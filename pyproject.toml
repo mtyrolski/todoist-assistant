@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "todoist-plugin"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11.4"
+tqdm = "^4.66.4"
+joblib = "^1.4.2"
+psycopg2 = "^2.9.10"
+sqlalchemy = "^2.0.36"
+pandas = "^2.2.3"
+numpy = "^2.1.2"
+plotly = "^5.24.1"
+python-dotenv = "^1.0.1"
+loguru = "^0.7.3"
+nbformat = "^5.10.4"
+requests = "^2.32.3"
+isort = "^5.13.2"
+yapf = "^0.43.0"
+matplotlib = "^3.10.0"
+streamlit = "^1.41.1"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

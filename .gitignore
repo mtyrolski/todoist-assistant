@@ -1,0 +1,9 @@
+.env
+*.pyc
+*.joblib
+*.html
+storage
+# ignore all pycaches:
+__pycache__/
+*.ipynb
+personal/*.py
