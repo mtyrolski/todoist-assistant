@@ -16,7 +16,7 @@ This tool provides insights into your Todoist activity by analyzing task events 
 ### 1. Update Activity Database
 To fetch and update your Todoist activity data, run:
 ```bash
-python3 activity.py
+python3 -m todoist activity --nweeks N_WEEKS
 ```
 
 This will:

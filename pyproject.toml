@@ -22,6 +22,7 @@ isort = "^5.13.2"
 yapf = "^0.43.0"
 matplotlib = "^3.10.0"
 streamlit = "^1.41.1"
+typer = "^0.15.1"
 
 
 [tool.poetry.group.dev.dependencies]
