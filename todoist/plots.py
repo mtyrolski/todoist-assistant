@@ -72,7 +72,7 @@ def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: date
     return fig
 
 
-def cumsum_plot_completed_tasks_biweekly(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
+def plot_completed_tasks_biweekly(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
     df_weekly_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
                                                                   ]).resample('2W').size().unstack(level=0)
     df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
@@ -103,5 +103,40 @@ def cumsum_plot_completed_tasks_biweekly(df: pd.DataFrame, beg_date: datetime, e
     fig.update_yaxes(title_text='Number of Completed Tasks')
 
     fig.update_layout(title_text='Weekly Completed Tasks Per Project', yaxis=dict(autorange=True, fixedrange=False))
+
+    return fig
+
+def cumsum_completed_tasks_biweekly(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
+    df_weekly_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
+                                                                  ]).resample('W').size().unstack(level=0)
+    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
+    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index <= end_date]
+    df_weekly_per_project = df_weekly_per_project.cumsum()
+
+    fig = go.Figure()
+
+    for root_project_name in df_weekly_per_project.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df_weekly_per_project.index,
+                y=df_weekly_per_project[root_project_name],
+                name=root_project_name,
+                line_shape='spline',
+        # dots
+                mode='lines+markers',
+            ))
+
+    # Update x-axis
+    fig.update_xaxes(
+        title_text='Date',
+        type='date',
+        showline=True,
+        showgrid=True,
+    )
+
+    # Update y-axis
+    fig.update_yaxes(title_text='Number of Completed Tasks')
+
+    fig.update_layout(title_text='Cumulative Weekly Completed Tasks Per Project', yaxis=dict(autorange=True, fixedrange=False))
 
     return fig

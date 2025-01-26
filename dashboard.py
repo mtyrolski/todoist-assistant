@@ -11,7 +11,7 @@ from joblib import load
 from loguru import logger
 
 from todoist.database import Database
-from todoist.plots import (cumsum_plot, cumsum_plot_completed_tasks_biweekly, cumsum_plot_per_project)
+from todoist.plots import (cumsum_plot, plot_completed_tasks_biweekly, cumsum_plot_per_project, cumsum_completed_tasks_biweekly)
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
 
 
@@ -102,7 +102,8 @@ def main():
                                      max_value=newest_date,
                                      step=timedelta(weeks=2),
                                      value=(newest_date - timedelta(weeks=4 * last_n_months), newest_date))
-    st.plotly_chart(cumsum_plot_completed_tasks_biweekly(df, beg_range, end_range))
+    st.plotly_chart(plot_completed_tasks_biweekly(df, beg_range, end_range))
+    st.plotly_chart(cumsum_completed_tasks_biweekly(df, beg_range, end_range))
     st.plotly_chart(cumsum_plot_per_project(df, beg_range, end_range))
     st.plotly_chart(cumsum_plot(df, beg_range, end_range))
 
