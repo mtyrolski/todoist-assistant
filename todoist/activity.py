@@ -5,6 +5,7 @@ from loguru import logger
 
 from todoist.database import Database
 from todoist.types import Event
+import typer
 
 EventCollection = set[Event]
 ACTIVITY_FILENAME = 'activity.joblib'
@@ -74,12 +75,11 @@ def remove_last_n_events_from_activity(activity_db: EventCollection, n: int) -> 
     return activity_db
 
 
-def main():
-    # remove_last_n_events_from_activity(load(ACTIVITY_FILENAME), 50)
-    activity_db, new_items = fetch_activity(n_weeks=3)
+def main(nweeks: int = 3):
+    activity_db, new_items = fetch_activity(nweeks)
     logger.info('Summary of Activity:')
     quick_summarize(activity_db, new_items)
 
 
 if __name__ == '__main__':
-    main()
+    typer.run(main)
