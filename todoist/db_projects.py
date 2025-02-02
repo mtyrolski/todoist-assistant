@@ -4,7 +4,7 @@ from subprocess import DEVNULL, PIPE, run
 from loguru import logger
 from tqdm import tqdm
 
-from todoist.types import Project, Task, _ProjectEntry_API_V9, _Task_API_V9
+from todoist.types import Project, Task, ProjectEntry, TaskEntry
 from todoist.utils import get_api_key
 
 
@@ -21,7 +21,7 @@ class DatabaseProjects:
                    stderr=DEVNULL,
                    check=True)
         data_dicts: list[dict] = json.loads(data.stdout)
-        entries = map(lambda raw_dict: _ProjectEntry_API_V9(**raw_dict), data_dicts)
+        entries = map(lambda raw_dict: ProjectEntry(**raw_dict), data_dicts)
         return list(map(lambda entry: Project(id=entry.id, project_entry=entry, tasks=[]), entries))
 
     def fetch_project_by_id(self, project_id: str, include_archived_in_search: bool = False) -> Project:
@@ -48,12 +48,12 @@ class DatabaseProjects:
                     self.archived_projects_cache = {project.id: project for project in archived}
                 return self.archived_projects_cache[project_id]
 
-        project = _ProjectEntry_API_V9(**result_dict['project'])
+        project = ProjectEntry(**result_dict['project'])
         return Project(id=project.id, project_entry=project, tasks=[])
 
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
         result: list[Project] = []
-        projects: list[_ProjectEntry_API_V9] = self._fetch_projects_data()
+        projects: list[ProjectEntry] = self._fetch_projects_data()
 
         if not include_tasks:
             return list(map(lambda project: Project(id=project.id, project_entry=project, tasks=[]), projects))
@@ -65,13 +65,13 @@ class DatabaseProjects:
                             position=0,
                             leave=True):
 
-            task_entries: list[_Task_API_V9] = self.fetch_project_tasks(project.id)
+            task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
             tasks: list[Task] = list(map(lambda task: Task(id=task.id, task_entry=task), task_entries))
 
             result.append(Project(id=project.id, project_entry=project, tasks=tasks))
         return result
 
-    def fetch_project_tasks(self, project_id: str) -> list[_Task_API_V9]:
+    def fetch_project_tasks(self, project_id: str) -> list[TaskEntry]:
         data = run([
             'curl', 'https://api.todoist.com/sync/v9/projects/get_data', '-H', f'Authorization: Bearer {get_api_key()}',
             '-d', f'project_id={project_id}'
@@ -82,7 +82,7 @@ class DatabaseProjects:
 
         tasks = []
         for task in json.loads(data.stdout)['items']:
-            tasks.append(_Task_API_V9(**task))
+            tasks.append(TaskEntry(**task))
 
         return tasks
 
@@ -127,7 +127,7 @@ class DatabaseProjects:
             return project
         return self._get_root_project(project.project_entry.parent_id)
 
-    def _fetch_projects_data(self) -> list[_ProjectEntry_API_V9]:
+    def _fetch_projects_data(self) -> list[ProjectEntry]:
         data = run([
             'curl', 'https://api.todoist.com/sync/v9/sync', '-H', f'Authorization: Bearer {get_api_key()}', '-d',
             'sync_token=*', '-d', 'resource_types=[\"projects\"]'
@@ -138,6 +138,6 @@ class DatabaseProjects:
 
         projects = []
         for project in json.loads(data.stdout)['projects']:
-            projects.append(_ProjectEntry_API_V9(**project))
+            projects.append(ProjectEntry(**project))
 
         return projects
