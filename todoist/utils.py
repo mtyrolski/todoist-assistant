@@ -1,9 +1,30 @@
 from os import getenv
+from pickle import HIGHEST_PROTOCOL
 from typing import Callable, TypeVar
-
+from joblib import load, dump
 from loguru import logger
+from os.path import join
+from os.path import exists
+ACTIVITY_FILENAME = 'activity.joblib'
 
+T = TypeVar('T', set, dict)
+class LocalStorage:
+    def __init__(self, path: str, resource_class: Callable[[], T]) -> None:
+        self.path = path
+        self.resource_class = resource_class
+        
+    def load(self) -> T:
+        return load(ACTIVITY_FILENAME) if exists(ACTIVITY_FILENAME) else self.resource_class()
+    
+    def save(self, data: T) -> None:
+        dump(data, self.path, protocol=HIGHEST_PROTOCOL)
 
+class Cache:
+    def __init__(self, path: str = './'):
+        self.path = path
+        self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
+        self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
+        
 def last_n_years_in_weeks(n_years: int) -> int:
     count_f: float = 365.25 * n_years / 7
     return int(count_f)
