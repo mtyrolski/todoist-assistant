@@ -1,15 +1,12 @@
-from os.path import exists
-
-from joblib import dump, load
 from loguru import logger
 
 from todoist.database import Database
 from todoist.types import Event
 import typer
 
-EventCollection = set[Event]
-ACTIVITY_FILENAME = 'activity.joblib'
+from todoist.utils import Cache
 
+EventCollection = set[Event]
 
 def get_last_n_events(events: EventCollection, n: int) -> EventCollection:
     """
@@ -56,14 +53,14 @@ def fetch_activity(n_weeks: int) -> tuple[EventCollection, EventCollection]:
     fetched_activity: list[Event] = dbio.fetch_activity()
     logger.info(f'Fetched {len(fetched_activity)} events')
 
-    activity_db: set[Event] = load(ACTIVITY_FILENAME) if exists(ACTIVITY_FILENAME) else set()
+    activity_db: set[Event] = Cache().activity.load()
     new_items: set[Event] = set()
     for fetched_event in fetched_activity:
         if fetched_event not in activity_db:
             activity_db.add(fetched_event)
             new_items.add(fetched_event)
     logger.info(f'Added {len(new_items)} new events, current size: {len(activity_db)}')
-    dump(activity_db, ACTIVITY_FILENAME)
+    Cache().activity.save(activity_db)
     return activity_db, new_items
 
 
@@ -71,7 +68,7 @@ def remove_last_n_events_from_activity(activity_db: EventCollection, n: int) -> 
     events_to_remove = get_last_n_events(activity_db, n)
     for event in events_to_remove:
         activity_db.remove(event)
-    dump(activity_db, ACTIVITY_FILENAME)
+    Cache().activity.save(activity_db)
     return activity_db
 
 
