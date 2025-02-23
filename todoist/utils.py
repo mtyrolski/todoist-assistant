@@ -5,7 +5,6 @@ from joblib import load, dump
 from loguru import logger
 from os.path import join
 from os.path import exists
-ACTIVITY_FILENAME = 'activity.joblib'
 
 T = TypeVar('T', set, dict)
 class LocalStorage:
@@ -14,7 +13,7 @@ class LocalStorage:
         self.resource_class = resource_class
         
     def load(self) -> T:
-        return load(ACTIVITY_FILENAME) if exists(ACTIVITY_FILENAME) else self.resource_class()
+        return load(self.path) if exists(self.path) else self.resource_class()
     
     def save(self, data: T) -> None:
         dump(data, self.path, protocol=HIGHEST_PROTOCOL)
@@ -35,10 +34,8 @@ def get_api_key() -> str:
     return getenv('API_KEY')
 
 
-T = TypeVar('T')
-
-
-def try_n_times(fn: Callable[[], T], n) -> T | None:
+U = TypeVar('U')
+def try_n_times(fn: Callable[[], U], n) -> U | None:
     """
     Try to run a function n times and return the result if successful
     If the function fails, log the exception and after n trials, return None
