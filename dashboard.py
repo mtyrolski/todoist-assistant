@@ -84,6 +84,16 @@ def load_data():
 
     diff_count = (root_id_copy != df['root_project_id']).sum()
     logger.info(f'Changed {diff_count} root project ids out of {len(df)} ({diff_count/len(df)*100:.2f}%)')
+    
+    # log not adjusted projects which are not in the mapping but should be
+    not_adjusted = set(df['root_project_name']) - set(link_adjustements.keys())
+    if len(not_adjusted) > 0:
+        logger.info(f'Not adjusted projects: {not_adjusted}')
+        logger.warning('If any of those is neither active nor archived root project, please adjust the mapping')
+        
+        # counts how many subprojects has each root project
+        subprojects_count = df['root_project_name'].value_counts()
+        logger.info(f'Subprojects count: {subprojects_count}')
 
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date')

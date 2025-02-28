@@ -117,6 +117,7 @@ class Project:
     id: str
     project_entry: ProjectEntry
     tasks: list[Task]
+    is_archived: bool
 
     def __eq__(self, other):
         return self.id == other.id
@@ -207,7 +208,4 @@ def events_to_dataframe(
             f'Not found {len(not_found_in_project_id_to_root)} projects in project_id_to_root: {not_found_in_project_id_to_root}'
         )
     
-    for not_found_id in not_found_in_project_id_to_root:
-        logger.warning(f'Not found project id {not_found_id} with name {project_id_to_name.get(not_found_id, "unknown")}')
-
     return DataFrame(mapping_data)
