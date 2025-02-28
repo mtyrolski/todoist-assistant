@@ -74,6 +74,7 @@ class XApiClient:
         Also includes direct links to each post on X.
         """
         try:
+            # self.client.get_list_tweets() TODO replace with
             tweets_response = self.client.get_users_tweets(
                 id=user_id,
                 max_results=min(max_results, 100),
