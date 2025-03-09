@@ -205,7 +205,7 @@ def events_to_dataframe(
     
     if len(not_found_in_project_id_to_root) > 0:
         logger.warning(
-            f'Not found {len(not_found_in_project_id_to_root)} projects in project_id_to_root: {not_found_in_project_id_to_root}'
+            f'Not found {len(not_found_in_project_id_to_root)} projects in project_id_to_root.'
         )
     
     return DataFrame(mapping_data)
