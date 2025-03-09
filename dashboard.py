@@ -1,6 +1,6 @@
 import importlib.util
 import sys
-from datetime import datetime, timedelta
+from datetime import timedelta
 from os import listdir
 from os.path import exists
 from pathlib import Path
@@ -11,8 +11,15 @@ from joblib import load
 from loguru import logger
 
 from todoist.database import Database
-from todoist.plots import (cumsum_plot, plot_completed_tasks_biweekly, cumsum_plot_per_project, cumsum_completed_tasks_biweekly)
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
+from todoist.plots import (
+    plot_percentage_change, plot_event_distribution_by_type, plot_events_over_time, plot_top_projects_by_events,
+    plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour, plot_event_types_by_project,
+    plot_cumulative_events_over_time, plot_events_per_project_over_time, plot_event_duration_analysis,
+    cumsum_plot, cumsum_plot_per_project, plot_completed_tasks_biweekly, cumsum_completed_tasks_biweekly
+)
+
+ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
 def extract_name(event: Event) -> str | None:
@@ -23,17 +30,12 @@ def extract_name(event: Event) -> str | None:
     return None
 
 
-# st.title('Uber pickups in NYC')
-ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
-
-
 def get_adjusting_mapping() -> dict[str, str]:
     scripts = list(filter(lambda x: x.endswith('.py'), listdir('personal')))
 
     logger.info(f'Found {len(scripts)} scripts in personal directory')
     final_mapping = {}
     for script in scripts:
-
         # execute script as module and get the link_adjustements variable
         script_path = Path('personal') / script
 
@@ -101,22 +103,81 @@ def load_data():
 
     return df
 
-
+# Plot functions
 def main():
-    df = load_data()
-    last_n_months = 3
-    oldest_date: datetime = df.index.min().to_pydatetime()
-    newest_date: datetime = df.index.max().to_pydatetime()
-    beg_range, end_range = st.slider(label='Last N months',
-                                     min_value=oldest_date,
-                                     max_value=newest_date,
-                                     step=timedelta(weeks=2),
-                                     value=(newest_date - timedelta(weeks=4 * last_n_months), newest_date))
-    st.plotly_chart(plot_completed_tasks_biweekly(df, beg_range, end_range))
-    st.plotly_chart(cumsum_completed_tasks_biweekly(df, beg_range, end_range))
-    st.plotly_chart(cumsum_plot_per_project(df, beg_range, end_range))
-    st.plotly_chart(cumsum_plot(df, beg_range, end_range))
+    # Streamlit app
+    st.set_page_config(page_title="Todoist Dashboard", layout="wide")
 
+    with st.spinner('Loading data...'):
+        data = load_data()
+
+    # Date range slider
+    oldest_date = data.index.min().to_pydatetime()
+    newest_date = data.index.max().to_pydatetime()
+    beg_range, end_range = st.sidebar.slider(
+        label='Date range',
+        min_value=oldest_date,
+        max_value=newest_date,
+        step=timedelta(weeks=2),
+        value=(newest_date - timedelta(weeks=4 * 3), newest_date)  # Default to last 3 months
+    )
+
+    # Granularity selection
+    granularity = st.sidebar.selectbox(
+        "Select granularity",
+        ["2W", "M", "2M", "3M"],
+        format_func=lambda x: {
+            "2W": "Two Weeks",
+            "M": "Month",
+            "2M": "Two Months",
+            "3M": "Three Months"
+        }[x]
+    )
+
+    pages = {
+        "Home": ["Event Distribution by Type", "Events Over Time"],
+        "Project Insights": ["Top Projects by Number of Events", "Event Distribution by Root Project", "Event Types by Project"],
+        "Time Analysis": ["Events Over Time", "Heatmap of Events by Day and Hour", "Cumulative Events Over Time", "Events Per Project Over Time"],
+        "Task Analysis": ["Most Frequent Event Titles", "Event Duration Analysis"],
+        "Custom Plots": ["Cumulative Number of Completed Tasks Over Time", "Cumulative Completed Tasks Per Project", "Weekly Completed Tasks Per Project", "Cumulative Weekly Completed Tasks Per Project"]
+    }
+
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to", list(pages.keys()))
+
+    st.title(f"{page} Dashboard")
+
+    for plot in pages[page]:
+        st.header(plot)
+        if plot == "Event Distribution by Type":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_event_distribution_by_type))
+        elif plot == "Events Over Time":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_events_over_time))
+        elif plot == "Top Projects by Number of Events":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_top_projects_by_events))
+        elif plot == "Event Distribution by Root Project":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_event_distribution_by_root_project))
+        elif plot == "Heatmap of Events by Day and Hour":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_heatmap_of_events_by_day_and_hour))
+        elif plot == "Event Types by Project":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_event_types_by_project))
+        elif plot == "Cumulative Events Over Time":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_cumulative_events_over_time))
+        elif plot == "Events Per Project Over Time":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_events_per_project_over_time))
+        elif plot == "Event Duration Analysis":
+            duration_fig = plot_event_duration_analysis(data, beg_range, end_range)
+            if duration_fig:
+                st.plotly_chart(duration_fig)
+        elif plot == "Cumulative Number of Completed Tasks Over Time":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, cumsum_plot))
+        elif plot == "Cumulative Completed Tasks Per Project":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, cumsum_plot_per_project))
+        elif plot == "Weekly Completed Tasks Per Project":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_completed_tasks_biweekly))
+        elif plot == "Cumulative Weekly Completed Tasks Per Project":
+            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, cumsum_completed_tasks_biweekly))
+        
 
 if __name__ == '__main__':
     main()
