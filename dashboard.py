@@ -14,8 +14,8 @@ from todoist.database import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
 from todoist.plots import (plot_event_distribution_by_type, plot_events_over_time, plot_top_projects_by_events,
     plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour, plot_event_types_by_project,
-    plot_cumulative_events_over_time, plot_event_duration_analysis,
-    cumsum_plot, cumsum_plot_per_project, plot_completed_tasks_biweekly, cumsum_completed_tasks_biweekly
+    plot_cumulative_events_over_time, 
+    cumsum_plot_per_project, plot_completed_tasks_periodically, cumsum_completed_tasks_periodically
 )
 
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
@@ -124,21 +124,20 @@ def main():
     # Granularity selection
     granularity = st.sidebar.selectbox(
         "Select granularity",
-        ["2W", "M", "2M", "3M"],
+        ["W", "2W", "ME", "2ME", "3ME"],
         format_func=lambda x: {
+            "W": "Week",
             "2W": "Two Weeks",
-            "M": "Month",
-            "2M": "Two Months",
-            "3M": "Three Months"
+            "ME": "Month",
+            "2ME": "Two Months",
+            "3ME": "Three Months"
         }[x]
     )
 
     pages = {
-        "Home": ["Event Distribution by Type", "Events Over Time"],
+        "Home": ["Event Distribution by Type",  "Periodically Completed Tasks Per Project", "Cumulative Periodically Completed Tasks Per Project", "Events Over Time"],
         "Project Insights": ["Top Projects by Number of Events", "Event Distribution by Root Project", "Event Types by Project"],
-        "Time Analysis": ["Events Over Time", "Heatmap of Events by Day and Hour", "Cumulative Events Over Time"],
-        "Task Analysis": ["Most Frequent Event Titles", "Event Duration Analysis"],
-        "Custom Plots": ["Cumulative Number of Completed Tasks Over Time", "Cumulative Completed Tasks Per Project", "Weekly Completed Tasks Per Project", "Cumulative Weekly Completed Tasks Per Project"]
+        "Task Analysis": ["Heatmap of Events by Day and Hour", "Cumulative Number of Completed Tasks Over Time", "Cumulative Completed Tasks Per Project"],
     }
 
     st.sidebar.title("Navigation")
@@ -162,18 +161,12 @@ def main():
             st.plotly_chart(plot_event_types_by_project(data, beg_range, end_range, granularity))
         elif plot == "Cumulative Events Over Time":
             st.plotly_chart(plot_cumulative_events_over_time(data, beg_range, end_range, granularity))
-        elif plot == "Event Duration Analysis":
-            duration_fig = plot_event_duration_analysis(data, beg_range, end_range)
-            if duration_fig:
-                st.plotly_chart(duration_fig)
-        elif plot == "Cumulative Number of Completed Tasks Over Time":
-            st.plotly_chart(cumsum_plot(data, beg_range, end_range, granularity))
         elif plot == "Cumulative Completed Tasks Per Project":
             st.plotly_chart(cumsum_plot_per_project(data, beg_range, end_range, granularity))
-        elif plot == "Weekly Completed Tasks Per Project":
-            st.plotly_chart(plot_completed_tasks_biweekly(data, beg_range, end_range, granularity))
-        elif plot == "Cumulative Weekly Completed Tasks Per Project":
-            st.plotly_chart(cumsum_completed_tasks_biweekly(data, beg_range, end_range, granularity))
+        elif plot == "Periodically Completed Tasks Per Project":
+            st.plotly_chart(plot_completed_tasks_periodically(data, beg_range, end_range, granularity))
+        elif plot == "Cumulative Periodically Completed Tasks Per Project":
+            st.plotly_chart(cumsum_completed_tasks_periodically(data, beg_range, end_range, granularity))
         
 
 if __name__ == '__main__':
