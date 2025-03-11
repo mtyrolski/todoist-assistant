@@ -102,25 +102,6 @@ class DatabaseProjects:
         mapping.update({project.project_entry.name: project.id for project in self.fetch_archived_projects()})
         return mapping
 
-    # def fetch_mapping_project_id_to_root(self) -> dict[str, Project]:
-    #     archived_projects = {project.id: project for project in self.fetch_archived_projects()}
-    #     projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}
-    #     mapping_project_id_to_root: dict[str, Project] = {}
-
-    #     for project in tqdm(projects.values(),
-    #                         desc='Building active project hierarchy',
-    #                         unit='project',
-    #                         total=len(projects)):
-    #         mapping_project_id_to_root[project.id] = self._get_root_project(project.id)
-
-    #     for project in tqdm(archived_projects.values(),
-    #                         desc='Building archived project hierarchy',
-    #                         unit='project',
-    #                         total=len(archived_projects)):
-    #         mapping_project_id_to_root[project.id] = self._get_root_project(project.id)
-
-    #     return mapping_project_id_to_root
-
     def fetch_mapping_project_id_to_root(self) -> dict[str, "Project"]:
         archived_projects = {project.id: project for project in self.fetch_archived_projects()}
         projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}

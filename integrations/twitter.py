@@ -186,7 +186,7 @@ def main():
     bearer_token, consumer_key, consumer_secret, access_token, access_token_secret = load_env_variables()
 
     # Example: Track posts from these users
-    tracked_users = ["mtyrolski"]
+    tracked_users = ["some user"]
     project_id = 1234567890
 
     x_integration = XIntegration(
