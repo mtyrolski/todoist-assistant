@@ -12,10 +12,9 @@ from loguru import logger
 
 from todoist.database import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
-from todoist.plots import (
-    plot_percentage_change, plot_event_distribution_by_type, plot_events_over_time, plot_top_projects_by_events,
+from todoist.plots import (plot_event_distribution_by_type, plot_events_over_time, plot_top_projects_by_events,
     plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour, plot_event_types_by_project,
-    plot_cumulative_events_over_time, plot_events_per_project_over_time, plot_event_duration_analysis,
+    plot_cumulative_events_over_time, plot_event_duration_analysis,
     cumsum_plot, cumsum_plot_per_project, plot_completed_tasks_biweekly, cumsum_completed_tasks_biweekly
 )
 
@@ -137,7 +136,7 @@ def main():
     pages = {
         "Home": ["Event Distribution by Type", "Events Over Time"],
         "Project Insights": ["Top Projects by Number of Events", "Event Distribution by Root Project", "Event Types by Project"],
-        "Time Analysis": ["Events Over Time", "Heatmap of Events by Day and Hour", "Cumulative Events Over Time", "Events Per Project Over Time"],
+        "Time Analysis": ["Events Over Time", "Heatmap of Events by Day and Hour", "Cumulative Events Over Time"],
         "Task Analysis": ["Most Frequent Event Titles", "Event Duration Analysis"],
         "Custom Plots": ["Cumulative Number of Completed Tasks Over Time", "Cumulative Completed Tasks Per Project", "Weekly Completed Tasks Per Project", "Cumulative Weekly Completed Tasks Per Project"]
     }
@@ -150,33 +149,31 @@ def main():
     for plot in pages[page]:
         st.header(plot)
         if plot == "Event Distribution by Type":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_event_distribution_by_type))
+            st.plotly_chart(plot_event_distribution_by_type(data, beg_range, end_range, granularity))
         elif plot == "Events Over Time":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_events_over_time))
+            st.plotly_chart(plot_events_over_time(data, beg_range, end_range, granularity))
         elif plot == "Top Projects by Number of Events":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_top_projects_by_events))
+            st.plotly_chart(plot_top_projects_by_events(data, beg_range, end_range, granularity))
         elif plot == "Event Distribution by Root Project":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_event_distribution_by_root_project))
+            st.plotly_chart(plot_event_distribution_by_root_project(data, beg_range, end_range, granularity))
         elif plot == "Heatmap of Events by Day and Hour":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_heatmap_of_events_by_day_and_hour))
+            st.plotly_chart(plot_heatmap_of_events_by_day_and_hour(data, beg_range, end_range, granularity))
         elif plot == "Event Types by Project":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_event_types_by_project))
+            st.plotly_chart(plot_event_types_by_project(data, beg_range, end_range, granularity))
         elif plot == "Cumulative Events Over Time":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_cumulative_events_over_time))
-        elif plot == "Events Per Project Over Time":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_events_per_project_over_time))
+            st.plotly_chart(plot_cumulative_events_over_time(data, beg_range, end_range, granularity))
         elif plot == "Event Duration Analysis":
             duration_fig = plot_event_duration_analysis(data, beg_range, end_range)
             if duration_fig:
                 st.plotly_chart(duration_fig)
         elif plot == "Cumulative Number of Completed Tasks Over Time":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, cumsum_plot))
+            st.plotly_chart(cumsum_plot(data, beg_range, end_range, granularity))
         elif plot == "Cumulative Completed Tasks Per Project":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, cumsum_plot_per_project))
+            st.plotly_chart(cumsum_plot_per_project(data, beg_range, end_range, granularity))
         elif plot == "Weekly Completed Tasks Per Project":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, plot_completed_tasks_biweekly))
+            st.plotly_chart(plot_completed_tasks_biweekly(data, beg_range, end_range, granularity))
         elif plot == "Cumulative Weekly Completed Tasks Per Project":
-            st.plotly_chart(plot_percentage_change(data, beg_range, end_range, granularity, cumsum_completed_tasks_biweekly))
+            st.plotly_chart(cumsum_completed_tasks_biweekly(data, beg_range, end_range, granularity))
         
 
 if __name__ == '__main__':
