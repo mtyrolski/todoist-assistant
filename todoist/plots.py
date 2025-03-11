@@ -144,91 +144,40 @@ def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_d
     fig.update_layout(title_text='Cumulative Events Over Time', xaxis_title='Date', yaxis_title='Cumulative Number of Events')
     return fig
 
-def plot_events_per_project_over_time(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str) -> go.Figure:
-    """
-    Plots the number of events per project over time as a line chart within the specified date range.
-    
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
-    
-    Returns:
-    go.Figure: Plotly figure object representing the events per project over time.
-    """
-    df_filtered = df.loc[beg_date:end_date]
-    events_per_project = df_filtered.groupby(['root_project_name', df_filtered.index.to_period(granularity)]).size().unstack().fillna(0).T
-    fig = go.Figure()
-    for project in events_per_project.columns:
-        fig.add_trace(go.Scatter(x=events_per_project.index.to_timestamp(), y=events_per_project[project], mode='lines', name=project))
-    fig.update_layout(title_text='Events Per Project Over Time', xaxis_title='Date', yaxis_title='Number of Events')
-    return fig
 
 def plot_event_duration_analysis(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure | None:
     """
-    Plots the duration analysis of events as a histogram within the specified date range.
-    
+    Plots the duration analysis of tasks from creation to completion as a histogram within the specified date range.
+
     Parameters:
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    
+
     Returns:
-    go.Figure | None: Plotly figure object representing the event duration analysis or None if required columns are missing.
+    go.Figure | None: Plotly figure object representing the event duration analysis or None if no tasks are found.
     """
     df_filtered = df.loc[beg_date:end_date]
-    if 'updated' in df_filtered['type'].unique():
-        updated_events = df_filtered[df_filtered['type'] == 'updated']
-        added_events = df_filtered[df_filtered['type'] == 'added']
-        if 'date_updated' not in updated_events.columns or 'date_added' not in added_events.columns:
-            logger.error("Required columns for duration analysis are missing.")
-            return None
-        durations = pd.merge(updated_events, added_events, on='id', suffixes=('_updated', '_added'))
-        durations['duration'] = (durations['date_updated'] - durations['date_added']).dt.total_seconds() / 3600
-        fig = go.Figure(data=[go.Histogram(x=durations['duration'])])
-        fig.update_layout(title_text='Event Duration Analysis', xaxis_title='Duration (hours)', yaxis_title='Number of Events')
-        return fig
-    else:
-        logger.error("No update events found for duration analysis.")
+    added_tasks = df_filtered[df_filtered['type'] == 'added']
+    completed_tasks = df_filtered[df_filtered['type'] == 'completed']
+
+    if added_tasks.empty or completed_tasks.empty:
+        logger.error("No added or completed tasks found for duration analysis.")
         return None
 
-def plot_percentage_change(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str, plot_func, *args) -> go.Figure:
-    """
-    Plots the percentage change of events compared to the previous period and adds the percentage change annotation to the plot.
-    
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
-    plot_func (function): The plot function to which the percentage change annotation will be added.
-    *args: Additional arguments to pass to the plot function.
-    
-    Returns:
-    go.Figure: Plotly figure object representing the percentage change of events.
-    """
-    curr_period = df.loc[beg_date:end_date]
-    prev_period = df.loc[(beg_date - (end_date - beg_date)) : beg_date]
-    
-    curr_count = curr_period.resample(granularity).size().sum()
-    prev_count = prev_period.resample(granularity).size().sum()
-    
-    percentage_change = ((curr_count - prev_count) / prev_count) * 100 if prev_count != 0 else float('inf')
-    
-    fig = plot_func(df, beg_date, end_date, granularity, *args)
-    
-    fig.update_layout(
-        annotations=[
-            go.layout.Annotation(
-                text=f"Change: {percentage_change:.2f}%",
-                xref="paper", yref="paper",
-                x=1, y=1, showarrow=False,
-                font=dict(size=14, color="red" if percentage_change < 0 else "green")
-            )
-        ]
-    )
-    
+    # Ensure 'parent_item_id' and 'id' columns are of the same type
+    completed_tasks.loc[:, 'parent_item_id'] = completed_tasks['parent_item_id'].astype(str)
+    added_tasks.loc[:, 'id'] = added_tasks['id'].astype(str)
+
+    # Merge on the correct columns and rename the date columns appropriately
+    durations = pd.merge(completed_tasks, added_tasks, left_on='parent_item_id', right_on='id', suffixes=('_completed', '_added'))
+    durations = durations.rename(columns={'date_completed_completed': 'date_completed', 'date_added_added': 'date_added'})
+
+    # Calculate the duration in hours
+    durations['duration'] = (durations['date_completed'] - durations['date_added']).dt.total_seconds() / 3600
+
+    fig = go.Figure(data=[go.Histogram(x=durations['duration'])])
+    fig.update_layout(title_text='Task Duration Analysis', xaxis_title='Duration (hours)', yaxis_title='Number of Tasks')
     return fig
 
 def cumsum_plot(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str) -> go.Figure:
@@ -412,3 +361,4 @@ def cumsum_completed_tasks_biweekly(df: pd.DataFrame, beg_date: datetime, end_da
     fig.update_layout(title_text=f'Cumulative {granularity} Completed Tasks Per Project', yaxis=dict(autorange=True, fixedrange=False))
 
     return fig
+
