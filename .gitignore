@@ -7,3 +7,4 @@ storage
 __pycache__/
 *.ipynb
 personal/*.py
+credentials.json
