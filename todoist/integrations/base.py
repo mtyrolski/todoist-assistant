@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import datetime as dt
 
 from loguru import logger
-
 from todoist.utils import Cache
 
 @dataclass
@@ -20,7 +19,8 @@ class TodoistTaskRequest:
     priority: int
 
 class Integration(ABC):
-    def __init__(self, name: str, frequency: float):
+    def __init__(self, name: str,
+                 frequency: float):
         """
         Initialize the integration with a name and frequency.
         Frequency is the number of seconds between each tick.

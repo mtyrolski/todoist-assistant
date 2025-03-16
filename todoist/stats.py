@@ -2,8 +2,7 @@ from datetime import datetime
 from functools import partial
 from typing import Any
 
-import pandas as pd
-import plotly.express as px
+
 from loguru import logger
 
 from todoist.types import Project

@@ -1,6 +1,6 @@
 from loguru import logger
 
-from todoist.database import Database
+from todoist.database.base import Database
 from todoist.types import Event
 import typer
 
