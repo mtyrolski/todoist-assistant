@@ -10,7 +10,7 @@ import streamlit as st
 from joblib import load
 from loguru import logger
 
-from todoist.database import Database
+from todoist.database.base import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
 from todoist.plots import (plot_event_distribution_by_type, plot_events_over_time, plot_top_projects_by_events,
     plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour, plot_event_types_by_project,

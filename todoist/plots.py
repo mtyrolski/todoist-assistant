@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from loguru import logger
 
 def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str) -> go.Figure:
     """

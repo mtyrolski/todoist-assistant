@@ -8,7 +8,7 @@ import tweepy
 from dotenv import load_dotenv
 from loguru import logger
 
-from integrations.integration import Integration, TodoistTaskRequest
+from integrations.base import Integration, TodoistTaskRequest
 
 @dataclass
 class XPost:

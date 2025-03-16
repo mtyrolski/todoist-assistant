@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
 
-from todoist.db_activity import DatabaseActivity
-from todoist.db_projects import DatabaseProjects
-from todoist.db_tasks import DatabaseTasks
+from todoist.database.db_activity import DatabaseActivity
+from todoist.database.db_projects import DatabaseProjects
+from todoist.database.db_tasks import DatabaseTasks
 from todoist.utils import last_n_years_in_weeks
 
 
