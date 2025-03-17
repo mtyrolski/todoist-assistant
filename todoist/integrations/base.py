@@ -1,10 +1,10 @@
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import datetime as dt
 
 from loguru import logger
 from todoist.utils import Cache
+
 
 @dataclass
 class TodoistTaskRequest:
@@ -18,9 +18,9 @@ class TodoistTaskRequest:
     due_date: str
     priority: int
 
+
 class Integration(ABC):
-    def __init__(self, name: str,
-                 frequency: float):
+    def __init__(self, name: str, frequency: float):
         """
         Initialize the integration with a name and frequency.
         Frequency is the number of seconds between each tick.
@@ -31,7 +31,7 @@ class Integration(ABC):
     def tick(self) -> list[TodoistTaskRequest]:
         last_launches: dict[str, dt.datetime] = Cache().integration_launches.load()
         last_launch = last_launches.get(self.name, dt.datetime.min)
-        
+
         now = dt.datetime.now()
 
         # Only run if at least a week has passed since last launch
@@ -41,16 +41,15 @@ class Integration(ABC):
             logger.info(f"Current time: {now}")
             logger.info(f"Time until next run: {dt.timedelta(weeks=1) - (now - last_launch)}")
             return []
-        
-        task_delegations = self._tick()        
+
+        task_delegations = self._tick()
         Cache().integration_launches.save({self.name: now})
-        
+
         return task_delegations
-        
+
     @abstractmethod
     def _tick(self) -> list[TodoistTaskRequest]:
         """
         Perform the integration's main operation.
         """
         pass
-    

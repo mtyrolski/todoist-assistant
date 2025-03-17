@@ -8,6 +8,7 @@ from todoist.utils import Cache
 
 EventCollection = set[Event]
 
+
 def get_last_n_events(events: EventCollection, n: int) -> EventCollection:
     """
     Returns the last n events in the collection.

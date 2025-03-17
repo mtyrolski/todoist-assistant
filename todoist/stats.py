@@ -2,7 +2,6 @@ from datetime import datetime
 from functools import partial
 from typing import Any
 
-
 from loguru import logger
 
 from todoist.types import Project

@@ -7,15 +7,15 @@ from functools import partial
 from todoist.types import Task
 import inspect
 
+
 class DatabaseTasks:
     """Database class to manage tasks in the Todoist API"""
-
     def __init__(self):
         pass
-    
+
     def reset(self):
         pass
-    
+
     def insert_task_from_template(self, task: Task, **overrrides) -> dict:
         """
         Insert a task into the database using a template and optional overrides.
@@ -40,15 +40,28 @@ class DatabaseTasks:
         if any(k not in param_names for k in overrrides.keys()):
             logger.error(f'Invalid overrides: {overrrides.keys()} are not subset of {param_names}')
             return {'error': 'Invalid overrides'}
-        
+
         merged_kwargs = {**task.task_entry.__dict__, **overrrides}
         final_kwargs = {k: v for k, v in merged_kwargs.items() if k in param_names}
         self.insert_task(**final_kwargs)
 
-    def insert_task(self, content: str, description: str = None, project_id: str = None, section_id: str = None,
-                    parent_id: str = None, order: int = None, labels: list[str] = None, priority: int = 1,
-                    due_string: str = None, due_date: str = None, due_datetime: str = None, due_lang: str = None,
-                    assignee_id: str = None, duration: int = None, duration_unit: str = None, deadline_date: str = None,
+    def insert_task(self,
+                    content: str,
+                    description: str = None,
+                    project_id: str = None,
+                    section_id: str = None,
+                    parent_id: str = None,
+                    order: int = None,
+                    labels: list[str] = None,
+                    priority: int = 1,
+                    due_string: str = None,
+                    due_date: str = None,
+                    due_datetime: str = None,
+                    due_lang: str = None,
+                    assignee_id: str = None,
+                    duration: int = None,
+                    duration_unit: str = None,
+                    deadline_date: str = None,
                     deadline_lang: str = None) -> dict:
         """
         Inserts a new task into the Todoist API.
@@ -104,9 +117,12 @@ class DatabaseTasks:
 
         # Remove keys with None values
         payload = {k: v for k, v in payload.items() if v is not None}
-        cmds = ["curl", url, "-X", "POST", "--data", json.dumps(payload), "-H", "Content-Type: application/json",
-                    "-H", f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"]
-        
+        cmds = [
+            "curl", url, "-X", "POST", "--data",
+            json.dumps(payload), "-H", "Content-Type: application/json", "-H",
+            f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"
+        ]
+
         response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
 
         load_fn = partial(json.loads, response.stdout)
@@ -115,7 +131,7 @@ class DatabaseTasks:
         if decoded_result is None:
             logger.error(f'Type: {type(decoded_result)}')
             logger.error(f'Keys: {decoded_result.keys()}')
-            
+
         return decoded_result
 
     def remove_task(self, task_id: str) -> bool:
@@ -134,10 +150,8 @@ class DatabaseTasks:
         }
 
         cmds = [
-            "curl", url, "-X", "DELETE",
-            "-H", "Content-Type: application/json",
-            "-H", f"X-Request-Id: {headers['X-Request-Id']}",
-            "-H", f"Authorization: {headers['Authorization']}"
+            "curl", url, "-X", "DELETE", "-H", "Content-Type: application/json", "-H",
+            f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"
         ]
 
         response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=False)
