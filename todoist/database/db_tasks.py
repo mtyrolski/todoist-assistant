@@ -6,10 +6,14 @@ from loguru import logger
 from functools import partial
 from todoist.types import Task
 import inspect
+
 class DatabaseTasks:
     """Database class to manage tasks in the Todoist API"""
 
     def __init__(self):
+        pass
+    
+    def reset(self):
         pass
     
     def insert_task_from_template(self, task: Task, **overrrides) -> dict:
@@ -103,7 +107,6 @@ class DatabaseTasks:
         cmds = ["curl", url, "-X", "POST", "--data", json.dumps(payload), "-H", "Content-Type: application/json",
                     "-H", f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"]
         
-        logger.debug(f'Launching curl with {cmds}')
         response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
 
         load_fn = partial(json.loads, response.stdout)
@@ -114,3 +117,45 @@ class DatabaseTasks:
             logger.error(f'Keys: {decoded_result.keys()}')
             
         return decoded_result
+
+    def remove_task(self, task_id: str) -> bool:
+        """
+        Removes (deletes) the specified task from the Todoist API.
+
+        Returns:
+        - True if the task was removed successfully.
+        - False otherwise.
+        """
+        url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Request-Id": str(uuid.uuid4()),
+            "Authorization": f"Bearer {get_api_key()}"
+        }
+
+        cmds = [
+            "curl", url, "-X", "DELETE",
+            "-H", "Content-Type: application/json",
+            "-H", f"X-Request-Id: {headers['X-Request-Id']}",
+            "-H", f"Authorization: {headers['Authorization']}"
+        ]
+
+        response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=False)
+        if response.returncode != 0:
+            logger.error("Error deleting task from Todoist.")
+            return False
+
+        # No content (204) is returned for successful DELETE calls to Todoist
+        if not response.stdout.strip():
+            return True
+
+        # If there's content, attempt to parse it
+        try:
+            decoded_result = json.loads(response.stdout)
+            logger.debug(f"Response after delete: {decoded_result}")
+        except json.JSONDecodeError:
+            # If it fails to decode, consider it non-fatal
+            logger.debug("Empty or invalid JSON returned after delete.")
+            return True
+
+        return True
