@@ -14,7 +14,7 @@ class DatabaseActivity:
     """Database class to fetch activity data from the Todoist API"""
     def __init__(self, max_pages: int):
         self.max_pages = max_pages
-    
+
     def reset(self):
         pass
 

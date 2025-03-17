@@ -202,10 +202,8 @@ def events_to_dataframe(
         mapping_data['parent_item_id'].append(event.event_entry.parent_item_id)
 
     logger.info(f'Processed {len(mapping_data["id"])} events')
-    
+
     if len(not_found_in_project_id_to_root) > 0:
-        logger.warning(
-            f'Not found {len(not_found_in_project_id_to_root)} projects in project_id_to_root.'
-        )
-    
+        logger.warning(f'Not found {len(not_found_in_project_id_to_root)} projects in project_id_to_root.')
+
     return DataFrame(mapping_data)

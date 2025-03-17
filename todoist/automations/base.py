@@ -8,8 +8,7 @@ from todoist.utils import Cache
 
 
 class Automation(ABC):
-    def __init__(self, name: str,
-                 frequency: float):
+    def __init__(self, name: str, frequency: float):
         """
         Initialize the automation with a name and frequency.
         Frequency is the number of minutes between each tick.
@@ -20,7 +19,7 @@ class Automation(ABC):
     def tick(self, db: Database):
         last_launches = Cache().automation_launches.load()
         last_launch = last_launches.get(self.name, dt.datetime.min)
-        
+
         now = dt.datetime.now()
 
         # Only run if at least a week has passed since last launch
@@ -30,12 +29,12 @@ class Automation(ABC):
             logger.info(f"Current time: {now}")
             logger.info(f"Time until next run: {dt.timedelta(minutes=self.frequency) - (now - last_launch)}")
             return []
-        
-        task_delegations = self._tick(db)        
+
+        task_delegations = self._tick(db)
         Cache().automation_launches.save({self.name: now})
-        
+
         return task_delegations
-        
+
     @abstractmethod
     def _tick(self, db: Database):
         """

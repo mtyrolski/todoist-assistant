@@ -13,10 +13,9 @@ from loguru import logger
 from todoist.database.base import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
 from todoist.plots import (plot_event_distribution_by_type, plot_events_over_time, plot_top_projects_by_events,
-    plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour, plot_event_types_by_project,
-    plot_cumulative_events_over_time, 
-    cumsum_plot_per_project, plot_completed_tasks_periodically, cumsum_completed_tasks_periodically
-)
+                           plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour,
+                           plot_event_types_by_project, plot_cumulative_events_over_time, cumsum_plot_per_project,
+                           plot_completed_tasks_periodically, cumsum_completed_tasks_periodically)
 
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
@@ -85,13 +84,13 @@ def load_data():
 
     diff_count = (root_id_copy != df['root_project_id']).sum()
     logger.info(f'Changed {diff_count} root project ids out of {len(df)} ({diff_count/len(df)*100:.2f}%)')
-    
+
     # log not adjusted projects which are not in the mapping but should be
     not_adjusted = set(df['root_project_name']) - set(link_adjustements.keys())
     if len(not_adjusted) > 0:
         logger.info(f'Not adjusted projects: {not_adjusted}')
         logger.warning('If any of those is neither active nor archived root project, please adjust the mapping')
-        
+
         # counts how many subprojects has each root project
         subprojects_count = df['root_project_name'].value_counts()
         logger.info(f'Subprojects count: {subprojects_count}')
@@ -101,6 +100,7 @@ def load_data():
     df = df.set_index('date')
 
     return df
+
 
 # Plot functions
 def main():
@@ -118,26 +118,31 @@ def main():
         min_value=oldest_date,
         max_value=newest_date,
         step=timedelta(weeks=2),
-        value=(newest_date - timedelta(weeks=4 * 3), newest_date)  # Default to last 3 months
+        value=(newest_date - timedelta(weeks=4 * 3), newest_date)    # Default to last 3 months
     )
 
     # Granularity selection
-    granularity = st.sidebar.selectbox(
-        "Select granularity",
-        ["W", "2W", "ME", "2ME", "3ME"],
-        format_func=lambda x: {
-            "W": "Week",
-            "2W": "Two Weeks",
-            "ME": "Month",
-            "2ME": "Two Months",
-            "3ME": "Three Months"
-        }[x]
-    )
+    granularity = st.sidebar.selectbox("Select granularity", ["W", "2W", "ME", "2ME", "3ME"],
+                                       format_func=lambda x: {
+                                           "W": "Week",
+                                           "2W": "Two Weeks",
+                                           "ME": "Month",
+                                           "2ME": "Two Months",
+                                           "3ME": "Three Months"
+                                       }[x])
 
     pages = {
-        "Home": ["Event Distribution by Type",  "Periodically Completed Tasks Per Project", "Cumulative Periodically Completed Tasks Per Project", "Events Over Time"],
-        "Project Insights": ["Top Projects by Number of Events", "Event Distribution by Root Project", "Event Types by Project"],
-        "Task Analysis": ["Heatmap of Events by Day and Hour", "Cumulative Number of Completed Tasks Over Time", "Cumulative Completed Tasks Per Project"],
+        "Home": [
+            "Event Distribution by Type", "Periodically Completed Tasks Per Project",
+            "Cumulative Periodically Completed Tasks Per Project", "Events Over Time"
+        ],
+        "Project Insights": [
+            "Top Projects by Number of Events", "Event Distribution by Root Project", "Event Types by Project"
+        ],
+        "Task Analysis": [
+            "Heatmap of Events by Day and Hour", "Cumulative Number of Completed Tasks Over Time",
+            "Cumulative Completed Tasks Per Project"
+        ],
     }
 
     st.sidebar.title("Navigation")
@@ -167,7 +172,7 @@ def main():
             st.plotly_chart(plot_completed_tasks_periodically(data, beg_range, end_range, granularity))
         elif plot == "Cumulative Periodically Completed Tasks Per Project":
             st.plotly_chart(cumsum_completed_tasks_periodically(data, beg_range, end_range, granularity))
-        
+
 
 if __name__ == '__main__':
     main()

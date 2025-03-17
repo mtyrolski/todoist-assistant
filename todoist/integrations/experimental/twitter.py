@@ -10,6 +10,7 @@ from loguru import logger
 
 from integrations.base import Integration, TodoistTaskRequest
 
+
 @dataclass
 class XPost:
     """
@@ -20,22 +21,20 @@ class XPost:
     text: str
     post_link: str
 
+
 class XApiError(Exception):
     """
     Custom exception to handle errors when interacting with X (formerly Twitter) via Tweepy.
     """
     pass
 
+
 class XApiClient:
     """
     A client for interacting with X (formerly Twitter) using the Tweepy library.
     Provides methods to authenticate and fetch posts.
     """
-
-    def __init__(self, bearer_token: str,
-                 consumer_key: str,
-                 consumer_secret: str,
-                 access_token: str,
+    def __init__(self, bearer_token: str, consumer_key: str, consumer_secret: str, access_token: str,
                  access_token_secret: str) -> None:
         """
         Initialize the Tweepy client with the provided credentials.
@@ -47,14 +46,12 @@ class XApiClient:
         if not consumer_key or not consumer_secret or not access_token or not access_token_secret:
             raise XApiError("Missing consumer or access tokens. Please check your environment variables.")
 
-        self.client = tweepy.Client(
-            bearer_token=bearer_token,
-            consumer_key=consumer_key,
-            consumer_secret=consumer_secret,
-            access_token=access_token,
-            access_token_secret=access_token_secret,
-            wait_on_rate_limit=True
-        )
+        self.client = tweepy.Client(bearer_token=bearer_token,
+                                    consumer_key=consumer_key,
+                                    consumer_secret=consumer_secret,
+                                    access_token=access_token,
+                                    access_token_secret=access_token_secret,
+                                    wait_on_rate_limit=True)
 
     def get_user_id(self, username: str) -> str:
         """
@@ -75,11 +72,9 @@ class XApiClient:
         """
         try:
             # self.client.get_list_tweets() TODO replace with
-            tweets_response = self.client.get_users_tweets(
-                id=user_id,
-                max_results=min(max_results, 100),
-                tweet_fields=["id", "text"]
-            )
+            tweets_response = self.client.get_users_tweets(id=user_id,
+                                                           max_results=min(max_results, 100),
+                                                           tweet_fields=["id", "text"])
             if not tweets_response or not tweets_response.data:
                 return []
             posts = []
@@ -92,6 +87,7 @@ class XApiClient:
             return posts
         except tweepy.TweepyException as exc:
             raise XApiError(f"Error fetching posts: {exc}")
+
 
 def load_env_variables():
     """
@@ -123,26 +119,13 @@ class XIntegration(Integration):
     Child class of Integration that fetches posts from tracked X users once a week,
     then converts those posts into TodoistTaskRequest items.
     """
-
-    def __init__(
-        self,
-        name: str,
-        frequency: float,
-        bearer_token: str,
-        consumer_key: str,
-        consumer_secret: str,
-        access_token: str,
-        access_token_secret: str,
-        tracked_users: List[str],
-        project_id: int
-    ):
+    def __init__(self, name: str, frequency: float, bearer_token: str, consumer_key: str, consumer_secret: str,
+                 access_token: str, access_token_secret: str, tracked_users: List[str], project_id: int):
         """
         Initialize with required tokens, tracked users, and a target project ID.
         """
         super().__init__(name, frequency)
-        self.x_api_client = XApiClient(
-            bearer_token, consumer_key, consumer_secret, access_token, access_token_secret
-        )
+        self.x_api_client = XApiClient(bearer_token, consumer_key, consumer_secret, access_token, access_token_secret)
         self.tracked_users = tracked_users
         self.project_id = project_id
 
@@ -151,7 +134,6 @@ class XIntegration(Integration):
         Fetches up to 100 posts from each tracked user if at least a week has passed.
         Converts them into TodoistTaskRequest objects.
         """
-
 
         all_tasks: List[TodoistTaskRequest] = []
         for username in self.tracked_users:
@@ -165,19 +147,18 @@ class XIntegration(Integration):
                 # Convert each post into a TodoistTaskRequest
                 for post in posts:
                     # Example: Use post text as the content, link as description
-                    new_task = TodoistTaskRequest(
-                        content=post.text[:50],
-                        description=f"Link: {post.post_link}\nID: {post.post_id}",
-                        project_id=self.project_id,
-                        due_date=None,
-                        priority=4
-                    )
+                    new_task = TodoistTaskRequest(content=post.text[:50],
+                                                  description=f"Link: {post.post_link}\nID: {post.post_id}",
+                                                  project_id=self.project_id,
+                                                  due_date=None,
+                                                  priority=4)
                     all_tasks.append(new_task)
             except XApiError as exc:
                 logger.error(f"Error while fetching posts for user '{username}': {exc}")
 
         logger.info(f"Generated {len(all_tasks)} TodoistTaskRequest items in total.")
         return all_tasks
+
 
 def main():
     """
@@ -191,20 +172,20 @@ def main():
 
     x_integration = XIntegration(
         name="X Integration",
-        frequency=604800.0,  # One week in seconds
+        frequency=604800.0,    # One week in seconds
         bearer_token=bearer_token,
         consumer_key=consumer_key,
         consumer_secret=consumer_secret,
         access_token=access_token,
         access_token_secret=access_token_secret,
         tracked_users=tracked_users,
-        project_id=project_id
-    )
+        project_id=project_id)
 
     requests = x_integration.tick()
     logger.info(f"Generated {len(requests)} tasks from X posts.")
     for request in requests:
         logger.info(f"Task: {request}")
-        
+
+
 if __name__ == "__main__":
     main()

@@ -8,10 +8,11 @@ from todoist.types import Project, Task, ProjectEntry, TaskEntry
 from todoist.utils import get_api_key, try_n_times
 from joblib import Parallel, delayed
 
+
 class DatabaseProjects:
     def __init__(self):
         self.archived_projects_cache: dict[str, Project] | None = None    # Not initialized yet
-        self.projects_cache: list[Project] | None = None   # Not initialized yet
+        self.projects_cache: list[Project] | None = None    # Not initialized yet
 
     def reset(self):
         self.archived_projects_cache = None
@@ -20,7 +21,7 @@ class DatabaseProjects:
     def fetch_archived_projects(self) -> list[Project]:
         if self.archived_projects_cache is not None:
             return list(self.archived_projects_cache.values())
-        
+
         data = run([
             'curl', 'https://api.todoist.com/sync/v9/projects/get_archived', '-H',
             f'Authorization: Bearer {get_api_key()}'
@@ -30,7 +31,9 @@ class DatabaseProjects:
                    check=True)
         data_dicts: list[dict] = json.loads(data.stdout)
         entries = map(lambda raw_dict: ProjectEntry(**raw_dict), data_dicts)
-        self.archived_projects_cache = {entry.id: Project(id=entry.id, project_entry=entry, tasks=[], is_archived=True) for entry in entries}
+        self.archived_projects_cache = {
+            entry.id: Project(id=entry.id, project_entry=entry, tasks=[], is_archived=True) for entry in entries
+        }
         return list(self.archived_projects_cache.values())
 
     def fetch_project_by_id(self, project_id: str, include_archived_in_search: bool = False) -> Project:
@@ -63,12 +66,14 @@ class DatabaseProjects:
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
         if self.projects_cache is not None:
             return self.projects_cache
-        
+
         result: list[Project] = []
         projects: list[ProjectEntry] = self._fetch_projects_data()
 
         if not include_tasks:
-            return list(map(lambda project: Project(id=project.id, project_entry=project, tasks=[], is_archived=False), projects))
+            return list(
+                map(lambda project: Project(id=project.id, project_entry=project, tasks=[], is_archived=False),
+                    projects))
 
         for project in tqdm(projects,
                             desc='Querying project data',
@@ -81,7 +86,7 @@ class DatabaseProjects:
             tasks: list[Task] = list(map(lambda task: Task(id=task.id, task_entry=task), task_entries))
 
             result.append(Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False))
-            
+
         self.projects_cache = result
         return self.projects_cache
 
@@ -122,28 +127,17 @@ class DatabaseProjects:
         mapping_project_id_to_root: dict[str, "Project"] = {}
 
         # Build active project hierarchy in parallel
-        active_roots = Parallel(n_jobs=-1)(
-            delayed(self._get_root_project)(project.id)
-            for project in tqdm(
-                projects.values(),
-                desc='Building active project hierarchy',
-                unit='project',
-                total=len(projects)
-            )
-        )
+        active_roots = Parallel(n_jobs=-1)(delayed(self._get_root_project)(project.id) for project in tqdm(
+            projects.values(), desc='Building active project hierarchy', unit='project', total=len(projects)))
         for project, root in zip(projects.values(), active_roots):
             mapping_project_id_to_root[project.id] = root
 
         # Build archived project hierarchy in parallel
-        archived_roots = Parallel(n_jobs=-1)(
-            delayed(self._get_root_project)(project.id)
-            for project in tqdm(
-                archived_projects.values(),
-                desc='Building archived project hierarchy',
-                unit='project',
-                total=len(archived_projects)
-            )
-        )
+        archived_roots = Parallel(n_jobs=-1)(delayed(self._get_root_project)(project.id)
+                                             for project in tqdm(archived_projects.values(),
+                                                                 desc='Building archived project hierarchy',
+                                                                 unit='project',
+                                                                 total=len(archived_projects)))
         for project, root in zip(archived_projects.values(), archived_roots):
             mapping_project_id_to_root[project.id] = root
 

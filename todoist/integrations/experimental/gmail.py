@@ -8,6 +8,7 @@ from googleapiclient.discovery import build
 # If modifying these SCOPES, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
+
 def main():
     """Shows basic usage of the Gmail API.
     Lists the user's unread emails from the last 4 weeks.
@@ -23,8 +24,7 @@ def main():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
         with open('token.json', 'w') as token:
@@ -34,7 +34,7 @@ def main():
 
     # Call the Gmail API
     now = datetime.datetime.utcnow()
-    four_weeks_ago = (now - datetime.timedelta(weeks=4)).isoformat() + 'Z'  # 'Z' indicates UTC time
+    four_weeks_ago = (now - datetime.timedelta(weeks=4)).isoformat() + 'Z'    # 'Z' indicates UTC time
 
     # Fetch unread emails from the last 4 weeks
     results = service.users().messages().list(userId='me', q=f'is:unread after:{four_weeks_ago}').execute()
@@ -50,6 +50,7 @@ def main():
             print(f"Subject: {msg['payload']['headers'][1]['value']}")
             print(f"Snippet: {msg['snippet']}")
             print('-' * 40)
+
 
 if __name__ == '__main__':
     main()
