@@ -4,12 +4,42 @@ from subprocess import run, PIPE, DEVNULL
 from todoist.utils import get_api_key, try_n_times
 from loguru import logger
 from functools import partial
-
+from todoist.types import Task
+import inspect
 class DatabaseTasks:
     """Database class to manage tasks in the Todoist API"""
 
     def __init__(self):
         pass
+    
+    def insert_task_from_template(self, task: Task, **overrrides) -> dict:
+        """
+        Insert a task into the database using a template and optional overrides.
+        This method creates a new task by merging the task template provided in the
+        'task' parameter with any keyword arguments passed as overrides. It first
+        validates that the keys in the overrides are a subset of the parameters accepted
+        by the 'insert_task' method. If any invalid keys are detected, it logs an error
+        and returns a dictionary with an error message.
+        The merging process combines the task template's attributes (obtained from
+        task.task_entry.__dict__) with the overrides, and then filters the resulting
+        dictionary to include only the keys that match the parameters expected by
+        'insert_task'.
+        Parameters:
+            task (Task): The task template containing default task attributes.
+            **overrrides: Arbitrary keyword arguments that override attributes from
+                          the task template.
+        Returns:
+            dict: A dictionary indicating success or containing an error message if the
+                  override keys are invalid.
+        """
+        param_names = inspect.signature(self.insert_task).parameters.keys()
+        if any(k not in param_names for k in overrrides.keys()):
+            logger.error(f'Invalid overrides: {overrrides.keys()} are not subset of {param_names}')
+            return {'error': 'Invalid overrides'}
+        
+        merged_kwargs = {**task.task_entry.__dict__, **overrrides}
+        final_kwargs = {k: v for k, v in merged_kwargs.items() if k in param_names}
+        self.insert_task(**final_kwargs)
 
     def insert_task(self, content: str, description: str = None, project_id: str = None, section_id: str = None,
                     parent_id: str = None, order: int = None, labels: list[str] = None, priority: int = 1,

@@ -25,7 +25,7 @@ class Automation(ABC):
 
         # Only run if at least a week has passed since last launch
         if (now - last_launch) < dt.timedelta(minutes=self.frequency):
-            logger.info("Less than a week since last automation run; no new tasks generated.")
+            logger.info(f"Automation {self.name} is not ready to run.")
             logger.info(f"Last run: {last_launch}")
             logger.info(f"Current time: {now}")
             logger.info(f"Time until next run: {dt.timedelta(minutes=self.frequency) - (now - last_launch)}")
