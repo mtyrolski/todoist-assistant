@@ -12,3 +12,7 @@ class Database(DatabaseActivity, DatabaseProjects, DatabaseTasks):
         DatabaseActivity.__init__(self, max_pages=max_pages)
         DatabaseProjects.__init__(self)
         DatabaseTasks.__init__(self)
+        
+    def reset(self):
+        for bs in Database.__bases__:
+            bs.reset(self)

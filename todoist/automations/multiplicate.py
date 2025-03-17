@@ -32,10 +32,12 @@ class Multiply(Automation):
             label = next(filter(lambda tag: tag in MUL_LABELS, task.task_entry.labels))
             mul_factor = int(label[1:])
             labels_of_new_task = list(filter(lambda tag: tag not in MUL_LABELS, task.task_entry.labels))
-            for i in range(2, mul_factor+2):
+            for i in range(1, mul_factor+1):
                 logger.debug(f'Creating task {task.task_entry.content} x{i}')
                 db.insert_task_from_template(task, content=f"{task.task_entry.content} x{i}", labels=labels_of_new_task)
-                
+            logger.debug(f"Removing task {task.id}")
+            if db.remove_task(task.id):
+                logger.debug(f"Task {task.id} removed")
                 
 def main():
     multiply = Multiply()
