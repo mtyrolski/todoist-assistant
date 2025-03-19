@@ -16,7 +16,7 @@ class TodoistTaskRequest:
     description: str
     project_id: int
     due_date: str
-    priority: int
+    priority: int    
 
 
 class Integration(ABC):
@@ -28,7 +28,7 @@ class Integration(ABC):
         self.name = name
         self.frequency = frequency
 
-    def tick(self) -> list[TodoistTaskRequest]:
+    def tick(self):
         last_launches: dict[str, dt.datetime] = Cache().integration_launches.load()
         last_launch = last_launches.get(self.name, dt.datetime.min)
 
@@ -42,13 +42,11 @@ class Integration(ABC):
             logger.info(f"Time until next run: {dt.timedelta(weeks=1) - (now - last_launch)}")
             return []
 
-        task_delegations = self._tick()
+        self._tick()
         Cache().integration_launches.save({self.name: now})
 
-        return task_delegations
-
     @abstractmethod
-    def _tick(self) -> list[TodoistTaskRequest]:
+    def _tick(self):
         """
         Perform the integration's main operation.
         """

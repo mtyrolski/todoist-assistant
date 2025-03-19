@@ -43,7 +43,7 @@ class DatabaseTasks:
 
         merged_kwargs = {**task.task_entry.__dict__, **overrrides}
         final_kwargs = {k: v for k, v in merged_kwargs.items() if k in param_names}
-        self.insert_task(**final_kwargs)
+        return self.insert_task(**final_kwargs)
 
     def insert_task(self,
                     content: str,
@@ -65,7 +65,7 @@ class DatabaseTasks:
                     deadline_lang: str = None) -> dict:
         """
         Inserts a new task into the Todoist API.
-        
+
         Parameters:
         - content (str): Task content. This value may contain markdown-formatted text and hyperlinks.
         - description (str): A description for the task.
@@ -87,6 +87,25 @@ class DatabaseTasks:
 
         Returns:
         - dict: Response from the Todoist API.
+        Example response:
+            {'id': '3501',
+            'assigner_id': None,
+            'assignee_id': None,
+            'project_id': '226095',
+            'section_id': None,
+            'parent_id': None,
+            'order': 3,
+            'content': 'Buy milk',
+            'description': '',
+            'is_completed': False,
+            'labels': [],
+            'priority': 1,
+            'comment_count': 0,
+            'creator_id': '381',
+            'created_at': '2025-03-13T21:16:27.284770Z',
+            'due': None,
+            'duration': None,
+            'deadline': None}
         """
         url = "https://api.todoist.com/rest/v2/tasks"
         headers = {
@@ -132,6 +151,7 @@ class DatabaseTasks:
             logger.error(f'Type: {type(decoded_result)}')
             logger.error(f'Keys: {decoded_result.keys()}')
 
+
         return decoded_result
 
     def remove_task(self, task_id: str) -> bool:
@@ -173,3 +193,61 @@ class DatabaseTasks:
             return True
 
         return True
+    
+    def fetch_task_by_id(self, task_id: str) -> dict:
+        """
+        Fetches a task by its ID from the Todoist API.
+
+        Parameters:
+        - task_id (str): The ID of the task to fetch.
+
+        Returns:
+        - dict: Response from the Todoist API containing task details.
+        Example response:
+            {
+                "id": "2995104339",
+                "content": "Buy Milk",
+                "description": "",
+                "project_id": "2203306141",
+                "section_id": "7025",
+                "parent_id": "2995104589",
+                "order": 1,
+                "labels": ["Food", "Shopping"],
+                "priority": 1,
+                "due": {
+                    "date": "2016-09-01",
+                    "is_recurring": false,
+                    "datetime": "2016-09-01T12:00:00.000000Z",
+                    "string": "tomorrow at 12",
+                    "timezone": "Europe/Moscow"
+                },
+                "deadline": {
+                    "date": "2016-09-04"
+                },
+                "duration": null,
+                "is_completed": false,
+                "url": "https://todoist.com/showTask?id=2995104339"
+            }
+        """
+        url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {get_api_key()}"
+        }
+
+        cmds = [
+            "curl", url, "-X", "GET", "-H", "Content-Type: application/json", "-H",
+            f"Authorization: {headers['Authorization']}"
+        ]
+
+        response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
+
+        load_fn = partial(json.loads, response.stdout)
+
+        decoded_result = try_n_times(load_fn, 3)
+        if decoded_result is None:
+            logger.error(f'Type: {type(decoded_result)}')
+            logger.error(f'Keys: {decoded_result.keys()}')
+
+
+        return decoded_result
