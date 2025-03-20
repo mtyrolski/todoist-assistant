@@ -33,7 +33,7 @@ class Template(Automation):
         super().__init__("Template", 1)
         self.task_templates = task_templates
         
-    def _tick(self, db):
+    def _tick(self, db: Database) -> None:
         projects = db.fetch_projects(include_tasks=True)
         all_tasks: Iterable[Task] = [task for project in projects for task in project.tasks]
         logger.debug(f"Found {len(list(all_tasks))} tasks in total")
@@ -76,7 +76,7 @@ class Template(Automation):
             
             
             # Calculate the due date for the root task
-            due_date = datetime.strptime(task.task_entry.due, '%Y-%m-%d') if task.task_entry.due else None
+            due_date = task.task_entry.due_datetime
             root_task_due_date = due_date.strftime('%Y-%m-%d') if due_date else None
 
             labels_root = list(filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))  
@@ -114,12 +114,73 @@ class Template(Automation):
             
             db.remove_task(task.id)
             logger.info(f"Initialized task {task.id} from template {template_name}")        
-            
+
+def get_default_template() -> dict:
+    return {
+        # Meetings, calls, syncs etc.
+        'call': TaskTemplate('Call', 'Call someone', 0, children=[
+            TaskTemplate('Setup meeting', 'Should be put on calendar.', due_date_days_difference=-3),
+            TaskTemplate('Prepare agenda', 'Prepare agenda for the meeting', due_date_days_difference=-1), 
+            TaskTemplate('Prepare notes', 'Prepare notes for the meeting', due_date_days_difference=-1),
+            TaskTemplate('Attend meeting', 'Attend the meeting', due_date_days_difference=0),
+            TaskTemplate('Write minutes', 'Write minutes for the meeting', due_date_days_difference=0),
+            TaskTemplate('E-Mail follow up', 'Follow up on the meeting with notes', due_date_days_difference=0),
+        ]),
+        
+        # Reading paper
+        'literature': TaskTemplate('Read Paper', 'Read a research paper', 0, children=[
+            TaskTemplate('Find paper', 'Find the paper to read', due_date_days_difference=-7),
+            TaskTemplate('Print paper', 'Print the paper', due_date_days_difference=-6),
+            TaskTemplate('Read paper', 'Spend time reading the paper', due_date_days_difference=0),
+            TaskTemplate('Summarize paper', 'Write a summary of the paper', due_date_days_difference=1),
+            TaskTemplate('Discuss paper', 'Discuss the content of the paper with peers', due_date_days_difference=2),
+        ]),
+        
+        # Writing a report
+        'report': TaskTemplate('Write Report', 'Write a detailed report', 0, children=[
+            TaskTemplate('Research topic', 'Research the topic for the report', due_date_days_difference=-10),
+            TaskTemplate('Outline report', 'Create an outline for the report', due_date_days_difference=-7),
+            TaskTemplate('Draft report', 'Write the first draft of the report', due_date_days_difference=-5),
+            TaskTemplate('Review draft', 'Review and revise the draft', due_date_days_difference=-3),
+            TaskTemplate('Finalize report', 'Finalize the report', due_date_days_difference=-1),
+        ]),
+        
+        # Project management
+        'project_management': TaskTemplate('Project Management', 'Manage a project', 0, children=[
+            TaskTemplate('Define project scope', 'Define the scope of the project', due_date_days_difference=-30),
+            TaskTemplate('Create project plan', 'Create a detailed project plan', due_date_days_difference=-25),
+            TaskTemplate('Assign tasks', 'Assign tasks to team members', due_date_days_difference=-20),
+            TaskTemplate('Track progress', 'Track the progress of the project', due_date_days_difference=0),
+            TaskTemplate('Review milestones', 'Review milestones and deliverables', due_date_days_difference=5),
+            TaskTemplate('Close project', 'Close the project', due_date_days_difference=30),
+        ]),
+        
+        # Onboarding new employee
+        'onboarding': TaskTemplate('Onboarding', 'Onboard a new employee', 0, children=[
+            TaskTemplate('Prepare workstation', 'Prepare the workstation for the new employee', due_date_days_difference=-7),
+            TaskTemplate('Introduce team', 'Introduce the new employee to the team', due_date_days_difference=0),
+            TaskTemplate('Provide training', 'Provide necessary training', due_date_days_difference=1),
+            TaskTemplate('Assign mentor', 'Assign a mentor to the new employee', due_date_days_difference=2),
+            TaskTemplate('Review progress', 'Review the progress of the new employee', due_date_days_difference=14),
+        ]),
+        
+        # Event planning
+        'event_planning': TaskTemplate('Event Planning', 'Plan an event', 0, children=[
+            TaskTemplate('Define event objectives', 'Define the objectives of the event', due_date_days_difference=-60),
+            TaskTemplate('Create event budget', 'Create a budget for the event', due_date_days_difference=-50),
+            TaskTemplate('Book venue', 'Book the venue for the event', due_date_days_difference=-45),
+            TaskTemplate('Send invitations', 'Send out invitations', due_date_days_difference=-30),
+            TaskTemplate('Plan agenda', 'Plan the agenda for the event', due_date_days_difference=-20),
+            TaskTemplate('Execute event', 'Execute the event', due_date_days_difference=0),
+            TaskTemplate('Follow up', 'Follow up with attendees', due_date_days_difference=7),
+        ]),
+    }
+
 if __name__ == "__main__":
     # Example usage
     template = Template({
         'daily': TaskTemplate('Daily', 'Daily tasks', 0, children=[
-            TaskTemplate('Morning', 'Morning tasks'),
+            TaskTemplate('Morning', 'Morning tasks', due_date_days_difference=5),
             TaskTemplate('Afternoon', 'Afternoon tasks', children=[TaskTemplate('Lunch', 'Lunch tasks', priority=1)]),
             TaskTemplate('Evening', 'Evening tasks')
         ]),
