@@ -27,6 +27,7 @@ class Integration(ABC):
         """
         self.name = name
         self.frequency = frequency
+        logger.warning(f'Integrations are not ready for use yet.')
 
     def tick(self):
         last_launches: dict[str, dt.datetime] = Cache().integration_launches.load()

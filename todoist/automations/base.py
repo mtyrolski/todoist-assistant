@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import datetime as dt
 from loguru import logger
 from todoist.database.base import Database

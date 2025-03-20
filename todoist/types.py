@@ -90,12 +90,21 @@ class _Task_API_V9:
     v2_parent_id: str | None
     v2_project_id: str | None
     v2_section_id: str | None
+    day_order: str | None
 
     def __repr__(self):
         return f'Task {self.content}'
 
     def __str__(self):
         return f'Task {self.content}'
+    
+    @property
+    def due_datetime(self) -> dt.datetime | None:
+        if self.due is None:
+            return None
+        if isinstance(self.due, dict):
+            return dt.datetime.strptime(self.due['date'], '%Y-%m-%d')
+        return dt.datetime.strptime(self.due, '%Y-%m-%d')
 
 
 ProjectEntry = _ProjectEntry_API_V9
