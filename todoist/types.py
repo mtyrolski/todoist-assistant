@@ -103,9 +103,8 @@ class _Task_API_V9:
         if self.due is None:
             return None
         if isinstance(self.due, dict):
-            return dt.datetime.strptime(self.due['date'], '%Y-%m-%d')
-        return dt.datetime.strptime(self.due, '%Y-%m-%d')
-
+            return dt.datetime.strptime(self.due['date'], '%Y-%m-%dT%H:%M:%S')
+        return dt.datetime.strptime(self.due, '%Y-%m-%dT%H:%M:%S')
 
 ProjectEntry = _ProjectEntry_API_V9
 TaskEntry = _Task_API_V9
