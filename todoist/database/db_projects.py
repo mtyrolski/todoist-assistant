@@ -14,6 +14,10 @@ class DatabaseProjects:
         self.archived_projects_cache: dict[str, Project] | None = None    # Not initialized yet
         self.projects_cache: list[Project] | None = None    # Not initialized yet
 
+    def pull(self):
+        self.fetch_archived_projects()
+        self.fetch_projects(include_tasks=True)
+
     def reset(self):
         self.archived_projects_cache = None
         self.projects_cache = None

@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
+from typing import Final
 
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from todoist.types import Project
 
 
 def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
@@ -45,6 +47,66 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     fig.update_layout(title_text='Events Over Time', xaxis_title='Date', yaxis_title='Number of Events')
     return fig
 
+def plot_most_popular_labels(projects: list[Project]) -> go.Figure:
+    """
+    Plots the most popular labels as pie chart.
+    
+    Parameters:
+    projects (list[Project]): List of projects.
+    
+    Returns:
+    go.Figure: Plotly figure object representing the most popular labels.
+    """
+    
+    labels_counter = {}
+    for project in projects:
+        for task in project.tasks:
+            for label in task.task_entry.labels:
+                labels_counter[label] = labels_counter.get(label, 0) + 1
+
+    N: Final[int] = 10 # constant for now
+    top_n_labels = dict(sorted(labels_counter.items(), key=lambda item: item[1], reverse=True)[:N])
+    
+    fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
+    fig.update_traces(hoverinfo='label+percent', textinfo='value', textfont_size=20,
+                      marker=dict(line=dict(color='#000000', width=2)))
+    fig.update_layout(title_text='Most Popular Labels')
+    return fig
+
+def current_tasks_types(projects: list[Project]) -> go.Figure:
+    # count overude, today+tomorrow, this week, later+nodate tasks
+    # make  pie plot as above
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    week_end = today + timedelta(days=7)
+    overdue = 0
+    today_tomorrow = 0
+    this_week = 0
+    later_nodate = 0
+    for project in projects:
+        for task in project.tasks:
+            
+            if task.task_entry.due_datetime is None:
+                later_nodate += 1
+                continue
+            task_due_date = task.task_entry.due_datetime.date()
+            
+            if task_due_date < today:
+                overdue += 1
+            elif task_due_date >= today and task_due_date <= tomorrow:
+                today_tomorrow += 1
+            elif task_due_date <= week_end:
+                this_week += 1
+            else:
+                later_nodate += 1
+
+    fig = go.Figure(data=[go.Pie(labels=['Overdue', 'Today/Tomorrow', 'This Week', 'Later/No Date'],
+                                    values=[overdue, today_tomorrow, this_week, later_nodate], hole=.3)])
+    fig.update_traces(hoverinfo='label+percent', textinfo='value', textfont_size=20,
+                      marker=dict(line=dict(color='#000000', width=2)))
+    
+    fig.update_layout(title_text='Current Tasks Types')
+    return fig
 
 def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
                                 granularity: str) -> go.Figure:
