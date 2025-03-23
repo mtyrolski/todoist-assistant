@@ -8,3 +8,4 @@ __pycache__/
 *.ipynb
 personal/*.py
 credentials.json
+outputs/

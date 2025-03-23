@@ -11,7 +11,7 @@ from joblib import load
 from loguru import logger
 
 from todoist.database.base import Database
-from todoist.types import SUPPORTED_EVENT_TYPES, Event, Project, Task, events_to_dataframe
+from todoist.types import SUPPORTED_EVENT_TYPES, Event, Project, events_to_dataframe
 from todoist.plots import (current_tasks_types, plot_event_distribution_by_type, plot_events_over_time, plot_most_popular_labels, plot_top_projects_by_events,
                            plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour,
                            plot_event_types_by_project, plot_cumulative_events_over_time, cumsum_plot_per_project,
