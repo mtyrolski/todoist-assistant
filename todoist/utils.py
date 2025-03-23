@@ -6,6 +6,12 @@ from typing import Callable, TypeVar
 from joblib import load, dump
 from loguru import logger
 
+from hydra import compose
+from hydra import initialize
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+
 T = TypeVar('T', set, dict)
 
 
@@ -53,3 +59,9 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
         except Exception as e:
             logger.error(f"Exception {e} occurred")
     return None
+
+def load_config(config_name: str, config_path: str) -> OmegaConf:
+    GlobalHydra.instance().clear()
+    initialize(config_path=config_path)
+    config: DictConfig = compose(config_name=config_name)
+    return OmegaConf.create(config)

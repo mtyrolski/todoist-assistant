@@ -15,7 +15,8 @@ import pandas as pd
 import streamlit as st
 from joblib import load
 from loguru import logger
-
+from omegaconf import OmegaConf
+from todoist.utils import load_config
 from todoist.database.base import Database
 from todoist.types import (SUPPORTED_EVENT_TYPES, Event, Project, events_to_dataframe)
 from todoist.plots import (current_tasks_types, plot_event_distribution_by_type, plot_events_over_time,
@@ -23,7 +24,8 @@ from todoist.plots import (current_tasks_types, plot_event_distribution_by_type,
                            plot_event_distribution_by_root_project, plot_heatmap_of_events_by_day_and_hour,
                            plot_event_types_by_project, plot_cumulative_events_over_time, cumsum_plot_per_project,
                            plot_completed_tasks_periodically, cumsum_completed_tasks_periodically)
-
+import hydra
+from todoist.automations.base import Automation
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
@@ -211,6 +213,10 @@ def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, g
     st.header("Cumulative Completed Tasks Per Project")
     st.plotly_chart(cumsum_plot_per_project(df_activity, beg_range, end_range, granularity))
 
+def render_control_panel_page(dbio: Database) -> None:
+    config: OmegaConf = load_config('config', 'config.yaml')
+    automations: list[Automation] = hydra.utils.instantiate(config.automations)
+    pass
 
 def main() -> None:
     """
