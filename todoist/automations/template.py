@@ -5,8 +5,12 @@ from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
 from loguru import logger
 from datetime import datetime, timedelta
+import hydra
+from omegaconf import DictConfig
 
 FROM_TEMPLATE_LABEL_PREFIX: Final[str] = 'template-'
+
+
 
 class TaskTemplate:
     """
@@ -94,7 +98,6 @@ class Template(Automation):
                     insert_subtasks(root_task, child_insertion_result['id'], child, parent_due_date)
                 else:
                     logger.error(f"Failed to insert subtask {child.content}")
-        logger.debug('dup')
         for task in task_to_initialize_from_template:
             template_label = next(filter(lambda tag: tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))
             template_name = template_label[len(FROM_TEMPLATE_LABEL_PREFIX):]
@@ -104,17 +107,20 @@ class Template(Automation):
             template_ = self.task_templates[template_name]
             
             # Calculate the due date for the root task
-            due_datetime_parent = task.task_entry.due_datetime.date()
-            due_datetime_child = (due_datetime_parent + timedelta(days=template_.due_date_days_difference))
-
+            if task.task_entry.due_datetime is None:
+                due_datetime_child = None
+                due_datetime_child_str = None
+            else:
+                due_datetime_parent = task.task_entry.due_datetime
+                due_datetime_child = (due_datetime_parent + timedelta(days=template_.due_date_days_difference))
+                due_datetime_child_str = due_datetime_child.strftime('%Y-%m-%dT%H:%M:%S')
             labels_root = list(filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))  
             root_insertion_result: dict = db.insert_task_from_template(
                 task,
                 content=f'{template_.content}: {task.task_entry.content}', 
                 description=template_.description, 
-                priority=template_.priority, 
-                # - due_datetime (str): Specific date and time in RFC3339 format in UTC.
-                due_datetime=due_datetime_child.strftime('%Y-%m-%dT%H:%M:%S'),
+                priority=task.task_entry.priority, 
+                due_datetime=due_datetime_child_str,
                 labels=labels_root
             )
             
@@ -144,39 +150,15 @@ class Template(Automation):
             db.remove_task(task.id)
             logger.info(f"Initialized task {task.id} from template {template_name}")        
 
-def get_default_template() -> dict:
-    return {
-        # Meetings, calls, syncs etc.
-        'call': TaskTemplate('Call', 'Call someone', 0, children=[
-            TaskTemplate('Setup meeting', 'Should be put on calendar.', due_date_days_difference=-3),
-            TaskTemplate('Prepare notes', 'Prepare notes for the meeting', due_date_days_difference=-1),
-            TaskTemplate('Attend meeting', 'Attend the meeting', due_date_days_difference=0),
-            TaskTemplate('Write minutes', 'Write minutes for the meeting', due_date_days_difference=0),
-            TaskTemplate('E-Mail follow up', 'Follow up on the meeting with notes', due_date_days_difference=0),
-        ]),
-        
-        # Reading paper
-        'literature': TaskTemplate('Read Paper', 'Read a research paper', 0, children=[
-            TaskTemplate('Find paper', 'Find the paper to read', due_date_days_difference=-7),
-            TaskTemplate('Print paper', 'Print the paper', due_date_days_difference=-6),
-            TaskTemplate('Read paper', 'Spend time reading the paper', due_date_days_difference=0),
-            TaskTemplate('Summarize paper', 'Write a summary of the paper', due_date_days_difference=1),
-            TaskTemplate('Discuss paper', 'Discuss the content of the paper with peers', due_date_days_difference=2),
-        ]),
-        
-        # Feature development - implementing new one
-        'features': TaskTemplate('Feature Development', 'Implement a feature', 0, children=[
-            TaskTemplate('Define requirements', 'Define the requirements for the feature', due_date_days_difference=-10),
-            TaskTemplate('Design feature', 'Design the feature', due_date_days_difference=-5),
-            TaskTemplate('Develop feature', 'Develop the feature', due_date_days_difference=0),
-            TaskTemplate('Test feature', 'Test the feature', due_date_days_difference=2),
-        ]),
-    }
 
-if __name__ == "__main__":
-    # Example usage
-    template = Template(get_default_template())
+# pylint: disable=missing-function-docstring
+@hydra.main(version_base=None, config_path=None)
+def main(config: DictConfig) -> None:
     db = Database('.env')
-    
+    single_templates = hydra.utils.instantiate(config.automations)
+    template = Template(single_templates)
     template.tick(db)
-     
+
+if __name__ == '__main__':
+    # pylint: disable=no-value-for-parameter
+    main()
