@@ -16,21 +16,27 @@ class Automation(ABC):
         self.frequency = frequency
 
     def tick(self, db: Database):
-        last_launches = Cache().automation_launches.load()
-        last_launch = last_launches.get(self.name, dt.datetime.min)
+        launch_data = Cache().automation_launches.load()  # expects a dict: {automation_name: [launch_times]}
+        launches = launch_data.get(self.name, [])
+        last_launch = launches[-1] if launches else dt.datetime.min
 
         now = dt.datetime.now()
 
-        # Only run if at least a week has passed since last launch
+        # Only run if the frequency delay has not passed since the last launch
         if (now - last_launch) < dt.timedelta(minutes=self.frequency):
+            delay = dt.timedelta(minutes=self.frequency) - (now - last_launch)
             logger.info(f"Automation {self.name} is not ready to run.")
             logger.info(f"Last run: {last_launch}")
             logger.info(f"Current time: {now}")
-            logger.info(f"Time until next run: {dt.timedelta(minutes=self.frequency) - (now - last_launch)}")
+            logger.info(f"Time until next run: {delay}")
             return []
 
         task_delegations = self._tick(db)
-        Cache().automation_launches.save({self.name: now})
+        
+        # Update the list of launch times with the new launch
+        launches.append(now)
+        launch_data[self.name] = launches
+        Cache().automation_launches.save(launch_data)
 
         return task_delegations
 

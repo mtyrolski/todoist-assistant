@@ -16,7 +16,7 @@ import streamlit as st
 from joblib import load
 from loguru import logger
 from omegaconf import OmegaConf
-from todoist.utils import load_config
+from todoist.utils import Cache, load_config
 from todoist.database.base import Database
 from todoist.types import (SUPPORTED_EVENT_TYPES, Event, Project, events_to_dataframe)
 from todoist.plots import (current_tasks_types, plot_event_distribution_by_type, plot_events_over_time,
@@ -214,9 +214,29 @@ def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, g
     st.plotly_chart(cumsum_plot_per_project(df_activity, beg_range, end_range, granularity))
 
 def render_control_panel_page(dbio: Database) -> None:
-    config: OmegaConf = load_config('config', 'config.yaml')
+    config: OmegaConf = load_config('automations', '../configs')
     automations: list[Automation] = hydra.utils.instantiate(config.automations)
-    pass
+
+    st.title("Automation Control Panel")
+    st.write("Below is the list of automations:")
+
+    for automation in automations:
+        with st.container():
+            cols = st.columns([3, 1, 1])
+            # First column displays the automation name.
+            cols[0].markdown(f"### {automation.name}")
+            # Second column displays the RUN button with a green arrow.
+            if cols[1].button("▶️", key=automation.name):
+                automation.tick(dbio)
+                st.rerun()
+            # Third column shows information about launches.
+            cache = Cache()
+            launches = cache.automation_launches.load()
+            launch_exists = automation.name in launches
+            launch_count = 1 if launch_exists else 0
+            last_launch = launches.get(automation.name, "Never")
+            cols[2].markdown(f"**Launches:** {launch_count}\n\n**Last launch:** {last_launch}")
+
 
 def main() -> None:
     """
@@ -237,6 +257,7 @@ def main() -> None:
         "Home": render_home_page,
         "Project Insights": render_project_insights_page,
         "Task Analysis": render_task_analysis_page,
+        'Control Panel': render_control_panel_page
     }
     st.sidebar.title("Navigation")
     current_page = st.sidebar.radio("Go to", list(pages.keys()))
@@ -248,7 +269,8 @@ def main() -> None:
         'beg_range': beg_range,
         'end_range': end_range,
         'granularity': granularity,
-        'active_projects': active_projects
+        'active_projects': active_projects,
+        'dbio': dbio
     }
 
     page_render_fn = pages[current_page]

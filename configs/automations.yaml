@@ -1,83 +1,85 @@
 automations:
-  call:
-    _target_: todoist.automations.template.TaskTemplate
-    content: Call
-    description: Call someone
-    due_date_days_difference: 0
-    priority: 1
-    children:
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Setup meeting
-        description: Should be put on calendar.
-        due_date_days_difference: -3
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Prepare notes
-        description: Prepare notes for the meeting
-        due_date_days_difference: -1
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Attend meeting
-        description: Attend the meeting
+  - _target_: todoist.automations.template.Template
+    task_templates:
+      call:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Call
+        description: Call someone
         due_date_days_difference: 0
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Write minutes
-        description: Write minutes for the meeting
-        due_date_days_difference: 0
-      - _target_: todoist.automations.template.TaskTemplate
-        content: E-Mail follow up
-        description: Follow up on the meeting with notes
-        due_date_days_difference: 0
+        priority: 1
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Setup meeting
+            description: Should be put on calendar.
+            due_date_days_difference: -3
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Prepare notes
+            description: Prepare notes for the meeting
+            due_date_days_difference: -1
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Attend meeting
+            description: Attend the meeting
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Write minutes
+            description: Write minutes for the meeting
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: E-Mail follow up
+            description: Follow up on the meeting with notes
+            due_date_days_difference: 0
 
-  read_paper:
-    _target_: todoist.automations.template.TaskTemplate
-    content: Read Paper
-    description: Read a research paper
-    due_date_days_difference: 0
-    priority: 1
-    children:
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Find paper
-        description: Find the paper to read
-        due_date_days_difference: -7
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Print paper
-        description: Print the paper
-        due_date_days_difference: -6
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Read paper
-        description: Spend time reading the paper
+      read_paper:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Read Paper
+        description: Read a research paper
         due_date_days_difference: 0
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Summarize paper
-        description: Write a summary of the paper
-        due_date_days_difference: 1
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Discuss paper
-        description: Discuss the content of the paper with peers
-        due_date_days_difference: 2
+        priority: 1
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Find paper
+            description: Find the paper to read
+            due_date_days_difference: -7
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Print paper
+            description: Print the paper
+            due_date_days_difference: -6
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Read paper
+            description: Spend time reading the paper
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Summarize paper
+            description: Write a summary of the paper
+            due_date_days_difference: 1
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Discuss paper
+            description: Discuss the content of the paper with peers
+            due_date_days_difference: 2
 
-  feature:
-    _target_: todoist.automations.template.TaskTemplate
-    content: Feature Development
-    description: Implement a feature
-    due_date_days_difference: 0
-    priority: 1
-    children:
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Define requirements
-        description: Define the requirements for the feature
-        due_date_days_difference: -10
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Design feature
-        description: Design the feature
-        due_date_days_difference: -5
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Develop feature
-        description: Develop the feature
+      feature:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Feature Development
+        description: Implement a feature
         due_date_days_difference: 0
-      - _target_: todoist.automations.template.TaskTemplate
-        content: Test feature
-        description: Test the feature
-        due_date_days_difference: 2
+        priority: 1
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Define requirements
+            description: Define the requirements for the feature
+            due_date_days_difference: -10
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Design feature
+            description: Design the feature
+            due_date_days_difference: -5
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Develop feature
+            description: Develop the feature
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Test feature
+            description: Test the feature
+            due_date_days_difference: 2
 
 hydra:
   searchpath:
