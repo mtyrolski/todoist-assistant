@@ -85,7 +85,6 @@ def current_tasks_types(projects: list[Project]) -> go.Figure:
     later_nodate = 0
     for project in projects:
         for task in project.tasks:
-            
             if task.task_entry.due_datetime is None:
                 later_nodate += 1
                 continue
