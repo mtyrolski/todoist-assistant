@@ -16,7 +16,7 @@ class Automation(ABC):
         self.frequency = frequency
 
     def tick(self, db: Database):
-        launch_data = Cache().automation_launches.load()  # expects a dict: {automation_name: [launch_times]}
+        launch_data = Cache().automation_launches.load()    # expects a dict: {automation_name: [launch_times]}
         launches = launch_data.get(self.name, [])
         last_launch = launches[-1] if launches else dt.datetime.min
 
@@ -32,7 +32,7 @@ class Automation(ABC):
             return []
 
         task_delegations = self._tick(db)
-        
+
         # Update the list of launch times with the new launch
         launches.append(now)
         launch_data[self.name] = launches

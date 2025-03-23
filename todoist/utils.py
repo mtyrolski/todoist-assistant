@@ -60,6 +60,7 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
             logger.error(f"Exception {e} occurred")
     return None
 
+
 def load_config(config_name: str, config_path: str) -> OmegaConf:
     GlobalHydra.instance().clear()
     initialize(config_path=config_path)
