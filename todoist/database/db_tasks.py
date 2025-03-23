@@ -41,8 +41,10 @@ class DatabaseTasks:
             logger.error(f'Invalid overrides: {overrrides.keys()} are not subset of {param_names}')
             return {'error': 'Invalid overrides'}
 
-        merged_kwargs = {**task.task_entry.__dict__, **overrrides}
+        logger.debug(f'Inserting tasks with overrides: {overrrides}')
+        merged_kwargs = {**task.task_entry.kwargs, **overrrides}
         final_kwargs = {k: v for k, v in merged_kwargs.items() if k in param_names}
+        logger.debug(f'Final kwargs: {final_kwargs}')
         return self.insert_task(**final_kwargs)
 
     def insert_task(self,
@@ -142,12 +144,13 @@ class DatabaseTasks:
             f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"
         ]
 
-        response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
-
+        response = run(cmds, stdout=PIPE, stderr=PIPE, check=True)
+        
         load_fn = partial(json.loads, response.stdout)
 
         decoded_result = try_n_times(load_fn, 3)
         if decoded_result is None:
+            logger.error(f'Response: {response.stdout}')
             logger.error(f'Type: {type(decoded_result)}')
             logger.error(f'Keys: {decoded_result.keys()}')
 
