@@ -26,6 +26,8 @@ from todoist.plots import (current_tasks_types, plot_event_distribution_by_type,
                            plot_completed_tasks_periodically, cumsum_completed_tasks_periodically)
 import hydra
 from todoist.automations.base import Automation
+import io
+import contextlib
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
@@ -220,22 +222,63 @@ def render_control_panel_page(dbio: Database) -> None:
     st.title("Automation Control Panel")
     st.write("Below is the list of automations:")
 
+    # Add some custom CSS for a nicer box look.
+    st.markdown(
+        """
+        <style>
+        .automation-box {
+            position: relative;
+            z-index: 1;
+            border: 2px solid #4CAF50;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        .automation-title {
+            color: #333333;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     for automation in automations:
         with st.container():
-            cols = st.columns([3, 1, 1])
-            # First column displays the automation name.
-            cols[0].markdown(f"### {automation.name}")
-            # Second column displays the RUN button with a green arrow.
-            if cols[1].button("▶️", key=automation.name):
-                automation.tick(dbio)
-                st.rerun()
-            # Third column shows information about launches.
-            cache = Cache()
-            launches = cache.automation_launches.load()
-            launch_exists = automation.name in launches
-            launch_count = 1 if launch_exists else 0
-            last_launch = launches.get(automation.name, "Never")
-            cols[2].markdown(f"**Launches:** {launch_count}\n\n**Last launch:** {last_launch}")
+            st.markdown(f'<div class="automation-box">', unsafe_allow_html=True)
+            cols = st.columns([3, 1, 2])
+            with cols[0]:
+                st.markdown(f"<h3 class='automation-title'>{automation.name}</h3>", unsafe_allow_html=True)
+            with cols[1]:
+                if st.button("▶️ Run", key=automation.name):
+                    with st.spinner("Executing automation..."):
+                        stdout_capture = io.StringIO()
+                        stderr_capture = io.StringIO()
+                        with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
+                            automation.tick(dbio)
+                        output = stdout_capture.getvalue()
+                        error = stderr_capture.getvalue()
+                        dbio.reset()
+                        st.success("Automation executed successfully!")
+                        if output:
+                            st.markdown("**Output:**")
+                            st.text(output)
+                        if error:
+                            st.markdown("**Error:**")
+                            st.text(error)
+                        st.rerun()
+            with cols[2]:
+                cache = Cache()
+                launches = cache.automation_launches.load()
+                if automation.name in launches:
+                    launch_count = len(launches[automation.name])
+                    last_launch = launches[automation.name][-1].strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    launch_count = 0
+                    last_launch = "Never"
+                st.markdown(f"<b>Launches:</b> {launch_count}<br><b>Last launch:</b> {last_launch}",
+                            unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
 
 def main() -> None:

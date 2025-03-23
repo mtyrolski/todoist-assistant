@@ -62,7 +62,7 @@ class TaskTemplate:
 
 class Template(Automation):
     def __init__(self, task_templates: dict[str, TaskTemplate]):
-        super().__init__("Template", 1)
+        super().__init__("Template", 0.1)
         self.task_templates = task_templates
 
     def _tick(self, db: Database) -> None:

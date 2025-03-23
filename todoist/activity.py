@@ -47,10 +47,9 @@ def quick_summarize(events: EventCollection, new_events: EventCollection):
         )
 
 
-def fetch_activity(n_weeks: int) -> tuple[EventCollection, EventCollection]:
+def fetch_activity(dbio: Database) -> tuple[EventCollection, EventCollection]:
     """Fetches activity from the last n_weeks weeks, updates
     local database, and returns the new items."""
-    dbio = Database('.env', max_pages=n_weeks)    # Fetch only the last 3 pages of activity (3 weeks)
     fetched_activity: list[Event] = dbio.fetch_activity()
     logger.info(f'Fetched {len(fetched_activity)} events')
 
@@ -74,7 +73,8 @@ def remove_last_n_events_from_activity(activity_db: EventCollection, n: int) -> 
 
 
 def main(nweeks: int = 3):
-    activity_db, new_items = fetch_activity(nweeks)
+    dbio = Database('.env', max_pages=nweeks)
+    activity_db, new_items = fetch_activity(dbio)
     logger.info('Summary of Activity:')
     quick_summarize(activity_db, new_items)
 
