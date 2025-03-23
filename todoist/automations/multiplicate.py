@@ -11,7 +11,7 @@ MUL_LABELS = ['X2', 'X3', 'X5', 'X10']
 
 class Multiply(Automation):
     def __init__(self):
-        super().__init__("Multiply", 1)
+        super().__init__("Multiply", 0.1)
 
     def _tick(self, db):
         projects = db.fetch_projects(include_tasks=True)
