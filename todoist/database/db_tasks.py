@@ -143,7 +143,7 @@ class DatabaseTasks:
         ]
 
         response = run(cmds, stdout=PIPE, stderr=PIPE, check=True)
-        
+
         load_fn = partial(json.loads, response.stdout)
 
         decoded_result = try_n_times(load_fn, 3)
@@ -151,7 +151,6 @@ class DatabaseTasks:
             logger.error(f'Response: {response.stdout}')
             logger.error(f'Type: {type(decoded_result)}')
             logger.error(f'Keys: {decoded_result.keys()}')
-
 
         return decoded_result
 
@@ -194,7 +193,7 @@ class DatabaseTasks:
             return True
 
         return True
-    
+
     def fetch_task_by_id(self, task_id: str) -> dict:
         """
         Fetches a task by its ID from the Todoist API.
@@ -231,10 +230,7 @@ class DatabaseTasks:
             }
         """
         url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {get_api_key()}"
-        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {get_api_key()}"}
 
         cmds = [
             "curl", url, "-X", "GET", "-H", "Content-Type: application/json", "-H",
@@ -249,6 +245,5 @@ class DatabaseTasks:
         if decoded_result is None:
             logger.error(f'Type: {type(decoded_result)}')
             logger.error(f'Keys: {decoded_result.keys()}')
-
 
         return decoded_result

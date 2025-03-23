@@ -11,7 +11,6 @@ from omegaconf import DictConfig
 FROM_TEMPLATE_LABEL_PREFIX: Final[str] = 'template-'
 
 
-
 class TaskTemplate:
     """
     A template representation of a task, allowing for nested child tasks.
@@ -22,7 +21,7 @@ class TaskTemplate:
         priority (int): The priority level of the task, where a higher value indicates higher priority. Defaults to 1.
         children (list[TaskTemplate]): A list of child TaskTemplate objects representing subtasks.
     """
-    def __init__(self, 
+    def __init__(self,
                  content: str,
                  description: str = None,
                  due_date_days_difference: int | None = None,
@@ -33,7 +32,7 @@ class TaskTemplate:
         self.description = description
         self.priority = priority
         self.children: list['TaskTemplate'] = children
-        
+
     @classmethod
     def priority_on_todoist(cls, priority: int) -> int:
         """
@@ -44,7 +43,6 @@ class TaskTemplate:
             int: The corresponding Todoist priority level.
         """
         return 4 - priority
-        
 
     def walk(self, skip_root=False) -> Iterable['TaskTemplate']:
         """
@@ -61,11 +59,12 @@ class TaskTemplate:
         for child in self.children:
             yield from child.walk()
 
+
 class Template(Automation):
     def __init__(self, task_templates: dict[str, TaskTemplate]):
         super().__init__("Template", 1)
         self.task_templates = task_templates
-        
+
     def _tick(self, db: Database) -> None:
         projects = db.fetch_projects(include_tasks=True)
         all_tasks: Iterable[Task] = [task for project in projects for task in project.tasks]
@@ -74,38 +73,41 @@ class Template(Automation):
         logger.debug(f"Found {len(all_unique_labels)} unique labels: {all_unique_labels}")
 
         task_to_initialize_from_template = list(
-            filter(lambda task: any(tag.startswith(FROM_TEMPLATE_LABEL_PREFIX) for tag in task.task_entry.labels), all_tasks))
-        
+            filter(lambda task: any(tag.startswith(FROM_TEMPLATE_LABEL_PREFIX) for tag in task.task_entry.labels),
+                   all_tasks))
+
         logger.info(f"Found {len(task_to_initialize_from_template)} tasks to initialize from template")
-        
-        def insert_subtasks(root_task: Task, parent_id: int, task_template: TaskTemplate, parent_due_date: datetime | None):
+
+        def insert_subtasks(root_task: Task, parent_id: int, task_template: TaskTemplate,
+                            parent_due_date: datetime | None):
             for child in task_template.children:
                 if child.due_date_days_difference is not None and parent_due_date is not None:
-                    subtask_due_date = (parent_due_date + timedelta(days=child.due_date_days_difference)).strftime('%Y-%m-%d')
+                    subtask_due_date = (parent_due_date +
+                                        timedelta(days=child.due_date_days_difference)).strftime('%Y-%m-%d')
                 else:
                     subtask_due_date = None
 
-                child_insertion_result = db.insert_task(
-                    content=child.content, 
-                    description=child.description, 
-                    project_id=task.task_entry.project_id, 
-                    parent_id=parent_id, 
-                    priority=child.priority, 
-                    due_date=subtask_due_date
-                )
-                
+                child_insertion_result = db.insert_task(content=child.content,
+                                                        description=child.description,
+                                                        project_id=task.task_entry.project_id,
+                                                        parent_id=parent_id,
+                                                        priority=child.priority,
+                                                        due_date=subtask_due_date)
+
                 if 'id' in child_insertion_result:
                     insert_subtasks(root_task, child_insertion_result['id'], child, parent_due_date)
                 else:
                     logger.error(f"Failed to insert subtask {child.content}")
+
         for task in task_to_initialize_from_template:
-            template_label = next(filter(lambda tag: tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))
+            template_label = next(filter(lambda tag: tag.startswith(FROM_TEMPLATE_LABEL_PREFIX),
+                                         task.task_entry.labels))
             template_name = template_label[len(FROM_TEMPLATE_LABEL_PREFIX):]
             if template_name not in self.task_templates:
                 logger.error(f"Template {template_name} not found")
                 continue
             template_ = self.task_templates[template_name]
-            
+
             # Calculate the due date for the root task
             if task.task_entry.due_datetime is None:
                 due_datetime_child = None
@@ -114,41 +116,40 @@ class Template(Automation):
                 due_datetime_parent = task.task_entry.due_datetime
                 due_datetime_child = (due_datetime_parent + timedelta(days=template_.due_date_days_difference))
                 due_datetime_child_str = due_datetime_child.strftime('%Y-%m-%dT%H:%M:%S')
-            labels_root = list(filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))  
+            labels_root = list(
+                filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))
             root_insertion_result: dict = db.insert_task_from_template(
                 task,
-                content=f'{template_.content}: {task.task_entry.content}', 
-                description=template_.description, 
-                priority=task.task_entry.priority, 
+                content=f'{template_.content}: {task.task_entry.content}',
+                description=template_.description,
+                priority=task.task_entry.priority,
                 due_datetime=due_datetime_child_str,
-                labels=labels_root
-            )
-            
+                labels=labels_root)
+
             if root_insertion_result is None or 'id' not in root_insertion_result:
                 logger.error(f"Failed to initialize task from template {template_name}")
                 continue
-                    
+
             root_task_id: str = db.fetch_task_by_id(root_insertion_result['id'])
-            fix_mapping = {
-                'creator_id': 'user_id'
-            }
-            
+            fix_mapping = {'creator_id': 'user_id'}
+
             drop_mapping = {'self'}
             root_task_entry = root_task_id | fix_mapping
-            root_task_entry = {k: v for k, v in root_task_entry.items() if k in signature(TaskEntry.__init__).parameters}
+            root_task_entry = {
+                k: v for k, v in root_task_entry.items() if k in signature(TaskEntry.__init__).parameters
+            }
             lacking_params = set(signature(TaskEntry.__init__).parameters) - set(root_task_entry.keys())
             for param in lacking_params:
                 root_task_entry[param] = None
 
             for drop in drop_mapping:
                 root_task_entry.pop(drop, None)
-                
-            
+
             root_task = Task(id=root_insertion_result['id'], task_entry=TaskEntry(**root_task_entry))
             insert_subtasks(root_task, root_insertion_result['id'], template_, due_datetime_child)
-            
+
             db.remove_task(task.id)
-            logger.info(f"Initialized task {task.id} from template {template_name}")        
+            logger.info(f"Initialized task {task.id} from template {template_name}")
 
 
 # pylint: disable=missing-function-docstring
@@ -158,6 +159,7 @@ def main(config: DictConfig) -> None:
     single_templates = hydra.utils.instantiate(config.automations)
     template = Template(single_templates)
     template.tick(db)
+
 
 if __name__ == '__main__':
     # pylint: disable=no-value-for-parameter

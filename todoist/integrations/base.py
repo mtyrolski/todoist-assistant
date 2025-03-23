@@ -16,7 +16,7 @@ class TodoistTaskRequest:
     description: str
     project_id: int
     due_date: str
-    priority: int    
+    priority: int
 
 
 class Integration(ABC):
