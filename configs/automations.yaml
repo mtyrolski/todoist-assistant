@@ -1,14 +1,4 @@
 automations:
-  - _target_: todoist.automations.activity.Activity
-    name: Activity Last Week
-    nweeks: 1
-  - _target_: todoist.automations.activity.Activity
-    name: Activity Last Month
-    nweeks: 4
-  - _target_: todoist.automations.activity.Activity
-    name: Activity Last 10 years
-    nweeks: 520
-  - _target_: todoist.automations.multiplicate.Multiply
   - _target_: todoist.automations.template.Template
     task_templates:
       call:
@@ -90,6 +80,16 @@ automations:
             content: Test feature
             description: Test the feature
             due_date_days_difference: 2
+  - _target_: todoist.automations.activity.Activity
+    name: Activity Last Week
+    nweeks: 1
+  - _target_: todoist.automations.activity.Activity
+    name: Activity Last Month
+    nweeks: 4
+  - _target_: todoist.automations.activity.Activity
+    name: Activity Last 10 years
+    nweeks: 520
+  - _target_: todoist.automations.multiplicate.Multiply
 
 hydra:
   searchpath:

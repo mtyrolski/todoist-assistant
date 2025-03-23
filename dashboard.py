@@ -28,6 +28,7 @@ import hydra
 from todoist.automations.base import Automation
 import io
 import contextlib
+
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
@@ -215,6 +216,7 @@ def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, g
     st.header("Cumulative Completed Tasks Per Project")
     st.plotly_chart(cumsum_plot_per_project(df_activity, beg_range, end_range, granularity))
 
+
 def render_control_panel_page(dbio: Database) -> None:
     config: OmegaConf = load_config('automations', '../configs')
     automations: list[Automation] = hydra.utils.instantiate(config.automations)
@@ -223,8 +225,7 @@ def render_control_panel_page(dbio: Database) -> None:
     st.write("Below is the list of automations:")
 
     # Add some custom CSS for a nicer box look.
-    st.markdown(
-        """
+    st.markdown("""
         <style>
         .automation-box {
             position: relative;
@@ -240,33 +241,16 @@ def render_control_panel_page(dbio: Database) -> None:
         }
         </style>
         """,
-        unsafe_allow_html=True
-    )
+                unsafe_allow_html=True)
 
     for automation in automations:
         with st.container():
-            st.markdown(f'<div class="automation-box">', unsafe_allow_html=True)
+            st.markdown('<div class="automation-box">', unsafe_allow_html=True)
             cols = st.columns([3, 1, 2])
             with cols[0]:
                 st.markdown(f"<h3 class='automation-title'>{automation.name}</h3>", unsafe_allow_html=True)
             with cols[1]:
-                if st.button("▶️ Run", key=automation.name):
-                    with st.spinner("Executing automation..."):
-                        stdout_capture = io.StringIO()
-                        stderr_capture = io.StringIO()
-                        with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
-                            automation.tick(dbio)
-                        output = stdout_capture.getvalue()
-                        error = stderr_capture.getvalue()
-                        dbio.reset()
-                        st.success("Automation executed successfully!")
-                        if output:
-                            st.markdown("**Output:**")
-                            st.text(output)
-                        if error:
-                            st.markdown("**Error:**")
-                            st.text(error)
-                        st.rerun()
+                run_pressed = st.button("▶️ Run", key=automation.name)
             with cols[2]:
                 cache = Cache()
                 launches = cache.automation_launches.load()
@@ -278,6 +262,27 @@ def render_control_panel_page(dbio: Database) -> None:
                     last_launch = "Never"
                 st.markdown(f"<b>Launches:</b> {launch_count}<br><b>Last launch:</b> {last_launch}",
                             unsafe_allow_html=True)
+
+            if run_pressed:
+                with st.spinner("Executing automation..."):
+                    stdout_capture = io.StringIO()
+                    stderr_capture = io.StringIO()
+                    with contextlib.redirect_stderr(stdout_capture), contextlib.redirect_stderr(stderr_capture):
+                        automation.tick(dbio)
+                    output = stdout_capture.getvalue()
+                    error = stderr_capture.getvalue()
+                    dbio.reset()
+                st.success("Automation executed successfully!")
+
+                # Display the captured output and error merged in a single row
+                if output or error:
+                    st.markdown("---")
+                    if output:
+                        st.markdown("**Output:**")
+                        st.text(output)
+                    if error:
+                        st.markdown("**Error:**")
+                        st.text(error)
             st.markdown("</div>", unsafe_allow_html=True)
 
 
