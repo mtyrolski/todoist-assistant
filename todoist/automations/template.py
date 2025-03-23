@@ -104,17 +104,17 @@ class Template(Automation):
             template_ = self.task_templates[template_name]
             
             # Calculate the due date for the root task
-            due_date = task.task_entry.due_datetime
-            logger.debug(f"Task due date: {due_date}")
-            root_task_due_date = due_date.strftime('%Y-%m-%d') if due_date else None
-            logger.debug(f"Root task due date: {root_task_due_date}")
+            due_datetime_parent = task.task_entry.due_datetime.date()
+            due_datetime_child = (due_datetime_parent + timedelta(days=template_.due_date_days_difference))
+
             labels_root = list(filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))  
             root_insertion_result: dict = db.insert_task_from_template(
                 task,
                 content=f'{template_.content}: {task.task_entry.content}', 
                 description=template_.description, 
                 priority=template_.priority, 
-                due_date=root_task_due_date,
+                # - due_datetime (str): Specific date and time in RFC3339 format in UTC.
+                due_datetime=due_datetime_child.strftime('%Y-%m-%dT%H:%M:%S'),
                 labels=labels_root
             )
             
@@ -139,7 +139,7 @@ class Template(Automation):
                 
             
             root_task = Task(id=root_insertion_result['id'], task_entry=TaskEntry(**root_task_entry))
-            insert_subtasks(root_task, root_insertion_result['id'], template_, due_date)
+            insert_subtasks(root_task, root_insertion_result['id'], template_, due_datetime_child)
             
             db.remove_task(task.id)
             logger.info(f"Initialized task {task.id} from template {template_name}")        
