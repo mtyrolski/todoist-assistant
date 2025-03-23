@@ -97,35 +97,30 @@ class _Task_API_V9:
 
     def __str__(self):
         return f'Task {self.content}'
-    
+
     @property
     def kwargs(self) -> dict[str, Any]:
         basic_kwargs = self.__dict__.copy()
         basic_kwargs['duration_unit'] = None if self.duration is None else self.duration.get('unit')
         basic_kwargs['duration'] = None if self.duration is None else self.duration.get('amount')
         return basic_kwargs
-        
+
     @property
     def duration_kwargs(self) -> dict[str, str | int] | None:
         if self.duration is None:
             return None
-        
-        if any(not isinstance(self.duration, dict),
-               'duration' not in self.duration,
-               'unit' not in self.duration):
+
+        if any(not isinstance(self.duration, dict), 'duration' not in self.duration, 'unit' not in self.duration):
             return None
 
-        return {
-            'duration': self.duration['duration'],
-            'unit': self.duration['unit']
-        }
-        
+        return {'duration': self.duration['duration'], 'unit': self.duration['unit']}
+
     @property
     def due_datetime(self) -> dt.datetime | None:
         if self.due is None:
             return None
         date_str = self.due['date'] if isinstance(self.due, dict) else self.due
-        
+
         try:
             return dt.datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S')
         except ValueError:
@@ -133,6 +128,7 @@ class _Task_API_V9:
                 return dt.datetime.strptime(date_str, '%Y-%m-%d')
             except ValueError:
                 return None
+
 
 ProjectEntry = _ProjectEntry_API_V9
 TaskEntry = _Task_API_V9
