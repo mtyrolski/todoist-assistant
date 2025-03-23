@@ -102,9 +102,16 @@ class _Task_API_V9:
     def due_datetime(self) -> dt.datetime | None:
         if self.due is None:
             return None
-        if isinstance(self.due, dict):
-            return dt.datetime.strptime(self.due['date'], '%Y-%m-%dT%H:%M:%S')
-        return dt.datetime.strptime(self.due, '%Y-%m-%dT%H:%M:%S')
+        logger.warning(f"{self.due}, {type(self.due)}")
+        date_str = self.due['date'] if isinstance(self.due, dict) else self.due
+        
+        try:
+            return dt.datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S')
+        except ValueError:
+            try:
+                return dt.datetime.strptime(date_str, '%Y-%m-%d')
+            except ValueError:
+                return None
 
 ProjectEntry = _ProjectEntry_API_V9
 TaskEntry = _Task_API_V9
