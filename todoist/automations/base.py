@@ -7,13 +7,17 @@ from todoist.utils import Cache
 
 
 class Automation(ABC):
-    def __init__(self, name: str, frequency: float):
+    def __init__(self, name: str, frequency: float, is_long: bool = False):
         """
         Initialize the automation with a name and frequency.
         Frequency is the number of minutes between each tick.
         """
         self.name = name
         self.frequency = frequency
+        self.is_long = is_long
+    
+    def __str__(self):
+        return f"Automation(name={self.name}, frequency={self.frequency}, is_long={self.is_long})"
 
     def tick(self, db: Database):
         launch_data = Cache().automation_launches.load()    # expects a dict: {automation_name: [launch_times]}
