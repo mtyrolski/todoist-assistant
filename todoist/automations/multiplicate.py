@@ -1,13 +1,18 @@
-# Multiply integration which look up over all active tasks, identify those with tag X2 X3 X5 or X10, then remove the tag and create new 2, 3, 5 or 10 tasks with the same content and other attributes. Only change is suffix of the task name identifying the multiplication factor.
-
+import re
 from typing import Iterable
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.types import Task
 from loguru import logger
 
-MUL_LABELS = ['X2', 'X3', 'X5', 'X10']
+def is_multiplication_label(tag: str) -> bool:
+    return bool(re.match(r"X\d+$", tag))
 
+def extract_multiplication_factor(tag: str) -> int:
+    match = re.match(r"X(\d+)$", tag)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"Invalid multiplication label: {tag}")
 
 class Multiply(Automation):
     def __init__(self):
@@ -21,19 +26,24 @@ class Multiply(Automation):
         logger.debug(f"Found {len(all_unique_labels)} unique labels: {all_unique_labels}")
 
         tasks_to_multiply = list(
-            filter(lambda task: any(tag in MUL_LABELS for tag in task.task_entry.labels), all_tasks))
+            filter(lambda task: any(is_multiplication_label(tag) for tag in task.task_entry.labels), all_tasks))
 
         logger.info(f"Found {len(tasks_to_multiply)} tasks to multiply")
         for task in tasks_to_multiply:
-            count_matched = len(list(filter(lambda tag: tag in MUL_LABELS, task.task_entry.labels)))
-            if count_matched != 1:
-                logger.error(f"Task {task.id} should have exactly one multiplication label")
+            matched_labels = list(filter(is_multiplication_label, task.task_entry.labels))
+            if len(matched_labels) != 1:
+                logger.error(f"Task {task.id} should have exactly one multiplication label, found: {matched_labels}")
                 continue
-            label = next(filter(lambda tag: tag in MUL_LABELS, task.task_entry.labels))
-            mul_factor = int(label[1:])
-            labels_of_new_task = list(filter(lambda tag: tag not in MUL_LABELS, task.task_entry.labels))
+            label = matched_labels[0]
+            try:
+                mul_factor = extract_multiplication_factor(label)
+            except ValueError as e:
+                logger.error(f"Error processing task {task.id}: {e}")
+                continue
+
+            labels_of_new_task = list(filter(lambda tag: not is_multiplication_label(tag), task.task_entry.labels))
             for i in range(1, mul_factor + 1):
-                logger.debug(f'Creating task {task.task_entry.content} x{i}')
+                logger.debug(f"Creating task {task.task_entry.content} x{i}")
                 db.insert_task_from_template(task, content=f"{task.task_entry.content} x{i}", labels=labels_of_new_task)
             logger.debug(f"Removing task {task.id}")
             if db.remove_task(task.id):
