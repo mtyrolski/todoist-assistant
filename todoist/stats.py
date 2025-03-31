@@ -44,26 +44,3 @@ def extract_task_due_date(due: str | None | dict[str, Any]) -> datetime | None:
     due_raw = due if isinstance(due, str) else due['date']
     return try_parse_date(due_raw)
 
-
-def overdue_tasks(project: Project, snapshot_time: datetime):
-    counter = 0
-    for task in project.tasks:
-        if task.task_entry.due is not None:
-            due_date = extract_task_due_date(task.task_entry.due)
-            if due_date < snapshot_time:
-                counter += 1
-    return counter
-
-
-def get_functions_for_time(snapshot_time: datetime):
-    statistics_funs = {
-    # 'all_tasks': all_tasks,
-        'p1_tasks': p1_tasks,
-        'p2_tasks': p2_tasks,
-        'p3_tasks': p3_tasks,
-        'p4_tasks': p4_tasks,
-        'any_labels': any_labels,
-        'overdue_tasks': partial(overdue_tasks, snapshot_time=snapshot_time)
-    }
-
-    return statistics_funs
