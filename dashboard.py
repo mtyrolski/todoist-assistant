@@ -17,6 +17,7 @@ from joblib import load
 from loguru import logger
 from omegaconf import OmegaConf
 from todoist.utils import Cache, load_config
+from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.database.base import Database
 from todoist.types import (SUPPORTED_EVENT_TYPES, Event, Project, events_to_dataframe)
 from todoist.plots import (current_tasks_types, plot_event_distribution_by_type, plot_events_over_time,
@@ -28,7 +29,7 @@ import hydra
 from todoist.automations.base import Automation
 import io
 import contextlib
-
+from functools import partial
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
@@ -73,7 +74,6 @@ def get_adjusting_mapping() -> dict[str, str]:
         final_mapping.update(link_adjustements)
 
     return final_mapping
-
 
 @st.cache_data
 def load_activity_data(_dbio: Database) -> pd.DataFrame:
@@ -161,7 +161,79 @@ def sidebar_granularity() -> str:
                                     "3ME": "Three Months"
                                 }[x])
 
+def extract_metrics(df_activity: pd.DataFrame,
+                    granularity: str) -> list[tuple[str, str, str]]:
+    # Define time span based on granularity
+    granularity_to_timedelta = {
+        "W": timedelta(weeks=1),
+        "ME": timedelta(weeks=4),
+        "3ME": timedelta(weeks=12)
+    }
+    if granularity not in granularity_to_timedelta:
+        raise ValueError(f"Unsupported granularity: {granularity}")
 
+    timespan = granularity_to_timedelta[granularity]
+    # Set current range as the last 'timespan' period in the data
+    end_range = df_activity.index.max().to_pydatetime()
+    beg_range = end_range - timespan
+
+    # Previous period is the same length immediately preceding beg_range
+    previous_beg_range = beg_range - timespan
+    previous_end_range = end_range - timespan
+
+    metrics: list[tuple[str, str, str]] = []
+
+    def _get_total_events(df_, beg_, end_):
+        filtered_df = df_[(df_.index >= beg_) & (df_.index <= end_)]
+        return len(filtered_df)
+
+    def _get_total_tasks_by_type(df_, beg_, end_, task_type):
+        filtered_df = df_[(df_.index >= beg_) & (df_.index <= end_)]
+        return len(filtered_df[filtered_df['type'] == task_type])
+
+    _get_total_completed_tasks = partial(_get_total_tasks_by_type, task_type='completed')
+    _get_total_added_tasks = partial(_get_total_tasks_by_type, task_type='added')
+    _get_total_edited_tasks = partial(_get_total_tasks_by_type, task_type='updated')
+    for metric_name, metric_func, inverse in [
+        ("Events", _get_total_events, False),
+        ("Completed Tasks", _get_total_completed_tasks, False),
+        ("Added Tasks", _get_total_added_tasks, False),
+        ("Edited Tasks", _get_total_edited_tasks, True)
+    ]:
+        logger.debug(f"Calculating metric '{metric_name}'")
+        current_value = metric_func(df_activity, beg_range, end_range)
+        previous_value = metric_func(df_activity, previous_beg_range, previous_end_range)
+        logger.debug(f"Current value: {current_value}, Previous value: {previous_value}")
+        # Avoid division by zero when previous_value is 0
+        if previous_value:
+            delta_percent = round((current_value - previous_value) / previous_value * 100, 2)
+        else:
+            delta_percent = float('inf')
+        metrics.append((metric_name, str(current_value), f"{delta_percent}%", inverse))
+
+    return metrics
+
+def get_badges(active_projects: list[Project]) -> str:
+    """
+    Returns a string with the badges of the active projects.
+    
+    Example of four badges: 
+    ":violet-badge[:material/star: 10] :orange-badge[⚠️ 5] :blue-badge[🔵 8] :gray-badge[🔧 2]"
+    
+    This function returns the following badges:
+    P1, P2, P3, P4
+    """
+    p1_task_count = sum(map(p1_tasks, active_projects))
+    p2_task_count = sum(map(p2_tasks, active_projects))
+    p3_task_count = sum(map(p3_tasks, active_projects))
+    p4_task_count = sum(map(p4_tasks, active_projects))
+    
+    badge = (f":red-badge[P1 tasks {p1_task_count}🔥] "
+             f":orange-badge[P2 tasks {p2_task_count} ⚠️] "
+             f":blue-badge[P3 tasks {p3_task_count} 🔵] "
+             f":gray-badge[P4 tasks {p4_task_count} 🔧]")
+    return badge
+    
 def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], beg_range, end_range,
                      granularity: str) -> None:
     """
@@ -175,6 +247,16 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
     with col2:
         st.header("Most Popular Labels")
         st.plotly_chart(plot_most_popular_labels(active_projects))
+    # Metrics
+    metrics: list[tuple[str, str, str, bool]] = extract_metrics(df_activity, granularity)
+    cols = st.columns(len(metrics))
+    for i, (metric_name, metric_value, metric_delta, do_inverse) in enumerate(metrics):
+        with cols[i]:
+            st.metric(label=metric_name, value=metric_value, delta=metric_delta, delta_color="inverse" if do_inverse else "normal", border=True)
+    
+    # Badges
+    badges: str = get_badges(active_projects)
+    st.markdown(badges)
 
     st.header("Periodically Completed Tasks Per Project")
     st.plotly_chart(plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity))
