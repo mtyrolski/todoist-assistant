@@ -5,6 +5,7 @@ from omegaconf import DictConfig
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 
+
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
     # Setup logging to a file with rotation

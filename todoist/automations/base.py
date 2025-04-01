@@ -15,7 +15,7 @@ class Automation(ABC):
         self.name = name
         self.frequency = frequency
         self.is_long = is_long
-    
+
     def __str__(self):
         return f"Automation(name={self.name}, frequency={self.frequency}, is_long={self.is_long})"
 

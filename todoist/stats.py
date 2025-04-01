@@ -43,4 +43,3 @@ def extract_task_due_date(due: str | None | dict[str, Any]) -> datetime | None:
 
     due_raw = due if isinstance(due, str) else due['date']
     return try_parse_date(due_raw)
-
