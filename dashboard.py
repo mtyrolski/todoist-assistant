@@ -304,69 +304,74 @@ def render_control_panel_page(dbio: Database) -> None:
     automations: list[Automation] = hydra.utils.instantiate(config.automations)
 
     st.title("Automation Control Panel")
-    st.write("Below is the list of automations:")
+    st.write("Manage and execute your automations below:")
 
-    # Add some custom CSS for a nicer box look.
+    # Add some custom CSS for a better appearance
     st.markdown("""
         <style>
         .automation-box {
-            position: relative;
-            z-index: 1;
-            border: 2px solid #4CAF50;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
         .automation-title {
-            color: #333333;
+            font-weight: bold;
+            color: #333;
+        }
+        .automation-details {
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        .automation-output {
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
         }
         </style>
         """,
-                unsafe_allow_html=True)
+        unsafe_allow_html=True)
 
     for automation in automations:
-        with st.container():
-            st.markdown('<div class="automation-box">', unsafe_allow_html=True)
-            cols = st.columns([3, 1, 2])
-            with cols[0]:
-                st.markdown(f"<h3 class='automation-title'>{automation.name}</h3>", unsafe_allow_html=True)
-            with cols[1]:
-                run_pressed = st.button("▶️ Run", key=automation.name)
-            with cols[2]:
-                cache = Cache()
-                launches = cache.automation_launches.load()
-                if automation.name in launches:
-                    launch_count = len(launches[automation.name])
-                    last_launch = launches[automation.name][-1].strftime("%Y-%m-%d %H:%M:%S")
-                else:
-                    launch_count = 0
-                    last_launch = "Never"
-                st.markdown(f"<b>Launches:</b> {launch_count}<br><b>Last launch:</b> {last_launch}",
-                            unsafe_allow_html=True)
+        cache = Cache()
+        launches = cache.automation_launches.load()
+        if automation.name in launches:
+            launch_count = len(launches[automation.name])
+            last_launch = launches[automation.name][-1].strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            launch_count = 0
+            last_launch = "Never"
+        st.markdown(f"<div class='automation-details'><b>Last launch:</b> {last_launch}</div>", unsafe_allow_html=True)
+
+        with st.expander(f"{automation.name}"):
+            st.markdown(f"<span class='automation-title'>{automation.name}</span>", unsafe_allow_html=True)
+            run_pressed = st.button("▶️ Run", key=automation.name)
+            
+            st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>",
+                        unsafe_allow_html=True)
 
             if run_pressed:
                 with st.spinner("Executing automation..."):
                     stdout_capture = io.StringIO()
                     stderr_capture = io.StringIO()
-                    with contextlib.redirect_stderr(stdout_capture), contextlib.redirect_stderr(stderr_capture):
+                    with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
                         automation.tick(dbio)
                     output = stdout_capture.getvalue()
                     error = stderr_capture.getvalue()
                     dbio.reset()
                 st.success("Automation executed successfully!")
 
-                # Display the captured output and error merged in a single row
+                # Display the captured output and error
                 if output or error:
-                    st.markdown("---")
                     if output:
                         st.markdown("**Output:**")
                         st.text(output)
                     if error:
                         st.markdown("**Error:**")
                         st.text(error)
-            st.markdown("</div>", unsafe_allow_html=True)
-
 
 def main() -> None:
     """

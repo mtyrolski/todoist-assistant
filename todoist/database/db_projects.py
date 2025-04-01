@@ -21,6 +21,7 @@ class DatabaseProjects:
     def reset(self):
         self.archived_projects_cache = None
         self.projects_cache = None
+        self.pull()
 
     def fetch_archived_projects(self) -> list[Project]:
         if self.archived_projects_cache is not None:
