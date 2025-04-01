@@ -30,6 +30,7 @@ from todoist.automations.base import Automation
 import io
 import contextlib
 from functools import partial
+
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
@@ -74,6 +75,7 @@ def get_adjusting_mapping() -> dict[str, str]:
         final_mapping.update(link_adjustements)
 
     return final_mapping
+
 
 @st.cache_data
 def load_activity_data(_dbio: Database) -> pd.DataFrame:
@@ -161,14 +163,10 @@ def sidebar_granularity() -> str:
                                     "3ME": "Three Months"
                                 }[x])
 
-def extract_metrics(df_activity: pd.DataFrame,
-                    granularity: str) -> list[tuple[str, str, str]]:
+
+def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> list[tuple[str, str, str]]:
     # Define time span based on granularity
-    granularity_to_timedelta = {
-        "W": timedelta(weeks=1),
-        "ME": timedelta(weeks=4),
-        "3ME": timedelta(weeks=12)
-    }
+    granularity_to_timedelta = {"W": timedelta(weeks=1), "ME": timedelta(weeks=4), "3ME": timedelta(weeks=12)}
     if granularity not in granularity_to_timedelta:
         raise ValueError(f"Unsupported granularity: {granularity}")
 
@@ -194,12 +192,10 @@ def extract_metrics(df_activity: pd.DataFrame,
     _get_total_completed_tasks = partial(_get_total_tasks_by_type, task_type='completed')
     _get_total_added_tasks = partial(_get_total_tasks_by_type, task_type='added')
     _get_total_edited_tasks = partial(_get_total_tasks_by_type, task_type='updated')
-    for metric_name, metric_func, inverse in [
-        ("Events", _get_total_events, False),
-        ("Completed Tasks", _get_total_completed_tasks, False),
-        ("Added Tasks", _get_total_added_tasks, False),
-        ("Edited Tasks", _get_total_edited_tasks, True)
-    ]:
+    for metric_name, metric_func, inverse in [("Events", _get_total_events, False),
+                                              ("Completed Tasks", _get_total_completed_tasks, False),
+                                              ("Added Tasks", _get_total_added_tasks, False),
+                                              ("Edited Tasks", _get_total_edited_tasks, True)]:
         logger.debug(f"Calculating metric '{metric_name}'")
         current_value = metric_func(df_activity, beg_range, end_range)
         previous_value = metric_func(df_activity, previous_beg_range, previous_end_range)
@@ -212,6 +208,7 @@ def extract_metrics(df_activity: pd.DataFrame,
         metrics.append((metric_name, str(current_value), f"{delta_percent}%", inverse))
 
     return metrics
+
 
 def get_badges(active_projects: list[Project]) -> str:
     """
@@ -227,13 +224,14 @@ def get_badges(active_projects: list[Project]) -> str:
     p2_task_count = sum(map(p2_tasks, active_projects))
     p3_task_count = sum(map(p3_tasks, active_projects))
     p4_task_count = sum(map(p4_tasks, active_projects))
-    
+
     badge = (f":red-badge[P1 tasks {p1_task_count}🔥] "
              f":orange-badge[P2 tasks {p2_task_count} ⚠️] "
              f":blue-badge[P3 tasks {p3_task_count} 🔵] "
              f":gray-badge[P4 tasks {p4_task_count} 🔧]")
     return badge
-    
+
+
 def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], beg_range, end_range,
                      granularity: str) -> None:
     """
@@ -252,8 +250,12 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
     cols = st.columns(len(metrics))
     for i, (metric_name, metric_value, metric_delta, do_inverse) in enumerate(metrics):
         with cols[i]:
-            st.metric(label=metric_name, value=metric_value, delta=metric_delta, delta_color="inverse" if do_inverse else "normal", border=True)
-    
+            st.metric(label=metric_name,
+                      value=metric_value,
+                      delta=metric_delta,
+                      delta_color="inverse" if do_inverse else "normal",
+                      border=True)
+
     # Badges
     badges: str = get_badges(active_projects)
     st.markdown(badges)
@@ -333,7 +335,7 @@ def render_control_panel_page(dbio: Database) -> None:
         }
         </style>
         """,
-        unsafe_allow_html=True)
+                unsafe_allow_html=True)
 
     for automation in automations:
         cache = Cache()
@@ -349,7 +351,7 @@ def render_control_panel_page(dbio: Database) -> None:
         with st.expander(f"{automation.name}"):
             st.markdown(f"<span class='automation-title'>{automation.name}</span>", unsafe_allow_html=True)
             run_pressed = st.button("▶️ Run", key=automation.name)
-            
+
             st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>",
                         unsafe_allow_html=True)
 
@@ -372,6 +374,7 @@ def render_control_panel_page(dbio: Database) -> None:
                     if error:
                         st.markdown("**Error:**")
                         st.text(error)
+
 
 def main() -> None:
     """

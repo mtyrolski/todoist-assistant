@@ -5,14 +5,17 @@ from todoist.database.base import Database
 from todoist.types import Task
 from loguru import logger
 
+
 def is_multiplication_label(tag: str) -> bool:
     return bool(re.match(r"X\d+$", tag))
+
 
 def extract_multiplication_factor(tag: str) -> int:
     match = re.match(r"X(\d+)$", tag)
     if match:
         return int(match.group(1))
     raise ValueError(f"Invalid multiplication label: {tag}")
+
 
 class Multiply(Automation):
     def __init__(self):

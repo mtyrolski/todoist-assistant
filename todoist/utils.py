@@ -2,7 +2,7 @@ from os import getenv
 from os.path import join
 from os.path import exists
 from pickle import HIGHEST_PROTOCOL
-from typing import Callable, TypeVar, TypedDict
+from typing import Callable, TypeVar
 from joblib import load, dump
 from loguru import logger
 
@@ -33,7 +33,6 @@ class Cache:
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
-
 
 
 def last_n_years_in_weeks(n_years: int) -> int:
