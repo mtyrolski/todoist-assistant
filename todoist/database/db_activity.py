@@ -8,6 +8,7 @@ from tqdm import tqdm
 from todoist.stats import extract_task_due_date
 from todoist.types import Event, _Event_API_V9
 from todoist.utils import get_api_key, try_n_times
+from joblib import Parallel, delayed
 
 
 class DatabaseActivity:
@@ -25,14 +26,23 @@ class DatabaseActivity:
         type of event (ex. completed, updated, uncompleted, added, ...)
         """
         result: list[Event] = []
-        for page in tqdm(range(0, self.max_pages + 1), desc='Querying activity data', unit='page',
-                         total=self.max_pages):
+        def process_page(page: int) -> list[Event]:
             events: list[_Event_API_V9] = self._fetch_activity_page(page)
+            page_events: list[Event] = []
             for event in events:
                 # TODO: Implement a factory method to create the correct Event subclass
                 event_date = extract_task_due_date(event.event_date)
                 assert event_date is not None
-                result.append(Event(event_entry=event, id=event.id, date=event_date))
+                page_events.append(Event(event_entry=event, id=event.id, date=event_date))
+            return page_events
+
+        pages = range(0, self.max_pages + 1)
+        all_events = Parallel(n_jobs=-1)(
+            delayed(process_page)(page)
+            for page in tqdm(pages, desc='Querying activity data', unit='page', total=self.max_pages)
+        )
+        for events in all_events:
+            result.extend(events)
         return result
 
     def _fetch_activity_page(self, page: int) -> list[_Event_API_V9]:
