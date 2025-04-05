@@ -80,17 +80,22 @@ class DatabaseProjects:
                 map(lambda project: Project(id=project.id, project_entry=project, tasks=[], is_archived=False),
                     projects))
 
-        for project in tqdm(projects,
-                            desc='Querying project data',
-                            unit='project',
-                            total=len(projects),
-                            position=0,
-                            leave=True):
-
+        def process_project(project: ProjectEntry) -> Project:
             task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
             tasks: list[Task] = list(map(lambda task: Task(id=task.id, task_entry=task), task_entries))
+            return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
 
-            result.append(Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False))
+        result = Parallel(n_jobs=-1)(
+            delayed(process_project)(project)
+            for project in tqdm(
+            projects,
+            desc='Querying project data',
+            unit='project',
+            total=len(projects),
+            position=0,
+            leave=True
+            )
+        )
 
         self.projects_cache = result
         return self.projects_cache

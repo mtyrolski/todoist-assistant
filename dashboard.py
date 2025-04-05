@@ -195,11 +195,9 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> list[tuple[s
     for metric_name, metric_func, inverse in [("Events", _get_total_events, False),
                                               ("Completed Tasks", _get_total_completed_tasks, False),
                                               ("Added Tasks", _get_total_added_tasks, False),
-                                              ("Edited Tasks", _get_total_edited_tasks, True)]:
-        logger.debug(f"Calculating metric '{metric_name}'")
+                                              ("Edited Tasks", _get_total_edited_tasks, False)]:
         current_value = metric_func(df_activity, beg_range, end_range)
         previous_value = metric_func(df_activity, previous_beg_range, previous_end_range)
-        logger.debug(f"Current value: {current_value}, Previous value: {previous_value}")
         # Avoid division by zero when previous_value is 0
         if previous_value:
             delta_percent = round((current_value - previous_value) / previous_value * 100, 2)
