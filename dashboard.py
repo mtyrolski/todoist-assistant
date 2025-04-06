@@ -191,11 +191,11 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> list[tuple[s
 
     _get_total_completed_tasks = partial(_get_total_tasks_by_type, task_type='completed')
     _get_total_added_tasks = partial(_get_total_tasks_by_type, task_type='added')
-    _get_total_edited_tasks = partial(_get_total_tasks_by_type, task_type='updated')
+    _get_total_rescheduled_tasks = partial(_get_total_tasks_by_type, task_type='rescheduled')
     for metric_name, metric_func, inverse in [("Events", _get_total_events, False),
                                               ("Completed Tasks", _get_total_completed_tasks, False),
                                               ("Added Tasks", _get_total_added_tasks, False),
-                                              ("Edited Tasks", _get_total_edited_tasks, False)]:
+                                              ("Rescheduled Tasks", _get_total_rescheduled_tasks, True)]:
         current_value = metric_func(df_activity, beg_range, end_range)
         previous_value = metric_func(df_activity, previous_beg_range, previous_end_range)
         # Avoid division by zero when previous_value is 0
