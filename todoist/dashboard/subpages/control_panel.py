@@ -9,6 +9,8 @@ from todoist.automations.base import Automation
 import io
 import contextlib
 import datetime
+import time
+import threading
 
 def render_control_panel_page(dbio: Database) -> None:
     config: OmegaConf = load_config('automations', '../configs')
@@ -77,29 +79,36 @@ def render_control_panel_page(dbio: Database) -> None:
 
             if run_pressed or (run_all_pressed and expanded):
                 with st.spinner(f"Executing {automation.name}..."):
-                    output_placeholder = st.empty()  # Create a placeholder for streaming output
-
-                    # Capture all outputs (stdout, stderr, and loguru logs)
+                    output_placeholder = st.empty()  # placeholder for output
                     output_stream = io.StringIO()
                     loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
-
-                    try:
+                    
+                    # Define a function to run the automation in a separate thread
+                    def run_automation():
                         with contextlib.redirect_stdout(output_stream), contextlib.redirect_stderr(output_stream):
-                            automation.tick(dbio)  # Execute the automation
-
-                            # Continuously update the placeholder with the captured output
-                            while True:
-                                output = output_stream.getvalue()
-                                if output:
-                                    output_placeholder.text(output)
-                                    output_stream.truncate(0)
-                                    output_stream.seek(0)
-                                else:
-                                    break
-                    finally:
-                        # Remove the loguru handler to avoid duplicate logs
-                        logger.remove(loguru_handler_id)
-
+                            automation.tick(dbio)  # Run the blocking automation
+                        # Ensure final output is captured before thread ends
+                        time.sleep(0.1)
+                    
+                    # Start the automation in a background thread
+                    thread = threading.Thread(target=run_automation)
+                    thread.start()
+                    
+                    # Continuously update the placeholder with streamed output while the thread is active
+                    while thread.is_alive():
+                        output = output_stream.getvalue()
+                        if output:
+                            output_placeholder.text(output)
+                            output_stream.truncate(0)
+                            output_stream.seek(0)
+                        time.sleep(0.1)
+                    thread.join()
+                    
+                    # Final update
+                    final_output = output_stream.getvalue()
+                    if final_output:
+                        output_placeholder.text(final_output)
+                    logger.remove(loguru_handler_id)
                     dbio.reset()
 
                 st.success(f"{automation.name} executed successfully!")
