@@ -172,6 +172,17 @@ class DatabaseProjects:
         })
         
         return mapping
+    
+    def fetch_mapping_project_name_to_color(self) -> dict[str, str]:
+        """
+        Fetches a mapping of project names to their associated colors.
+        """
+        id_to_color = self.fetch_mapping_project_id_to_color()
+        id_to_name = self.fetch_mapping_project_id_to_name()
+        name_to_color = {
+            id_to_name[project_id]: color for project_id, color in id_to_color.items()
+        }
+        return name_to_color
 
     def _get_root_project(self, project_id: int):
         # project = self.fetch_project_by_id(project_id)
