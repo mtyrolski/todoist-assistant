@@ -5,6 +5,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from todoist.types import Project
+from todoist.database.db_projects import DatabaseProjects
+from todoist.database.db_labels import DatabaseLabels
 
 
 def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
@@ -68,11 +70,17 @@ def plot_most_popular_labels(projects: list[Project]) -> go.Figure:
     N: Final[int] = 10    # constant for now
     top_n_labels = dict(sorted(labels_counter.items(), key=lambda item: item[1], reverse=True)[:N])
 
-    fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
+    db_labels = DatabaseLabels()
+    label_colors = db_labels.fetch_label_colors()
+
+    fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), 
+                                 values=list(top_n_labels.values()), 
+                                 hole=.3)])
     fig.update_traces(hoverinfo='label+percent',
                       textinfo='value',
                       textfont_size=20,
-                      marker=dict(line=dict(color='#000000', width=2)))
+                      marker=dict(colors=[label_colors.get(label, '#808080') for label in top_n_labels.keys()],
+                                  line=dict(color='#000000', width=2)))
     fig.update_layout(title_text='Most Popular Labels')
     return fig
 
@@ -133,7 +141,13 @@ def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: 
     """
     df_filtered = df.loc[beg_date:end_date]
     project_counts = df_filtered['root_project_name'].value_counts().head(10)
-    fig = go.Figure(data=[go.Bar(x=project_counts.index, y=project_counts.values)])
+
+    db_projects = DatabaseProjects()
+    project_colors = db_projects.fetch_mapping_project_name_to_color()
+
+    fig = go.Figure(data=[go.Bar(x=project_counts.index, 
+                                 y=project_counts.values, 
+                                 marker_color=[project_colors.get(project, '#808080') for project in project_counts.index])])
     fig.update_layout(title_text='Top Projects by Number of Events',
                       xaxis_title='Projects',
                       yaxis_title='Number of Events')
@@ -157,8 +171,15 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
     df_filtered = df.loc[beg_date:end_date]
     event_counts = df_filtered.groupby('root_project_name')['type'].value_counts().unstack().fillna(0)
     fig = go.Figure()
+
+    db_projects = DatabaseProjects()
+    project_colors = db_projects.fetch_mapping_project_name_to_color()
+
     for col in event_counts.columns:
-        fig.add_trace(go.Bar(name=col, x=event_counts.index, y=event_counts[col]))
+        fig.add_trace(go.Bar(name=col, 
+                             x=event_counts.index, 
+                             y=event_counts[col],
+                             marker_color=[project_colors.get(project, '#808080') for project in event_counts.index]))
     fig.update_layout(barmode='stack',
                       title_text='Event Distribution by Root Project',
                       xaxis_title='Root Projects',
@@ -258,13 +279,16 @@ def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: date
     completed_tasks = completed_tasks[completed_tasks['date'] <= end_date]
     fig = go.Figure()
 
+    db_projects = DatabaseProjects()
+    project_colors = db_projects.fetch_mapping_project_name_to_color()
+
     for root_project_name in completed_tasks['root_project_name'].unique():
         data = completed_tasks[completed_tasks['root_project_name'] == root_project_name]
         fig.add_trace(
             go.Scatter(
                 x=data['date'],
                 y=data['completed'],
-                line=dict(width=3),
+                line=dict(width=3, color=project_colors.get(root_project_name, '#808080')),
                 name=root_project_name,
                 line_shape='spline',
             ))
@@ -303,6 +327,9 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
 
     fig = go.Figure()
 
+    db_projects = DatabaseProjects()
+    project_colors = db_projects.fetch_mapping_project_name_to_color()
+
     for root_project_name in df_weekly_per_project.columns:
         fig.add_trace(
             go.Scatter(
@@ -311,6 +338,7 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
                 name=root_project_name,
                 line_shape='spline',
                 mode='lines+markers',
+                line=dict(color=project_colors.get(root_project_name, '#808080')),
             ))
 
     # Update x-axis
@@ -367,6 +395,9 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
 
     fig = go.Figure()
 
+    db_projects = DatabaseProjects()
+    project_colors = db_projects.fetch_mapping_project_name_to_color()
+
     for root_project_name in df_weekly_per_project.columns:
         fig.add_trace(
             go.Scatter(
@@ -375,6 +406,7 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
                 name=root_project_name,
                 line_shape='spline',
                 mode='lines+markers',
+                line=dict(color=project_colors.get(root_project_name, '#808080')),
             ))
 
     # Update x-axis
