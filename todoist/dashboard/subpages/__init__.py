@@ -1,4 +1,4 @@
-from todoist.dashboard.pages import home, projects, tasks, control_panel
+from todoist.dashboard.subpages import home, projects, tasks, control_panel
 
 render_home_page = home.render_home_page
 render_project_insights_page = projects.render_project_insights_page
