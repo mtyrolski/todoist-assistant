@@ -2,12 +2,12 @@
 import streamlit as st
 from omegaconf import OmegaConf
 from todoist.utils import Cache, load_config
+from loguru import logger
 from todoist.database.base import Database
 import hydra
 from todoist.automations.base import Automation
 import io
 import contextlib
-
 
 
 def render_control_panel_page(dbio: Database) -> None:
@@ -66,21 +66,29 @@ def render_control_panel_page(dbio: Database) -> None:
 
             if run_pressed:
                 with st.spinner("Executing automation..."):
-                    stdout_capture = io.StringIO()
-                    stderr_capture = io.StringIO()
-                    with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
-                        automation.tick(dbio)
-                    output = stdout_capture.getvalue()
-                    error = stderr_capture.getvalue()
+                    output_placeholder = st.empty()  # Create a placeholder for streaming output
+
+                    # Capture all outputs (stdout, stderr, and loguru logs)
+                    output_stream = io.StringIO()
+                    loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
+
+                    try:
+                        with contextlib.redirect_stdout(output_stream), contextlib.redirect_stderr(output_stream):
+                            automation.tick(dbio)  # Execute the automation
+
+                            # Continuously update the placeholder with the captured output
+                            while True:
+                                output = output_stream.getvalue()
+                                if output:
+                                    output_placeholder.text(output)
+                                    output_stream.truncate(0)
+                                    output_stream.seek(0)
+                                else:
+                                    break
+                    finally:
+                        # Remove the loguru handler to avoid duplicate logs
+                        logger.remove(loguru_handler_id)
+
                     dbio.reset()
+
                 st.success("Automation executed successfully!")
-
-                # Display the captured output and error
-                if output or error:
-                    if output:
-                        st.markdown("**Output:**")
-                        st.text(output)
-                    if error:
-                        st.markdown("**Error:**")
-                        st.text(error)
-
