@@ -29,6 +29,7 @@ class _ProjectEntry_API_V9:
     inbox_project: bool = False
     description: str = ''
     default_order: int | None = None
+    public_access: bool = False
 
     def __repr__(self):
         return f'Project {self.name}'
