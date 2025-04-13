@@ -9,7 +9,7 @@ import streamlit as st
 
 from todoist.dashboard.utils import load_activity_data, sidebar_date_range, sidebar_granularity, get_database
 from todoist.types import Project
-from todoist.dashboard.pages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
+from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
 
 def main() -> None:
     """
