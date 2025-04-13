@@ -46,12 +46,14 @@ def render_control_panel_page(dbio: Database) -> None:
         """,
                 unsafe_allow_html=True)
 
+    # Add a "RUN ALL" button
+    run_all_pressed = st.button("▶️ RUN ALL Automations")
+
     for automation in automations:
         cache = Cache()
         launches = cache.automation_launches.load()
         if automation.name in launches:
             launch_count = len(launches[automation.name])
-            detailed_last_launch = launches[automation.name][-1].strftime("%Y-%m-%d %H:%M:%S")
             last_launch_time = launches[automation.name][-1]
             delta = datetime.datetime.now() - last_launch_time
             days = delta.days
@@ -59,20 +61,22 @@ def render_control_panel_page(dbio: Database) -> None:
             header_last_launch = f"{days}d {hours}h"
         else:
             launch_count = 0
-            detailed_last_launch = "Never"
             header_last_launch = "Never launched"
 
         header_last_launch = f'launched {header_last_launch} ago' if launch_count > 0 else 'Never launched'
 
-        with st.expander(f"{automation.name} ({header_last_launch})", expanded=False):
+        # Expand the box if "RUN ALL" is pressed
+        expanded = run_all_pressed
+
+        with st.expander(f"{automation.name} ({header_last_launch})", expanded=expanded):
             st.markdown(f"<span class='automation-title'>{automation.name}</span>", unsafe_allow_html=True)
-            st.markdown(f"<div class='automation-details'><b>Last launch:</b> {detailed_last_launch}</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>", unsafe_allow_html=True)
 
+            # Add a "Run" button for individual automation
             run_pressed = st.button("▶️ Run", key=automation.name)
 
-            if run_pressed:
-                with st.spinner("Executing automation..."):
+            if run_pressed or (run_all_pressed and expanded):
+                with st.spinner(f"Executing {automation.name}..."):
                     output_placeholder = st.empty()  # Create a placeholder for streaming output
 
                     # Capture all outputs (stdout, stderr, and loguru logs)
@@ -98,4 +102,7 @@ def render_control_panel_page(dbio: Database) -> None:
 
                     dbio.reset()
 
-                st.success("Automation executed successfully!")
+                st.success(f"{automation.name} executed successfully!")
+
+    if run_all_pressed:
+        st.success("All automations executed successfully!")
