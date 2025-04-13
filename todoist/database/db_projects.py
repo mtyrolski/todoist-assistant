@@ -5,7 +5,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import get_api_key, try_n_times
+from todoist.utils import COLOR_NAME_TO_TODOIST_CODE, get_api_key, try_n_times
 from joblib import Parallel, delayed
 
 
@@ -152,6 +152,26 @@ class DatabaseProjects:
             mapping_project_id_to_root[project.id] = root
 
         return mapping_project_id_to_root
+
+    def fetch_mapping_project_id_to_color(self) -> dict[str, str]:
+        """
+        Fetches a mapping of project IDs to their associated colors.
+        """
+        mapping: dict[str, str] = {
+            project.id: project.project_entry.color for project in self.fetch_projects(include_tasks=False)
+        }
+
+        mapping.update({project.id: project.project_entry.color for project in self.fetch_archived_projects()})
+        mapping.update({
+            project.id: COLOR_NAME_TO_TODOIST_CODE[project.project_entry.color]
+            for project in self.fetch_projects(include_tasks=False)
+        })
+        mapping.update({
+            project.id: COLOR_NAME_TO_TODOIST_CODE[project.project_entry.color]
+            for project in self.fetch_archived_projects()
+        })
+        
+        return mapping
 
     def _get_root_project(self, project_id: int):
         # project = self.fetch_project_by_id(project_id)
