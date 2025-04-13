@@ -8,7 +8,7 @@ import hydra
 from todoist.automations.base import Automation
 import io
 import contextlib
-
+import datetime
 
 def render_control_panel_page(dbio: Database) -> None:
     config: OmegaConf = load_config('automations', '../configs')
@@ -51,18 +51,25 @@ def render_control_panel_page(dbio: Database) -> None:
         launches = cache.automation_launches.load()
         if automation.name in launches:
             launch_count = len(launches[automation.name])
-            last_launch = launches[automation.name][-1].strftime("%Y-%m-%d %H:%M:%S")
+            detailed_last_launch = launches[automation.name][-1].strftime("%Y-%m-%d %H:%M:%S")
+            last_launch_time = launches[automation.name][-1]
+            delta = datetime.datetime.now() - last_launch_time
+            days = delta.days
+            hours = delta.seconds // 3600
+            header_last_launch = f"{days}d {hours}h"
         else:
             launch_count = 0
-            last_launch = "Never"
-        st.markdown(f"<div class='automation-details'><b>Last launch:</b> {last_launch}</div>", unsafe_allow_html=True)
+            detailed_last_launch = "Never"
+            header_last_launch = "Never launched"
 
-        with st.expander(f"{automation.name}"):
+        header_last_launch = f'launched {header_last_launch} ago' if launch_count > 0 else 'Never launched'
+
+        with st.expander(f"{automation.name} ({header_last_launch})", expanded=False):
             st.markdown(f"<span class='automation-title'>{automation.name}</span>", unsafe_allow_html=True)
-            run_pressed = st.button("▶️ Run", key=automation.name)
+            st.markdown(f"<div class='automation-details'><b>Last launch:</b> {detailed_last_launch}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>", unsafe_allow_html=True)
 
-            st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>",
-                        unsafe_allow_html=True)
+            run_pressed = st.button("▶️ Run", key=automation.name)
 
             if run_pressed:
                 with st.spinner("Executing automation..."):
