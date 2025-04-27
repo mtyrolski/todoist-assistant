@@ -104,24 +104,11 @@ flowchart TD
 
 ## Makefile Usage (recommended)
 
-The following `Makefile` commands are available for managing the local environment and running the dashboard:
+The following [Makefile](Makefile) commands are available for managing the local environment and running the dashboard:
 
-```makefile
-.PHONY: init_local_env run_dashboard
-
-init_local_env: # syncs history, fetches activity
-	poetry run python3 -m todoist.automations.init_env --config-dir configs --config-name automations
-
-run_dashboard:
-	PYTHONPATH=. poetry run streamlit run todoist/dashboard/app.py
-
-clear_local_env:
-	rm -f activity.joblib
-```
-
-- **`init_local_env`:** Initializes the local environment by syncing history and fetching activity.
-- **`run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
-- **`clear_local_env`:** Clears local environment data by removing the activity cache.
+- **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity.
+- **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
+- **`make clear_local_env`:** Clears local environment data by removing the activity cache.
 
 
 ## Manual Usage

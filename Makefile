@@ -1,4 +1,4 @@
-.PHONY: init_local_env run_dashboard
+.PHONY: init_local_env run_dashboard clear_local_env
 
 init_local_env: # syncs history, fetches activity
 	poetry run python3 -m todoist.automations.init_env --config-dir configs --config-name automations
