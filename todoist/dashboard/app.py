@@ -21,7 +21,9 @@ def main() -> None:
     with st.spinner('Loading data...'):
         df_activity = load_activity_data(dbio)
         active_projects: list[Project] = dbio.fetch_projects()
-
+    if len(df_activity) == 0:
+        st.error("No activity data available. Run `make init_local_env` first and ensure that your keys refer to account with non-zero tasks count.")
+        st.stop()
     beg_range, end_range = sidebar_date_range(df_activity)
     granularity = sidebar_granularity()
 

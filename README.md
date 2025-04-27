@@ -2,10 +2,89 @@
 
 Todoist Assistant is a Python-based tool designed to interact with the Todoist API. It fetches project and task data, generating insightful reports and statistics to help you track productivity trends.
 
-
 ## Library Design Overview
 
-Todoist Assistant is built on a modular, plug-and-play architecture that makes it both powerful and extensible. Here’s a quick look at its inner workings:
+
+The Todoist Assistant is designed to interact seamlessly with the Todoist API, providing modular functionalities for automation, data visualization, and productivity insights. Below is a high-level diagram and explanation of the system's architecture and key ideas.
+
+```mermaid
+flowchart TD
+    A["Core Modules"] --> B["Activity Module"]
+    A --> C["Database Module"]
+    A --> D["Dashboard & Plots"]
+    A --> E["Automations & Integrations"]
+    
+    B --> F["Fetch Project Data"]
+    B --> G["Fetch Task Data"]
+    B --> H["Fetch Activity Logs"]
+    
+    D --> J["Streamlit Dashboard"]
+    D --> P["Data Visualization"]
+    D --> Q["Statistics & Reports"]
+    
+    E --> M["Custom Automation Scripts"]
+    E --> N["Config Files (YAML)"]
+    E --> R["API Integrations"]
+    
+    subgraph TodoistAssistant["Todoist Assistant"]
+        style TodoistAssistant fill:#2d333b,stroke:#8b949e,stroke-width:2px,color:#e6edf3
+        A
+    end
+    
+    subgraph DatabaseLayer["Database Layer"]
+        style DatabaseLayer fill:#1f2937,stroke:#4b5563,stroke-width:2px,color:#e6edf3
+        C
+        
+        subgraph ActivityStore["Activity Storage"]
+            style ActivityStore fill:#111827,stroke:#4b5563,stroke-width:1px,color:#e6edf3
+            B
+            F
+            G
+            H
+        end
+        
+        subgraph DataPersistence["Data Persistence"]
+            style DataPersistence fill:#111827,stroke:#4b5563,stroke-width:1px,color:#e6edf3
+            L["Joblib Cache"]
+            S["Task Database"]
+            T["Project Repository"]
+        end
+    end
+    
+    subgraph UILayer["Interface & Visualization"]
+        style UILayer fill:#1e3a5f,stroke:#4878bc,stroke-width:2px,color:#e6edf3
+        D
+        J
+        P
+        Q
+        I["CLI Commands"]
+    end
+    
+    subgraph AutomationLayer["Automation Layer"]
+        style AutomationLayer fill:#301934,stroke:#7c3aed,stroke-width:2px,color:#e6edf3
+        E
+        M
+        N
+        R
+    end
+    
+    subgraph ConfigLayer["Configuration"]
+        style ConfigLayer fill:#3c1f1e,stroke:#9b2c2c,stroke-width:2px,color:#e6edf3
+        K[".env File"]
+    end
+    
+    TodoistAssistant --> DatabaseLayer
+    TodoistAssistant --> UILayer
+    TodoistAssistant --> AutomationLayer
+    TodoistAssistant --> ConfigLayer
+    
+    DatabaseLayer -.-> UILayer
+    AutomationLayer -.-> DatabaseLayer
+    ConfigLayer -.-> AutomationLayer
+    
+    classDef darkNode fill:#374151,stroke:#6b7280,color:#e6edf3;
+    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,P,Q,R,S,T darkNode;
+```
 
 - **Separation of Concerns:**  
   Each module handles a specific task—fetching data, processing it, or visualizing results—so you can easily swap out or extend functionality without touching the core.
@@ -23,8 +102,31 @@ Todoist Assistant is built on a modular, plug-and-play architecture that makes i
   - **Automations & Integrations:** *(experimental)*  
     Automations allow custom triggers and actions, while integrations open the door to connect with external services like Twitter or Gmail.
 
-## Installation 
+## Makefile Usage (recommended)
 
+The following `Makefile` commands are available for managing the local environment and running the dashboard:
+
+```makefile
+.PHONY: init_local_env run_dashboard
+
+init_local_env: # syncs history, fetches activity
+	poetry run python3 -m todoist.automations.init_env --config-dir configs --config-name automations
+
+run_dashboard:
+	PYTHONPATH=. poetry run streamlit run todoist/dashboard/app.py
+
+clear_local_env:
+	rm -f activity.joblib
+```
+
+- **`init_local_env`:** Initializes the local environment by syncing history and fetching activity.
+- **`run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
+- **`clear_local_env`:** Clears local environment data by removing the activity cache.
+
+
+## Manual Usage
+
+### Installation
 ```bash
 git clone https://github.com/mtyrolski/todoist-assistant.git
 cd todoist-assistant
@@ -34,7 +136,6 @@ poetry install
 echo "API_KEY=your_todoist_api_key" > .env
 ```
 
-## Usage
 ### Updating Activity Database
 
 Fetch and update your Todoist activity data:
@@ -45,11 +146,11 @@ python3 -m todoist activity --nweeks N_WEEKS
 This command retrieves, summarizes, and saves the latest activity data locally.
 
 ### Automatons Manual launch
+
 This line launches all automations defined in `configs/automations.yaml`. Update or add own config for customization.
 ```
 python3 -m todoist.automations.run --config-dir configs --config-name automations
 ```
-
 
 ### Dashboard Usage
 
@@ -58,7 +159,7 @@ To run the dashboard, execute the following command:
 streamlit run dashboard.py
 ```
 
-This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity logs. It applies filters (e.g., date ranges or event types) and generates interactive visualizations for technical analysis of task and project data.
+This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events.
 
 Navigate to Control Panel to launch automations in GUI.
 
@@ -122,13 +223,12 @@ recent_events: List[Event] = [
 print(f"Events in the last 2 weeks: {len(recent_events)}")
 ```
 
-
 ### Custom Automations
 
 Extend Todoist-Assistant with custom automation scripts. Automations define actions triggered by Todoist events, enhancing data processing before visualization.
 
-## Configuration
 
+## Configuration
 
 ### Aligning Archive Projects
 
