@@ -153,48 +153,78 @@ Navigate to Control Panel to launch automations in GUI.
 ### Library Integration
 
 Integrate Todoist-Assistant into your projects using the provided API. Here are some examples:
+### Library Integration
+
+Integrate Todoist-Assistant into your projects using the provided API. Here are some examples:
 ```python
 from datetime import datetime, timedelta
 from typing import List
-from todoist.database import Database
-from todoist.types import Project, Event
+import os
 
-db: Database = Database()
+# Import necessary modules from the library
+from todoist.database.base import Database
+from todoist.types import Project, Event, _Task_API_V9 as TaskEntry
 
-# Add a new task to "Daily Tasks"
-task_id: int = db.add_task(
-    project_name="Daily Tasks",
+# Initialize the database with path to your .env file
+# The .env file should contain your API_KEY
+db = Database(dotenv_path=".env")
+
+# Add a new task to a project
+task_id = db.insert_task(
     content="Review Pull Requests",
-    due_date="2025-03-25"
+    project_id="2345678901",  # Replace with your actual project ID
+    due_date="2025-05-01",
+    priority=3,  # 3 = Medium priority in Todoist
+    labels=["work", "coding"]
 )
-print(f"New task created with ID: {task_id}")
+print(f"New task created: {task_id}")
 
-# Insert a task from a template for recurring tasks
-db.insert_task_from_template(
-    template_name="daily-checklist",
-    insert_date="2025-04-01",
-    project_name="Daily Tasks"
+# Create a task template and insert it with overrides
+task_template = TaskEntry(
+    id="template_task",
+    content="Daily stand-up meeting",
+    project_id="2345678901",
+    priority=2,
+    labels=["work", "meetings"],
+    description="Discuss project progress and blockers",
 )
-print("Task inserted from template.")
+
+# Insert the task from template with some overrides
+result = db.insert_task_from_template(
+    task=task_template,
+    due_date="2025-05-01",
+    content="Special stand-up meeting",
+    priority=3
+)
+print(f"Task inserted from template: {result}")
+
+# Fetch projects data
+db.pull()  # This ensures project data is loaded
 
 # List all active projects
-projects: List[Project] = db.list_projects()
-print("Projects:")
+projects: List[Project] = db.projects_cache
+print("Active Projects:")
 for proj in projects:
-    print(f" - {proj.name} (ID: {proj.id})")
+    print(f" - {proj.project_entry.name} (ID: {proj.id})")
 
 # Fetch a specific project by its identifier
-project: Project = db.db_projects.fetch_project_by_id("123456789")
+project: Project = db.fetch_project_by_id("2345678901")
 print(f"Fetched project: {project.project_entry.name}, Archived: {project.is_archived}")
 
-# List archived projects with historical data
-archived_projects: List[Project] = db.db_projects.fetch_archived_projects()
+# List archived projects
+archived_projects: List[Project] = db.fetch_archived_projects()
 print("Archived Projects:")
 for proj in archived_projects:
     print(f" - {proj.project_entry.name} (ID: {proj.id})")
 
+# Get label colors
+label_colors = db.fetch_label_colors()
+print("Label Colors:")
+for label_name, color_code in label_colors.items():
+    print(f" - {label_name}: {color_code}")
+
 # Retrieve activity logs and filter events
-activity_data: List[Event] = db.db_activity.fetch_activity()
+activity_data: List[Event] = db.fetch_activity()
 
 # Filter for completed events
 completed_events: List[Event] = [
@@ -214,6 +244,62 @@ print(f"Events in the last 2 weeks: {len(recent_events)}")
 
 Extend Todoist-Assistant with custom automation scripts. Automations define actions triggered by Todoist events, enhancing data processing before visualization.
 
+**Automation Configuration.** The `automations.yaml` file defines the available automations that can be executed either through the dashboard control panel or via manual command-line launches.
+**Configuration Structure.** The configuration file (`configs/automations.yaml`) defines several types of automations:
+
+```yaml
+automations:
+  # Task templates for creating structured sets of tasks
+  - _target_: todoist.automations.template.Template
+    task_templates:
+      # Call template with preparation and follow-up subtasks
+      call:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Call
+        description: Call someone
+        due_date_days_difference: 0
+        priority: 1
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Setup meeting
+            description: Should be put on calendar.
+            due_date_days_difference: -3
+          # Additional child tasks omitted for brevity...
+      
+      # Paper reading workflow template
+      read_paper:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Read Paper
+        description: Read a research paper
+        due_date_days_difference: 0
+        priority: 1
+        children:
+          # Child tasks omitted for brevity...
+      
+      # Feature development template
+      feature:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Feature Development
+        description: Implement a feature
+        due_date_days_difference: 0
+        priority: 1
+        children:
+          # Child tasks omitted for brevity...
+  
+  # Activity tracking automations for different time periods
+  - _target_: todoist.automations.activity.Activity
+    name: Activity Last Week
+    nweeks: 1
+  - _target_: todoist.automations.activity.Activity
+    name: Activity Last Month
+    nweeks: 4
+  - _target_: todoist.automations.activity.Activity
+    name: Activity Last 10 years
+    nweeks: 520
+  
+  # Task multiplication automation
+  - _target_: todoist.automations.multiplicate.Multiply
+```
 
 ## Configuration
 
