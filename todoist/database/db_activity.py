@@ -26,6 +26,7 @@ class DatabaseActivity:
         type of event (ex. completed, updated, uncompleted, added, ...)
         """
         result: list[Event] = []
+
         def process_page(page: int) -> list[Event]:
             events: list[_Event_API_V9] = self._fetch_activity_page(page)
             page_events: list[Event] = []
@@ -39,8 +40,7 @@ class DatabaseActivity:
         pages = range(0, self.max_pages + 1)
         all_events = Parallel(n_jobs=-1)(
             delayed(process_page)(page)
-            for page in tqdm(pages, desc='Querying activity data', unit='page', total=self.max_pages)
-        )
+            for page in tqdm(pages, desc='Querying activity data', unit='page', total=self.max_pages))
         for events in all_events:
             result.extend(events)
         return result
