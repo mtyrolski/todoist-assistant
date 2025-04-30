@@ -85,17 +85,8 @@ class DatabaseProjects:
             tasks: list[Task] = list(map(lambda task: Task(id=task.id, task_entry=task), task_entries))
             return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
 
-        result = Parallel(n_jobs=-1)(
-            delayed(process_project)(project)
-            for project in tqdm(
-            projects,
-            desc='Querying project data',
-            unit='project',
-            total=len(projects),
-            position=0,
-            leave=True
-            )
-        )
+        result = Parallel(n_jobs=-1)(delayed(process_project)(project) for project in tqdm(
+            projects, desc='Querying project data', unit='project', total=len(projects), position=0, leave=True))
 
         self.projects_cache = result
         return self.projects_cache
@@ -170,18 +161,16 @@ class DatabaseProjects:
             project.id: COLOR_NAME_TO_TODOIST_CODE[project.project_entry.color]
             for project in self.fetch_archived_projects()
         })
-        
+
         return mapping
-    
+
     def fetch_mapping_project_name_to_color(self) -> dict[str, str]:
         """
         Fetches a mapping of project names to their associated colors.
         """
         id_to_color = self.fetch_mapping_project_id_to_color()
         id_to_name = self.fetch_mapping_project_id_to_name()
-        name_to_color = {
-            id_to_name[project_id]: color for project_id, color in id_to_color.items()
-        }
+        name_to_color = {id_to_name[project_id]: color for project_id, color in id_to_color.items()}
         return name_to_color
 
     def _get_root_project(self, project_id: int):

@@ -1,5 +1,3 @@
-
-
 import pandas as pd
 import streamlit as st
 from todoist.plots import (plot_event_distribution_by_type, plot_top_projects_by_events,

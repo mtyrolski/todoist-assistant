@@ -44,8 +44,6 @@ class Automation(ABC):
 
         return task_delegations
 
-
-
     @abstractmethod
     def _tick(self, db: Database):
         """

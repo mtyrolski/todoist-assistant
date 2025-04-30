@@ -11,14 +11,14 @@ class DatabaseLabels:
 
     def reset(self):
         self._fetch_label_data()
-        
+
     def fetch_label_colors(self) -> dict[str, str]:
         """
         Returns a dictionary mapping label names to their colors.
         """
         if not self._labels:
             self._fetch_label_data()
-        
+
         mapping_name_to_color_code = {}
         for label in self._labels:
             label_name = label['name']
@@ -34,13 +34,9 @@ class DatabaseLabels:
         Fetches label data from the Todoist API and populates local attributes.
         """
         url = "https://api.todoist.com/rest/v2/labels"
-        headers = {
-            "Authorization": f"Bearer {get_api_key()}"
-        }
+        headers = {"Authorization": f"Bearer {get_api_key()}"}
 
-        cmds = [
-            "curl", url, "-H", f"Authorization: {headers['Authorization']}"
-        ]
+        cmds = ["curl", url, "-H", f"Authorization: {headers['Authorization']}"]
 
         response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
 
@@ -51,9 +47,7 @@ class DatabaseLabels:
         try:
             labels = json.loads(response.stdout)
             self._labels = labels
-            self._mapping_label_name_to_color = {
-                label['name']: label['color'] for label in labels
-            }
+            self._mapping_label_name_to_color = {label['name']: label['color'] for label in labels}
             logger.info(f"Fetched {len(labels)} labels.")
         except json.JSONDecodeError:
             logger.error("Failed to decode label data from Todoist API.")

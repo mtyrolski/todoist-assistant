@@ -1,5 +1,3 @@
-
-
 from todoist.database.base import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
 from joblib import load
@@ -12,6 +10,7 @@ import sys
 from pathlib import Path
 
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
+
 
 def extract_name(event: Event) -> str | None:
     """

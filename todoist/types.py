@@ -136,13 +136,16 @@ ProjectEntry = _ProjectEntry_API_V9
 TaskEntry = _Task_API_V9
 EventEntry = _Event_API_V9
 
+
 def is_recurring_task(task: 'Task'):
     return task.task_entry.due is not None and \
         isinstance(task.task_entry.due, dict) and \
         task.task_entry.due.get('is_recurring') is True
 
+
 def is_non_recurring_task(task: 'Task'):
     return not is_recurring_task(task)
+
 
 @dataclass
 class Task:
@@ -160,6 +163,7 @@ class Task:
     def is_non_recurring(self) -> bool:
         return is_non_recurring_task(self)
 
+
 @dataclass
 class Project:
     id: str
@@ -169,7 +173,6 @@ class Project:
 
     def __eq__(self, other):
         return self.id == other.id
-    
 
 
 def is_event_rescheduled(event: 'Event') -> bool:
@@ -186,17 +189,17 @@ def is_event_rescheduled(event: 'Event') -> bool:
     'extra_data_id': xxxxxx,
         
     """
-    return all(
-        [
-            event.event_entry.event_type == 'updated',
-            'due_date' in event.event_entry.extra_data,
-            'last_due_date' in event.event_entry.extra_data,
-        ]
-    )
+    return all([
+        event.event_entry.event_type == 'updated',
+        'due_date' in event.event_entry.extra_data,
+        'last_due_date' in event.event_entry.extra_data,
+    ])
+
 
 _EVENT_SUBTYPES_MAPPING = {
     'rescheduled': is_event_rescheduled,
 }
+
 
 @dataclass
 class Event:
@@ -220,7 +223,7 @@ class Event:
         if 'name' in self.event_entry.extra_data:
             return self.event_entry.extra_data['name']
         return None
-    
+
     @property
     def event_type(self) -> str:
         """

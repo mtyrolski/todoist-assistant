@@ -17,6 +17,7 @@ def load_activity_data_cached(_dbio: Database) -> pd.DataFrame:
     df = load_activity_data(_dbio)
     return df
 
+
 @st.cache_resource
 def get_database() -> Database:
     """

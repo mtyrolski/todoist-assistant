@@ -73,9 +73,7 @@ def plot_most_popular_labels(projects: list[Project]) -> go.Figure:
     db_labels = DatabaseLabels()
     label_colors = db_labels.fetch_label_colors()
 
-    fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), 
-                                 values=list(top_n_labels.values()), 
-                                 hole=.3)])
+    fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
     fig.update_traces(hoverinfo='label+percent',
                       textinfo='value',
                       textfont_size=20,
@@ -145,9 +143,11 @@ def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: 
     db_projects = DatabaseProjects()
     project_colors = db_projects.fetch_mapping_project_name_to_color()
 
-    fig = go.Figure(data=[go.Bar(x=project_counts.index, 
-                                 y=project_counts.values, 
-                                 marker_color=[project_colors.get(project, '#808080') for project in project_counts.index])])
+    fig = go.Figure(data=[
+        go.Bar(x=project_counts.index,
+               y=project_counts.values,
+               marker_color=[project_colors.get(project, '#808080') for project in project_counts.index])
+    ])
     fig.update_layout(title_text='Top Projects by Number of Events',
                       xaxis_title='Projects',
                       yaxis_title='Number of Events')
@@ -176,10 +176,11 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
     project_colors = db_projects.fetch_mapping_project_name_to_color()
 
     for col in event_counts.columns:
-        fig.add_trace(go.Bar(name=col, 
-                             x=event_counts.index, 
-                             y=event_counts[col],
-                             marker_color=[project_colors.get(project, '#808080') for project in event_counts.index]))
+        fig.add_trace(
+            go.Bar(name=col,
+                   x=event_counts.index,
+                   y=event_counts[col],
+                   marker_color=[project_colors.get(project, '#808080') for project in event_counts.index]))
     fig.update_layout(barmode='stack',
                       title_text='Event Distribution by Root Project',
                       xaxis_title='Root Projects',

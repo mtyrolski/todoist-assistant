@@ -12,6 +12,7 @@ from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_rang
 from todoist.types import Project, Task
 from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
 
+
 def main() -> None:
     """
     Main function to setup the dashboard.
@@ -23,11 +24,13 @@ def main() -> None:
         df_activity = load_activity_data_cached(dbio)
         active_projects: list[Project] = dbio.fetch_projects()
     if len(df_activity) == 0:
-        st.error("No activity data available. Run `make init_local_env` first and ensure that your keys refer to account with non-zero tasks count.")
+        st.error(
+            "No activity data available. Run `make init_local_env` first and ensure that your keys refer to account with non-zero tasks count."
+        )
         st.stop()
     beg_range, end_range = sidebar_date_range(df_activity)
     granularity = sidebar_granularity()
-    active_tasks: list[Task] = [task for project in active_projects for task in project.tasks] 
+    active_tasks: list[Task] = [task for project in active_projects for task in project.tasks]
     logger.debug(f"Found {len(active_tasks)} active tasks")
     # Navigation
     pages = {

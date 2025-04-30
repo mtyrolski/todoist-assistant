@@ -1,10 +1,10 @@
-
 import pandas as pd
 import streamlit as st
 from todoist.dashboard.utils import extract_metrics, get_badges
 from todoist.types import (Project)
-from todoist.plots import (current_tasks_types, plot_events_over_time,
-                           plot_most_popular_labels, plot_completed_tasks_periodically, cumsum_completed_tasks_periodically)
+from todoist.plots import (current_tasks_types, plot_events_over_time, plot_most_popular_labels,
+                           plot_completed_tasks_periodically, cumsum_completed_tasks_periodically)
+
 
 def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], beg_range, end_range,
                      granularity: str) -> None:

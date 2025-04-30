@@ -1,4 +1,3 @@
-
 import streamlit as st
 from omegaconf import OmegaConf
 from todoist.utils import Cache, load_config
@@ -11,6 +10,7 @@ import contextlib
 import datetime
 import time
 import threading
+
 
 def render_control_panel_page(dbio: Database) -> None:
     config: OmegaConf = load_config('automations', '../configs')
@@ -72,28 +72,29 @@ def render_control_panel_page(dbio: Database) -> None:
 
         with st.expander(f"{automation.name} ({header_last_launch})", expanded=expanded):
             st.markdown(f"<span class='automation-title'>{automation.name}</span>", unsafe_allow_html=True)
-            st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='automation-details'><b>Launches:</b> {launch_count}</div>",
+                        unsafe_allow_html=True)
 
             # Add a "Run" button for individual automation
             run_pressed = st.button("▶️ Run", key=automation.name)
 
             if run_pressed or (run_all_pressed and expanded):
                 with st.spinner(f"Executing {automation.name}..."):
-                    output_placeholder = st.empty()  # placeholder for output
+                    output_placeholder = st.empty()    # placeholder for output
                     output_stream = io.StringIO()
                     loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
-                    
+
                     # Define a function to run the automation in a separate thread
                     def run_automation():
                         with contextlib.redirect_stdout(output_stream), contextlib.redirect_stderr(output_stream):
-                            automation.tick(dbio)  # Run the blocking automation
+                            automation.tick(dbio)    # Run the blocking automation
                         # Ensure final output is captured before thread ends
                         time.sleep(0.1)
-                    
+
                     # Start the automation in a background thread
                     thread = threading.Thread(target=run_automation)
                     thread.start()
-                    
+
                     # Continuously update the placeholder with streamed output while the thread is active
                     while thread.is_alive():
                         output = output_stream.getvalue()
@@ -103,7 +104,7 @@ def render_control_panel_page(dbio: Database) -> None:
                             output_stream.seek(0)
                         time.sleep(0.1)
                     thread.join()
-                    
+
                     # Final update
                     final_output = output_stream.getvalue()
                     if final_output:
