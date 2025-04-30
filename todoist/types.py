@@ -30,6 +30,7 @@ class _ProjectEntry_API_V9:
     description: str = ''
     default_order: int | None = None
     public_access: bool = False
+    access: str | None = None
 
     def __repr__(self):
         return f'Project {self.name}'
@@ -135,6 +136,13 @@ ProjectEntry = _ProjectEntry_API_V9
 TaskEntry = _Task_API_V9
 EventEntry = _Event_API_V9
 
+def is_recurring_task(task: 'Task'):
+    return task.task_entry.due is not None and \
+        isinstance(task.task_entry.due, dict) and \
+        task.task_entry.due.get('is_recurring') is True
+
+def is_non_recurring_task(task: 'Task'):
+    return not is_recurring_task(task)
 
 @dataclass
 class Task:
@@ -144,6 +152,13 @@ class Task:
     def __eq__(self, other):
         return self.id == other.id
 
+    @property
+    def is_recurring(self) -> bool:
+        return is_recurring_task(self)
+
+    @property
+    def is_non_recurring(self) -> bool:
+        return is_non_recurring_task(self)
 
 @dataclass
 class Project:
