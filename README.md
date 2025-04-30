@@ -6,7 +6,6 @@ Todoist Assistant is a Python-based tool designed to interact with the Todoist A
 
 
 The Todoist Assistant is designed to interact seamlessly with the Todoist API, providing modular functionalities for automation, data visualization, and productivity insights. Below is a high-level diagram and explanation of the system's architecture and key ideas.
-The Todoist Assistant is designed to interact seamlessly with the Todoist API, providing modular functionalities for automation, data visualization, and productivity insights. Below is a high-level diagram and explanation of the system's architecture and key ideas.
 
 ```mermaid
 flowchart TD
