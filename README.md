@@ -6,25 +6,25 @@ Todoist Assistant is a Python-based tool designed to interact with the Todoist A
 
 
 The Todoist Assistant is designed to interact seamlessly with the Todoist API, providing modular functionalities for automation, data visualization, and productivity insights. Below is a high-level diagram and explanation of the system's architecture and key ideas.
+The Todoist Assistant is designed to interact seamlessly with the Todoist API, providing modular functionalities for automation, data visualization, and productivity insights. Below is a high-level diagram and explanation of the system's architecture and key ideas.
 
 ```mermaid
 flowchart TD
-    A["Core Modules"] --> B["Activity Module"]
-    A --> C["Database Module"]
-    A --> D["Dashboard & Plots"]
-    A --> E["Automations & Integrations"]
+    A["Core Modules"] --> B["Automation Layer"]
+    A --> C["Database Layer"]
+    A --> D["Visualization Layer"]
     
-    B --> F["Fetch Project Data"]
-    B --> G["Fetch Task Data"]
-    B --> H["Fetch Activity Logs"]
+    B --> E["Templates"]
+    B --> F["API Integrations"]
+    B --> G["Custom Automation Scripts"]
     
-    D --> J["Streamlit Dashboard"]
-    D --> P["Data Visualization"]
-    D --> Q["Statistics & Reports"]
+    C --> H["Tasks"]
+    C --> I["Projects"]
+    C --> J["Activity"]
     
-    E --> M["Custom Automation Scripts"]
-    E --> N["Config Files (YAML)"]
-    E --> R["API Integrations"]
+    D --> K["Project Trends"]
+    D --> L["Control Panel"]
+    D --> M["Tasks Plots"]
     
     subgraph TodoistAssistant["Todoist Assistant"]
         style TodoistAssistant fill:#2d333b,stroke:#8b949e,stroke-width:2px,color:#e6edf3
@@ -34,56 +34,33 @@ flowchart TD
     subgraph DatabaseLayer["Database Layer"]
         style DatabaseLayer fill:#1f2937,stroke:#4b5563,stroke-width:2px,color:#e6edf3
         C
-        
-        subgraph ActivityStore["Activity Storage"]
-            style ActivityStore fill:#111827,stroke:#4b5563,stroke-width:1px,color:#e6edf3
-            B
-            F
-            G
-            H
-        end
-        
-        subgraph DataPersistence["Data Persistence"]
-            style DataPersistence fill:#111827,stroke:#4b5563,stroke-width:1px,color:#e6edf3
-            L["Joblib Cache"]
-            S["Task Database"]
-            T["Project Repository"]
-        end
+        H
+        I
+        J
     end
     
-    subgraph UILayer["Interface & Visualization"]
-        style UILayer fill:#1e3a5f,stroke:#4878bc,stroke-width:2px,color:#e6edf3
+    subgraph VisualizationLayer["Visualization Layer"]
+        style VisualizationLayer fill:#1e3a5f,stroke:#4878bc,stroke-width:2px,color:#e6edf3
         D
-        J
-        P
-        Q
-        I["CLI Commands"]
+        K
+        L
+        M
     end
     
     subgraph AutomationLayer["Automation Layer"]
         style AutomationLayer fill:#301934,stroke:#7c3aed,stroke-width:2px,color:#e6edf3
+        B
         E
-        M
-        N
-        R
-    end
-    
-    subgraph ConfigLayer["Configuration"]
-        style ConfigLayer fill:#3c1f1e,stroke:#9b2c2c,stroke-width:2px,color:#e6edf3
-        K[".env File"]
+        F
+        G
     end
     
     TodoistAssistant --> DatabaseLayer
-    TodoistAssistant --> UILayer
+    TodoistAssistant --> VisualizationLayer
     TodoistAssistant --> AutomationLayer
-    TodoistAssistant --> ConfigLayer
-    
-    DatabaseLayer -.-> UILayer
-    AutomationLayer -.-> DatabaseLayer
-    ConfigLayer -.-> AutomationLayer
     
     classDef darkNode fill:#374151,stroke:#6b7280,color:#e6edf3;
-    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,P,Q,R,S,T darkNode;
+    class A,B,C,D,E,F,G,H,I,J,K,L,M darkNode;
 ```
 
 - **Separation of Concerns:**  
