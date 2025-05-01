@@ -4,6 +4,7 @@ from todoist.plots import (plot_event_distribution_by_type, plot_top_projects_by
                            plot_event_distribution_by_root_project, plot_event_types_by_project)
 
 
+@st.cache_data
 def render_project_insights_page(df_activity: pd.DataFrame, beg_range, end_range, granularity: str) -> None:
     """
     Renders the Project Insights dashboard page.

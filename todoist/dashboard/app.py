@@ -12,6 +12,12 @@ from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_rang
 from todoist.types import Project, Task
 from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
 
+# def are_new_events_added(df_activity) -> bool:
+#     assert len(df_activity) >= st.session_state.events_count
+#     return st.session_state.events_count != df_activity.shape[0]
+
+# def init_session_state(df_activity) -> None:
+#     st.session_state.setdefault('events_count', len(df_activity))
 
 def main() -> None:
     """
