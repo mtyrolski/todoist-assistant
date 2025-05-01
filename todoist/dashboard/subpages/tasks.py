@@ -7,8 +7,6 @@ from todoist.types import Task
 import math
 
 
-# Use Streamlit's caching decorator for processing the rescheduled tasks data
-@st.cache_data(ttl=3600)    # Cache for 1 hour
 def process_rescheduled_tasks(df_activity, active_tasks):
     """
     Process and return rescheduled tasks data with caching.
@@ -29,6 +27,7 @@ def process_rescheduled_tasks(df_activity, active_tasks):
     return filtered_tasks
 
 
+@st.cache_data
 def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, granularity: str,
                               active_tasks: list[Task]) -> None:
     """
