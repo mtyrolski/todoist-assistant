@@ -11,7 +11,6 @@ import datetime
 import time
 import threading
 
-
 def render_control_panel_page(dbio: Database) -> None:
     config: OmegaConf = load_config('automations', '../configs')
     automations: list[Automation] = hydra.utils.instantiate(config.automations)
@@ -111,7 +110,7 @@ def render_control_panel_page(dbio: Database) -> None:
                         output_placeholder.text(final_output)
                     logger.remove(loguru_handler_id)
                     dbio.reset()
-
+                st.cache_data.clear()
                 st.success(f"{automation.name} executed successfully!")
 
     if run_all_pressed:
