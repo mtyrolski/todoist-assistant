@@ -4,7 +4,7 @@ Refactored for better structure and readability.
 """
 
 import inspect
-
+import sys
 from loguru import logger
 import streamlit as st
 
@@ -12,12 +12,8 @@ from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_rang
 from todoist.types import Project, Task
 from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
 
-# def are_new_events_added(df_activity) -> bool:
-#     assert len(df_activity) >= st.session_state.events_count
-#     return st.session_state.events_count != df_activity.shape[0]
-
-# def init_session_state(df_activity) -> None:
-#     st.session_state.setdefault('events_count', len(df_activity))
+from todoist.database.demo import anonymize_project_names
+from todoist.database.demo import anonymize_label_names
 
 def main() -> None:
     """
@@ -25,6 +21,7 @@ def main() -> None:
     """
     st.set_page_config(page_title="Todoist Dashboard", layout="wide")
     dbio = get_database()
+    anonymized: bool = len(sys.argv) > 1 and 'demo' in sys.argv
 
     with st.spinner('Loading data...'):
         df_activity = load_activity_data_cached(dbio)
@@ -34,6 +31,11 @@ def main() -> None:
             "No activity data available. Run `make init_local_env` first and ensure that your keys refer to account with non-zero tasks count."
         )
         st.stop()
+        
+    if anonymized:
+        _ = anonymize_project_names(df_activity)
+        _ = anonymize_label_names(active_projects)    
+    
     beg_range, end_range = sidebar_date_range(df_activity)
     granularity = sidebar_granularity()
     active_tasks: list[Task] = [task for project in active_projects for task in project.tasks]

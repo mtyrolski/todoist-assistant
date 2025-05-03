@@ -18,7 +18,7 @@ class DatabaseActivity:
 
     def reset(self):
         pass
-
+    
     def fetch_activity(self) -> list[Event]:
         """
         Fetches the activity data from the Todoist API.

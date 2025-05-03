@@ -72,7 +72,6 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     mapping_project_id_to_root = _dbio.fetch_mapping_project_id_to_root()
     mapping_project_id_to_name = _dbio.fetch_mapping_project_id_to_name()
     mapping_project_name_to_id = _dbio.fetch_mapping_project_name_to_id()
-    # mapping_project_id_to_color = _dbio.fetch_mapping_project_id_to_color()
 
     df = events_to_dataframe(activity_db,
                              project_id_to_name=mapping_project_id_to_name,
