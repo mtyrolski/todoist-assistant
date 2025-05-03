@@ -7,7 +7,7 @@ run_dashboard:
 	PYTHONPATH=. poetry run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False
 
 run_demo:
-	PYTHONPATH=. poetry run streamlit run todoist/dashboard/app.py --demo
+	PYTHONPATH=. poetry run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False demo
 
 clear_local_env:
 	rm -f activity.joblib

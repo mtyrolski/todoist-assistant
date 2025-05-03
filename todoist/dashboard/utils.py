@@ -5,9 +5,9 @@ import streamlit as st
 from todoist.database.dataframe import load_activity_data
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.database.base import Database
-from todoist.types import (Project)
+from todoist.types import Project
 from functools import partial
-
+from loguru import logger
 
 @st.cache_data
 def load_activity_data_cached(_dbio: Database) -> pd.DataFrame:
