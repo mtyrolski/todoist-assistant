@@ -6,8 +6,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from todoist.types import Project
-from todoist.database.db_projects import DatabaseProjects
-from todoist.database.db_labels import DatabaseLabels
 
 
 def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
@@ -51,7 +49,7 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     return fig
 
 
-def plot_most_popular_labels(projects: list[Project]) -> go.Figure:
+def plot_most_popular_labels(projects: list[Project], label_colors: dict[str, str]) -> go.Figure:
     """
     Plots the most popular labels as pie chart.
     
@@ -70,10 +68,6 @@ def plot_most_popular_labels(projects: list[Project]) -> go.Figure:
 
     N: Final[int] = 10    # constant for now
     top_n_labels = dict(sorted(labels_counter.items(), key=lambda item: item[1], reverse=True)[:N])
-
-    db_labels = DatabaseLabels()
-    label_colors = db_labels.fetch_label_colors()
-    logger.debug('\n' + '\n'.join([f'{label}: {color}' for label, color in label_colors.items()]))
 
     fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
     fig.update_traces(hoverinfo='label+percent',
@@ -126,7 +120,7 @@ def current_tasks_types(projects: list[Project]) -> go.Figure:
 
 
 def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                granularity: str) -> go.Figure:
+                                project_colors: dict[str, str]) -> go.Figure:
     """
     Plots the top projects by the number of events as a bar chart within the specified date range.
     
@@ -142,9 +136,6 @@ def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: 
     df_filtered = df.loc[beg_date:end_date]
     project_counts = df_filtered['root_project_name'].value_counts().head(10)
 
-    db_projects = DatabaseProjects()
-    project_colors = db_projects.fetch_mapping_project_name_to_color()
-
     fig = go.Figure(data=[
         go.Bar(x=project_counts.index,
                y=project_counts.values,
@@ -157,7 +148,7 @@ def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: 
 
 
 def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                            granularity: str) -> go.Figure:
+                                            project_colors: dict[str, str]) -> go.Figure:
     """
     Plots the distribution of event types by root project as a stacked bar chart within the specified date range.
     
@@ -174,9 +165,6 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
     event_counts = df_filtered.groupby('root_project_name')['type'].value_counts().unstack().fillna(0)
     fig = go.Figure()
 
-    db_projects = DatabaseProjects()
-    project_colors = db_projects.fetch_mapping_project_name_to_color()
-
     for col in event_counts.columns:
         fig.add_trace(
             go.Bar(name=col,
@@ -190,8 +178,7 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
     return fig
 
 
-def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                           granularity: str) -> go.Figure:
+def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
     """
     Plots a heatmap of events by day of the week and hour of the day within the specified date range.
     
@@ -199,7 +186,6 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
     
     Returns:
     go.Figure: Plotly figure object representing the heatmap of events by day and hour.
@@ -213,8 +199,7 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     return fig
 
 
-def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                granularity: str) -> go.Figure:
+def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
     """
     Plots the distribution of event types by project as a grouped bar chart within the specified date range.
     
@@ -262,7 +247,8 @@ def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_d
     return fig
 
 
-def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str) -> go.Figure:
+def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
+                            project_colors: dict[str, str]) -> go.Figure:
     """
     Plots the cumulative number of completed tasks per project over time as a line chart within the specified date range.
     
@@ -281,9 +267,6 @@ def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: date
     completed_tasks = completed_tasks[completed_tasks['date'] >= beg_date]
     completed_tasks = completed_tasks[completed_tasks['date'] <= end_date]
     fig = go.Figure()
-
-    db_projects = DatabaseProjects()
-    project_colors = db_projects.fetch_mapping_project_name_to_color()
 
     for root_project_name in completed_tasks['root_project_name'].unique():
         data = completed_tasks[completed_tasks['root_project_name'] == root_project_name]
@@ -309,8 +292,8 @@ def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: date
     return fig
 
 
-def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                      granularity: str) -> go.Figure:
+def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str,
+                                      project_colors: dict[str, str]) -> go.Figure:
     """
     Plots the number of completed tasks per project over time as a line chart with markers within the specified date range.
 
@@ -329,9 +312,6 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
     df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index <= end_date]
 
     fig = go.Figure()
-
-    db_projects = DatabaseProjects()
-    project_colors = db_projects.fetch_mapping_project_name_to_color()
 
     for root_project_name in df_weekly_per_project.columns:
         fig.add_trace(
@@ -361,8 +341,8 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
     return fig
 
 
-def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                        granularity: str) -> go.Figure:
+def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str,
+                                        project_colors: dict[str, str]) -> go.Figure:
     """
     Plots the cumulative number of completed tasks per project over time as a line chart with markers within the specified date range.
 
@@ -397,9 +377,6 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     df_weekly_per_project = df_weekly_per_project.interpolate(method='linear', axis=0)
 
     fig = go.Figure()
-
-    db_projects = DatabaseProjects()
-    project_colors = db_projects.fetch_mapping_project_name_to_color()
 
     for root_project_name in df_weekly_per_project.columns:
         fig.add_trace(

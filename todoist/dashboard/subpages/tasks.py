@@ -29,18 +29,18 @@ def process_rescheduled_tasks(df_activity, active_tasks):
 
 @st.cache_data
 def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, granularity: str,
-                              active_tasks: list[Task]) -> None:
+                              active_tasks: list[Task], project_colors: dict[str, str]) -> None:
     """
     Renders the Task Analysis dashboard page.
     """
     st.header("Heatmap of Events by Day and Hour")
-    st.plotly_chart(plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range, granularity))
+    st.plotly_chart(plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range))
 
     st.header("Cumulative Number of Completed Tasks Over Time")
     st.plotly_chart(plot_cumulative_events_over_time(df_activity, beg_range, end_range, granularity))
 
     st.header("Cumulative Completed Tasks Per Project")
-    st.plotly_chart(cumsum_plot_per_project(df_activity, beg_range, end_range, granularity))
+    st.plotly_chart(cumsum_plot_per_project(df_activity, beg_range, end_range, project_colors))
 
     # List of tasks with the highest number of being rescheduled
     st.header("Tasks with the Highest Number of Reschedules")
