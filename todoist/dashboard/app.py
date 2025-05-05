@@ -39,6 +39,8 @@ def main() -> None:
         label_ori2anonym = anonymize_label_names(active_projects)
         dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
 
+    project_colors = dbio.fetch_mapping_project_name_to_color()
+    label_colors = dbio.fetch_label_colors()
     beg_range, end_range = sidebar_date_range(df_activity)
     granularity = sidebar_granularity()
     active_tasks: list[Task] = [task for project in active_projects for task in project.tasks]
@@ -62,7 +64,9 @@ def main() -> None:
         'granularity': granularity,
         'active_projects': active_projects,
         'active_tasks': active_tasks,
-        'dbio': dbio
+        'dbio': dbio,
+        'project_colors': project_colors,
+        'label_colors': label_colors,
     }
 
     page_render_fn = pages[current_page]

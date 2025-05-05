@@ -7,8 +7,8 @@ from todoist.plots import (current_tasks_types, plot_events_over_time, plot_most
 
 
 @st.cache_data
-def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], beg_range, end_range,
-                     granularity: str) -> None:
+def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], beg_range, end_range, granularity: str,
+                     label_colors: dict[str, str], project_colors: dict[str, str]) -> None:
     """
     Renders the Home dashboard page.
     """
@@ -19,7 +19,7 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
         st.plotly_chart(current_tasks_types(active_projects))
     with col2:
         st.header("Most Popular Labels")
-        st.plotly_chart(plot_most_popular_labels(active_projects))
+        st.plotly_chart(plot_most_popular_labels(active_projects, label_colors))
     # Metrics
     metrics: list[tuple[str, str, str, bool]] = extract_metrics(df_activity, granularity)
     cols = st.columns(len(metrics))
@@ -36,10 +36,10 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
     st.markdown(badges)
 
     st.header("Periodically Completed Tasks Per Project")
-    st.plotly_chart(plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity))
+    st.plotly_chart(plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors))
 
     st.header("Cumulative Periodically Completed Tasks Per Project")
-    st.plotly_chart(cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity))
+    st.plotly_chart(cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors))
 
     st.header("Events Over Time")
     st.plotly_chart(plot_events_over_time(df_activity, beg_range, end_range, granularity))
