@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Final
 
+from loguru import logger
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -72,6 +73,7 @@ def plot_most_popular_labels(projects: list[Project]) -> go.Figure:
 
     db_labels = DatabaseLabels()
     label_colors = db_labels.fetch_label_colors()
+    logger.debug('\n' + '\n'.join([f'{label}: {color}' for label, color in label_colors.items()]))
 
     fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
     fig.update_traces(hoverinfo='label+percent',

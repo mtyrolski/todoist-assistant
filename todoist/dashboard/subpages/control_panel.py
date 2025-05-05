@@ -11,6 +11,7 @@ import datetime
 import time
 import threading
 
+
 def render_control_panel_page(dbio: Database) -> None:
     config: OmegaConf = load_config('automations', '../configs')
     automations: list[Automation] = hydra.utils.instantiate(config.automations)

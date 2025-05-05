@@ -15,6 +15,7 @@ from todoist.dashboard.subpages import render_home_page, render_project_insights
 from todoist.database.demo import anonymize_project_names
 from todoist.database.demo import anonymize_label_names
 
+
 def main() -> None:
     """
     Main function to setup the dashboard.
@@ -31,11 +32,13 @@ def main() -> None:
             "No activity data available. Run `make init_local_env` first and ensure that your keys refer to account with non-zero tasks count."
         )
         st.stop()
-        
+
     if anonymized:
-        _ = anonymize_project_names(df_activity)
-        _ = anonymize_label_names(active_projects)    
-    
+        logger.info("Anonymizing data...")
+        project_ori2anonym = anonymize_project_names(df_activity)
+        label_ori2anonym = anonymize_label_names(active_projects)
+        dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+
     beg_range, end_range = sidebar_date_range(df_activity)
     granularity = sidebar_granularity()
     active_tasks: list[Task] = [task for project in active_projects for task in project.tasks]

@@ -11,6 +11,7 @@ from hydra import initialize
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from abc import ABC, abstractmethod
 
 T = TypeVar('T', set, dict)
 
@@ -33,6 +34,25 @@ class Cache:
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
+
+
+class Anonymizable(ABC):
+    def __init__(self):
+        self.is_anonymized = False
+
+    @abstractmethod
+    def _anonymize(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
+        pass
+
+    def anonymize(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
+        """
+        Anonymizes project and label names in the database.
+        """
+        if not self.is_anonymized:
+            self._anonymize(project_mapping, label_mapping)
+            self.is_anonymized = True
+        else:
+            logger.debug("Already anonymized. Skipping.")
 
 
 def last_n_years_in_weeks(n_years: int) -> int:
@@ -68,7 +88,7 @@ def load_config(config_name: str, config_path: str) -> OmegaConf:
     return OmegaConf.create(config)
 
 
-COLOR_NAME_TO_TODOIST_CODE: dict[str, str] = {
+TODOIST_COLOR_NAME_TO_RGB: dict[str, str] = {
     'berry_red': '#B8255F',
     'red': '#DC4C3E',
     'orange': '#C77100',
