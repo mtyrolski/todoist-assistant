@@ -5,7 +5,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import COLOR_NAME_TO_TODOIST_CODE, get_api_key, try_n_times
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, try_n_times
 from joblib import Parallel, delayed
 
 
@@ -154,11 +154,11 @@ class DatabaseProjects:
 
         mapping.update({project.id: project.project_entry.color for project in self.fetch_archived_projects()})
         mapping.update({
-            project.id: COLOR_NAME_TO_TODOIST_CODE[project.project_entry.color]
+            project.id: TODOIST_COLOR_NAME_TO_RGB[project.project_entry.color]
             for project in self.fetch_projects(include_tasks=False)
         })
         mapping.update({
-            project.id: COLOR_NAME_TO_TODOIST_CODE[project.project_entry.color]
+            project.id: TODOIST_COLOR_NAME_TO_RGB[project.project_entry.color]
             for project in self.fetch_archived_projects()
         })
 
