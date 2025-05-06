@@ -101,7 +101,6 @@ def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, g
             st.session_state.page_number = 1
 
         items_per_page = 20
-        total_pages = math.ceil(len(rescheduled_tasks) / items_per_page)
 
         # Calculate start and end indices for the current page
         start_idx = (st.session_state.page_number - 1) * items_per_page
@@ -131,24 +130,24 @@ def render_task_analysis_page(df_activity: pd.DataFrame, beg_range, end_range, g
             st.markdown(html, unsafe_allow_html=True)
 
         # Show pagination controls if there are more pages
-        if total_pages > 1:
-            col1, col2, col3 = st.columns([1, 2, 1])
+        # if total_pages > 1:
+        #     col1, col2, col3 = st.columns([1, 2, 1])
 
-            with col1:
-                if st.session_state.page_number > 1:
-                    if st.button("← Previous"):
-                        st.session_state.page_number -= 1
-                        st.rerun()
+        #     with col1:
+        #         if st.session_state.page_number > 1:
+        #             if st.button("← Previous"):
+        #                 st.session_state.page_number -= 1
+        #                 st.rerun()
 
-            with col2:
-                st.markdown(f"**Page {st.session_state.page_number} of {total_pages}**", unsafe_allow_html=True)
+        #     with col2:
+        #         st.markdown(f"**Page {st.session_state.page_number} of {total_pages}**", unsafe_allow_html=True)
 
-            with col3:
-                # Only show "Show More" button if there are more pages to show
-                if st.session_state.page_number < total_pages:
-                    if st.button("Show More →"):
-                        st.session_state.page_number += 1
-                        st.rerun()
+        #     with col3:
+        #         # Only show "Show More" button if there are more pages to show
+        #         if st.session_state.page_number < total_pages:
+        #             if st.button("Show More →"):
+        #                 st.session_state.page_number += 1
+        #                 st.rerun()
 
     # List of oldest tasks
     st.header("Oldest Tasks")
