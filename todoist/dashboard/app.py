@@ -33,7 +33,6 @@ def main() -> None:
     beg_range, end_range = sidebar_date_range(df_activity)
     granularity = sidebar_granularity()
     active_tasks: list[Task] = [task for project in active_projects for task in project.tasks]
-    logger.debug(f"Found {len(active_tasks)} active tasks")
     # Navigation
     pages = {
         "Home": render_home_page,
