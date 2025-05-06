@@ -9,12 +9,8 @@ from loguru import logger
 import streamlit as st
 
 from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_range, sidebar_granularity, get_database
-from todoist.types import Project, Task
+from todoist.types import Task
 from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
-
-from todoist.database.demo import anonymize_project_names
-from todoist.database.demo import anonymize_label_names
-
 
 def main() -> None:
     """
@@ -25,19 +21,12 @@ def main() -> None:
     demo_mode: bool = len(sys.argv) > 1 and 'demo' in sys.argv
 
     with st.spinner('Loading data...'):
-        df_activity = load_activity_data_cached(dbio)
-        active_projects: list[Project] = dbio.fetch_projects()
+        (df_activity, active_projects) = load_activity_data_cached(dbio, demo_mode)
     if len(df_activity) == 0:
         st.error(
             "No activity data available. Run `make init_local_env` first and ensure that your keys refer to account with non-zero tasks count."
         )
         st.stop()
-
-    if demo_mode and not dbio.is_anonymized:
-        logger.info("Anonymizing data...")
-        project_ori2anonym = anonymize_project_names(df_activity)
-        label_ori2anonym = anonymize_label_names(active_projects)
-        dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
 
     project_colors = dbio.fetch_mapping_project_name_to_color()
     label_colors = dbio.fetch_label_colors()

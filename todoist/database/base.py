@@ -15,7 +15,9 @@ class Database(Anonymizable, DatabaseActivity, DatabaseProjects, DatabaseTasks, 
 
     def reset(self):
         for bs in Database.__bases__:
-            bs.reset(self)
+            if hasattr(bs, 'reset'):
+                logger.debug(f'Resetting {bs.__name__}...')
+                assert hasattr(bs, 'reset'), f'{bs.__name__} is not resettable'
 
     @property
     def anonimizable_subdatabases(self):

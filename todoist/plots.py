@@ -169,7 +169,8 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
             go.Bar(name=col,
                    x=event_counts.index,
                    y=event_counts[col],
-                   marker_color=[project_colors.get(project, '#808080') for project in event_counts.index]))
+                   marker_color=[project_colors.get(project, '#808080') for project in event_counts.index],
+                   showlegend=False))
     fig.update_layout(barmode='stack',
                       title_text='Event Distribution by Root Project',
                       xaxis_title='Root Projects',

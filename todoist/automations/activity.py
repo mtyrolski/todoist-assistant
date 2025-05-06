@@ -10,7 +10,6 @@ class Activity(Automation):
         self.nweeks = nweeks
 
     def _tick(self, dbio: Database):
-        dbio.max_pages = self.nweeks
-        activity_db, new_items = fetch_activity(dbio)
+        activity_db, new_items = fetch_activity(dbio, self.nweeks)
         logger.info('Summary of Activity:')
         quick_summarize(activity_db, new_items)
