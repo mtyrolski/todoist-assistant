@@ -7,15 +7,26 @@ from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.database.base import Database
 from todoist.types import Project
 from functools import partial
-
+from loguru import logger
+from todoist.database.demo import anonymize_project_names
+from todoist.database.demo import anonymize_label_names
 
 @st.cache_data
-def load_activity_data_cached(_dbio: Database) -> pd.DataFrame:
+def load_activity_data_cached(_dbio: Database, demo_mode: bool) -> tuple[pd.DataFrame, list[Project]]:
     """
     Loads and processes the activity data from joblib file and database mappings.
     """
+    logger.debug("Loading activity data...")
     df = load_activity_data(_dbio)
-    return df
+    logger.debug(f"Loaded {len(df)} activity records")
+    active_projects: list[Project] = _dbio.fetch_projects()
+    logger.debug(f"Found {len(active_projects)} active projects")
+    if demo_mode and not _dbio.is_anonymized:
+        logger.info("Anonymizing data...")
+        project_ori2anonym = anonymize_project_names(df)
+        label_ori2anonym = anonymize_label_names(active_projects)
+        _dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+    return (df, active_projects)
 
 
 @st.cache_resource
