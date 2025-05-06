@@ -5,14 +5,16 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, try_n_times
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, try_n_times, Anonymizable
 from joblib import Parallel, delayed
 
 
 class DatabaseProjects:
     def __init__(self):
+        super().__init__()
         self.archived_projects_cache: dict[str, Project] | None = None    # Not initialized yet
         self.projects_cache: list[Project] | None = None    # Not initialized yet
+        self.mapping_project_name_to_color: dict[str, str] | None = None    # Not initialized yet
 
     def pull(self):
         self.fetch_archived_projects()
@@ -148,6 +150,7 @@ class DatabaseProjects:
         """
         Fetches a mapping of project IDs to their associated colors.
         """
+
         mapping: dict[str, str] = {
             project.id: project.project_entry.color for project in self.fetch_projects(include_tasks=False)
         }
@@ -162,15 +165,21 @@ class DatabaseProjects:
             for project in self.fetch_archived_projects()
         })
 
+        self.mapping_project_name_to_color = mapping
+
         return mapping
 
     def fetch_mapping_project_name_to_color(self) -> dict[str, str]:
         """
         Fetches a mapping of project names to their associated colors.
         """
+        if self.mapping_project_name_to_color is not None:
+            return self.mapping_project_name_to_color
+
         id_to_color = self.fetch_mapping_project_id_to_color()
         id_to_name = self.fetch_mapping_project_id_to_name()
         name_to_color = {id_to_name[project_id]: color for project_id, color in id_to_color.items()}
+        self.mapping_project_name_to_color = name_to_color
         return name_to_color
 
     def _get_root_project(self, project_id: int):
@@ -194,3 +203,14 @@ class DatabaseProjects:
             projects.append(ProjectEntry(**project))
 
         return projects
+
+    def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
+        if not self.projects_cache:
+            self.fetch_projects(include_tasks=True)
+
+        if not self.mapping_project_name_to_color:
+            _ = self.fetch_mapping_project_name_to_color()
+
+        for ori_name, anonym_name in tqdm(project_mapping.items(), desc="Anonymizing projects", unit="project"):
+            logger.info(f"Anonymizing project '{ori_name}' to '{anonym_name}'")
+            self.mapping_project_name_to_color[anonym_name] = self.mapping_project_name_to_color[ori_name]

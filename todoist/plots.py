@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Final
 
-from loguru import logger
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px

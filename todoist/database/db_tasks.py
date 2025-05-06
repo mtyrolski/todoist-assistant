@@ -11,7 +11,7 @@ import inspect
 class DatabaseTasks:
     """Database class to manage tasks in the Todoist API"""
     def __init__(self):
-        pass
+        super().__init__()
 
     def reset(self):
         pass

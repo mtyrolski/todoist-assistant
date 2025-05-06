@@ -38,6 +38,8 @@ class Cache:
 
 class Anonymizable(ABC):
     def __init__(self):
+        super().__init__()
+        logger.debug(f'Initializing {self.__class__.__name__}... somehow anonimizable')
         self.is_anonymized = False
 
     @abstractmethod
@@ -49,6 +51,7 @@ class Anonymizable(ABC):
         Anonymizes project and label names in the database.
         """
         if not self.is_anonymized:
+            logger.warning('Anonymizing data...')
             self._anonymize(project_mapping, label_mapping)
             self.is_anonymized = True
         else:
