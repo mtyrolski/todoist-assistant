@@ -13,13 +13,13 @@ from joblib import Parallel, delayed
 
 class DatabaseActivity:
     """Database class to fetch activity data from the Todoist API"""
-    def __init__(self, max_pages: int):
-        self.max_pages = max_pages
+    def __init__(self):
+        super().__init__()
 
     def reset(self):
         pass
 
-    def fetch_activity(self) -> list[Event]:
+    def fetch_activity(self, max_pages: int = 4) -> list[Event]:
         """
         Fetches the activity data from the Todoist API.
         Returns a list of Event objects, each of those is associated with a date
@@ -37,7 +37,7 @@ class DatabaseActivity:
                 page_events.append(Event(event_entry=event, id=event.id, date=event_date))
             return page_events
 
-        pages = range(0, self.max_pages + 1)
+        pages = range(0, max_pages + 1)
         all_events = Parallel(n_jobs=-1)(
             delayed(process_page)(page)
             for page in tqdm(pages, desc='Querying activity data', unit='page', total=self.max_pages))

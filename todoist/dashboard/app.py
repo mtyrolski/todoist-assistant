@@ -22,7 +22,7 @@ def main() -> None:
     """
     st.set_page_config(page_title="Todoist Dashboard", layout="wide")
     dbio = get_database()
-    anonymized: bool = len(sys.argv) > 1 and 'demo' in sys.argv
+    demo_mode: bool = len(sys.argv) > 1 and 'demo' in sys.argv
 
     with st.spinner('Loading data...'):
         df_activity = load_activity_data_cached(dbio)
@@ -33,7 +33,7 @@ def main() -> None:
         )
         st.stop()
 
-    if anonymized:
+    if demo_mode and not dbio.is_anonymized:
         logger.info("Anonymizing data...")
         project_ori2anonym = anonymize_project_names(df_activity)
         label_ori2anonym = anonymize_label_names(active_projects)

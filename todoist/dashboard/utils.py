@@ -23,7 +23,7 @@ def get_database() -> Database:
     """
     Returns a Database instance and pulls the latest data.
     """
-    dbio = Database('.env', 4)
+    dbio = Database('.env')
     dbio.pull()
     return dbio
 

@@ -2,22 +2,16 @@ import json
 from subprocess import DEVNULL, PIPE, run
 
 from tqdm import tqdm
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, Anonymizable, get_api_key
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key
 from loguru import logger
 
 
-class DatabaseLabels(Anonymizable):
+class DatabaseLabels:
     def __init__(self):
-        super(DatabaseLabels, self).__init__()
+        super().__init__()
         self._labels: list[dict] = []
         self._mapping_label_name_to_color: dict[str, str] = {}
         self._fetch_label_data()
-
-    def is_already_anonymized(self) -> bool:
-        """
-        Check if the labels have already been anonymized.
-        """
-        return self.is_anonymized
 
     def reset(self):
         self._fetch_label_data()
@@ -59,8 +53,9 @@ class DatabaseLabels(Anonymizable):
         except json.JSONDecodeError:
             logger.error("Failed to decode label data from Todoist API.")
 
-    def _anonymize(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
+    def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
         if not self._labels:
+            logger.debug("Labels not fetched yet. Fetching now.")
             self._fetch_label_data()
 
         for ori_name, anonym_name in tqdm(label_mapping.items(), desc="Anonymizing labels", unit="label"):
