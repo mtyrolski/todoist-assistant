@@ -296,13 +296,19 @@ automations:
 
 ### Aligning Archive Projects
 
-Map archived projects to active ones for accurate stats:
+
+Map archived projects to active ones for accurate stats and reporting. This step is essential because the Todoist API does not automatically link archived projects to their respective parent or related active projects. Without this alignment, the statistics and insights derived from the data could become fragmented and misleading. By manually mapping these relationships, we ensure a comprehensive and accurate representation of productivity trends and task history. Perhaps in future it will be somehow automated (contributions are welcome!).
+
 ```python
 link_adjustments = {
+    'Old Project 0': 'Current active root project',
     'Old Project 1 ⚔️': 'Current active root project',
-    'Old Project 2': 'Another active project 🔥⚔️🔥'
+    'Old Project 2': 'Another active project 🔥⚔️🔥',
+    'Old Project 3': 'An old master archive project'
 }
 ```
+
+For example, in the statistics, `Old Project 1` will be reflected under the correct active project (`Current active root project`). Archived projects will no longer appear as standalone entities, making the reports cohesive and more insightful.
 
 ## Contributing
 
