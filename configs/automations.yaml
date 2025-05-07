@@ -1,6 +1,30 @@
 automations:
   - _target_: todoist.automations.template.Template
     task_templates:
+      pr:
+        _target_: todoist.automations.template.TaskTemplate
+        content: Review PR
+        description: Review a pull request
+        due_date_days_difference: 0
+        priority: 1
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Read PR & Task content
+            description: Read the pull request
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Check code
+            description: Check the code
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Manually test the code
+            description: Manually test the code along with unit tests and other checks
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Write review
+            description: Write the review
+            due_date_days_difference: 0
+
       msg:
         _target_: todoist.automations.template.TaskTemplate
         content: Message
@@ -17,13 +41,14 @@ automations:
             description: Refine the text with AI
             due_date_days_difference: 0
           - _target_: todoist.automations.template.TaskTemplate
-            content: Send message
+            content: last check before sending
             description: Last refine before sending
             due_date_days_difference: 0
           - _target_: todoist.automations.template.TaskTemplate
             content: Send message
             description: Send the message
             due_date_days_difference: 0 
+
       
       call:
         _target_: todoist.automations.template.TaskTemplate
@@ -107,6 +132,9 @@ automations:
   - _target_: todoist.automations.activity.Activity
     name: Activity Last Week
     nweeks: 1
+  - _target_: todoist.automations.activity.Activity
+    name: Activity 2 Weeks
+    nweeks: 2
   - _target_: todoist.automations.activity.Activity
     name: Activity Last Month
     nweeks: 4
