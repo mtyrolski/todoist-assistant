@@ -82,8 +82,8 @@ flowchart TD
     Summarizes activity logs into actionable insights, provides on-demand or daily productivity snapshots, detects trends like peak hours or bottlenecks, tracks progress toward goals, supports plain-language queries, and tailors reports by projects, labels, or timeframes.
 
 <div style="text-align: center;">
-  <img src="img/home_1.png" alt="home_1" width="900"/>
-  <img src="img/home_2.png" alt="home_2" width="900"/>
+  <img src="img/home_header.png" alt="home_1" width="900"/>
+  <img src="img/home_suffix.png" alt="home_2" width="900"/>
 </div>
 
 ## Makefile Usage (recommended)
