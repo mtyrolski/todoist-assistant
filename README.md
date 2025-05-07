@@ -81,8 +81,10 @@ flowchart TD
   - **Agentic AI Module** *(incoming)*
     Summarizes activity logs into actionable insights, provides on-demand or daily productivity snapshots, detects trends like peak hours or bottlenecks, tracks progress toward goals, supports plain-language queries, and tailors reports by projects, labels, or timeframes.
 
-<img src="img/home_1.png" alt="home_1" width="900"/>
-<img src="img/home_2.png" alt="home_2" width="900"/>
+<div style="text-align: center;">
+  <img src="img/home_1.png" alt="home_1" width="900"/>
+  <img src="img/home_2.png" alt="home_2" width="900"/>
+</div>
 
 ## Makefile Usage (recommended)
 
@@ -128,7 +130,7 @@ To run the dashboard, execute the following command:
 streamlit run dashboard.py
 ```
 
-| This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events. You can also navigate to Control Panel to launch automations in GUI.  | <img src="img/control_panel.png" alt="control_panel" width="900"/> |
+| This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events. You can also navigate to Control Panel to launch automations in GUI.  | <img src="img/control_panel.png" alt="control_panel"/> |
 |---|---|
 
 ### Library Integration
