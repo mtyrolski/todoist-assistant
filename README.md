@@ -1,6 +1,6 @@
 # Todoist Assistant
 
-| **Todoist Assistant** is a Python-based tool designed to interact with the Todoist API. It fetches project and task data, generating insightful reports and statistics to help you track productivity trends. It offers the following key features: <br><br> 1. **Well-written Python library:** Easily fetch, manage, and modify Todoist data, including activities, projects, and events. <br> 2. **Interactive plots:** Visualize productivity trends and history (far beyond Todoist's default 4-week bar charts). Analyze data such as task label distributions or productivity trends from the creation of your Todoist account. <br> 3. **Automations:** Automate repetitive tasks like rolling out tasks based on specific labels. | <img src="img/logo.png" alt="Assistant Logo" width="700"/> |
+| **Todoist Assistant** is a Python-based locally based tool designed to interact with the Todoist API. It fetches project and task data, generating insightful reports and statistics to help you track productivity trends. It offers the following key features: <br><br> 1. **Well-written Python library:** Easily fetch, manage, and modify Todoist data, including activities, projects, and events. <br> 2. **Interactive plots:** Visualize productivity trends and history (far beyond Todoist's default 4-week bar charts). Analyze data such as task label distributions or productivity trends from the creation of your Todoist account. <br> 3. **Automations:** Automate repetitive tasks like rolling out tasks based on specific labels. | <img src="img/logo.png" alt="Assistant Logo" width="700"/> |
 |---|---|
 
 ## Library Design Overview
@@ -66,18 +66,23 @@ flowchart TD
 - **Separation of Concerns:**  
   Each module handles a specific task—fetching data, processing it, or visualizing results—so you can easily swap out or extend functionality without touching the core.
 
-- **Core Modules:**
-  - **Activity Module:**  
-    Gathers and aggregates Todoist events such as task additions, deletions, and completions.
+- **Core Modules:**    
   - **Database Module:**  
     Acts as the intermediary between the Todoist API and your app. It’s subdivided into:
     - *Projects:* Manage active/archived projects.
     - *Tasks:* Add, delete, or template-insert tasks.
-    - *Activity:* Log and update event data.
+    - *Activity:* Gathers and aggregates Todoist events such as task additions, deletions, and completions.
   - **Dashboard & Plots:**  
     Use Streamlit to build interactive dashboards. The Plots module transforms raw data into engaging visualizations that showcase productivity trends.
-  - **Automations & Integrations:** *(experimental)*  
-    Automations allow custom triggers and actions, while integrations open the door to connect with external services like Twitter or Gmail.
+  - **Automations & Integrations:**
+    Automations allow custom triggers and actions like fetching activity, apply templates, ...
+  - **Integrations** *(experimental)*   
+    Integrations open the door to connect with external services like Twitter or Gmail.
+  - **Agentic AI Module** *(incoming)*
+    Summarizes activity logs into actionable insights, provides on-demand or daily productivity snapshots, detects trends like peak hours or bottlenecks, tracks progress toward goals, supports plain-language queries, and tailors reports by projects, labels, or timeframes.
+
+<img src="img/home_1.png" alt="home_1" width="900"/>
+<img src="img/home_1.png" alt="home_2" width="900"/>
 
 ## Makefile Usage (recommended)
 
@@ -123,13 +128,9 @@ To run the dashboard, execute the following command:
 streamlit run dashboard.py
 ```
 
-This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events.
+| This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events. You can also navigate to Control Panel to launch automations in GUI.  | <img src="img/control_panel.png" alt="control_panel" width="900"/> |
+|---|---|
 
-Navigate to Control Panel to launch automations in GUI.
-
-### Library Integration
-
-Integrate Todoist-Assistant into your projects using the provided API. Here are some examples:
 ### Library Integration
 
 Integrate Todoist-Assistant into your projects using the provided API. Here are some examples:
@@ -241,6 +242,10 @@ automations:
             content: Setup meeting
             description: Should be put on calendar.
             due_date_days_difference: -3
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Prepare content for a meeting
+            description: Prepare notes and bullet points to cover.
+            due_date_days_difference: -1
           # Additional child tasks omitted for brevity...
       
       # Paper reading workflow template
@@ -252,16 +257,7 @@ automations:
         priority: 1
         children:
           # Child tasks omitted for brevity...
-      
-      # Feature development template
-      feature:
-        _target_: todoist.automations.template.TaskTemplate
-        content: Feature Development
-        description: Implement a feature
-        due_date_days_difference: 0
-        priority: 1
-        children:
-          # Child tasks omitted for brevity...
+
   
   # Activity tracking automations for different time periods
   - _target_: todoist.automations.activity.Activity
@@ -270,9 +266,7 @@ automations:
   - _target_: todoist.automations.activity.Activity
     name: Activity Last Month
     nweeks: 4
-  - _target_: todoist.automations.activity.Activity
-    name: Activity Last 10 years
-    nweeks: 520
+...
   
   # Task multiplication automation
   - _target_: todoist.automations.multiplicate.Multiply
