@@ -6,7 +6,7 @@
       <strong>Todoist Assistant</strong> is a Python-based locally based tool designed to interact with the Todoist API. It fetches project and task data, generating insightful reports and statistics to help you track productivity trends. It offers the following key features: <br><br>
       1. <strong>Well-written Python library:</strong> Easily fetch, manage, and modify Todoist data, including activities, projects, and events. <br>
       2. <strong>Interactive plots:</strong> Visualize productivity trends and history (far beyond Todoist's default 4-week bar charts). Analyze data such as task label distributions or productivity trends from the creation of your Todoist account. <br>
-      3. <strong>Automations:</strong> Automate repetitive tasks like rolling out tasks based on specific labels.
+      3. <strong>Automations:</strong> Automate repetitive tasks like rolling out templates based on specific labels.
     </td>
     <td style="text-align: center; vertical-align: top;">
       <img src="img/logo.png" alt="Assistant Logo" style="max-width: 100%; height: auto;"/>
@@ -266,7 +266,6 @@ automations:
             content: Prepare content for a meeting
             description: Prepare notes and bullet points to cover.
             due_date_days_difference: -1
-          # Additional child tasks omitted for brevity...
       
       # Paper reading workflow template
       read_paper:
@@ -287,10 +286,10 @@ automations:
     name: Activity Last Month
     nweeks: 4
 ...
-  
-  # Task multiplication automation
-  - _target_: todoist.automations.multiplicate.Multiply
 ```
+- `Template` automation will transform all tasks marked with labels `@template-call` by attaching specified subtasks, `read_paper` and other templates similarly. See [todoist/automations/template.py](todoist/automations/template.py) for details.
+- `Activity` fetches all evenets from specific time range. See (todoist/automations/activity.py)[todoist/automations/activity.py] for details.
+- Similarly other automations defined in (todoist/automations)[todoist/automations] folder can be enhanced or inspected and even implemented new ones by inheritance with base automation (todoist/automations/base.py)[todoist/automations/base.py].
 
 ## Configuration
 
