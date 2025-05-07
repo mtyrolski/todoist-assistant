@@ -5,12 +5,12 @@ Refactored for better structure and readability.
 
 import inspect
 import sys
-from loguru import logger
 import streamlit as st
 
 from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_range, sidebar_granularity, get_database
 from todoist.types import Task
 from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
+
 
 def main() -> None:
     """

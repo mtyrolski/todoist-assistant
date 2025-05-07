@@ -4,7 +4,6 @@ import streamlit as st
 from todoist.plots import (plot_heatmap_of_events_by_day_and_hour, plot_cumulative_events_over_time,
                            cumsum_plot_per_project)
 from todoist.types import Task
-import math
 
 
 def process_rescheduled_tasks(df_activity, active_tasks):

@@ -4,7 +4,7 @@ from todoist.database.db_activity import DatabaseActivity
 from todoist.database.db_labels import DatabaseLabels
 from todoist.database.db_projects import DatabaseProjects
 from todoist.database.db_tasks import DatabaseTasks
-from todoist.utils import Anonymizable, last_n_years_in_weeks
+from todoist.utils import Anonymizable
 from loguru import logger
 
 

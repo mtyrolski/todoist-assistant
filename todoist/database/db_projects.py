@@ -5,7 +5,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, try_n_times, Anonymizable
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, try_n_times
 from joblib import Parallel, delayed
 
 

@@ -20,6 +20,7 @@ def priority_tasks(project: Project, prio: int) -> int:
     """
     return len(list(filter(lambda task: task.task_entry.priority == prio, project.tasks)))
 
+
 p1_tasks = partial(priority_tasks, prio=4)
 p2_tasks = partial(priority_tasks, prio=3)
 p3_tasks = partial(priority_tasks, prio=2)
