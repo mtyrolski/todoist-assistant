@@ -1,10 +1,7 @@
 # Todoist Assistant
 
-Todoist Assistant is a Python-based tool designed to interact with the Todoist API. It fetches project and task data, generating insightful reports and statistics to help you track productivity trends.
-
-<p align="center">
-  <img src="img/logo.png" alt="Assistant Logo" width="200"/>
-</p>
+| **Todoist Assistant** is a Python-based tool designed to interact with the Todoist API. It fetches project and task data, generating insightful reports and statistics to help you track productivity trends. It offers the following key features: <br><br> 1. **Well-written Python library:** Easily fetch, manage, and modify Todoist data, including activities, projects, and events. <br> 2. **Interactive plots:** Visualize productivity trends and history (far beyond Todoist's default 4-week bar charts). Analyze data such as task label distributions or productivity trends from the creation of your Todoist account. <br> 3. **Automations:** Automate repetitive tasks like rolling out tasks based on specific labels. | <img src="img/logo.png" alt="Assistant Logo" width="400"/> |
+|---|---|
 
 ## Library Design Overview
 
