@@ -129,9 +129,16 @@ To run the dashboard, execute the following command:
 ```bash
 streamlit run dashboard.py
 ```
-
-| This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events. You can also navigate to Control Panel to launch automations in GUI.  | <img src="img/control_panel.png" alt="control_panel"/> |
-|---|---|
+<table>
+  <tr>
+    <td style="text-align: justify; vertical-align: top;">
+      This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events. You can also navigate to Control Panel to launch automations in GUI.
+    </td>
+    <td style="text-align: center; vertical-align: top;">
+      <img src="img/control_panel.png" alt="control_panel" style="max-width: 100%; height: auto;"/>
+    </td>
+  </tr>
+</table>
 
 ### Library Integration
 
