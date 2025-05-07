@@ -11,6 +11,7 @@ from loguru import logger
 from todoist.database.demo import anonymize_project_names
 from todoist.database.demo import anonymize_label_names
 
+
 @st.cache_data
 def load_activity_data_cached(_dbio: Database, demo_mode: bool) -> tuple[pd.DataFrame, list[Project]]:
     """

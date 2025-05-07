@@ -151,6 +151,7 @@ class Template(Automation):
             db.remove_task(task.id)
             logger.info(f"Initialized task {task.id} from template {template_name}")
 
+
 # pylint: disable=missing-function-docstring
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
