@@ -288,8 +288,8 @@ automations:
 ...
 ```
 - `Template` automation will transform all tasks marked with labels `@template-call` by attaching specified subtasks, `read_paper` and other templates similarly. See [todoist/automations/template.py](todoist/automations/template.py) for details.
-- `Activity` fetches all evenets from specific time range. See (todoist/automations/activity.py)[todoist/automations/activity.py] for details.
-- Similarly other automations defined in (todoist/automations)[todoist/automations] folder can be enhanced or inspected and even implemented new ones by inheritance with base automation (todoist/automations/base.py)[todoist/automations/base.py].
+- `Activity` fetches all evenets from specific time range. See [todoist/automations/activity.py](todoist/automations/activity.py) for details.
+- Similarly other automations defined in (todoist/automations)[todoist/automations] folder can be enhanced or inspected and even implemented new ones by inheritance with base automation [todoist/automations/base.py](todoist/automations/base.py).
 
 ## Configuration
 
