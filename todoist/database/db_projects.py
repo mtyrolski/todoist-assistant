@@ -67,7 +67,6 @@ class DatabaseProjects:
                     self.archived_projects_cache = {project.id: project for project in archived}
                 return self.archived_projects_cache[project_id]
 
-        # project = ProjectEntry(**result_dict['project'])
         project = safe_instantiate_entry(ProjectEntry, **result_dict['project'])
         return Project(id=project.id, project_entry=project, tasks=[], is_archived=False)
 
@@ -184,7 +183,6 @@ class DatabaseProjects:
         return name_to_color
 
     def _get_root_project(self, project_id: int):
-        # project = self.fetch_project_by_id(project_id)
         project = try_n_times(lambda: self.fetch_project_by_id(project_id), 3)
         if project.project_entry.parent_id is None:
             return project
@@ -201,7 +199,6 @@ class DatabaseProjects:
 
         projects = []
         for project in json.loads(data.stdout)['projects']:
-            # projects.append(ProjectEntry(**project))
             projects.append(safe_instantiate_entry(ProjectEntry, **project))
 
         return projects

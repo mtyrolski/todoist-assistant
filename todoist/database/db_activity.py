@@ -57,8 +57,7 @@ class DatabaseActivity:
         decoded_result: dict = json.loads(response.stdout)
         total_events_count: int = decoded_result['count']
 
-        # for event in decoded_result['events']:
-        # events.append(_Event_API_V9(**event))
+
         events = list(map(lambda event: safe_instantiate_entry(_Event_API_V9, **event), decoded_result['events']))
         if total_events_count > limit:
             for offset in range(limit, total_events_count, limit):
