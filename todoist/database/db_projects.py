@@ -5,7 +5,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, try_n_times
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times
 from joblib import Parallel, delayed
 
 
@@ -37,7 +37,7 @@ class DatabaseProjects:
                    stderr=DEVNULL,
                    check=True)
         data_dicts: list[dict] = json.loads(data.stdout)
-        entries = map(lambda raw_dict: ProjectEntry(**raw_dict), data_dicts)
+        entries = map(lambda raw_dict: safe_instantiate_entry(ProjectEntry, **raw_dict), data_dicts)
         self.archived_projects_cache = {
             entry.id: Project(id=entry.id, project_entry=entry, tasks=[], is_archived=True) for entry in entries
         }
@@ -67,7 +67,8 @@ class DatabaseProjects:
                     self.archived_projects_cache = {project.id: project for project in archived}
                 return self.archived_projects_cache[project_id]
 
-        project = ProjectEntry(**result_dict['project'])
+        # project = ProjectEntry(**result_dict['project'])
+        project = safe_instantiate_entry(ProjectEntry, **result_dict['project'])
         return Project(id=project.id, project_entry=project, tasks=[], is_archived=False)
 
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
@@ -104,7 +105,7 @@ class DatabaseProjects:
 
         tasks = []
         for task in json.loads(data.stdout)['items']:
-            tasks.append(TaskEntry(**task))
+            tasks.append(safe_instantiate_entry(TaskEntry, **task))
 
         return tasks
 
@@ -200,7 +201,8 @@ class DatabaseProjects:
 
         projects = []
         for project in json.loads(data.stdout)['projects']:
-            projects.append(ProjectEntry(**project))
+            # projects.append(ProjectEntry(**project))
+            projects.append(safe_instantiate_entry(ProjectEntry, **project))
 
         return projects
 

@@ -12,8 +12,29 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from abc import ABC, abstractmethod
+from typing import KeysView, Type, Any
 
 T = TypeVar('T', set, dict)
+
+
+def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
+    """
+    Get all fields of a dataclass class.
+    """
+    return cls.__dataclass_fields__.keys()
+
+
+def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
+    """Safely instantiates a class by writing unexpected (i.e now in todoist api) field to kwargs parameter"""
+    class_fields = get_all_fields_of_dataclass(cls)
+    unexpected_fields = set(entry_kwargs.keys()) - set(class_fields)
+
+    assert 'new_api_kwargs' in class_fields, f"kwargs field is not in {cls.__name__} class"
+
+    # write unexpected fields to kwargs
+    filtered_kwargs = {k: v for k, v in entry_kwargs.items() if k in class_fields}
+    unexpected_kwargs = {k: v for k, v in entry_kwargs.items() if k in unexpected_fields}
+    return cls(**filtered_kwargs, new_api_kwargs=unexpected_kwargs)
 
 
 class LocalStorage:

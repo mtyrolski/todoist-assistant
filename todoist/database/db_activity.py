@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from todoist.stats import extract_task_due_date
 from todoist.types import Event, _Event_API_V9
-from todoist.utils import get_api_key, try_n_times
+from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times
 from joblib import Parallel, delayed
 
 
@@ -46,7 +46,6 @@ class DatabaseActivity:
         return result
 
     def _fetch_activity_page(self, page: int) -> list[_Event_API_V9]:
-        events = []
         limit: int = 50
 
         url = f"https://api.todoist.com/sync/v9/activity/get?page={page}&limit={limit}"
@@ -58,9 +57,9 @@ class DatabaseActivity:
         decoded_result: dict = json.loads(response.stdout)
         total_events_count: int = decoded_result['count']
 
-        for event in decoded_result['events']:
-            events.append(_Event_API_V9(**event))
-
+        # for event in decoded_result['events']:
+        # events.append(_Event_API_V9(**event))
+        events = list(map(lambda event: safe_instantiate_entry(_Event_API_V9, **event), decoded_result['events']))
         if total_events_count > limit:
             for offset in range(limit, total_events_count, limit):
                 url = f"https://api.todoist.com/sync/v9/activity/get?page={page}&limit={limit}&offset={offset}"

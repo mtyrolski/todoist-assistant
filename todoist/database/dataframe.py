@@ -69,9 +69,14 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     if no_title_events:
         logger.warning(f'Found {len(no_title_events)} events without title.')
 
+    logger.info(f'Loaded {len(activity_db)} events from {activity_filename}.')
     mapping_project_id_to_root = _dbio.fetch_mapping_project_id_to_root()
+    logger.success(f'Loaded project id to root mapping ({len(mapping_project_id_to_root)} entries)')
     mapping_project_id_to_name = _dbio.fetch_mapping_project_id_to_name()
+    logger.success(f'Loaded project id to name mapping ({len(mapping_project_id_to_name)} entries)')
     mapping_project_name_to_id = _dbio.fetch_mapping_project_name_to_id()
+    logger.success(f'Loaded project name to id mapping ({len(mapping_project_name_to_id)} entries)')
+    logger.info('Creating dataframe from events...')
 
     df = events_to_dataframe(activity_db,
                              project_id_to_name=mapping_project_id_to_name,
@@ -79,7 +84,8 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
 
     original_root_id = df['root_project_id'].copy()
     link_mapping = get_adjusting_mapping()
-
+    logger.info(f'Loaded {len(link_mapping)} link adjustments')
+    logger.info('Adjusting root project names...')
     # Adjust project names and map back to ids
     df['root_project_name'] = df['root_project_name'].apply(lambda name: link_mapping.get(name, name))
     df['root_project_id'] = df['root_project_name'].apply(lambda name: mapping_project_name_to_id[name])

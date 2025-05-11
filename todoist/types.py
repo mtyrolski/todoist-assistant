@@ -31,6 +31,7 @@ class _ProjectEntry_API_V9:
     default_order: int | None = None
     public_access: bool = False
     access: str | None = None
+    new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
     def __repr__(self):
         return f'Project {self.name}'
@@ -54,6 +55,7 @@ class _Event_API_V9:
     v2_object_id: str | None
     v2_parent_item_id: str | None
     v2_parent_project_id: str | None
+    new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
     def __repr__(self):
         return f'Event {self.object_type} {self.event_type}'
@@ -93,6 +95,7 @@ class _Task_API_V9:
     v2_project_id: str | None
     v2_section_id: str | None
     day_order: str | None
+    new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
     def __repr__(self):
         return f'Task {self.content}'
