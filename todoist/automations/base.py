@@ -34,6 +34,8 @@ class Automation(ABC):
             logger.info(f"Current time: {now}")
             logger.info(f"Time until next run: {delay}")
             return []
+        
+        logger.info(f"Running automation {self.name} at {now} since passed {(now - last_launch).total_seconds() / 60} minutes since last run.")
 
         task_delegations = self._tick(db)
 

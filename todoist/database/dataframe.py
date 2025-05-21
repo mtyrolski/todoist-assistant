@@ -9,6 +9,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from todoist.utils import Cache
+
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
 
@@ -60,7 +62,8 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     Loads and processes the activity data from joblib file and database mappings.
     """
     activity_filename = 'activity.joblib'
-    activity_db: set[Event] = load(activity_filename) if exists(activity_filename) else set()
+    # activity_db: set[Event] = load(activity_filename) if exists(activity_filename) else set()
+    activity_db: set[Event] = Cache().activity.load()
 
     # Filter supported events and check for events with missing titles
     supported_events = list(filter(lambda ev: ev.event_entry.event_type in SUPPORTED_EVENT_TYPES, activity_db))

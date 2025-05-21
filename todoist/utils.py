@@ -5,7 +5,6 @@ from pickle import HIGHEST_PROTOCOL
 from typing import Callable, TypeVar
 from joblib import load, dump
 from loguru import logger
-
 from hydra import compose
 from hydra import initialize
 from hydra.core.global_hydra import GlobalHydra
@@ -13,9 +12,23 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from abc import ABC, abstractmethod
 from typing import KeysView, Type, Any
+from pickle import UnpicklingError
+from zlib import error as ZlibError
+from lzma import LZMAError
+from builtins import EOFError
+from builtins import ValueError
+from builtins import TypeError
+from builtins import FileNotFoundError
+from builtins import OSError
+from builtins import ImportError
+from builtins import AttributeError
+from builtins import ModuleNotFoundError
 
 T = TypeVar('T', set, dict)
-
+LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError,
+                FileNotFoundError, ValueError,
+                TypeError, OSError, ImportError, AttributeError,
+                ModuleNotFoundError, KeyError)
 
 def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
     """
@@ -36,6 +49,14 @@ def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     unexpected_kwargs = {k: v for k, v in entry_kwargs.items() if k in unexpected_fields}
     return cls(**filtered_kwargs, new_api_kwargs=unexpected_kwargs)
 
+class LocalStorageError(Exception):
+    """
+    Custom exception for LocalStorage-related errors.
+    Logs the error message when the exception is instantiated.
+    """
+    def __init__(self, message: str):
+        super().__init__(message)
+        logger.error(f"LocalStorageError: {message}")
 
 class LocalStorage:
     def __init__(self, path: str, resource_class: Callable[[], T]) -> None:
@@ -43,10 +64,16 @@ class LocalStorage:
         self.resource_class = resource_class
 
     def load(self) -> T:
-        return load(self.path) if exists(self.path) else self.resource_class()
+        try:
+            return load(self.path) if exists(self.path) else self.resource_class()
+        except LOCAL_STORAGE_EXCEPTIONS as e:
+            raise LocalStorageError(f"Failed to load data from {self.path}: {e}") from e
 
     def save(self, data: T) -> None:
-        dump(data, self.path, protocol=HIGHEST_PROTOCOL)
+        try:
+            dump(data, self.path, protocol=HIGHEST_PROTOCOL)
+        except LOCAL_STORAGE_EXCEPTIONS as e:
+            raise LocalStorageError(f"Failed to save data to {self.path}: {e}") from e
 
 
 class Cache:

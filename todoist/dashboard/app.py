@@ -10,7 +10,7 @@ import streamlit as st
 from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_range, sidebar_granularity, get_database
 from todoist.types import Task
 from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
-
+from todoist.automations.activity import Activity
 
 def main() -> None:
     """
@@ -19,6 +19,7 @@ def main() -> None:
     st.set_page_config(page_title="Todoist Dashboard", layout="wide")
     dbio = get_database()
     demo_mode: bool = len(sys.argv) > 1 and 'demo' in sys.argv
+    Activity(name='last_2_week.on_launch', nweeks=2, frequency_in_minutes=2).tick(dbio)
 
     with st.spinner('Loading data...'):
         (df_activity, active_projects) = load_activity_data_cached(dbio, demo_mode)
