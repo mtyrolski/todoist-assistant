@@ -26,7 +26,7 @@ class Multiply(Automation):
         all_tasks: Iterable[Task] = [task for project in projects for task in project.tasks]
         logger.debug(f"Found {len(list(all_tasks))} tasks in total")
         all_unique_labels = set(tag for task in all_tasks for tag in task.task_entry.labels)
-        logger.debug(f"Found {len(all_unique_labels)} unique labels: {all_unique_labels}")
+        logger.debug(f"Found {len(all_unique_labels)} unique labels")
 
         tasks_to_multiply = list(
             filter(lambda task: any(is_multiplication_label(tag) for tag in task.task_entry.labels), all_tasks))

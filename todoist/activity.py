@@ -7,7 +7,8 @@ import typer
 from todoist.utils import Cache, LocalStorageError
 
 EventCollection = set[Event]
-NWEEKSMAX = 520 # 10 years
+NWEEKSMAX = 520    # 10 years
+
 
 def get_last_n_events(events: EventCollection, n: int) -> EventCollection:
     """
@@ -61,6 +62,7 @@ def fetch_activity(dbio: Database, nweeks: int) -> tuple[EventCollection, EventC
         logger.error('No local activity database found, creating a new one.')
         logger.error(str(e))
         is_corrupted = True
+        all_events = []
     new_events: set[Event] = set()
     for fetched_event in fetched_activity:
         if fetched_event not in all_events:

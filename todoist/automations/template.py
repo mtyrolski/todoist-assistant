@@ -70,7 +70,7 @@ class Template(Automation):
         all_tasks: Iterable[Task] = [task for project in projects for task in project.tasks]
         logger.debug(f"Found {len(list(all_tasks))} tasks in total")
         all_unique_labels = set(tag for task in all_tasks for tag in task.task_entry.labels)
-        logger.debug(f"Found {len(all_unique_labels)} unique labels: {all_unique_labels}")
+        logger.debug(f"Found {len(all_unique_labels)} unique labels")
 
         task_to_initialize_from_template = list(
             filter(lambda task: any(tag.startswith(FROM_TEMPLATE_LABEL_PREFIX) for tag in task.task_entry.labels),
