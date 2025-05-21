@@ -23,12 +23,12 @@ from builtins import OSError
 from builtins import ImportError
 from builtins import AttributeError
 from builtins import ModuleNotFoundError
+import time
 
 T = TypeVar('T', set, dict)
-LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError,
-                FileNotFoundError, ValueError,
-                TypeError, OSError, ImportError, AttributeError,
-                ModuleNotFoundError, KeyError)
+LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
+                            OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
+
 
 def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
     """
@@ -49,6 +49,7 @@ def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     unexpected_kwargs = {k: v for k, v in entry_kwargs.items() if k in unexpected_fields}
     return cls(**filtered_kwargs, new_api_kwargs=unexpected_kwargs)
 
+
 class LocalStorageError(Exception):
     """
     Custom exception for LocalStorage-related errors.
@@ -57,6 +58,7 @@ class LocalStorageError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         logger.error(f"LocalStorageError: {message}")
+
 
 class LocalStorage:
     def __init__(self, path: str, resource_class: Callable[[], T]) -> None:
@@ -67,7 +69,7 @@ class LocalStorage:
         try:
             return load(self.path) if exists(self.path) else self.resource_class()
         except LOCAL_STORAGE_EXCEPTIONS as e:
-            raise LocalStorageError(f"Failed to load data from {self.path}: {e}") from e
+            raise LocalStorageError(f"Failed to load data from {self.path}: {type(e)}. {e}") from e
 
     def save(self, data: T) -> None:
         try:
@@ -121,14 +123,19 @@ U = TypeVar('U')
 
 def try_n_times(fn: Callable[[], U], n) -> U | None:
     """
-    Try to run a function n times and return the result if successful
-    If the function fails, log the exception and after n trials, return None
+    Try to run a function n times and return the result if successful.
+    If the function fails, log the exception and after n trials, return None.
+    Waits exponentially longer after each failure (1s, 2s, 4s, ...).
     """
-    for _ in range(n):
+    for attempt in range(n):
         try:
             return fn()
         except Exception as e:
-            logger.error(f"Exception {e} occurred")
+            logger.error(f"Exception {e} occurred on attempt {attempt + 1}")
+            if attempt < n - 1:
+                wait_time = 2**(attempt + 3)
+                logger.debug(f"Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
     return None
 
 

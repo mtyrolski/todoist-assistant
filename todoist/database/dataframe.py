@@ -99,11 +99,7 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
 
     not_adjusted = set(df['root_project_name']) - set(link_mapping.keys())
     if not_adjusted:
-        logger.info(f'Not adjusted projects: {not_adjusted}')
         logger.warning('If any of these are neither active nor archived root project, please adjust the mapping')
-
-        subprojects_count = df['root_project_name'].value_counts()
-        logger.info(f'Subprojects count: {subprojects_count}')
 
     df['date'] = pd.to_datetime(df['date'])
     df.sort_values('date', inplace=True)

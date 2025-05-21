@@ -97,26 +97,66 @@ flowchart TD
   <img src="img/home_suffix.png" alt="home_2" width="900"/>
 </div>
 
+## Installation
+### Recommended Setup Environment
+
+> **Note:** While the Todoist-Stats-App can be used on Windows, it is highly recommended to set it up in a Linux environment for the best experience.  
+> If you are on Windows, consider installing [Ubuntu 20.04 (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) to get started with a Linux subsystem.
+
+
+### Setup Instructions (Linux / Ubuntu / Debian)
+
+1. **Install Python 3**
+
+   Make sure Python 3 is installed on your system.  
+   On Ubuntu/Debian, you can install it via:
+   ```bash
+   sudo apt update
+   sudo apt install python3
+   ```
+
+2. **Install Required Tools**
+
+   - [Git](https://git-scm.com/)
+   - [Make](https://askubuntu.com/a/272020) (for Makefile support)
+   - [UV (Python package manager)](https://github.com/astral-sh/uv)
+
+3. **Clone and Set Up the Repository**
+
+   ```bash
+   git clone https://github.com/mtyrolski/todoist-assistant.git
+   cd todoist-assistant
+   # Set up the Python environment & dependencies
+   uv install
+
+   # Create a .env file with your configuration
+   echo "API_KEY = 'your_todoist_api_key'" >> .env
+   echo "FILE_ENCODING = 'utf-8'" >> .env
+   ```
+
+4. **Setup Todoist Assistant**
+   Launch initialization of the local environment which will fetch your tasks, events and projects from last 10 years (can take a few minutes).
+   ```bash
+   make init_local_env
+   ```
+
+5. **(Optional) In case of any fetching error, you can setup env from beginning using two steps**
+  Clear and setup local env from beinning.
+  ```bash
+  make clear_local_env
+  make init_local_env
+  ```
+
 ## Makefile Usage (recommended)
 
 The following [Makefile](Makefile) commands are available for managing the local environment and running the dashboard:
 
-- **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity.
+- **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
 
 
 ## Manual Usage
-
-### Installation
-```bash
-git clone https://github.com/mtyrolski/todoist-assistant.git
-cd todoist-assistant
-# Set up environment
-poetry shell
-poetry install
-echo "API_KEY=your_todoist_api_key" > .env
-```
 
 ### Updating Activity Database
 
