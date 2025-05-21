@@ -97,10 +97,16 @@ flowchart TD
   <img src="img/home_suffix.png" alt="home_2" width="900"/>
 </div>
 
+## Demo Video
+
+[![Watch the demo on YouTube](https://img.youtube.com/vi/e_-EOyAq6mU/hqdefault.jpg)](https://www.youtube.com/watch?v=e_-EOyAq6mU)
+
+[Watch the demo on YouTube](https://www.youtube.com/watch?v=e_-EOyAq6mU)
+
 ## Installation
 ### Recommended Setup Environment
 
-> **Note:** While the Todoist-Stats-App can be used on Windows, it is highly recommended to set it up in a Linux environment for the best experience.  
+> **Note for windows:** While the Todoist-Stats-App can be used on Windows, it is highly recommended to set it up in a Linux environment for the best experience.  
 > If you are on Windows, consider installing [Ubuntu 20.04 (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) to get started with a Linux subsystem.
 
 
@@ -128,11 +134,15 @@ flowchart TD
    cd todoist-assistant
    # Set up the Python environment & dependencies
    uv install
-
-   # Create a .env file with your configuration
+   cp .env.example .env
+   # Open .env file (copy)
+   nano .env
+   # Inside a .env file, write your configuration and access key
    echo "API_KEY = 'your_todoist_api_key'" >> .env
    echo "FILE_ENCODING = 'utf-8'" >> .env
    ```
+   Where to find **Todoist API Key**? 
+   `Go to App --> Settings --> Integrations --> Developer --> API token --> Copy API token`
 
 4. **Setup Todoist Assistant**
    Launch initialization of the local environment which will fetch your tasks, events and projects from last 10 years (can take a few minutes).
@@ -194,89 +204,49 @@ streamlit run dashboard.py
 ### Library Integration
 
 Integrate Todoist-Assistant into your projects using the provided API. Here are some examples:
+
+**Fetching activity**
 ```python
-from datetime import datetime, timedelta
-from typing import List
-import os
-
-# Import necessary modules from the library
+from todoist.types import Event, is_event_rescheduled
 from todoist.database.base import Database
-from todoist.types import Project, Event, _Task_API_V9 as TaskEntry
 
-# Initialize the database with path to your .env file
-# The .env file should contain your API_KEY
-db = Database(dotenv_path=".env")
-
-# Add a new task to a project
-task_id = db.insert_task(
-    content="Review Pull Requests",
-    project_id="2345678901",  # Replace with your actual project ID
-    due_date="2025-05-01",
-    priority=3,  # 3 = Medium priority in Todoist
-    labels=["work", "coding"]
-)
-print(f"New task created: {task_id}")
-
-# Create a task template and insert it with overrides
-task_template = TaskEntry(
-    id="template_task",
-    content="Daily stand-up meeting",
-    project_id="2345678901",
-    priority=2,
-    labels=["work", "meetings"],
-    description="Discuss project progress and blockers",
-)
-
-# Insert the task from template with some overrides
-result = db.insert_task_from_template(
-    task=task_template,
-    due_date="2025-05-01",
-    content="Special stand-up meeting",
-    priority=3
-)
-print(f"Task inserted from template: {result}")
-
-# Fetch projects data
-db.pull()  # This ensures project data is loaded
-
-# List all active projects
-projects: List[Project] = db.projects_cache
-print("Active Projects:")
-for proj in projects:
-    print(f" - {proj.project_entry.name} (ID: {proj.id})")
-
-# Fetch a specific project by its identifier
-project: Project = db.fetch_project_by_id("2345678901")
-print(f"Fetched project: {project.project_entry.name}, Archived: {project.is_archived}")
-
-# List archived projects
-archived_projects: List[Project] = db.fetch_archived_projects()
-print("Archived Projects:")
-for proj in archived_projects:
-    print(f" - {proj.project_entry.name} (ID: {proj.id})")
-
-# Get label colors
-label_colors = db.fetch_label_colors()
-print("Label Colors:")
-for label_name, color_code in label_colors.items():
-    print(f" - {label_name}: {color_code}")
-
-# Retrieve activity logs and filter events
-activity_data: List[Event] = db.fetch_activity()
-
-# Filter for completed events
-completed_events: List[Event] = [
-    evt for evt in activity_data if evt.event_entry.event_type == "completed"
-]
-print(f"Number of completed events: {len(completed_events)}")
-
-# Filter activity events from the last 14 days
-cutoff_date: datetime = datetime.utcnow() - timedelta(days=14)
-recent_events: List[Event] = [
-    evt for evt in activity_data if evt.date >= cutoff_date
-]
-print(f"Events in the last 2 weeks: {len(recent_events)}")
+dbio = Database('.env') # Initialize the database connection (in fact, bridge to local cached data and connection to Todoist API)
+# Fetch events from Todoist API with 5 weeks
+activity: list[Event] = dbio.fetch_activity(max_pages=5)
+len(activity)
 ```
+*1324*
+
+```python
+n_reschedules = sum(map(is_event_rescheduled, activity))
+print(f"Number of rescheduled events: {n_reschedules} ( {(round(n_reschedules / len(activity) * 100, 2))}% )")
+```
+
+*Querying activity data: 6page [00:00, 2818.12page/s]*
+*Number of rescheduled events: 186 ( 14.05% )*
+
+**Inserting tasks**
+```python
+from todoist.types import Project
+
+projects: list[Project] = dbio.fetch_projects(include_tasks=True)
+dbio.insert_task(content='Buy milk', project_id=projects[0].id) # Insert a new task into the first project
+```
+
+**Create mapping to play with your todoist history**
+```python
+project_name_to_tasks = {
+    project.project_entry.name: project.tasks for project in projects
+}
+```
+See source files to full capabilities:
+- [todoist/database/base.py](todoist/database/base.py)
+- [todoist/database/dataframe.py](todoist/database/base.py)
+- [todoist/database/db_activity.py](todoist/database/base.py)
+- [todoist/database/db_labels.py](todoist/database/base.py)
+- [todoist/database/db_projects.py](todoist/database/base.py)
+- [todoist/database/db_tasks.py](todoist/database/base.py)
+
 
 ### Custom Automations
 
