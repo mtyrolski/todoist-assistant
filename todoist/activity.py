@@ -4,10 +4,10 @@ from todoist.database.base import Database
 from todoist.types import Event
 import typer
 
-from todoist.utils import Cache
+from todoist.utils import Cache, LocalStorageError
 
 EventCollection = set[Event]
-
+NWEEKSMAX = 520 # 10 years
 
 def get_last_n_events(events: EventCollection, n: int) -> EventCollection:
     """
@@ -47,21 +47,28 @@ def quick_summarize(events: EventCollection, new_events: EventCollection):
         )
 
 
-def fetch_activity(dbio: Database, nweeks: int) -> tuple[EventCollection, EventCollection]:
+def fetch_activity(dbio: Database, nweeks: int) -> tuple[EventCollection, EventCollection, bool]:
     """Fetches activity from the last n_weeks weeks, updates
-    local database, and returns the new items."""
+    local database, and returns the new items.
+    
+    Third param is a is_corrupted flag indicating if internl error occured and database had to be recreated."""
     fetched_activity: list[Event] = dbio.fetch_activity(max_pages=nweeks)
     logger.info(f'Fetched {len(fetched_activity)} events')
-
-    activity_db: set[Event] = Cache().activity.load()
-    new_items: set[Event] = set()
+    is_corrupted = False
+    try:
+        all_events: set[Event] = Cache().activity.load()
+    except LocalStorageError as e:
+        logger.error('No local activity database found, creating a new one.')
+        logger.error(str(e))
+        is_corrupted = True
+    new_events: set[Event] = set()
     for fetched_event in fetched_activity:
-        if fetched_event not in activity_db:
-            activity_db.add(fetched_event)
-            new_items.add(fetched_event)
-    logger.info(f'Added {len(new_items)} new events, current size: {len(activity_db)}')
-    Cache().activity.save(activity_db)
-    return activity_db, new_items
+        if fetched_event not in all_events:
+            all_events.add(fetched_event)
+            new_events.add(fetched_event)
+    logger.info(f'Added {len(new_events)} new events, current size: {len(all_events)}')
+    Cache().activity.save(all_events)
+    return all_events, new_events, is_corrupted
 
 
 def remove_last_n_events_from_activity(activity_db: EventCollection, n: int) -> EventCollection:
@@ -74,8 +81,8 @@ def remove_last_n_events_from_activity(activity_db: EventCollection, n: int) -> 
 
 def main(nweeks: int = 3):
     dbio = Database('.env')
-    activity_db, new_items = fetch_activity(dbio, nweeks)
-    logger.info('Summary of Activity:')
+    activity_db, new_items, is_corrupted = fetch_activity(dbio, nweeks)
+    logger.info(f'Summary of Activity (is_corrupted={is_corrupted}):')
     quick_summarize(activity_db, new_items)
 
 
