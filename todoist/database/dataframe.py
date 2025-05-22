@@ -33,7 +33,7 @@ def get_adjusting_mapping() -> dict[str, str]:
 
     if not personal_dir.exists():
         logger.warning(f'Personal directory {personal_dir} does not exist. No adjustments will be made.')
-        os.mkdir(personal_dir)
+        os.makedirs(personal_dir)
         with open(personal_dir / 'archived_root_projects.py', 'w') as f:
             f.write('link_adjustements = {\n')
             f.write('# No adjustments made\n')
