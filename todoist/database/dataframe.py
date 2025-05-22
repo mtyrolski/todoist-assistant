@@ -35,11 +35,15 @@ def get_adjusting_mapping() -> dict[str, str]:
         logger.warning(f'Personal directory {personal_dir} does not exist. No adjustments will be made.')
         os.makedirs(personal_dir)
         with open(personal_dir / 'archived_root_projects.py', 'w') as f:
-            f.write('link_adjustements = {\n')
-            f.write('# No adjustments made\n')
-            f.write('# "some_archived_project": "some_current_main_project"')
-            f.write('# "other_archived_project": "other_archived_main_project"')
-            f.write('}\n\n')
+            f.writelines([
+                '# Adjustments for archived root projects\n',
+                '# This file is auto-generated. Do not edit manually.\n',
+                'link_adjustements = {\n',
+                '# No adjustments made\n',
+                '# "some_archived_project": "some_current_main_project"\n',
+                '# "other_archived_project": "other_archived_main_project"\n',
+                '}\n\n'
+            ])
         logger.info(f'Created empty adjustments file in {personal_dir}')
 
     scripts = [s for s in listdir(personal_dir) if s.endswith('.py')]
