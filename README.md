@@ -118,7 +118,7 @@ flowchart TD
    On Ubuntu/Debian, you can install it via:
    ```bash
    sudo apt update
-   sudo apt install python3
+   sudo apt install -y python3 libpq-dev
    ```
 
 2. **Install Required Tools**
@@ -133,14 +133,14 @@ flowchart TD
    git clone https://github.com/mtyrolski/todoist-assistant.git
    cd todoist-assistant
    # Set up the Python environment & dependencies
-   uv install
+   uv run python3 -c "print('packages installed')"
    cp .env.example .env
    # Open .env file (copy)
    nano .env
-   # Inside a .env file, write your configuration and access key
-   echo "API_KEY = 'your_todoist_api_key'" >> .env
-   echo "FILE_ENCODING = 'utf-8'" >> .env
+   # Inside a .env file, edit your configuration and access key
+   API_KEY = 'your_todoist_api_key'
    ```
+   then do `ctrl + x` --> `y` --> `enter` to save the file.
    Where to find **Todoist API Key**? 
    `Go to App --> Settings --> Integrations --> Developer --> API token --> Copy API token`
 
