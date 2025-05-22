@@ -1,10 +1,9 @@
 from todoist.database.base import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
-from joblib import load
-from os.path import exists
 import pandas as pd
 from loguru import logger
 from os import listdir
+import os
 import importlib.util
 import sys
 from pathlib import Path
@@ -34,6 +33,7 @@ def get_adjusting_mapping() -> dict[str, str]:
 
     if not personal_dir.exists():
         logger.warning(f'Personal directory {personal_dir} does not exist. No adjustments will be made.')
+        os.mkdir(personal_dir)
         with open(personal_dir / 'archived_root_projects.py', 'w') as f:
             f.write('link_adjustements = {\n')
             f.write('# No adjustments made\n')
