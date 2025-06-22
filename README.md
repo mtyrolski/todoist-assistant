@@ -157,6 +157,12 @@ flowchart TD
   make init_local_env
   ```
 
+1. **(Optional) Update your local env from make**
+    If you want to update your local environment (from shell instead of control panel) with the latest activity data + run templates and label-based automations on your todoist account, you can run:
+    ```bash
+    make update_env
+    ```
+
 ## Makefile Usage (recommended)
 
 The following [Makefile](Makefile) commands are available for managing the local environment and running the dashboard:
