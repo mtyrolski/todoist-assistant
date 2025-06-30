@@ -1,6 +1,7 @@
 import json
 from functools import partial
 from subprocess import DEVNULL, PIPE, run
+from typing import Any
 
 from loguru import logger
 from tqdm import tqdm
@@ -73,7 +74,15 @@ class DatabaseActivity:
                     logger.error(f'Type: {type(decoded_result)}')
                     logger.error(f'Keys: {decoded_result.keys()}')
 
-                for event in decoded_result['events']:
-                    events.append(_Event_API_V9(**event))
+                for event_kwargs in decoded_result['events']:
+                    dataclass_params = {
+                        key: value for key, value in event_kwargs.items() if key in _Event_API_V9.__dataclass_fields__
+                    }
+                    events.append(_Event_API_V9(
+                        **dataclass_params,
+                        new_api_kwargs={key: value for key, value in event_kwargs.items()
+                                        if key not in _Event_API_V9.__dataclass_fields__}
+                    ))
+
 
         return events
