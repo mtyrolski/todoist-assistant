@@ -6,7 +6,7 @@ from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.utils import try_n_times
 from functools import partial
-
+from todoist.automations.activity import Activity
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
@@ -18,10 +18,24 @@ def main(config: DictConfig) -> None:
     logger.info("Loaded automations: {}", list(map(str, automations)))
     
     # Filtering only for short ones
-    automation_gen = filter(lambda x: not x.is_long, automations)
+    automations = list(filter(lambda x: not x.is_long, automations))
+
+    # if Activity among automations, we need to run the longest (still left) one.
+    activity_automations: list[Activity] = list(filter(lambda x: isinstance(x, Activity), automations))
+    rest_automations = list(filter(lambda x: not isinstance(x, Activity), automations))
+    if activity_automations:
+        longest_automation = max(activity_automations, key=lambda x: x.frequency_in_minutes)
+        logger.info(f"Activity automations found, running the longest one, each {int(longest_automation.frequency_in_minutes)} minutes.")
+        automations = [longest_automation] + rest_automations
+    else:
+        logger.info("No activity automations found, running all remaining automations.")
     
+    if not automations:
+        logger.warning("No automations to run. Exiting.")
+        return
+
     logger.info("Starting automations...")
-    for automation in tqdm(automation_gen, desc="Processing automations"):
+    for automation in tqdm(automations, desc="Processing automations"):
         logger.info("Running automation: {}", automation)
         try_n_times(partial(automation.tick, dbio), 5)
         logger.info("Automation completed: {}", automation)
