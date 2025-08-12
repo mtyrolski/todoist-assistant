@@ -14,3 +14,7 @@ run_demo:
 
 clear_local_env:
 	rm -f activity.joblib
+
+update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
+	uv run python3 -m todoist.automations.update_env --config-dir configs --config-name automations && \
+	PYTHONPATH=. uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False

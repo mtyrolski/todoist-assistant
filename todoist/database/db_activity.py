@@ -29,7 +29,7 @@ class DatabaseActivity:
         result: list[Event] = []
 
         def process_page(page: int) -> list[Event]:
-            events: list[_Event_API_V9] = self._fetch_activity_page(page)
+            events: list[Event] = self._fetch_activity_page(page)
             page_events: list[Event] = []
             for event in events:
                 # TODO: Implement a factory method to create the correct Event subclass
