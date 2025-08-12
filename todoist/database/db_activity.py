@@ -19,6 +19,14 @@ class DatabaseActivity:
 
     def reset(self):
         pass
+    
+    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_weeks: int = 5) -> list[Event]:
+        n_empty_weeks: int = 0
+        total_events: list[Event] = []
+        while n_empty_weeks < early_stop_after_n_weeks:
+            window_event: list[Event] = self.fetch_activity(...)
+            
+    
 
     def fetch_activity(self, max_pages: int = 4) -> list[Event]:
         """
@@ -39,6 +47,10 @@ class DatabaseActivity:
             return page_events
 
         pages = range(0, max_pages + 1)
+            #     all_events = Parallel(n_jobs=-1)(
+            # delayed(process_page)(pages[0]), delayed(process_page)(pages[1]),
+            # delayed(process_page)(pages[2]), delayed(process_page)(pages[3])),
+            # ..., delayed(process_page)(pages[max_pages]))
         all_events = Parallel(n_jobs=-1)(
             delayed(process_page)(page)
             for page in tqdm(pages, desc='Querying activity data', unit='page', total=max_pages))
