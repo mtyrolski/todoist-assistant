@@ -24,8 +24,8 @@ def main(config: DictConfig) -> None:
     activity_automations: list[Activity] = list(filter(lambda x: isinstance(x, Activity), automations))
     rest_automations = list(filter(lambda x: not isinstance(x, Activity), automations))
     if activity_automations:
-        longest_automation = max(activity_automations, key=lambda x: x.frequency_in_minutes)
-        logger.info(f"Activity automations found, running the longest one, each {int(longest_automation.frequency_in_minutes)} minutes.")
+        longest_automation = max(activity_automations, key=lambda x: x.nweeks)
+        logger.info(f"Activity automations found, running the longest one - last {int(longest_automation.nweeks)} weeks of activity collection.")
         automations = [longest_automation] + rest_automations
     else:
         logger.info("No activity automations found, running all remaining automations.")
