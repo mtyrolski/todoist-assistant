@@ -1,7 +1,6 @@
 import json
 from functools import partial
 from subprocess import DEVNULL, PIPE, run
-from typing import Any
 
 from loguru import logger
 from tqdm import tqdm
@@ -86,3 +85,81 @@ class DatabaseActivity:
 
 
         return events
+    
+    def fetch_activity_adaptively(self, sliding_window_size: int, early_stopping_after: int) -> list[Event]:
+        """
+        Fetches activity adaptively using sliding windows and early stopping.
+        
+        This method fetches activity in sliding windows of `sliding_window_size` pages
+        and continues until `early_stopping_after` consecutive windows return no new activity.
+        It iteratively calls fetch_activity to get different page ranges moving backwards in time.
+        
+        Args:
+            sliding_window_size: Number of pages to fetch in each sliding window  
+            early_stopping_after: Number of consecutive windows with no activity before stopping
+            
+        Returns:
+            List of Event objects from all fetched windows
+            
+        Example:
+            # If we have activity: week0: 15, week1: 130, week2: 0, week3: 95, week4: 100, 
+            #                      week5: 0, week6: 0, week7: 0, ...
+            # fetch_activity_adaptively(1, 1) will fetch (week0), (week1), (week2) and stop
+            # fetch_activity_adaptively(1, 2) will fetch (week0), (week1), (week2), (week3), 
+            #                                                    (week4), (week5), (week6) and stop
+            # fetch_activity_adaptively(2, 2) will fetch (week0,week1), (week2,week3), 
+            #                                             (week4,week5), (week6,week7) and stop
+        """
+        all_events: list[Event] = []
+        seen_event_ids: set[str] = set()
+        current_start_page = 0
+        consecutive_empty_windows = 0
+        
+        logger.info(f"Starting adaptive activity fetch with window_size={sliding_window_size}, "
+                   f"early_stopping_after={early_stopping_after}")
+        
+        while consecutive_empty_windows < early_stopping_after:
+            # Fetch the current sliding window by getting pages from current_start_page 
+            # to current_start_page + sliding_window_size - 1
+            logger.debug(f"Fetching window: pages {current_start_page} to "
+                        f"{current_start_page + sliding_window_size - 1}")
+            
+            # Fetch pages for this window
+            window_events: list[Event] = []
+            for page in range(current_start_page, current_start_page + sliding_window_size):
+                page_events = self._fetch_activity_page(page)
+                
+                # Convert to Event objects (similar to what fetch_activity does)
+                for event in page_events:
+                    event_date = extract_task_due_date(event.event_date)
+                    if event_date is not None:
+                        window_events.append(Event(event_entry=event, id=event.id, date=event_date))
+            
+            # Count new events in this window (events we haven't seen before)
+            new_events_count = 0
+            for event in window_events:
+                if event.id not in seen_event_ids:
+                    seen_event_ids.add(event.id)
+                    all_events.append(event)
+                    new_events_count += 1
+            
+            logger.debug(f"Window pages {current_start_page}-{current_start_page + sliding_window_size - 1} "
+                        f"returned {len(window_events)} total events, {new_events_count} new events")
+            
+            # Check if this window had any new activity
+            if new_events_count == 0:
+                consecutive_empty_windows += 1
+                logger.debug(f"Empty window detected. Consecutive empty windows: "
+                           f"{consecutive_empty_windows}/{early_stopping_after}")
+            else:
+                consecutive_empty_windows = 0
+                logger.debug(f"Window had {new_events_count} new events. "
+                           f"Resetting consecutive empty windows counter.")
+            
+            # Move to the next window
+            current_start_page += sliding_window_size
+            
+        logger.info(f"Adaptive fetch completed. Total unique events fetched: {len(all_events)}. "
+                   f"Stopped after {consecutive_empty_windows} consecutive empty windows.")
+        
+        return all_events
