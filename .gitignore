@@ -10,3 +10,4 @@ personal/*.py
 credentials.json
 outputs/
 automation.log
+demo_adaptive_fetch.py
