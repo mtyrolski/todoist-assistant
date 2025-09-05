@@ -395,6 +395,12 @@ automations:
     name: Activity Last 10 years
     nweeks: 520
   - _target_: todoist.automations.multiplicate.Multiply
+  - _target_: todoist.langgraph.automation.LangGraphAutomation
+    name: "LangGraph Task Synthesizer"
+    frequency: 1440  # Run once per day (in minutes)
+    is_long: false
+    input_source: "env"  # Options: "env", "file", "manual" 
+    auto_create_tasks: false  # Set to true to automatically create tasks in Todoist
 
 hydra:
   searchpath:
