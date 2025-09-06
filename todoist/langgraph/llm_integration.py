@@ -12,8 +12,41 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
+try:
+    from pydantic import BaseModel, Field
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+    # Create dummy classes when Pydantic is not available
+    class BaseModel:
+        pass
+    def Field(**kwargs):
+        return None
+
 from .config import get_config
 from .constants import ModelProviders, DefaultValues
+
+
+if PYDANTIC_AVAILABLE:
+    class TaskGenerationOutput(BaseModel):
+        """Pydantic model for structured task generation output."""
+        main_task: str = Field(description="The main task title")
+        description: str = Field(description="Detailed task description")
+        urgency: str = Field(description="Task urgency level: low, medium, high")
+        suggested_labels: List[str] = Field(description="List of suggested label names", default_factory=list)
+        subtasks: List[str] = Field(description="List of subtask titles", default_factory=list)
+        priority: Optional[int] = Field(description="Task priority (1-4)", default=None)
+else:
+    # Fallback class when Pydantic is not available
+    class TaskGenerationOutput:
+        def __init__(self, main_task="", description="", urgency="medium", 
+                     suggested_labels=None, subtasks=None, priority=None):
+            self.main_task = main_task
+            self.description = description
+            self.urgency = urgency
+            self.suggested_labels = suggested_labels or []
+            self.subtasks = subtasks or []
+            self.priority = priority
 
 
 class BaseLLM(ABC):
@@ -31,74 +64,87 @@ class BaseLLM(ABC):
 
 
 class HuggingFaceLLM(BaseLLM):
-    """Hugging Face transformers integration."""
+    """Hugging Face transformers integration with LangChain."""
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize Hugging Face LLM."""
         self.config = config
-        self.model = None
-        self.tokenizer = None
+        self.llm = None
+        self.structured_llm = None
         self._initialize_model()
     
     def _initialize_model(self):
-        """Initialize the Hugging Face model and tokenizer."""
+        """Initialize the Hugging Face LangChain LLM."""
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+            from langchain_huggingface import HuggingFacePipeline
+            from transformers import pipeline
             
             model_name = self.config.get("model_name", DefaultValues.HUGGINGFACE_MODEL)
-            device = self.config.get("device", "auto")
             
-            logger.info(f"Initializing Hugging Face model: {model_name}")
+            logger.info(f"Initializing Hugging Face LangChain model: {model_name}")
             
-            # Use pipeline for simpler text generation
-            self.pipeline = pipeline(
+            # Create transformers pipeline
+            hf_pipeline = pipeline(
                 "text-generation",
                 model=model_name,
-                device=0 if device == "cuda" else -1,  # 0 for GPU, -1 for CPU
-                return_full_text=False,
                 max_length=self.config.get("max_length", DefaultValues.MAX_LENGTH),
                 temperature=self.config.get("temperature", DefaultValues.TEMPERATURE),
                 do_sample=self.config.get("do_sample", True),
-                top_p=self.config.get("top_p", 0.9)
+                return_full_text=False
             )
             
-            logger.info("Hugging Face model initialized successfully")
+            # Wrap in LangChain HuggingFace LLM
+            self.llm = HuggingFacePipeline(pipeline=hf_pipeline)
             
-        except ImportError:
-            logger.warning("Transformers library not available, HuggingFace LLM disabled")
-            self.pipeline = None
+            # Create structured LLM if Pydantic is available
+            if PYDANTIC_AVAILABLE:
+                self.structured_llm = self.llm.with_structured_output(TaskGenerationOutput)
+            else:
+                self.structured_llm = None
+            
+            logger.info("Hugging Face LangChain model initialized successfully")
+            
+        except ImportError as e:
+            logger.warning(f"Required libraries not available for HuggingFace LLM: {e}")
+            self.llm = None
+            self.structured_llm = None
         except Exception as e:
             logger.error(f"Error initializing Hugging Face model: {e}")
-            self.pipeline = None
+            self.llm = None
+            self.structured_llm = None
     
     def generate_response(self, prompt: str, **kwargs) -> str:
-        """Generate response using Hugging Face model."""
+        """Generate response using Hugging Face LangChain model."""
         if not self.is_available():
             raise RuntimeError("Hugging Face model not available")
         
         try:
-            max_length = kwargs.get("max_length", self.config.get("max_length", DefaultValues.MAX_LENGTH))
-            
-            # Generate response
-            result = self.pipeline(
-                prompt,
-                max_length=max_length,
-                num_return_sequences=1,
-                pad_token_id=self.pipeline.tokenizer.eos_token_id
-            )
-            
-            if result and len(result) > 0:
-                return result[0]["generated_text"].strip()
-            else:
-                return ""
+            # Use LangChain LLM for generation
+            response = self.llm.invoke(prompt)
+            return response.strip() if response else ""
                 
         except Exception as e:
             logger.error(f"Error generating response with Hugging Face: {e}")
             return ""
     
+    def generate_structured_response(self, prompt: str, **kwargs) -> Optional[TaskGenerationOutput]:
+        """Generate structured response using with_structured_output."""
+        if not self.is_available() or self.structured_llm is None:
+            logger.warning("Structured LLM not available, falling back to manual parsing")
+            return None
+        
+        try:
+            # Use structured output for better parsing
+            result = self.structured_llm.invoke(prompt)
+            return result
+                
+        except Exception as e:
+            logger.error(f"Error generating structured response: {e}")
+            return None
+    
     def is_available(self) -> bool:
         """Check if Hugging Face model is available."""
-        return self.pipeline is not None
+        return self.llm is not None
 
 
 class OpenAILLM(BaseLLM):
@@ -234,6 +280,13 @@ class LLMManager:
         prompt = self._build_task_generation_prompt(user_input, available_labels, context)
         
         try:
+            # Try structured output first if available
+            if hasattr(self.llm, 'generate_structured_response'):
+                structured_result = self.llm.generate_structured_response(prompt)
+                if structured_result:
+                    return self._convert_structured_to_dict(structured_result)
+            
+            # Fallback to regular response and parsing
             response = self.llm.generate_response(prompt)
             return self._parse_llm_response(response, user_input)
             
@@ -248,20 +301,40 @@ class LLMManager:
         available_labels: List[str],
         context: Dict[str, Any]
     ) -> str:
-        """Build prompt for task generation."""
+        """Build prompt for task generation with structured output."""
         prompts = self.config.get_prompts()
         
-        system_prompt = prompts.get("system_prompt", "Generate structured tasks.")
-        task_prompt = prompts.get("task_generation_prompt", 
-            "Based on the user input: '{user_input}', generate appropriate tasks.")
+        system_prompt = prompts.get("system_prompt", 
+            "You are a task management assistant. Generate structured tasks from user input.")
         
-        # Format the prompt with available data
-        formatted_prompt = task_prompt.format(
-            user_input=user_input,
-            available_labels=", ".join(available_labels) if available_labels else "none"
-        )
+        # Enhanced prompt for structured output
+        task_prompt = f"""
+Based on the user input: '{user_input}', create a comprehensive task breakdown.
+
+Available labels in Todoist: {', '.join(available_labels) if available_labels else 'none'}
+
+Generate:
+- A clear main task title
+- Detailed description
+- Appropriate urgency level (low/medium/high)
+- Relevant labels from the available ones
+- Useful subtasks if the task is complex
+
+Focus on being practical and actionable.
+"""
         
-        return f"{system_prompt}\n\n{formatted_prompt}"
+        return f"{system_prompt}\n\n{task_prompt}"
+    
+    def _convert_structured_to_dict(self, structured_output: TaskGenerationOutput) -> Dict[str, Any]:
+        """Convert Pydantic model to dictionary format."""
+        return {
+            "main_task": structured_output.main_task,
+            "description": structured_output.description,
+            "urgency": structured_output.urgency,
+            "suggested_labels": structured_output.suggested_labels,
+            "subtasks": structured_output.subtasks,
+            "priority": structured_output.priority
+        }
     
     def _parse_llm_response(self, response: str, user_input: str) -> Dict[str, Any]:
         """Parse LLM response into structured task data."""

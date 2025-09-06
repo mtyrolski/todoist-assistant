@@ -31,9 +31,17 @@ class LabelManager:
             # Reset and fetch fresh label data
             self.db_labels.reset()
             
-            # Get available labels from the database
-            if hasattr(self.db_labels, '_labels') and self.db_labels._labels:
-                self.available_labels = [label.get('name', '') for label in self.db_labels._labels if label.get('name')]
+            # Get available labels from the database using robust access
+            try:
+                # Try to access _labels attribute directly (it should exist after reset)
+                labels_data = self.db_labels._labels if self.db_labels._labels else []
+            except AttributeError:
+                # Fallback if _labels doesn't exist for some reason
+                logger.warning("_labels attribute not found on DatabaseLabels instance")
+                labels_data = []
+            
+            if labels_data:
+                self.available_labels = [label.get('name', '') for label in labels_data if label.get('name')]
             else:
                 self.available_labels = []
             
