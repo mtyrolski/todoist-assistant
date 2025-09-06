@@ -20,15 +20,33 @@ class DatabaseActivity:
     def reset(self):
         pass
     
-    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_weeks: int = 5) -> list[Event]:
+    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] = set()) -> list[Event]:
         n_empty_weeks: int = 0
+        iterated_weeks: int = 0
         total_events: list[Event] = []
-        while n_empty_weeks < early_stop_after_n_weeks:
-            window_event: list[Event] = self.fetch_activity(...)
+        print("Start fetch_activity_adaptively: window_size=%d, early_stop=%d", 
+        nweeks_window_size, early_stop_after_n_windows)
+        while n_empty_weeks < early_stop_after_n_windows:
+            window_event: list[Event] = self.fetch_activity(nweeks_window_size, iterated_weeks)
+            logger.debug(f"Fetching activity: window_size={window_event}, offset={iterated_weeks} weeks")
+            iterated_weeks += nweeks_window_size
+            logger.debug(f"Fetched {len(window_event)} events in current window")
+            if len([e for e in window_event if e not in events_already_fetched]) == 0:
+                n_empty_weeks += 1
+                logger.debug(f"No events found, empty_weeks_count={n_empty_weeks}")
+            else:
+                n_empty_weeks = 0
+                logger.debug("Events found, resetting empty_weeks_count to 0")
+            total_events.extend(window_event)
+            logger.debug("Total events so far: %d", len(total_events))
+        logger.debug("Stopping fetch after %d weeks processed, total_events=%d",
+        iterated_weeks, len(total_events))
+        return total_events
+
             
     
 
-    def fetch_activity(self, max_pages: int = 4) -> list[Event]:
+    def fetch_activity(self, max_pages: int = 4, starting_page: int = 0) -> list[Event]:
         """
         Fetches the activity data from the Todoist API.
         Returns a list of Event objects, each of those is associated with a date
@@ -46,7 +64,8 @@ class DatabaseActivity:
                 page_events.append(Event(event_entry=event, id=event.id, date=event_date))
             return page_events
 
-        pages = range(0, max_pages + 1)
+        pages = range(starting_page, starting_page + max_pages)
+            # pages = range(0, max_pages + 1)
             #     all_events = Parallel(n_jobs=-1)(
             # delayed(process_page)(pages[0]), delayed(process_page)(pages[1]),
             # delayed(process_page)(pages[2]), delayed(process_page)(pages[3])),
