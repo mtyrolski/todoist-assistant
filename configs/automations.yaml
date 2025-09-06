@@ -399,7 +399,7 @@ automations:
     name: "LangGraph Task Synthesizer"
     frequency: 1440  # Run once per day (in minutes)
     is_long: false
-    input_source: "env"  # Options: "env", "file", "manual" 
+    input_source: "env"  # Options: "env", "file", "manual" (use constants from InputSources)
     auto_create_tasks: false  # Set to true to automatically create tasks in Todoist
 
 hydra:

@@ -9,11 +9,19 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import os
 
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from .task_synthesizer import TaskSynthesizer, TaskSuggestion
+from .constants import (
+    InputSources, EnvironmentVariables, DefaultValues, PriorityLevels
+)
+from .config import get_config
 
 
 class LangGraphAutomation(Automation):
@@ -27,9 +35,9 @@ class LangGraphAutomation(Automation):
     def __init__(
         self, 
         name: str = "LangGraph Task Synthesizer", 
-        frequency: float = 1440,  # Run once per day by default
+        frequency: float = DefaultValues.FREQUENCY_MINUTES,  # Run once per day by default
         is_long: bool = False,
-        input_source: str = "manual",
+        input_source: str = InputSources.MANUAL,
         auto_create_tasks: bool = False
     ):
         """
@@ -39,13 +47,14 @@ class LangGraphAutomation(Automation):
             name: Name of the automation
             frequency: Frequency in minutes between runs
             is_long: Whether this is a long-running automation
-            input_source: Source of input ("manual", "file", "env")
+            input_source: Source of input (InputSources.MANUAL, InputSources.FILE, InputSources.ENV)
             auto_create_tasks: Whether to automatically create tasks in Todoist
         """
         super().__init__(name, frequency, is_long)
         self.input_source = input_source
         self.auto_create_tasks = auto_create_tasks
         self.task_synthesizer = TaskSynthesizer()
+        self.config = get_config()
         
         logger.info(f"Initialized LangGraph automation with input_source='{input_source}', auto_create={auto_create_tasks}")
     
@@ -99,11 +108,11 @@ class LangGraphAutomation(Automation):
         Returns:
             List of user input strings to process
         """
-        if self.input_source == "env":
+        if self.input_source == InputSources.ENV:
             return self._get_inputs_from_env()
-        elif self.input_source == "file":
+        elif self.input_source == InputSources.FILE:
             return self._get_inputs_from_file()
-        elif self.input_source == "manual":
+        elif self.input_source == InputSources.MANUAL:
             return self._get_manual_inputs()
         else:
             logger.warning(f"Unknown input source: {self.input_source}")
@@ -114,7 +123,7 @@ class LangGraphAutomation(Automation):
         inputs = []
         
         # Check for LANGGRAPH_INPUT environment variable
-        env_input = os.getenv("LANGGRAPH_INPUT")
+        env_input = os.getenv(EnvironmentVariables.INPUT)
         if env_input:
             inputs.append(env_input)
             logger.info(f"Found input from environment: {env_input}")
@@ -122,7 +131,7 @@ class LangGraphAutomation(Automation):
         # Check for multiple inputs (LANGGRAPH_INPUT_1, LANGGRAPH_INPUT_2, etc.)
         i = 1
         while True:
-            env_key = f"LANGGRAPH_INPUT_{i}"
+            env_key = f"{EnvironmentVariables.INPUT}_{i}"
             env_value = os.getenv(env_key)
             if env_value:
                 inputs.append(env_value)
@@ -135,7 +144,7 @@ class LangGraphAutomation(Automation):
     
     def _get_inputs_from_file(self) -> List[str]:
         """Get inputs from a file."""
-        file_path = os.getenv("LANGGRAPH_INPUT_FILE", "langgraph_inputs.txt")
+        file_path = os.getenv(EnvironmentVariables.INPUT_FILE, DefaultValues.FILE_PATH)
         
         try:
             if os.path.exists(file_path):
@@ -145,7 +154,7 @@ class LangGraphAutomation(Automation):
                 logger.info(f"Read {len(inputs)} inputs from file: {file_path}")
                 
                 # Clear the file after reading (optional)
-                if os.getenv("LANGGRAPH_CLEAR_FILE_AFTER_READ", "false").lower() == "true":
+                if os.getenv(EnvironmentVariables.CLEAR_FILE_AFTER_READ, "false").lower() == "true":
                     open(file_path, 'w').close()
                     logger.info(f"Cleared input file: {file_path}")
                 
@@ -162,7 +171,7 @@ class LangGraphAutomation(Automation):
         """Get manual inputs (for demonstration/testing)."""
         # This would typically be empty for production
         # For demo purposes, we can include some sample inputs
-        demo_inputs = os.getenv("LANGGRAPH_DEMO_INPUTS")
+        demo_inputs = os.getenv(EnvironmentVariables.DEMO_INPUTS)
         if demo_inputs:
             return [demo_inputs]
         

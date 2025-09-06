@@ -1,0 +1,72 @@
+# LangGraph Model Configuration
+model:
+  provider: "huggingface"  # Options: "huggingface", "openai", "anthropic", "local"
+  
+  # Hugging Face configuration
+  huggingface:
+    model_name: "microsoft/DialoGPT-medium"  # Default OSS conversational model
+    tokenizer_name: null  # Will use model_name if not specified
+    device: "auto"  # "auto", "cpu", "cuda", "mps"
+    max_length: 512
+    temperature: 0.7
+    do_sample: true
+    top_p: 0.9
+    
+  # OpenAI configuration (if available)
+  openai:
+    model_name: "gpt-3.5-turbo"
+    temperature: 0.7
+    max_tokens: 512
+    
+  # Local model configuration
+  local:
+    model_path: null
+    
+  # Fallback to rule-based generation if no model available
+  fallback_to_rules: true
+
+# Task generation prompts
+prompts:
+  system_prompt: |
+    You are a helpful assistant that generates structured tasks and subtasks.
+    Given a user request, create appropriate tasks with realistic subtasks.
+    
+  task_generation_prompt: |
+    Based on the user input: "{user_input}"
+    
+    Generate a main task and relevant subtasks. Consider:
+    - The type of activity requested
+    - Logical sequence of steps
+    - Realistic time requirements
+    - Available labels: {available_labels}
+    
+    Provide tasks with appropriate urgency and labels from the available options.
+
+# Constants for magic strings
+constants:
+  input_sources:
+    ENV: "env"
+    FILE: "file" 
+    MANUAL: "manual"
+    
+  task_types:
+    GENERAL: "general_task"
+    MEETING: "meeting_task"
+    RESEARCH: "research_task"
+    
+  urgency_levels:
+    LOW: "low"
+    MEDIUM: "medium"
+    HIGH: "high"
+    
+  priority_mapping:
+    low: 1
+    medium: 2
+    high: 3
+    urgent: 4
+    
+  env_vars:
+    INPUT: "LANGGRAPH_INPUT"
+    INPUT_FILE: "LANGGRAPH_INPUT_FILE"
+    CLEAR_FILE: "LANGGRAPH_CLEAR_FILE_AFTER_READ"
+    DEMO_INPUTS: "LANGGRAPH_DEMO_INPUTS"
