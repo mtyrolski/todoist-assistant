@@ -20,27 +20,36 @@ class DatabaseActivity:
     def reset(self):
         pass
     
-    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] = set()) -> list[Event]:
+    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
+        if events_already_fetched is None:
+            events_already_fetched = set()
+        """
+        Fetches activity events from the Todoist API using a sliding window approach.
+        This method adaptively fetches activity data going backwards in time window by window(week by week) in fixed windows size(nweeks_window_size arg).
+        Fetching stops after a number of consecutive empty windows(early_stop_after_n_windows), which avoids unnecessary fetching far into the past.
+        Arg events_already_fetched is a set of events that have already been fetched, to avoid duplicates in the returned result. Events already in this set will be excluded from the final output.
+        """
         n_empty_weeks: int = 0
         iterated_weeks: int = 0
         total_events: list[Event] = []
-        print("Start fetch_activity_adaptively: window_size=%d, early_stop=%d", 
-        nweeks_window_size, early_stop_after_n_windows)
+        logger.debug(f"Start fetch_activity_adaptively: window_size={nweeks_window_size}, early_stop={early_stop_after_n_windows}")
         while n_empty_weeks < early_stop_after_n_windows:
-            window_event: list[Event] = self.fetch_activity(nweeks_window_size, iterated_weeks)
-            logger.debug(f"Fetching activity: window_size={window_event}, offset={iterated_weeks} weeks")
+            window_events: list[Event] = self.fetch_activity(nweeks_window_size, iterated_weeks)
+            logger.debug(f"Fetching activity: window_size={nweeks_window_size}, offset={iterated_weeks} weeks")
             iterated_weeks += nweeks_window_size
-            logger.debug(f"Fetched {len(window_event)} events in current window")
-            if len([e for e in window_event if e not in events_already_fetched]) == 0:
+            logger.debug(f"Fetched {len(window_events)} events in current window")
+            events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
+            if len(events_not_already_fetched) == 0:
                 n_empty_weeks += 1
                 logger.debug(f"No events found, empty_weeks_count={n_empty_weeks}")
             else:
                 n_empty_weeks = 0
                 logger.debug("Events found, resetting empty_weeks_count to 0")
-            total_events.extend(window_event)
-            logger.debug("Total events so far: %d", len(total_events))
-        logger.debug("Stopping fetch after %d weeks processed, total_events=%d",
-        iterated_weeks, len(total_events))
+            new_events = [e for e in window_events if e not in events_already_fetched]
+            total_events.extend(new_events)
+            events_already_fetched.update(new_events)
+            logger.debug(f"Total events so far: {len(total_events)}")
+        logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
         return total_events
 
             
