@@ -6,6 +6,9 @@ import plotly.graph_objects as go
 import plotly.express as px
 from todoist.types import Project
 
+# Constants
+TOP_N_ITEMS: Final[int] = 10
+
 
 def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
     """
@@ -64,7 +67,7 @@ def plot_most_popular_labels(projects: list[Project], label_colors: dict[str, st
             for label in task.task_entry.labels:
                 labels_counter[label] = labels_counter.get(label, 0) + 1
 
-    N: Final[int] = 10    # constant for now
+    N: Final[int] = TOP_N_ITEMS    # constant for now
     top_n_labels = dict(sorted(labels_counter.items(), key=lambda item: item[1], reverse=True)[:N])
 
     fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
@@ -78,8 +81,16 @@ def plot_most_popular_labels(projects: list[Project], label_colors: dict[str, st
 
 
 def current_tasks_types(projects: list[Project]) -> go.Figure:
-    # count overude, today+tomorrow, this week, later+nodate tasks
-    # make  pie plot as above
+    """
+    Plots the distribution of current tasks by due date categories as a pie chart.
+    
+    Parameters:
+    projects (list[Project]): List of projects containing tasks.
+    
+    Returns:
+    go.Figure: Plotly figure object representing current task types distribution.
+    """
+    # Count overdue, today+tomorrow, this week, later+nodate tasks
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     week_end = today + timedelta(days=7)
@@ -132,7 +143,7 @@ def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: 
     go.Figure: Plotly figure object representing the top projects by number of events.
     """
     df_filtered = df.loc[beg_date:end_date]
-    project_counts = df_filtered['root_project_name'].value_counts().head(10)
+    project_counts = df_filtered['root_project_name'].value_counts().head(TOP_N_ITEMS)
 
     fig = go.Figure(data=[
         go.Bar(x=project_counts.index,
@@ -211,7 +222,7 @@ def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: 
     go.Figure: Plotly figure object representing the event types by project.
     """
     df_filtered = df.loc[beg_date:end_date]
-    event_counts = df_filtered.groupby(['root_project_name', 'type']).size().unstack().fillna(0).head(10)
+    event_counts = df_filtered.groupby(['root_project_name', 'type']).size().unstack().fillna(0).head(TOP_N_ITEMS)
     fig = go.Figure()
     for col in event_counts.columns:
         fig.add_trace(go.Bar(name=col, x=event_counts.index, y=event_counts[col]))
@@ -304,18 +315,18 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
     Returns:
     go.Figure: Plotly figure object representing the number of completed tasks per project over time.
     """
-    df_weekly_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
+    df_tasks_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
                                                                   ]).resample(granularity).size().unstack(level=0)
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index <= end_date]
+    df_tasks_per_project = df_tasks_per_project[df_tasks_per_project.index >= beg_date]
+    df_tasks_per_project = df_tasks_per_project[df_tasks_per_project.index <= end_date]
 
     fig = go.Figure()
 
-    for root_project_name in df_weekly_per_project.columns:
+    for root_project_name in df_tasks_per_project.columns:
         fig.add_trace(
             go.Scatter(
-                x=df_weekly_per_project.index,
-                y=df_weekly_per_project[root_project_name],
+                x=df_tasks_per_project.index,
+                y=df_tasks_per_project[root_project_name],
                 name=root_project_name,
                 line_shape='spline',
                 mode='lines+markers',
@@ -353,34 +364,34 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     Returns:
     go.Figure: Plotly figure object representing the cumulative number of completed tasks per project over time.
     """
-    df_weekly_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
+    df_tasks_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
                                                                   ]).resample(granularity).size().unstack(level=0)
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index <= end_date]
-    df_weekly_per_project = df_weekly_per_project.cumsum()
+    df_tasks_per_project = df_tasks_per_project[df_tasks_per_project.index >= beg_date]
+    df_tasks_per_project = df_tasks_per_project[df_tasks_per_project.index <= end_date]
+    df_tasks_per_project = df_tasks_per_project.cumsum()
 
-    # Append 0 from the left (one day before the minimum date)
-    min_date = df_weekly_per_project.index.min() - timedelta(days=7 if 'W' in granularity else 14)
-    df_weekly_per_project.loc[min_date] = 0
+    # Append 0 from the left (one period before the minimum date)
+    min_date = df_tasks_per_project.index.min() - timedelta(days=7 if 'W' in granularity else 14)
+    df_tasks_per_project.loc[min_date] = 0
 
     # Append the maximum value of each project from the right (one day after the maximum date)
-    max_date = df_weekly_per_project.index.max() + timedelta(days=1)
-    for root_project_name in df_weekly_per_project.columns:
-        df_weekly_per_project.loc[max_date, root_project_name] = df_weekly_per_project[root_project_name].max()
+    max_date = df_tasks_per_project.index.max() + timedelta(days=1)
+    for root_project_name in df_tasks_per_project.columns:
+        df_tasks_per_project.loc[max_date, root_project_name] = df_tasks_per_project[root_project_name].max()
 
     # Sort the index
-    df_weekly_per_project = df_weekly_per_project.sort_index()
+    df_tasks_per_project = df_tasks_per_project.sort_index()
 
     # Interpolate to ensure all dots are connected
-    df_weekly_per_project = df_weekly_per_project.interpolate(method='linear', axis=0)
+    df_tasks_per_project = df_tasks_per_project.interpolate(method='linear', axis=0)
 
     fig = go.Figure()
 
-    for root_project_name in df_weekly_per_project.columns:
+    for root_project_name in df_tasks_per_project.columns:
         fig.add_trace(
             go.Scatter(
-                x=df_weekly_per_project.index,
-                y=df_weekly_per_project[root_project_name],
+                x=df_tasks_per_project.index,
+                y=df_tasks_per_project[root_project_name],
                 name=root_project_name,
                 line_shape='spline',
                 mode='lines+markers',
