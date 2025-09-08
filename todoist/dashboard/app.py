@@ -9,7 +9,7 @@ import streamlit as st
 
 from todoist.dashboard.utils import load_activity_data_cached, sidebar_date_range, sidebar_granularity, get_database
 from todoist.types import Task
-from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page
+from todoist.dashboard.subpages import render_home_page, render_project_insights_page, render_task_analysis_page, render_control_panel_page, render_log_viewer_page
 
 
 def main() -> None:
@@ -38,7 +38,8 @@ def main() -> None:
         "Home": render_home_page,
         "Project Insights": render_project_insights_page,
         "Task Analysis": render_task_analysis_page,
-        'Control Panel': render_control_panel_page
+        'Control Panel': render_control_panel_page,
+        'Log Viewer': render_log_viewer_page
     }
     st.sidebar.title("Navigation")
     current_page = st.sidebar.radio("Go to", list(pages.keys()))
