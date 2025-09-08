@@ -30,21 +30,114 @@ def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_da
 
 def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str) -> go.Figure:
     """
-    Plots the number of events over time as a line chart within the specified date range.
+    Plots the number of events over time as a stacked area chart with daily data points
+    and 7-day rolling averages, segmented by activity type.
     
     Parameters:
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
+    granularity (str): Resampling granularity (ignored - uses daily granularity with 7-day rolling average).
     
     Returns:
-    go.Figure: Plotly figure object representing the events over time.
+    go.Figure: Plotly figure object representing the events over time by activity type.
     """
-    df_filtered = df.loc[beg_date:end_date]
-    events_over_time = df_filtered.resample(granularity).size()
-    fig = go.Figure(data=[go.Scatter(x=events_over_time.index, y=events_over_time.values, mode='lines')])
-    fig.update_layout(title_text='Events Over Time', xaxis_title='Date', yaxis_title='Number of Events')
+    # Filter data by date range
+    df_filtered = df.loc[beg_date:end_date].copy()
+    
+    # Define activity types and colors with high contrast
+    activity_types = ['added', 'completed', 'updated', 'deleted', 'rescheduled']
+    activity_colors = {
+        'added': '#2E8B57',      # Sea Green - for creation
+        'completed': '#4169E1',   # Royal Blue - for accomplishment  
+        'updated': '#FF8C00',     # Dark Orange - for modification
+        'deleted': '#DC143C',     # Crimson - for removal
+        'rescheduled': '#9370DB'  # Medium Purple - for rescheduling
+    }
+    
+    # Resample to daily granularity and count events by type
+    # Use groupby + resample approach that works with older pandas versions  
+    daily_counts = df_filtered.groupby('type').resample('D').size().unstack(level=0, fill_value=0)
+    
+    # Ensure we have all activity types as columns (even if no data)
+    for activity_type in activity_types:
+        if activity_type not in daily_counts.columns:
+            daily_counts[activity_type] = 0
+    
+    # Reorder columns to match our defined order
+    daily_counts = daily_counts[activity_types]
+    
+    # Calculate 7-day rolling averages for each activity type
+    rolling_averages = daily_counts.rolling(window=7, min_periods=1).mean()
+    
+    # Create the figure
+    fig = go.Figure()
+    
+    # Add traces for each activity type (stacked area chart)
+    for i, activity_type in enumerate(activity_types):
+        if activity_type in rolling_averages.columns:
+            fig.add_trace(go.Scatter(
+                x=rolling_averages.index,
+                y=rolling_averages[activity_type],
+                mode='lines',
+                name=activity_type.capitalize(),
+                fill='tonexty' if i > 0 else 'tozeroy',
+                line=dict(
+                    color=activity_colors.get(activity_type, '#808080'),
+                    width=2
+                ),
+                fillcolor=activity_colors.get(activity_type, '#808080'),
+                opacity=0.7,
+                hovertemplate=(
+                    f'<b>{activity_type.capitalize()}</b><br>' +
+                    'Date: %{x}<br>' +
+                    'Average: %{y:.1f} events/day<br>' +
+                    '<extra></extra>'
+                )
+            ))
+    
+    # Update layout with improved styling
+    fig.update_layout(
+        title={
+            'text': 'Events Over Time (7-Day Rolling Average by Activity Type)',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 18, 'family': 'Arial, sans-serif'}
+        },
+        xaxis={
+            'title': 'Date',
+            'showgrid': True,
+            'gridwidth': 1,
+            'gridcolor': 'rgba(128,128,128,0.2)',
+            'showline': True,
+            'linewidth': 1,
+            'linecolor': 'rgba(128,128,128,0.8)',
+            'tickfont': {'size': 12}
+        },
+        yaxis={
+            'title': 'Average Number of Events per Day',
+            'showgrid': True,
+            'gridwidth': 1,
+            'gridcolor': 'rgba(128,128,128,0.2)',
+            'showline': True,
+            'linewidth': 1,
+            'linecolor': 'rgba(128,128,128,0.8)',
+            'tickfont': {'size': 12}
+        },
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        legend={
+            'orientation': 'h',
+            'yanchor': 'bottom',
+            'y': 1.02,
+            'xanchor': 'right',
+            'x': 1,
+            'font': {'size': 12}
+        },
+        margin=dict(l=50, r=50, t=80, b=50),
+        hovermode='x unified'
+    )
+    
     return fig
 
 
