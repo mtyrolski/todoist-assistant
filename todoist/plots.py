@@ -7,8 +7,7 @@ import plotly.express as px
 from todoist.types import Project
 
 
-def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                    granularity: str) -> go.Figure:
+def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
     """
     Plots the distribution of event types as a pie chart within the specified date range.
     
@@ -16,7 +15,6 @@ def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_da
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
     
     Returns:
     go.Figure: Plotly figure object representing the event distribution by type.
@@ -54,6 +52,7 @@ def plot_most_popular_labels(projects: list[Project], label_colors: dict[str, st
     
     Parameters:
     projects (list[Project]): List of projects.
+    label_colors (dict[str, str]): Mapping of label names to colors.
     
     Returns:
     go.Figure: Plotly figure object representing the most popular labels.
@@ -127,7 +126,7 @@ def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: 
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
+    project_colors (dict[str, str]): Mapping of project names to colors.
     
     Returns:
     go.Figure: Plotly figure object representing the top projects by number of events.
@@ -155,7 +154,7 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
+    project_colors (dict[str, str]): Mapping of project names to colors.
     
     Returns:
     go.Figure: Plotly figure object representing the event distribution by root project.
@@ -207,7 +206,6 @@ def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: 
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
     
     Returns:
     go.Figure: Plotly figure object representing the event types by project.
@@ -256,7 +254,7 @@ def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: date
     df (pd.DataFrame): DataFrame containing event data.
     beg_date (datetime): Start date for filtering events.
     end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
+    project_colors (dict[str, str]): Mapping of project names to colors.
     
     Returns:
     go.Figure: Plotly figure object representing the cumulative number of completed tasks per project over time.
