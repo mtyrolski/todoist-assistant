@@ -56,8 +56,21 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     }
     
     # Resample to daily granularity and count events by type
-    # Use groupby + resample approach that works with older pandas versions  
-    daily_counts = df_filtered.groupby('type').resample('D').size().unstack(level=0, fill_value=0)
+    # Create daily counts for each activity type, avoiding the deprecation warning
+    daily_counts_dict = {}
+    activity_types = ['added', 'completed', 'updated', 'deleted', 'rescheduled']
+    
+    for activity_type in activity_types:
+        type_data = df_filtered[df_filtered['type'] == activity_type]
+        if len(type_data) > 0:
+            daily_counts_dict[activity_type] = type_data.resample('D').size()
+        else:
+            # Create empty series for this activity type
+            date_range = pd.date_range(start=beg_date.date(), end=end_date.date(), freq='D')
+            daily_counts_dict[activity_type] = pd.Series(0, index=date_range)
+    
+    # Combine into a single DataFrame
+    daily_counts = pd.DataFrame(daily_counts_dict).fillna(0)
     
     # Ensure we have all activity types as columns (even if no data)
     for activity_type in activity_types:
