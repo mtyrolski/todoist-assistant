@@ -1,0 +1,9 @@
+2024-01-16 09:00:00 | INFO | Initializing Todoist Assistant
+2024-01-16 09:00:01 | INFO | Loading environment configuration
+2024-01-16 09:00:02 | INFO | Connecting to Todoist API
+2024-01-16 09:00:03 | SUCCESS | API connection established
+2024-01-16 09:00:04 | INFO | Fetching user projects and tasks
+2024-01-16 09:00:05 | INFO | Found 15 active projects
+2024-01-16 09:00:06 | INFO | Found 127 active tasks
+2024-01-16 09:00:07 | INFO | Caching data locally
+2024-01-16 09:00:08 | SUCCESS | Environment initialization completed
