@@ -10,4 +10,4 @@ personal/*.py
 credentials.json
 outputs/
 automation.log
-todoist/scripts/
+todoist/scripts/*.log
