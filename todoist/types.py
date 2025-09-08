@@ -115,7 +115,7 @@ class _Task_API_V9:
         if self.duration is None:
             return None
 
-        if any(not isinstance(self.duration, dict), 'duration' not in self.duration, 'unit' not in self.duration):
+        if any([not isinstance(self.duration, dict), 'duration' not in self.duration, 'unit' not in self.duration]):
             return None
 
         return {'duration': self.duration['duration'], 'unit': self.duration['unit']}
