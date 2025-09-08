@@ -6,47 +6,22 @@ from typing import Dict, Any, List, Optional, Union
 import os
 from abc import ABC, abstractmethod
 
-try:
-    from loguru import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
-
-try:
-    from pydantic import BaseModel, Field
-    PYDANTIC_AVAILABLE = True
-except ImportError:
-    PYDANTIC_AVAILABLE = False
-    # Create dummy classes when Pydantic is not available
-    class BaseModel:
-        pass
-    def Field(**kwargs):
-        return None
+from loguru import logger
+from pydantic import BaseModel, Field
 
 from .config import get_config
 from .constants import ModelProviders, DefaultValues
+from .prompts import build_task_generation_prompt, get_rule_based_response
 
 
-if PYDANTIC_AVAILABLE:
-    class TaskGenerationOutput(BaseModel):
-        """Pydantic model for structured task generation output."""
-        main_task: str = Field(description="The main task title")
-        description: str = Field(description="Detailed task description")
-        urgency: str = Field(description="Task urgency level: low, medium, high")
-        suggested_labels: List[str] = Field(description="List of suggested label names", default_factory=list)
-        subtasks: List[str] = Field(description="List of subtask titles", default_factory=list)
-        priority: Optional[int] = Field(description="Task priority (1-4)", default=None)
-else:
-    # Fallback class when Pydantic is not available
-    class TaskGenerationOutput:
-        def __init__(self, main_task="", description="", urgency="medium", 
-                     suggested_labels=None, subtasks=None, priority=None):
-            self.main_task = main_task
-            self.description = description
-            self.urgency = urgency
-            self.suggested_labels = suggested_labels or []
-            self.subtasks = subtasks or []
-            self.priority = priority
+class TaskGenerationOutput(BaseModel):
+    """Pydantic model for structured task generation output."""
+    main_task: str = Field(description="The main task title")
+    description: str = Field(description="Detailed task description")
+    urgency: str = Field(description="Task urgency level: low, medium, high")
+    suggested_labels: List[str] = Field(description="List of suggested label names", default_factory=list)
+    subtasks: List[str] = Field(description="List of subtask titles", default_factory=list)
+    priority: Optional[int] = Field(description="Task priority (1-4)", default=None)
 
 
 class BaseLLM(ABC):
@@ -75,14 +50,14 @@ class HuggingFaceLLM(BaseLLM):
     
     def _initialize_model(self):
         """Initialize the Hugging Face LangChain LLM."""
+        from langchain_huggingface import HuggingFacePipeline
+        from transformers import pipeline
+        
+        model_name = self.config.get("model_name", DefaultValues.HUGGINGFACE_MODEL)
+        
+        logger.info(f"Initializing Hugging Face LangChain model: {model_name}")
+        
         try:
-            from langchain_huggingface import HuggingFacePipeline
-            from transformers import pipeline
-            
-            model_name = self.config.get("model_name", DefaultValues.HUGGINGFACE_MODEL)
-            
-            logger.info(f"Initializing Hugging Face LangChain model: {model_name}")
-            
             # Create transformers pipeline
             hf_pipeline = pipeline(
                 "text-generation",
@@ -96,18 +71,11 @@ class HuggingFaceLLM(BaseLLM):
             # Wrap in LangChain HuggingFace LLM
             self.llm = HuggingFacePipeline(pipeline=hf_pipeline)
             
-            # Create structured LLM if Pydantic is available
-            if PYDANTIC_AVAILABLE:
-                self.structured_llm = self.llm.with_structured_output(TaskGenerationOutput)
-            else:
-                self.structured_llm = None
+            # Create structured LLM
+            self.structured_llm = self.llm.with_structured_output(TaskGenerationOutput)
             
             logger.info("Hugging Face LangChain model initialized successfully")
             
-        except ImportError as e:
-            logger.warning(f"Required libraries not available for HuggingFace LLM: {e}")
-            self.llm = None
-            self.structured_llm = None
         except Exception as e:
             logger.error(f"Error initializing Hugging Face model: {e}")
             self.llm = None
@@ -158,19 +126,17 @@ class OpenAILLM(BaseLLM):
     
     def _initialize_client(self):
         """Initialize OpenAI client."""
+        import openai
+        
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not found, OpenAI LLM disabled")
+            return
+        
         try:
-            import openai
-            
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                logger.warning("OPENAI_API_KEY not found, OpenAI LLM disabled")
-                return
-            
             self.client = openai.OpenAI(api_key=api_key)
             logger.info("OpenAI client initialized successfully")
             
-        except ImportError:
-            logger.warning("OpenAI library not available, OpenAI LLM disabled")
         except Exception as e:
             logger.error(f"Error initializing OpenAI client: {e}")
     
@@ -211,15 +177,7 @@ class RuleBasedLLM(BaseLLM):
     
     def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response using rule-based logic."""
-        # This is a simple fallback that returns a structured response
-        # In a real implementation, this could use templates or basic NLP
-        
-        if "generate task" in prompt.lower():
-            return "Generated task based on input with appropriate subtasks."
-        elif "suggest labels" in prompt.lower():
-            return "Suggested labels: general, planning, action"
-        else:
-            return "Task processed using rule-based generation."
+        return get_rule_based_response(prompt)
     
     def is_available(self) -> bool:
         """Rule-based LLM is always available."""
@@ -302,28 +260,7 @@ class LLMManager:
         context: Dict[str, Any]
     ) -> str:
         """Build prompt for task generation with structured output."""
-        prompts = self.config.get_prompts()
-        
-        system_prompt = prompts.get("system_prompt", 
-            "You are a task management assistant. Generate structured tasks from user input.")
-        
-        # Enhanced prompt for structured output
-        task_prompt = f"""
-Based on the user input: '{user_input}', create a comprehensive task breakdown.
-
-Available labels in Todoist: {', '.join(available_labels) if available_labels else 'none'}
-
-Generate:
-- A clear main task title
-- Detailed description
-- Appropriate urgency level (low/medium/high)
-- Relevant labels from the available ones
-- Useful subtasks if the task is complex
-
-Focus on being practical and actionable.
-"""
-        
-        return f"{system_prompt}\n\n{task_prompt}"
+        return build_task_generation_prompt(user_input, available_labels, context)
     
     def _convert_structured_to_dict(self, structured_output: TaskGenerationOutput) -> Dict[str, Any]:
         """Convert Pydantic model to dictionary format."""

@@ -5,19 +5,8 @@ Configuration management for LangGraph module using Hydra.
 import os
 from typing import Dict, Any, Optional
 
-try:
-    from omegaconf import DictConfig, OmegaConf
-    OMEGACONF_AVAILABLE = True
-except ImportError:
-    OMEGACONF_AVAILABLE = False
-    DictConfig = dict
-    OmegaConf = None
-
-try:
-    from loguru import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from omegaconf import DictConfig, OmegaConf
+from loguru import logger
 
 from .constants import ModelProviders, DefaultValues
 
@@ -45,15 +34,12 @@ class LangGraphConfig:
     def _load_config(self) -> DictConfig:
         """Load configuration from file."""
         try:
-            if OMEGACONF_AVAILABLE and os.path.exists(self.config_path):
+            if os.path.exists(self.config_path):
                 config = OmegaConf.load(self.config_path)
                 logger.info(f"Loaded LangGraph configuration from {self.config_path}")
                 return config
             else:
-                if not OMEGACONF_AVAILABLE:
-                    logger.warning("OmegaConf not available, using default configuration")
-                else:
-                    logger.warning(f"Configuration file not found: {self.config_path}")
+                logger.warning(f"Configuration file not found: {self.config_path}")
                 return self._get_default_config()
                 
         except Exception as e:
@@ -89,67 +75,47 @@ class LangGraphConfig:
         }
         
         logger.info("Using default LangGraph configuration")
-        if OMEGACONF_AVAILABLE:
-            return OmegaConf.create(default_config)
-        else:
-            return default_config
+        return OmegaConf.create(default_config)
     
     def get_model_config(self) -> Dict[str, Any]:
         """Get model configuration."""
-        if OMEGACONF_AVAILABLE:
-            return OmegaConf.to_container(self.config.model, resolve=True)
-        else:
-            return self.config.get("model", {})
+        return OmegaConf.to_container(self.config.model, resolve=True)
     
     def get_model_provider(self) -> str:
         """Get configured model provider."""
-        model_config = self.config.get("model", {}) if isinstance(self.config, dict) else self.config.model
-        return model_config.get("provider", ModelProviders.HUGGINGFACE)
+        return self.config.model.get("provider", ModelProviders.HUGGINGFACE)
     
     def get_huggingface_config(self) -> Dict[str, Any]:
         """Get Hugging Face model configuration."""
-        if OMEGACONF_AVAILABLE:
-            return OmegaConf.to_container(
-                self.config.model.get("huggingface", {}), 
-                resolve=True
-            )
-        else:
-            return self.config.get("model", {}).get("huggingface", {})
+        return OmegaConf.to_container(
+            self.config.model.get("huggingface", {}), 
+            resolve=True
+        )
     
     def get_openai_config(self) -> Dict[str, Any]:
         """Get OpenAI model configuration."""
-        if OMEGACONF_AVAILABLE:
-            return OmegaConf.to_container(
-                self.config.model.get("openai", {}), 
-                resolve=True
-            )
-        else:
-            return self.config.get("model", {}).get("openai", {})
+        return OmegaConf.to_container(
+            self.config.model.get("openai", {}), 
+            resolve=True
+        )
     
     def should_fallback_to_rules(self) -> bool:
         """Check if should fallback to rule-based generation."""
-        model_config = self.config.get("model", {}) if isinstance(self.config, dict) else self.config.model
-        return model_config.get("fallback_to_rules", True)
+        return self.config.model.get("fallback_to_rules", True)
     
     def get_prompts(self) -> Dict[str, str]:
         """Get configured prompts."""
-        if OMEGACONF_AVAILABLE:
-            return OmegaConf.to_container(
-                self.config.get("prompts", {}), 
-                resolve=True
-            )
-        else:
-            return self.config.get("prompts", {})
+        return OmegaConf.to_container(
+            self.config.get("prompts", {}), 
+            resolve=True
+        )
     
     def get_constants(self) -> Dict[str, Any]:
         """Get constants from configuration."""
-        if OMEGACONF_AVAILABLE:
-            return OmegaConf.to_container(
-                self.config.get("constants", {}), 
-                resolve=True
-            )
-        else:
-            return self.config.get("constants", {})
+        return OmegaConf.to_container(
+            self.config.get("constants", {}), 
+            resolve=True
+        )
     
     def get_priority_mapping(self) -> Dict[str, int]:
         """Get priority level mapping."""

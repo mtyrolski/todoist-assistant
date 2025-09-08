@@ -6,11 +6,7 @@ from typing import List, Dict, Set, Optional
 import re
 from collections import defaultdict
 
-try:
-    from loguru import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from loguru import logger
 
 from todoist.database.db_labels import DatabaseLabels
 

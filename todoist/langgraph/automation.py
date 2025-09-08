@@ -9,11 +9,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import os
 
-try:
-    from loguru import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from loguru import logger
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database

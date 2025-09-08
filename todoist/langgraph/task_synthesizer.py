@@ -6,38 +6,17 @@ and automatically generate structured tasks and subtasks using configurable
 LLMs and intelligent label assignment.
 """
 
-from typing import Dict, List, Any, Optional
-try:
-    from typing import TypedDict
-except ImportError:
-    # Fallback for older Python versions
-    TypedDict = dict
+from typing import Dict, List, Any, Optional, TypedDict
 from dataclasses import dataclass
 import json
 from datetime import datetime, timedelta
 
-try:
-    from langchain_core.messages import HumanMessage, SystemMessage
-    from langchain_core.prompts import ChatPromptTemplate
-    from langgraph.graph import StateGraph, END
-    from langgraph.graph.message import add_messages
-    from typing_extensions import Annotated
-    LANGGRAPH_AVAILABLE = True
-except ImportError:
-    # Fallback types when LangGraph is not available
-    LANGGRAPH_AVAILABLE = False
-    add_messages = lambda x: x  # Simple fallback
-    try:
-        from typing_extensions import Annotated
-    except ImportError:
-        # Fallback for older Python versions
-        def Annotated(x, y): return x
-
-try:
-    from loguru import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from typing_extensions import Annotated
+from loguru import logger
 
 from .constants import (
     TaskTypes, UrgencyLevels, PriorityLevels, DefaultValues, ValidationLimits
@@ -88,23 +67,14 @@ class TaskSynthesizer:
         """
         self.config = get_config()
         
-        # Import these conditionally to avoid dependency issues
-        try:
-            from .llm_integration import LLMManager
-            from .label_manager import LabelManager
-            
-            self.llm_manager = llm_manager or LLMManager()
-            self.label_manager = LabelManager()
-        except ImportError as e:
-            logger.warning(f"LLM or Label manager not available: {e}")
-            self.llm_manager = None
-            self.label_manager = None
+        # Import these modules directly
+        from .llm_integration import LLMManager
+        from .label_manager import LabelManager
         
-        if LANGGRAPH_AVAILABLE:
-            self.workflow = self._build_workflow()
-        else:
-            logger.warning("LangGraph not available, using simplified workflow")
-            self.workflow = None
+        self.llm_manager = llm_manager or LLMManager()
+        self.label_manager = LabelManager()
+        
+        self.workflow = self._build_workflow()
         
         logger.info(f"TaskSynthesizer initialized with LLM available: {self.llm_manager is not None}")
     
@@ -114,10 +84,6 @@ class TaskSynthesizer:
     
     def _build_workflow(self) -> Optional[Any]:
         """Build the LangGraph workflow for task synthesis."""
-        if not LANGGRAPH_AVAILABLE:
-            logger.warning("LangGraph not available, workflow disabled")
-            return None
-            
         from langgraph.graph import StateGraph, END
         
         workflow = StateGraph(TaskSynthesizerState)
