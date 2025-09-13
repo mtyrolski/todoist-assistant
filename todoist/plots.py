@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Final
+from typing import Final, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -83,7 +83,15 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     # Calculate 7-day rolling averages for each activity type
     rolling_averages = daily_counts.rolling(window=7, min_periods=1).mean()
     
-    # Create the figure
+    # Helper to convert HEX to RGBA with alpha (for nicer area fills on dark bg)
+    def hex_to_rgba(hex_color: str, alpha: float) -> str:
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        return f'rgba({r},{g},{b},{alpha})'
+
+    # Create the figure (dark-friendly template)
     fig = go.Figure()
     
     # Add traces for each activity type (stacked area chart)
@@ -99,8 +107,8 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
                     color=activity_colors.get(activity_type, '#808080'),
                     width=2
                 ),
-                fillcolor=activity_colors.get(activity_type, '#808080'),
-                opacity=0.7,
+                # Use semi-transparent fill while keeping solid line for readability on dark bg
+                fillcolor=hex_to_rgba(activity_colors.get(activity_type, '#9e9e9e'), 0.28),
                 hovertemplate=(
                     f'<b>{activity_type.capitalize()}</b><br>' +
                     'Date: %{x}<br>' +
@@ -111,44 +119,46 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     
     # Update layout with improved styling
     fig.update_layout(
+        template='plotly_dark',
         title={
             'text': 'Events Over Time (7-Day Rolling Average by Activity Type)',
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 18, 'family': 'Arial, sans-serif'}
+            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
         },
         xaxis={
-            'title': 'Date',
+            'title': {'text': 'Date', 'font': {'color': '#ffffff'}},
             'showgrid': True,
             'gridwidth': 1,
-            'gridcolor': 'rgba(128,128,128,0.2)',
+            'gridcolor': 'rgba(255,255,255,0.08)',
             'showline': True,
             'linewidth': 1,
-            'linecolor': 'rgba(128,128,128,0.8)',
-            'tickfont': {'size': 12}
+            'linecolor': 'rgba(255,255,255,0.24)',
+            'tickfont': {'size': 12, 'color': '#e6e6e6'}
         },
         yaxis={
-            'title': 'Average Number of Events per Day',
+            'title': {'text': 'Average Number of Events per Day', 'font': {'color': '#ffffff'}},
             'showgrid': True,
             'gridwidth': 1,
-            'gridcolor': 'rgba(128,128,128,0.2)',
+            'gridcolor': 'rgba(255,255,255,0.08)',
             'showline': True,
             'linewidth': 1,
-            'linecolor': 'rgba(128,128,128,0.8)',
-            'tickfont': {'size': 12}
+            'linecolor': 'rgba(255,255,255,0.24)',
+            'tickfont': {'size': 12, 'color': '#e6e6e6'}
         },
-        plot_bgcolor='white',
-        paper_bgcolor='white',
+        plot_bgcolor='#111318',
+        paper_bgcolor='#111318',
         legend={
             'orientation': 'h',
             'yanchor': 'bottom',
             'y': 1.02,
             'xanchor': 'right',
             'x': 1,
-            'font': {'size': 12}
+            'font': {'size': 12, 'color': '#e6e6e6'}
         },
         margin=dict(l=50, r=50, t=80, b=50),
-        hovermode='x unified'
+        hovermode='x unified',
+        hoverlabel=dict(bgcolor='#1e1e1e', bordercolor='#444', font=dict(color='#ffffff'))
     )
     
     return fig
@@ -297,8 +307,10 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     go.Figure: Plotly figure object representing the heatmap of events by day and hour.
     """
     df_filtered = df.loc[beg_date:end_date].copy()
-    df_filtered['hour'] = df_filtered.index.hour
-    df_filtered['day_of_week'] = df_filtered.index.dayofweek
+    # Ensure we operate on a DateTimeIndex for static typing correctness
+    dt_index = cast(pd.DatetimeIndex, pd.to_datetime(df_filtered.index))
+    df_filtered['hour'] = dt_index.hour
+    df_filtered['day_of_week'] = dt_index.dayofweek
     heatmap_data = df_filtered.groupby(['day_of_week', 'hour']).size().unstack().fillna(0)
     fig = px.imshow(heatmap_data, labels=dict(x="Hour of Day", y="Day of Week", color="Number of Events"))
     fig.update_layout(title_text='Heatmap of Events by Day and Hour')
