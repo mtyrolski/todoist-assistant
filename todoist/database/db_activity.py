@@ -1,7 +1,6 @@
 import json
 from functools import partial
 from subprocess import DEVNULL, PIPE, run
-from typing import Any
 
 from loguru import logger
 from tqdm import tqdm
