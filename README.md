@@ -85,10 +85,10 @@ flowchart TD
     - *Activity:* Gathers and aggregates Todoist events such as task additions, deletions, and completions.
   - **Dashboard & Plots:**  
     Use Streamlit to build interactive dashboards. The Plots module transforms raw data into engaging visualizations that showcase productivity trends.
-  - **Automations & Integrations:**
+  - **Automations:**
     Automations allow custom triggers and actions like fetching activity, apply templates, ...
   - **Integrations** *(experimental)*   
-    Integrations open the door to connect with external services like Twitter or Gmail.
+    Integrations open the door to connect with external services like Twitter or Gmail. The Gmail Tasks automation can automatically create Todoist tasks from actionable emails.
   - **Agentic AI Module** *(incoming)*
     Summarizes activity logs into actionable insights, provides on-demand or daily productivity snapshots, detects trends like peak hours or bottlenecks, tracks progress toward goals, supports plain-language queries, and tailors reports by projects, labels, or timeframes.
 
@@ -306,6 +306,25 @@ automations:
 - `Template` automation will transform all tasks marked with labels `@template-call` by attaching specified subtasks, `read_paper` and other templates similarly. See [todoist/automations/template.py](todoist/automations/template.py) for details.
 - `Activity` fetches all evenets from specific time range. See [todoist/automations/activity.py](todoist/automations/activity.py) for details.
 - Similarly other automations defined in (todoist/automations)[todoist/automations] folder can be enhanced or inspected and even implemented new ones by inheritance with base automation [todoist/automations/base.py](todoist/automations/base.py).
+
+## Gmail Tasks Automation *(experimental)*
+
+The Gmail Tasks automation automatically creates Todoist tasks from actionable emails. This feature:
+
+- Monitors your Gmail for unread emails containing actionable keywords
+- Creates corresponding tasks in Todoist with appropriate context and priority
+- Avoids creating duplicate tasks
+- Runs automatically at configurable intervals
+
+**Setup**: See [Gmail Setup Guide](docs/gmail_setup.md) for detailed configuration instructions.
+
+**Keywords detected**: `todo`, `action required`, `follow up`, `deadline`, `urgent`, `reminder`, `task`, `meeting`, `schedule`, and more.
+
+**Created tasks include**:
+- Email subject as task content
+- Sender information and email preview in description  
+- Priority based on urgency keywords
+- `gmail-task` label for easy identification
 
 ## Configuration
 
