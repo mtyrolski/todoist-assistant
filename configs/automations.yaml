@@ -1,5 +1,4 @@
 automations:
-
   - _target_: todoist.automations.template.Template
     task_templates:
       pr:
@@ -216,8 +215,6 @@ automations:
             content: Update academic CV/website
             description: Add talks, posters, or experiences to your CV or website
             due_date_days_difference: 5
-  - _target_: todoist.automations.template.Template
-    task_templates:
       poster_creation:
         _target_: todoist.automations.template.TaskTemplate
         content: Poster Creation
@@ -277,7 +274,6 @@ automations:
             content: Follow up with new contacts
             description: Send thank-you notes, answer questions, and share materials after the event
             due_date_days_difference: 2
-
       msg:
         _target_: todoist.automations.template.TaskTemplate
         content: Message
