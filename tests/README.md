@@ -37,35 +37,36 @@ This directory contains comprehensive tests for the data structures and database
 # Using the test runner script
 PYTHONPATH=. python3 run_tests.py
 
-# Using unittest directly
-PYTHONPATH=. python3 -m unittest discover tests/ -v
+# Using pytest directly
+PYTHONPATH=. python3 -m pytest tests/ -v
 ```
 
 ### Run Specific Test Files
 ```bash
 # Test data types
-PYTHONPATH=. python3 -m unittest tests.test_types -v
+PYTHONPATH=. python3 -m pytest tests/test_types.py -v
 
 # Test database operations
-PYTHONPATH=. python3 -m unittest tests.test_database -v
+PYTHONPATH=. python3 -m pytest tests/test_database.py -v
 
 # Test data transformations
-PYTHONPATH=. python3 -m unittest tests.test_transformations -v
+PYTHONPATH=. python3 -m pytest tests/test_transformations.py -v
 ```
 
-### Run Individual Test Classes
+### Run Specific Tests
 ```bash
-# Test data structure creation
-PYTHONPATH=. python3 -m unittest tests.test_types.TestDataStructureCreation -v
+# Run a specific test function
+PYTHONPATH=. python3 -m pytest tests/test_types.py::test_project_entry_creation -v
 
-# Test database tasks operations
-PYTHONPATH=. python3 -m unittest tests.test_database.TestDatabaseTasksOperations -v
+# Run tests matching a pattern
+PYTHONPATH=. python3 -m pytest tests/ -k "database" -v
 ```
 
 ## Dependencies
 
 The tests require the following Python packages:
-- `unittest` (built-in)
+- `pytest` (testing framework)
+- `pytest-mock` (enhanced mocking capabilities)
 - `loguru`
 - `pandas`
 - `joblib`
@@ -98,6 +99,24 @@ The tests cover:
 ✅ **Bug Fixes**
 - Fixed `TaskEntry.duration_kwargs` property implementation
 - Proper error handling in API calls
+
+## Test Framework Migration
+
+The test suite has been migrated from `unittest` to `pytest`:
+
+### Key Changes
+- Converted from `TestCase` classes to plain functions with `test_` prefix
+- Replaced `self.assertEqual()` with plain `assert` statements
+- Converted `setUp()` methods to pytest fixtures
+- Enhanced mocking with `pytest-mock`
+- Simplified test runner using pytest's built-in discovery
+
+### Benefits
+- More concise and readable test code
+- Better fixture management and dependency injection
+- Enhanced parametrization capabilities
+- Improved test discovery and reporting
+- More flexible test execution options
 
 ## Test Results
 
