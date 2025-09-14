@@ -35,16 +35,45 @@ def get_available_log_files() -> List[str]:
     return sorted(list(set(log_files)))  # Remove duplicates and sort
 
 
-def read_log_file(file_path: str, tail_lines: int = 100) -> Optional[str]:
-    """Read the last N lines from a log file."""
+def read_log_file(file_path: str, tail_lines: int = 40, page: int = 1) -> tuple[Optional[str], int]:
+    """Read lines from a log file with pagination support.
+    
+    Args:
+        file_path: Path to the log file
+        tail_lines: Number of lines per page
+        page: Page number (1-based)
+        
+    Returns:
+        Tuple of (content, total_pages)
+    """
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
-            if tail_lines > 0:
-                lines = lines[-tail_lines:]
-            return ''.join(lines)
+            
+        total_lines = len(lines)
+        total_pages = max(1, (total_lines + tail_lines - 1) // tail_lines)  # Ceiling division
+        
+        if page < 1:
+            page = 1
+        elif page > total_pages:
+            page = total_pages
+            
+        # Calculate start and end indices for the requested page
+        # Page 1 shows the most recent lines (end of file)
+        # Page 2 shows the lines before that, etc.
+        end_line = total_lines - (page - 1) * tail_lines
+        start_line = max(0, end_line - tail_lines)
+        
+        if start_line < 0:
+            start_line = 0
+        if end_line > total_lines:
+            end_line = total_lines
+            
+        page_lines = lines[start_line:end_line]
+        return ''.join(page_lines), total_pages
+        
     except Exception as e:
-        return f"Error reading file: {str(e)}"
+        return f"Error reading file: {str(e)}", 1
 
 
 def render_log_viewer_page() -> None:
@@ -88,12 +117,13 @@ def render_log_viewer_page() -> None:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            tail_lines = st.number_input(
-                "Number of lines to show (from end)",
+            lines_per_page = st.number_input(
+                "Lines per page",
                 min_value=10,
                 max_value=1000,
-                value=100,
-                step=10
+                value=40,
+                step=10,
+                key="lines_per_page"
             )
         
         with col2:
@@ -103,16 +133,61 @@ def render_log_viewer_page() -> None:
             if st.button("🔄 Refresh"):
                 st.rerun()
         
+        # Initialize page number in session state
+        if 'log_page' not in st.session_state:
+            st.session_state.log_page = 1
+        
+        # Get log content with pagination
+        log_content, total_pages = read_log_file(selected_file, lines_per_page, st.session_state.log_page)
+        
+        # Pagination controls
+        if total_pages > 1:
+            st.subheader("📄 Page Navigation")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                if st.button("⏮️ First", disabled=(st.session_state.log_page == 1)):
+                    st.session_state.log_page = 1
+                    st.rerun()
+                    
+            with col2:
+                if st.button("⬅️ Previous", disabled=(st.session_state.log_page == 1)):
+                    st.session_state.log_page = max(1, st.session_state.log_page - 1)
+                    st.rerun()
+                    
+            with col3:
+                # Page selector
+                new_page = st.number_input(
+                    f"Page (1-{total_pages})",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=st.session_state.log_page,
+                    key="page_selector"
+                )
+                if new_page != st.session_state.log_page:
+                    st.session_state.log_page = new_page
+                    st.rerun()
+                    
+            with col4:
+                if st.button("➡️ Next", disabled=(st.session_state.log_page == total_pages)):
+                    st.session_state.log_page = min(total_pages, st.session_state.log_page + 1)
+                    st.rerun()
+                    
+            with col5:
+                if st.button("⏭️ Last", disabled=(st.session_state.log_page == total_pages)):
+                    st.session_state.log_page = total_pages
+                    st.rerun()
+            
+            st.info(f"📊 Showing page {st.session_state.log_page} of {total_pages} | Page {st.session_state.log_page} contains lines from the log file")
+        
         # Display log content
-        st.subheader(f"Content: {os.path.basename(selected_file)}")
+        st.subheader(f"Content: {os.path.basename(selected_file)} (Page {st.session_state.log_page}/{total_pages})")
         
-        log_content = read_log_file(selected_file, tail_lines)
-        
-        if log_content:
+        if log_content and not log_content.startswith("Error reading file"):
             # Use a text area for better display
             st.code(log_content, language="text")
         else:
-            st.warning("Unable to read the selected log file.")
+            st.warning("Unable to read the selected log file or file is empty.")
         
         # Auto-refresh functionality
         if auto_refresh:
@@ -129,6 +204,8 @@ def render_log_viewer_page() -> None:
     
     **Tips:**
     - Use the refresh button or auto-refresh to see real-time updates
-    - Adjust the number of lines to view more or less content
+    - Adjust the lines per page to view more or less content
+    - Use pagination controls to navigate through large log files
+    - Page 1 shows the most recent entries (end of file)
     - Log files are searched in the current directory and common log locations
     """)
