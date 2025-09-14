@@ -6,31 +6,20 @@ import streamlit as st
 import os
 from typing import List, Optional
 from pathlib import Path
+from datetime import datetime
 
 
 def get_available_log_files() -> List[str]:
-    """Get a list of available .log files in the current directory and common log locations."""
+    """Get a list of available .log files in the current repository and its subfolders."""
     log_files = []
     
-    # Check current directory
+    # Check current directory and all subfolders in the repository
     current_dir = Path.cwd()
-    for log_file in current_dir.glob("*.log"):
+    
+    # Find all .log files recursively in the repository
+    for log_file in current_dir.rglob("*.log"):
         if log_file.is_file():
             log_files.append(str(log_file))
-    
-    # Check common log directories
-    common_log_dirs = [
-        Path.cwd() / "logs",
-        Path.cwd() / "log", 
-        Path("/var/log"),
-        Path("/tmp")
-    ]
-    
-    for log_dir in common_log_dirs:
-        if log_dir.exists() and log_dir.is_dir():
-            for log_file in log_dir.glob("*.log"):
-                if log_file.is_file():
-                    log_files.append(str(log_file))
     
     return sorted(list(set(log_files)))  # Remove duplicates and sort
 
@@ -85,7 +74,7 @@ def render_log_viewer_page() -> None:
     log_files = get_available_log_files()
     
     if not log_files:
-        st.info("No .log files found in the current directory or common log locations.")
+        st.info("No .log files found in the current repository.")
         st.write("Log files will appear here once automations are run or other processes create log files.")
         return
     
@@ -104,13 +93,23 @@ def render_log_viewer_page() -> None:
         file_path = Path(selected_file)
         file_stat = file_path.stat()
         
+        # Convert file path to relative path from repository root
+        try:
+            relative_path = file_path.parent.relative_to(Path.cwd())
+            location_display = f"./{relative_path}" if str(relative_path) != "." else "./"
+        except ValueError:
+            # Fallback if file is outside repository (shouldn't happen with our new implementation)
+            location_display = f"./{file_path.parent.name}"
+        
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("File Size", f"{file_stat.st_size / 1024:.1f} KB")
         with col2:
-            st.metric("Modified", file_stat.st_mtime)
+            # Format timestamp to human readable format
+            modified_time = datetime.fromtimestamp(file_stat.st_mtime)
+            st.metric("Modified", modified_time.strftime("%Y-%m-%d %H:%M:%S"))
         with col3:
-            st.metric("Location", str(file_path.parent))
+            st.metric("Location", location_display)
         
         # Options for viewing
         st.subheader("Viewing Options")
@@ -207,5 +206,5 @@ def render_log_viewer_page() -> None:
     - Adjust the lines per page to view more or less content
     - Use pagination controls to navigate through large log files
     - Page 1 shows the most recent entries (end of file)
-    - Log files are searched in the current directory and common log locations
+    - Log files are searched in the current repository and all its subfolders
     """)
