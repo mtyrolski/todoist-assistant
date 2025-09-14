@@ -1,0 +1,23 @@
+# Conference People Scanning Template
+_target_: todoist.automations.template.TaskTemplate
+content: Initial People Scanning
+description: Identify and scan key people at the conference/summer school
+due_date_days_difference: 0
+priority: 1
+children:
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Get list of participants/speakers
+    description: Download or collect the list from the event website/platform
+    due_date_days_difference: -2
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Mark must-meet researchers
+    description: Choose people you want/need to connect with (advisors, labs, similar topics)
+    due_date_days_difference: -1
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Google/Scholar scan
+    description: Skim recent papers/talks of key people
+    due_date_days_difference: 0
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Write short notes/questions
+    description: Prepare questions or talking points for each person
+    due_date_days_difference: 0

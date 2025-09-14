@@ -1,0 +1,27 @@
+# Networking Follow-Up Template
+_target_: todoist.automations.template.TaskTemplate
+content: Networking Follow-Up
+description: Follow up after initial networking
+due_date_days_difference: 3
+priority: 1
+children:
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Review notes from meeting/conversation
+    description: Review what you discussed, summarize key points
+    due_date_days_difference: 1
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Draft follow-up message
+    description: Thank them, mention something specific you discussed, include next steps
+    due_date_days_difference: 2
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Refine follow-up with AI
+    description: Refine text with AI for clarity
+    due_date_days_difference: 2
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Send follow-up message
+    description: Send via appropriate channel (email, LinkedIn, etc.)
+    due_date_days_difference: 3
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Add to contacts notebook
+    description: Maintain a living doc/spreadsheet of your network and notes
+    due_date_days_difference: 4
