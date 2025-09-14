@@ -20,15 +20,15 @@ def main(config: DictConfig) -> None:
     # Filtering only for short ones
     automations = list(filter(lambda x: not x.is_long, automations))
 
-    # if Activity among automations, we need to run the longest (still left) one.
+    # Run activity automation if present (now using adaptive approach)
     activity_automations: list[Activity] = list(filter(lambda x: isinstance(x, Activity), automations))
     rest_automations = list(filter(lambda x: not isinstance(x, Activity), automations))
     if activity_automations:
-        longest_automation = max(activity_automations, key=lambda x: x.nweeks)
-        logger.info(f"Activity automations found, running the longest one - last {int(longest_automation.nweeks)} weeks of activity collection.")
-        automations = [longest_automation] + rest_automations
+        activity_automation = activity_automations[0]  # Only one activity automation now
+        logger.info(f"Activity automation found, running adaptive activity collection.")
+        automations = [activity_automation] + rest_automations
     else:
-        logger.info("No activity automations found, running all remaining automations.")
+        logger.info("No activity automation found, running all remaining automations.")
     
     if not automations:
         logger.warning("No automations to run. Exiting.")
