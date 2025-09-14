@@ -4,7 +4,7 @@ Tests for data transformation and dataframe operations.
 import pandas as pd
 import datetime as dt
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from todoist.types import Event, EventEntry, Project, ProjectEntry, events_to_dataframe
 

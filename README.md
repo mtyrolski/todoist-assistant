@@ -167,9 +167,18 @@ flowchart TD
 
 The following [Makefile](Makefile) commands are available for managing the local environment and running the dashboard:
 
+### Application Commands
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
+
+### Development Commands
+- **`make test`:** Run tests with pytest
+- **`make format-check`:** Check code formatting with yapf
+- **`make lint`:** Check code with ruff linter
+- **`make format`:** Auto-fix formatting with yapf
+- **`make lint-fix`:** Auto-fix linting issues with ruff
+- **`make ci-check`:** Run all CI checks locally (tests, formatting, linting)
 
 
 ## Manual Usage
