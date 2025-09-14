@@ -19,7 +19,13 @@ def get_available_log_files() -> List[str]:
     # Find all .log files recursively in the repository
     for log_file in current_dir.rglob("*.log"):
         if log_file.is_file():
-            log_files.append(str(log_file))
+            # Exclude empty files and handle race conditions (file removed between checks)
+            try:
+                if log_file.stat().st_size > 0:
+                    log_files.append(str(log_file))
+            except OSError:
+                # Skip files that cannot be accessed
+                continue
     
     return sorted(list(set(log_files)))  # Remove duplicates and sort
 
