@@ -1,0 +1,27 @@
+# Read Paper Template
+_target_: todoist.automations.template.TaskTemplate
+content: Read Paper
+description: Read a research paper
+due_date_days_difference: 0
+priority: 1
+children:
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Find paper
+    description: Find the paper to read
+    due_date_days_difference: -7
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Print paper
+    description: Print the paper
+    due_date_days_difference: -6
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Read paper
+    description: Spend time reading the paper
+    due_date_days_difference: 0
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Summarize paper
+    description: Write a summary of the paper
+    due_date_days_difference: 1
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Discuss paper
+    description: Discuss the content of the paper with peers
+    due_date_days_difference: 2

@@ -1,0 +1,59 @@
+# Poster Creation Template
+_target_: todoist.automations.template.TaskTemplate
+content: Poster Creation
+description: Prepare and present a research poster
+due_date_days_difference: 0
+priority: 1
+children:
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Review poster guidelines
+    description: Check official poster size, format, and submission requirements
+    due_date_days_difference: -20
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Select content for poster
+    description: Decide on the research, results, and story to present
+    due_date_days_difference: -18
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Sketch poster layout
+    description: Draw a rough layout for sections and flow
+    due_date_days_difference: -17
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Gather figures, charts, and visuals
+    description: Prepare all images, graphs, and diagrams for clarity and impact
+    due_date_days_difference: -15
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Draft poster content
+    description: Write section text (title, intro, methods, results, discussion, references)
+    due_date_days_difference: -14
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Peer/mentor review
+    description: Get feedback on draft content and visuals
+    due_date_days_difference: -12
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Revise poster with feedback
+    description: Update poster with improvements suggested by reviewers
+    due_date_days_difference: -10
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Design and finalize poster
+    description: Use design software to assemble and polish the poster
+    due_date_days_difference: -8
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Print poster or prepare digital version
+    description: Print physical poster or format file for digital presentation
+    due_date_days_difference: -5
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Practice poster pitch
+    description: Rehearse your 1-minute and deep-dive explanations
+    due_date_days_difference: -3
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Gather poster supplies
+    description: Collect poster tube, tape, pushpins, business cards, handouts
+    due_date_days_difference: -2
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Present poster at event
+    description: Arrive early, set up, engage with attendees, take notes on feedback
+    due_date_days_difference: 0
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Follow up with new contacts
+    description: Send thank-you notes, answer questions, and share materials after the event
+    due_date_days_difference: 2
