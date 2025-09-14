@@ -11,3 +11,5 @@ credentials.json
 outputs/
 *.log
 todoist/scripts/*.log
+# Screenshots added temporarily
+*.png

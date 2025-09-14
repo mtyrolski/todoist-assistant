@@ -3,7 +3,6 @@ from typing import Final, cast
 
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from todoist.types import Project
 
 
@@ -297,6 +296,7 @@ def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime
 def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
     """
     Plots a heatmap of events by day of the week and hour of the day within the specified date range.
+    Enhanced version with dark mode support and improved informativeness.
     
     Parameters:
     df (pd.DataFrame): DataFrame containing event data.
@@ -307,13 +307,174 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     go.Figure: Plotly figure object representing the heatmap of events by day and hour.
     """
     df_filtered = df.loc[beg_date:end_date].copy()
+    
+    # Handle empty data gracefully
+    if df_filtered.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            template='plotly_dark',
+            title={
+                'text': 'Heatmap of Events by Day and Hour (No Data)',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
+            },
+            paper_bgcolor='#111318',
+            plot_bgcolor='#111318'
+        )
+        return fig
+    
     # Ensure we operate on a DateTimeIndex for static typing correctness
     dt_index = cast(pd.DatetimeIndex, pd.to_datetime(df_filtered.index))
     df_filtered['hour'] = dt_index.hour
     df_filtered['day_of_week'] = dt_index.dayofweek
-    heatmap_data = df_filtered.groupby(['day_of_week', 'hour']).size().unstack().fillna(0)
-    fig = px.imshow(heatmap_data, labels=dict(x="Hour of Day", y="Day of Week", color="Number of Events"))
-    fig.update_layout(title_text='Heatmap of Events by Day and Hour')
+    
+    # Create heatmap data with proper indexing
+    heatmap_data = df_filtered.groupby(['day_of_week', 'hour']).size().unstack(fill_value=0)
+    
+    # Ensure all hours (0-23) and all days (0-6) are represented
+    all_hours = list(range(24))
+    all_days = list(range(7))
+    heatmap_data = heatmap_data.reindex(index=all_days, columns=all_hours, fill_value=0)
+    
+    # Day names for better readability
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    # Create custom hover text with more information
+    total_events = heatmap_data.sum().sum()
+    hover_text = []
+    
+    for day_idx in range(7):
+        hover_row = []
+        for hour in range(24):
+            count = heatmap_data.iloc[day_idx, hour]
+            percentage = (count / total_events * 100) if total_events > 0 else 0
+            
+            # Format hour display (e.g., "9 AM", "2 PM", "0 (midnight)")
+            if hour == 0:
+                hour_str = "12 AM (midnight)"
+            elif hour == 12:
+                hour_str = "12 PM (noon)"
+            elif hour < 12:
+                hour_str = f"{hour} AM"
+            else:
+                hour_str = f"{hour - 12} PM"
+            
+            hover_text_cell = (
+                f"<b>{day_names[day_idx]}</b><br>"
+                f"Time: {hour_str}<br>"
+                f"Events: {int(count)}<br>"
+                f"Percentage: {percentage:.1f}%<br>"
+                f"<extra></extra>"
+            )
+            hover_row.append(hover_text_cell)
+        hover_text.append(hover_row)
+    
+    # Create the heatmap using plotly graph objects for better control
+    fig = go.Figure(data=go.Heatmap(
+        z=heatmap_data.values,
+        x=all_hours,
+        y=day_names,
+        colorscale=[
+            [0.0, '#0d1b2a'],      # Dark blue for low activity
+            [0.1, '#1b263b'],      # Slightly lighter blue
+            [0.2, '#2d4f7c'],      # Medium blue
+            [0.3, '#415a77'],      # Blue-gray
+            [0.4, '#778da9'],      # Light blue-gray
+            [0.5, '#a8dadc'],      # Light blue
+            [0.6, '#f1faee'],      # Very light blue/white
+            [0.7, '#ffeaa7'],      # Light yellow
+            [0.8, '#fdcb6e'],      # Orange-yellow
+            [0.9, '#e17055'],      # Orange-red
+            [1.0, '#d63031']       # Red for high activity
+        ],
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_text,
+        showscale=True,
+        colorbar=dict(
+            title=dict(
+                text="Events Count",
+                font=dict(size=14, color='#ffffff')
+            ),
+            tickfont=dict(size=12, color='#e6e6e6'),
+            bgcolor='#111318',
+            bordercolor='rgba(255,255,255,0.24)',
+            borderwidth=1
+        )
+    ))
+    
+    # Update layout with dark theme and enhanced styling
+    fig.update_layout(
+        template='plotly_dark',
+        title={
+            'text': 'Activity Heatmap: Events by Day and Hour',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
+        },
+        xaxis={
+            'title': {
+                'text': 'Hour of Day',
+                'font': {'size': 14, 'color': '#ffffff'}
+            },
+            'tickmode': 'array',
+            'tickvals': list(range(0, 24, 2)),  # Show every 2 hours for readability
+            'ticktext': [f'{h}:00' for h in range(0, 24, 2)],
+            'tickfont': {'size': 11, 'color': '#e6e6e6'},
+            'showgrid': True,
+            'gridwidth': 1,
+            'gridcolor': 'rgba(255,255,255,0.08)',
+            'showline': True,
+            'linewidth': 1,
+            'linecolor': 'rgba(255,255,255,0.24)'
+        },
+        yaxis={
+            'title': {
+                'text': 'Day of Week',
+                'font': {'size': 14, 'color': '#ffffff'}
+            },
+            'tickfont': {'size': 11, 'color': '#e6e6e6'},
+            'showgrid': True,
+            'gridwidth': 1,
+            'gridcolor': 'rgba(255,255,255,0.08)',
+            'showline': True,
+            'linewidth': 1,
+            'linecolor': 'rgba(255,255,255,0.24)'
+        },
+        plot_bgcolor='#111318',
+        paper_bgcolor='#111318',
+        margin=dict(l=80, r=100, t=80, b=60),
+        font=dict(color='#ffffff'),
+        hoverlabel=dict(
+            bgcolor='#1e1e1e',
+            bordercolor='#444',
+            font=dict(color='#ffffff', size=12)
+        )
+    )
+    
+    # Add subtle annotations for peak activity times if there's data
+    if total_events > 0:
+        # Find peak hour and day
+        max_pos = heatmap_data.stack().idxmax()
+        peak_day, peak_hour = max_pos
+        peak_count = heatmap_data.iloc[peak_day, peak_hour]
+        
+        if peak_count > 0:
+            fig.add_annotation(
+                x=peak_hour,
+                y=day_names[peak_day],
+                text=f"Peak: {int(peak_count)}",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                arrowcolor="#ffffff",
+                font=dict(color="#ffffff", size=10),
+                bgcolor="rgba(0,0,0,0.7)",
+                bordercolor="#ffffff",
+                borderwidth=1
+            )
+    
     return fig
 
 
