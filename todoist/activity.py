@@ -81,40 +81,9 @@ def remove_last_n_events_from_activity(activity_db: EventCollection, n: int) -> 
     return activity_db
 
 
-def fetch_activity_adaptive(dbio: Database, nweeks_window_size: int = 2, early_stop_after_n_windows: int = 4) -> tuple[EventCollection, EventCollection, bool]:
-    """Fetches activity using adaptive approach with sliding window and early stopping.
-    Updates local database, and returns the new items.
-    
-    Third param is a is_corrupted flag indicating if internal error occurred and database had to be recreated.
-    """
-    is_corrupted = False
-    try:
-        all_events: set[Event] = Cache().activity.load()
-    except LocalStorageError as e:
-        logger.error('No local activity database found, creating a new one.')
-        logger.error(str(e))
-        is_corrupted = True
-        all_events = set()
-
-    # Fetch new events using adaptive approach
-    fetched_activity: list[Event] = dbio.fetch_activity_adaptively(
-        nweeks_window_size=nweeks_window_size,
-        early_stop_after_n_windows=early_stop_after_n_windows,
-        events_already_fetched=all_events
-    )
-    logger.info(f'Fetched {len(fetched_activity)} new events using adaptive approach')
-
-    new_events: set[Event] = set(fetched_activity)
-    all_events.update(new_events)
-    
-    logger.info(f'Added {len(new_events)} new events, current size: {len(all_events)}')
-    Cache().activity.save(all_events)
-    return all_events, new_events, is_corrupted
-
-
-def main(nweeks_window_size: int = 2, early_stop_after_n_windows: int = 4):
+def main(nweeks: int = 3):
     dbio = Database('.env')
-    activity_db, new_items, is_corrupted = fetch_activity_adaptive(dbio, nweeks_window_size, early_stop_after_n_windows)
+    activity_db, new_items, is_corrupted = fetch_activity(dbio, nweeks)
     logger.info(f'Summary of Activity (is_corrupted={is_corrupted}):')
     quick_summarize(activity_db, new_items)
 
