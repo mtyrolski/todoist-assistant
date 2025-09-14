@@ -27,6 +27,11 @@ activity_last_10_years:
 multiply:
   _target_: todoist.automations.multiplicate.Multiply
 
+gmail_tasks:
+  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
+  name: Gmail Tasks
+  frequency_in_minutes: 60
+
 # Template automation
 template:
   _target_: todoist.automations.template.Template
@@ -57,6 +62,7 @@ automations:
   - ${activity_last_month}
   - ${activity_last_10_years}
   - ${multiply}
+  - ${gmail_tasks}
 
 hydra:
   searchpath:
