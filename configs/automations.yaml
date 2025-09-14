@@ -391,6 +391,9 @@ automations:
     name: Activity Last 10 years
     nweeks: 520
   - _target_: todoist.automations.multiplicate.Multiply
+  - _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
+    name: Gmail Tasks
+    frequency_in_minutes: 60
 
 hydra:
   searchpath:
