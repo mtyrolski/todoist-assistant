@@ -9,5 +9,5 @@ __pycache__/
 personal/*.py
 credentials.json
 outputs/
-automation.log
+*.log
 todoist/scripts/*.log
