@@ -25,10 +25,16 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
     cols = st.columns(len(metrics))
     for i, (metric_name, metric_value, metric_delta, do_inverse) in enumerate(metrics):
         with cols[i]:
-            # Add date range information above the metric in colorful format
+            st.metric(label=metric_name,
+                      value=metric_value,
+                      delta=metric_delta,
+                      delta_color="inverse" if do_inverse else "normal",
+                      border=True)
+            
+            # Add date range information inside the metric box area
             st.markdown(f"""
-            <div style="margin-bottom: 10px; font-size: 10px; line-height: 1.3;">
-                <div style="color: #00d4aa; font-weight: 500; margin-bottom: 3px;">
+            <div style="margin-top: 5px; font-size: 9px; line-height: 1.2; padding: 4px 8px; background-color: rgba(255,255,255,0.05); border-radius: 4px;">
+                <div style="color: #00d4aa; font-weight: 500; margin-bottom: 2px;">
                     ▶ {current_period}
                 </div>
                 <div style="color: #ff6b6b; font-weight: 500;">
@@ -36,12 +42,6 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
-            st.metric(label=metric_name,
-                      value=metric_value,
-                      delta=metric_delta,
-                      delta_color="inverse" if do_inverse else "normal",
-                      border=True)
 
     # Badges
     badges: str = get_badges(active_projects)
