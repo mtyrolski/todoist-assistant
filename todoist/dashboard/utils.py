@@ -68,7 +68,7 @@ def sidebar_granularity() -> str:
                                 }[x])
 
 
-def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> list[tuple[str, str, str]]:
+def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> tuple[list[tuple[str, str, str, bool]], str, str]:
     # Define time span based on granularity
     granularity_to_timedelta = {"W": timedelta(weeks=1), "ME": timedelta(weeks=4), "3ME": timedelta(weeks=12)}
     if granularity not in granularity_to_timedelta:
@@ -82,6 +82,10 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> list[tuple[s
     # Previous period is the same length immediately preceding beg_range
     previous_beg_range = beg_range - timespan
     previous_end_range = end_range - timespan
+
+    # Format date ranges for display
+    current_period_str = f"{beg_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
+    previous_period_str = f"{previous_beg_range.strftime('%Y-%m-%d')} to {previous_end_range.strftime('%Y-%m-%d')}"
 
     metrics: list[tuple[str, str, str]] = []
 
@@ -109,7 +113,7 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> list[tuple[s
             delta_percent = float('inf')
         metrics.append((metric_name, str(current_value), f"{delta_percent}%", inverse))
 
-    return metrics
+    return metrics, current_period_str, previous_period_str
 
 
 def get_badges(active_projects: list[Project]) -> str:

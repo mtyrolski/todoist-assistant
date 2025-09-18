@@ -21,7 +21,7 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
         st.header("Most Popular Labels")
         st.plotly_chart(plot_most_popular_labels(active_projects, label_colors))
     # Metrics
-    metrics: list[tuple[str, str, str, bool]] = extract_metrics(df_activity, granularity)
+    metrics, current_period, previous_period = extract_metrics(df_activity, granularity)
     cols = st.columns(len(metrics))
     for i, (metric_name, metric_value, metric_delta, do_inverse) in enumerate(metrics):
         with cols[i]:
@@ -30,6 +30,9 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
                       delta=metric_delta,
                       delta_color="inverse" if do_inverse else "normal",
                       border=True)
+            # Add date range information in small font
+            st.markdown(f"<small>Current: {current_period}<br>Previous: {previous_period}</small>", 
+                       unsafe_allow_html=True)
 
     # Badges
     badges: str = get_badges(active_projects)
