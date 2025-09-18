@@ -44,6 +44,7 @@ def render_overview_page(df_activity: pd.DataFrame, active_projects: list[Projec
     
     # === MAIN CONTENT: THREE COLUMN LAYOUT ===
     st.header("🎯 Activity Insights")
+    st.markdown("**Current state of your productivity ecosystem**")
     
     # First row: Current state overview
     col1, col2, col3 = st.columns(3)
@@ -62,6 +63,7 @@ def render_overview_page(df_activity: pd.DataFrame, active_projects: list[Projec
     
     # === SECOND ROW: TIME-BASED ANALYTICS ===
     st.header("⏰ Time & Activity Patterns")
+    st.markdown("**Discover when and where you're most productive**")
     
     col1, col2 = st.columns(2)
     
@@ -77,6 +79,7 @@ def render_overview_page(df_activity: pd.DataFrame, active_projects: list[Projec
     
     # === THIRD ROW: TREND ANALYSIS ===
     st.header("📈 Progress Trends")
+    st.markdown("**Track your productivity evolution over time**")
     
     # Full-width charts for trend analysis
     col1, col2 = st.columns(2)
@@ -93,6 +96,7 @@ def render_overview_page(df_activity: pd.DataFrame, active_projects: list[Projec
     
     # === BOTTOM SECTION: ACTIONABLE INSIGHTS ===
     st.header("💡 Quick Insights")
+    st.markdown("**Key takeaways from your productivity data**")
     
     # Calculate some quick stats for insights
     total_active_tasks = len(active_tasks)
