@@ -220,6 +220,7 @@ make run_chainlit
       This launches a Chainlit-based chat interface that provides interactive plot visualization through buttons and includes a placeholder for future AI chat agent capabilities. The interface displays all the same plots as the Streamlit dashboard but in an interactive chat format, making it easier to explore your productivity data through guided interactions.
     </td>
     <td style="text-align: center; vertical-align: top;">
+      <img src="img/chainlit_app_interface.png" alt="chainlit_interface" style="max-width: 100%; height: auto;"/><br>
       <strong>Features:</strong><br>
       📊 Interactive plot buttons<br>
       💬 Chat-based interface<br>
