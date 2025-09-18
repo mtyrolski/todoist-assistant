@@ -380,6 +380,8 @@ automations:
             due_date_days_difference: 2
   - _target_: todoist.automations.activity.Activity
     name: Activity Adaptive Fetch
+    nweeks_window_size: 4
+    early_stop_after_n_windows: 6
   - _target_: todoist.automations.multiplicate.Multiply
 
 hydra:

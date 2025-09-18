@@ -24,7 +24,9 @@ def main(config: DictConfig) -> None:
     activity_automations: list[Activity] = list(filter(lambda x: isinstance(x, Activity), automations))
     rest_automations = list(filter(lambda x: not isinstance(x, Activity), automations))
     if activity_automations:
-        activity_automation = activity_automations[0]  # Only one activity automation now
+        if len(activity_automations) > 1:
+            logger.warning(f"Found {len(activity_automations)} activity automations, but only one is supported. Using the first one.")
+        activity_automation = activity_automations[0]
         logger.info(f"Activity automation found, running adaptive activity collection.")
         automations = [activity_automation] + rest_automations
     else:
