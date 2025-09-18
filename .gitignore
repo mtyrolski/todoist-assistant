@@ -13,3 +13,6 @@ outputs/
 todoist/scripts/*.log
 # Screenshots added temporarily
 *.png
+# Chainlit auto-generated files
+.chainlit/translations/
+chainlit.md

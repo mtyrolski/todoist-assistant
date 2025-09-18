@@ -1,0 +1,99 @@
+[project]
+# Whether to enable telemetry (default: true). No personal data is collected.
+enable_telemetry = true
+
+# List of environment variables to be provided by each user to use the app.
+user_env = []
+
+# Duration (in seconds) during which the session is saved when the connection is lost
+session_timeout = 3600
+
+# Enable third parties caching (e.g LangChain cache)
+cache = false
+
+# Authorized origins
+allow_origins = ["*"]
+
+# Follow symlink for asset mount (see https://github.com/Chainlit/chainlit/issues/317)
+# follow_symlink = false
+
+[features]
+# Show the prompt playground
+prompt_playground = true
+
+# Process and display HTML in messages. This can be a security risk (see https://stackoverflow.com/questions/19603097/why-is-it-dangerous-to-render-user-generated-html-or-javascript)
+unsafe_allow_html = false
+
+# Process and display mathematical expressions. This can clash with $-based syntax
+latex = false
+
+# Automatically tag threads when an element is created and allow users to search by tags.
+auto_tag_thread = true
+
+# Literal AI integration
+[features.literalai]
+# The agent id to use for Literal AI
+# agent_id = ""
+# Tags to apply to the threads
+# tags = []
+
+[UI]
+# Name of the app and chatbot.
+name = "Todoist Assistant"
+
+# Show the readme while the thread is empty.
+show_readme = false
+
+# Description of the app and chatbot. This is used for HTML tags.
+description = "Interactive Todoist productivity dashboard with chat capabilities"
+
+# Large size content are by default collapsed for a cleaner ui
+default_collapse_content = true
+
+# The default value for the expand messages settings.
+default_expand_messages = false
+
+# Hide the chain of thought details from the user in the UI.
+hide_cot = false
+
+# Link to your github repo. This will add a github button in the UI's header.
+# github = ""
+
+# Specify a CSS file that can be used to customize the user interface.
+# The CSS file can be served from the public directory or via an external link.
+# custom_css = "/public/test.css"
+
+# Specify a Javascript file that can be used to customize the user interface.
+# The Javascript file can be served from the public directory.
+# custom_js = "/public/test.js"
+
+# Specify a custom font url.
+# custom_font = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap"
+
+# Specify the theme to use. Can be "light" or "dark".
+default_theme = "dark"
+
+# Override default MUI light theme. (Check theme.ts)
+[UI.theme]
+
+[UI.theme.light]
+    #background = "#FAFAFA"
+    #paper = "#FFFFFF"
+
+    [UI.theme.light.primary]
+        #main = "#F80061"
+        #dark = "#980039"
+        #light = "#FA4183"
+
+# Override default MUI dark theme. (Check theme.ts)
+[UI.theme.dark]
+    #background = "#0F1419"
+    #paper = "#1E2328"
+
+    [UI.theme.dark.primary]
+        #main = "#00C853"
+        #dark = "#00A045"
+        #light = "#4FD176"
+
+[meta]
+generated_by = "1.2.0"

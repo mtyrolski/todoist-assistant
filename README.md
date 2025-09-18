@@ -169,6 +169,7 @@ The following [Makefile](Makefile) commands are available for managing the local
 
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
+- **`make run_chainlit`:** Launches the new Chainlit chat interface with interactive plot visualization.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
 
 
@@ -192,7 +193,8 @@ python3 -m todoist.automations.run --config-dir configs --config-name automation
 
 ### Dashboard Usage
 
-To run the dashboard, execute the following command:
+#### Streamlit Dashboard (Traditional)
+To run the traditional dashboard, execute the following command:
 ```bash
 streamlit run dashboard.py
 ```
@@ -203,6 +205,27 @@ streamlit run dashboard.py
     </td>
     <td style="text-align: center; vertical-align: top;">
       <img src="img/control_panel.png" alt="control_panel" style="max-width: 100%; height: auto;"/>
+    </td>
+  </tr>
+</table>
+
+#### Chainlit Chat Interface (New!)
+To run the new interactive chat interface with plot visualization:
+```bash
+make run_chainlit
+```
+<table>
+  <tr>
+    <td style="text-align: justify; vertical-align: top;">
+      This launches a Chainlit-based chat interface that provides interactive plot visualization through buttons and includes a placeholder for future AI chat agent capabilities. The interface displays all the same plots as the Streamlit dashboard but in an interactive chat format, making it easier to explore your productivity data through guided interactions.
+    </td>
+    <td style="text-align: center; vertical-align: top;">
+      <strong>Features:</strong><br>
+      📊 Interactive plot buttons<br>
+      💬 Chat-based interface<br>
+      🤖 AI agent placeholder<br>
+      📈 All visualization types<br>
+      🔍 Guided data exploration
     </td>
   </tr>
 </table>
