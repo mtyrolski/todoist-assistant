@@ -25,14 +25,23 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
     cols = st.columns(len(metrics))
     for i, (metric_name, metric_value, metric_delta, do_inverse) in enumerate(metrics):
         with cols[i]:
+            # Add date range information above the metric in colorful format
+            st.markdown(f"""
+            <div style="margin-bottom: 10px; font-size: 10px; line-height: 1.3;">
+                <div style="color: #00d4aa; font-weight: 500; margin-bottom: 3px;">
+                    ▶ {current_period}
+                </div>
+                <div style="color: #ff6b6b; font-weight: 500;">
+                    ◀ {previous_period}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
             st.metric(label=metric_name,
                       value=metric_value,
                       delta=metric_delta,
                       delta_color="inverse" if do_inverse else "normal",
                       border=True)
-            # Add date range information in small font
-            st.markdown(f"<small>Current: {current_period}<br>Previous: {previous_period}</small>", 
-                       unsafe_allow_html=True)
 
     # Badges
     badges: str = get_badges(active_projects)
