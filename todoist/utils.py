@@ -1,6 +1,8 @@
 from os import getenv
 from os.path import join
 from os.path import exists
+from pathlib import Path
+import sys
 from pickle import HIGHEST_PROTOCOL
 from typing import Callable, TypeVar
 from joblib import load, dump
@@ -114,7 +116,29 @@ def last_n_years_in_weeks(n_years: int) -> int:
 
 
 def get_api_key() -> str:
-    """Assuming that ENV variables are set"""
+    """Get API key from environment variables or custom config location"""
+    # First try to load from custom .env file location if specified
+    dotenv_path = getenv('DOTENV_PATH')
+    if dotenv_path and exists(dotenv_path):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(dotenv_path)
+        except ImportError:
+            # dotenv not available, try to read manually
+            try:
+                with open(dotenv_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip().strip("'\"")
+                            if key == 'API_KEY':
+                                return value
+            except Exception:
+                pass
+    
+    # Fallback to regular environment variable
     return getenv('API_KEY')
 
 

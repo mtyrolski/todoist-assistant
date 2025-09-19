@@ -104,9 +104,36 @@ flowchart TD
 [Watch the demo on YouTube](https://www.youtube.com/watch?v=e_-EOyAq6mU)
 
 ## Installation
+
+### Windows Executable Package
+
+**For Windows users who want the simplest installation:**
+
+The repository includes build scripts to create a self-contained Windows executable:
+
+```bash
+# Install build dependencies
+pip install pyinstaller pillow
+
+# Run the build script
+python build_windows.py
+```
+
+This creates a complete Windows package with:
+- ✅ Self-contained executable (no Python installation needed)
+- ✅ Automatic desktop shortcut creation via `install.bat`
+- ✅ Start Menu integration
+- ✅ Easy configuration wizard
+- ✅ Uninstaller included
+
+**First Run Configuration:**
+1. The application will prompt you to configure your Todoist API key
+2. Get your API key from: https://todoist.com/prefs/integrations
+3. The dashboard will open automatically in your browser
+
 ### Recommended Setup Environment
 
-> **Note for windows:** While the Todoist-Stats-App can be used on Windows, it is highly recommended to set it up in a Linux environment for the best experience.  
+> **Note for windows:** The application now provides build scripts for creating a native Windows executable package. However, if you prefer manual setup, it is still recommended to use a Linux environment or WSL for development.  
 > If you are on Windows, consider installing [Ubuntu 20.04 (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) to get started with a Linux subsystem.
 
 
