@@ -13,3 +13,11 @@ outputs/
 todoist/scripts/*.log
 # Screenshots added temporarily
 *.png
+
+# Windows executable build artifacts
+*.exe
+*.zip
+dist/
+build/
+TodoistAssistant_Windows/
+*.spec.bak
