@@ -100,9 +100,12 @@ class GmailTasksAutomation(Automation):
         Returns:
             True if the email appears to contain actionable items
         """
+        logger.debug(f"Checking if email is actionable: {subject}")
         text_to_check = f"{subject} {snippet}".lower()
-        return any(keyword in text_to_check for keyword in self.TASK_KEYWORDS)
-    
+        is_actionable = any(keyword in text_to_check for keyword in self.TASK_KEYWORDS)
+        logger.debug(f"Email {subject} -> actionable? {is_actionable}")
+        return is_actionable
+
     def _extract_task_content(self, subject: str, snippet: str, sender: str) -> dict:
         """
         Extract task content from email data.

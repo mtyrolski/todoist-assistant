@@ -56,12 +56,12 @@ template:
     call: ${communication.call}
 
 automations:
-  # - ${template}
-  # - ${activity_last_week}
-  # - ${activity_2_weeks}
-  # - ${activity_last_month}
-  # - ${activity_last_10_years}
-  # - ${multiply}
+  - ${template}
+  - ${activity_last_week}
+  - ${activity_2_weeks}
+  - ${activity_last_month}
+  - ${activity_last_10_years}
+  - ${multiply}
   - ${gmail_tasks}
 
 hydra:
