@@ -7,24 +7,20 @@ from emails that appear to contain actionable items, while avoiding duplicates.
 import datetime
 import os.path
 import re
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from loguru import logger
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.utils import Cache
-
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 GMAIL_CREDENTIALS_FILE = 'gmail_credentials.json'
 GMAIL_TOKEN_FILE = 'gmail_token.json'
 
 class GmailTasksAutomation(Automation):
-    """
-    Automation to fetch Gmail emails and convert them to Todoist tasks.
+    """Automation to fetch Gmail emails and convert them to Todoist tasks.
     
     This automation:
     1. Fetches unread emails from Gmail from the last week
@@ -173,16 +169,19 @@ class GmailTasksAutomation(Automation):
         Args:
             db: Database instance for Todoist operations
         """
-        if not os.path.exists(GMAIL_CREDENTIALS_FILE):
-            logger.error(f"Gmail credentials file {GMAIL_CREDENTIALS_FILE} not found. "
-                         "Please follow the setup instructions to configure Gmail API access.")
-            return
         try:
-            # Authenticate with Gmail
-            self.gmail_service = self._authenticate_gmail()
-            if not self.gmail_service:
-                logger.error("Failed to authenticate with Gmail API")
-                return
+            # Authenticate with Gmail only if no service injected (e.g., in tests)
+            if self.gmail_service is None:
+                if not os.path.exists(GMAIL_CREDENTIALS_FILE):
+                    logger.error(
+                        f"Gmail credentials file {GMAIL_CREDENTIALS_FILE} not found. "
+                        "Please follow the setup instructions to configure Gmail API access."
+                    )
+                    return
+                self.gmail_service = self._authenticate_gmail()
+                if not self.gmail_service:
+                    logger.error("Failed to authenticate with Gmail API")
+                    return
                 
             logger.info("Successfully authenticated with Gmail API")
             
@@ -270,7 +269,7 @@ class GmailTasksAutomation(Automation):
                     else:
                         logger.error(f"Failed to create task: {result.get('error')}")
                         
-                except (HttpError, KeyError, ValueError, AttributeError, TypeError) as e:
+                except (KeyError, ValueError, AttributeError, TypeError) as e:
                     logger.error(f"Error processing email {message['id']}: {e}")
                     
             # Persist processed IDs if updated
@@ -281,5 +280,5 @@ class GmailTasksAutomation(Automation):
 
             logger.info(f"Gmail Tasks automation completed. Created {tasks_created} new tasks.")
             
-        except (HttpError, OSError, ValueError, TypeError) as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Gmail Tasks automation failed: {e}")

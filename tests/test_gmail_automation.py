@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from todoist.automations.gmail_tasks import GmailTasksAutomation
+import re
 
 
 class TestGmailTasksAutomation:
@@ -119,7 +120,7 @@ class TestGmailTasksAutomation:
         
         # Mock database that raises an exception
         mock_db = Mock()
-        mock_db.fetch_projects.side_effect = Exception("Database error")
+        mock_db.fetch_projects.side_effect = RuntimeError("Database error")
         
         result = automation._get_existing_task_contents(mock_db)
         
@@ -178,3 +179,155 @@ class TestGmailTasksAutomation:
         assert hasattr(automation, '_tick')
         assert hasattr(automation, 'name')
         assert hasattr(automation, 'frequency')
+
+    def test_query_uses_correct_date_format(self):
+        """Ensure Gmail query uses 'after' and 'before' with YYYY/M/D format."""
+        automation = GmailTasksAutomation()
+
+        captured_queries = []
+
+        class FakeMessages:
+            def list(self, userId, q):  # noqa: N803 (external API naming)
+                captured_queries.append(q)
+                class Exec:
+                    def execute(self):
+                        return {"messages": []}
+                return Exec()
+
+        class FakeUsers:
+            def messages(self):
+                return FakeMessages()
+
+        class FakeService:
+            def users(self):
+                return FakeUsers()
+
+        # Inject fake Gmail service
+        automation.gmail_service = FakeService()
+
+        # Run
+        mock_db = Mock()
+        automation._tick(mock_db)
+
+        assert captured_queries, "Expected at least one Gmail query to be executed"
+        q = captured_queries[0]
+        # Must include 'is:unread', 'after:' and 'before:' with YYYY/M/D (no leading zeros required)
+        assert 'is:unread' in q
+        assert 'after:' in q and 'before:' in q
+        m = re.search(r"after:(\d{4}/\d{1,2}/\d{1,2})", q)
+        n = re.search(r"before:(\d{4}/\d{1,2}/\d{1,2})", q)
+        assert m and n, f"Query doesn't contain properly formatted dates: {q}"
+
+    def test_processed_ids_are_skipped_and_persisted(self):
+        """Processed Gmail message IDs should be skipped and saved after run."""
+        # Fake cache in memory
+        saved_set = set()
+
+        class FakeStorage:
+            def __init__(self, initial):
+                self._data = set(initial)
+            def load(self):
+                return set(self._data)
+            def save(self, data):
+                saved_set.clear()
+                saved_set.update(data)
+
+        class FakeCache:
+            def __init__(self, path: str = './'):
+                self.processed_gmail_messages = FakeStorage({"abc123"})
+
+        # Fake Gmail service producing two messages (one already processed)
+        class FakeMessages:
+            def list(self, userId, q):  # noqa: N803
+                class Exec:
+                    def execute(self):
+                        return {"messages": [{"id": "abc123"}, {"id": "xyz9"}]}
+                return Exec()
+            def get(self, userId, id):  # noqa: A002, N803 - external API naming
+                class Exec:
+                    def execute(self):
+                        # Always actionable
+                        return {
+                            "payload": {"headers": [{"name": "Subject", "value": "TODO: Do X"}, {"name": "From", "value": "me@example.com"}]},
+                            "snippet": "Please follow up"
+                        }
+                return Exec()
+
+        class FakeUsers:
+            def messages(self):
+                return FakeMessages()
+
+        class FakeService:
+            def users(self):
+                return FakeUsers()
+
+        automation = GmailTasksAutomation()
+        # Patch Cache in the module to our fake
+        with patch('todoist.automations.gmail_tasks.Cache', FakeCache):
+            # Recreate automation so __init__ picks up FakeCache
+            automation = GmailTasksAutomation()
+            automation.gmail_service = FakeService()
+
+            mock_db = Mock()
+            mock_db.insert_task.return_value = {}
+            mock_db.fetch_projects.return_value = []
+
+            automation._tick(mock_db)
+
+        # Should insert only for xyz9 (abc123 skipped)
+        assert mock_db.insert_task.call_count == 1
+        # Saved set should now include both ids
+        assert "abc123" in saved_set and "xyz9" in saved_set
+
+    def test_duplicate_content_is_skipped(self):
+        """If existing tasks already contain the same content, skip creation."""
+        class FakeMessages:
+            def list(self, userId, q):  # noqa: N803
+                class Exec:
+                    def execute(self):
+                        return {"messages": [{"id": "dup1"}]}
+                return Exec()
+            def get(self, userId, id):  # noqa: A002, N803
+                class Exec:
+                    def execute(self):
+                        return {
+                            "payload": {"headers": [{"name": "Subject", "value": "Re: Review plan"}, {"name": "From", "value": "boss@example.com"}]},
+                            "snippet": "TODO: Review plan please"
+                        }
+                return Exec()
+
+        class FakeUsers:
+            def messages(self):
+                return FakeMessages()
+
+        class FakeService:
+            def users(self):
+                return FakeUsers()
+
+        # Fake empty cache
+        class FakeStorage:
+            def load(self):
+                return set()
+            def save(self, data):
+                pass
+        class FakeCache:
+            def __init__(self, path: str = './'):
+                self.processed_gmail_messages = FakeStorage()
+
+        with patch('todoist.automations.gmail_tasks.Cache', FakeCache):
+            automation = GmailTasksAutomation()
+            automation.gmail_service = FakeService()
+
+            # Existing task with same normalized content after prefix removal
+            mock_task = Mock()
+            mock_task.task_entry.content = "Review plan"
+            mock_project = Mock()
+            mock_project.tasks = [mock_task]
+
+            mock_db = Mock()
+            mock_db.fetch_projects.return_value = [mock_project]
+
+            automation._tick(mock_db)
+
+        # Should not insert any task
+        assert not mock_db.insert_task.called
