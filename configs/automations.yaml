@@ -30,7 +30,7 @@ multiply:
 gmail_tasks:
   _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
   name: Gmail Tasks
-  frequency_in_minutes: 60
+  frequency_in_minutes: 0.1
 
 # Template automation
 template:
@@ -56,12 +56,12 @@ template:
     call: ${communication.call}
 
 automations:
-  - ${template}
-  - ${activity_last_week}
-  - ${activity_2_weeks}
-  - ${activity_last_month}
-  - ${activity_last_10_years}
-  - ${multiply}
+  # - ${template}
+  # - ${activity_last_week}
+  # - ${activity_2_weeks}
+  # - ${activity_last_month}
+  # - ${activity_last_10_years}
+  # - ${multiply}
   - ${gmail_tasks}
 
 hydra:
