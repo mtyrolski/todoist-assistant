@@ -2,27 +2,18 @@ from os import getenv
 from os.path import join
 from os.path import exists
 from pickle import HIGHEST_PROTOCOL
-from typing import Callable, TypeVar
+from typing import Callable, TypeVar, cast
 from joblib import load, dump
 from loguru import logger
 from hydra import compose
 from hydra import initialize
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from abc import ABC, abstractmethod
 from typing import KeysView, Type, Any
 from pickle import UnpicklingError
 from zlib import error as ZlibError
 from lzma import LZMAError
-from builtins import EOFError
-from builtins import ValueError
-from builtins import TypeError
-from builtins import FileNotFoundError
-from builtins import OSError
-from builtins import ImportError
-from builtins import AttributeError
-from builtins import ModuleNotFoundError
 import time
 
 T = TypeVar('T', set, dict)
@@ -67,7 +58,11 @@ class LocalStorage:
 
     def load(self) -> T:
         try:
-            return load(self.path) if exists(self.path) else self.resource_class()
+            if exists(self.path):
+                return cast(T, load(self.path))
+            else:
+                default_value = self.resource_class()
+                return cast(T, default_value)
         except LOCAL_STORAGE_EXCEPTIONS as e:
             raise LocalStorageError(f"Failed to load data from {self.path}: {type(e)}. {e}") from e
 
@@ -84,6 +79,7 @@ class Cache:
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
+        self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)
 
 
 class Anonymizable(ABC):
@@ -115,7 +111,7 @@ def last_n_years_in_weeks(n_years: int) -> int:
 
 def get_api_key() -> str:
     """Assuming that ENV variables are set"""
-    return getenv('API_KEY')
+    return getenv('API_KEY') or ""
 
 
 U = TypeVar('U')
@@ -127,10 +123,11 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
     If the function fails, log the exception and after n trials, return None.
     Waits exponentially longer after each failure (1s, 2s, 4s, ...).
     """
+    # pylint: disable=broad-exception-caught
     for attempt in range(n):
         try:
             return fn()
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - logged and retried
             logger.error(f"Exception {e} occurred on attempt {attempt + 1}")
             if attempt < n - 1:
                 wait_time = 2**(attempt + 3)
@@ -139,11 +136,11 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
     return None
 
 
-def load_config(config_name: str, config_path: str) -> OmegaConf:
+def load_config(config_name: str, config_path: str) -> DictConfig:
     GlobalHydra.instance().clear()
     initialize(config_path=config_path)
     config: DictConfig = compose(config_name=config_name)
-    return OmegaConf.create(config)
+    return config
 
 
 TODOIST_COLOR_NAME_TO_RGB: dict[str, str] = {
