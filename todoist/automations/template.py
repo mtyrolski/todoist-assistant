@@ -66,6 +66,7 @@ class Template(Automation):
         self.task_templates = task_templates
 
     def _tick(self, db: Database) -> None:
+        logger.info("Running Template automation")
         projects = db.fetch_projects(include_tasks=True)
         all_tasks: Iterable[Task] = [task for project in projects for task in project.tasks]
         logger.debug(f"Found {len(list(all_tasks))} tasks in total")

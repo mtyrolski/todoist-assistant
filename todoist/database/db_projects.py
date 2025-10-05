@@ -1,12 +1,13 @@
 import json
 from subprocess import DEVNULL, PIPE, run
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import cast, Optional
 
 from loguru import logger
 from tqdm import tqdm
-
+from functools import partial
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
 from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times
-from joblib import Parallel, delayed
 
 
 class DatabaseProjects:
@@ -71,8 +72,11 @@ class DatabaseProjects:
         return Project(id=project.id, project_entry=project, tasks=[], is_archived=False)
 
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
+        logger.debug(f"Fetching projects (include_tasks={include_tasks})")
         if self.projects_cache is not None:
+            logger.debug(f"Using cached projects")
             return self.projects_cache
+        logger.debug("Projects not fetched yet. Fetching now.")
 
         result: list[Project] = []
         projects: list[ProjectEntry] = self._fetch_projects_data()
@@ -84,11 +88,36 @@ class DatabaseProjects:
 
         def process_project(project: ProjectEntry) -> Project:
             task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
-            tasks: list[Task] = list(map(lambda task: Task(id=task.id, task_entry=task), task_entries))
+            tasks: list[Task] = [Task(id=task.id, task_entry=task) for task in task_entries]
             return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
 
-        result = Parallel(n_jobs=-1)(delayed(process_project)(project) for project in tqdm(
-            projects, desc='Querying project data', unit='project', total=len(projects), position=0, leave=True))
+        if not projects:
+            logger.info("No projects returned from API.")
+            self.projects_cache = []
+            return self.projects_cache
+
+        logger.info(f"Fetching {len(projects)} projects (include_tasks={include_tasks}) with thread pool")
+        max_workers = min(8, len(projects))
+        ordered_results: list[Optional[Project]] = [None] * len(projects)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {executor.submit(process_project, proj): idx for idx, proj in enumerate(projects)}
+            for future in tqdm(as_completed(future_to_index), total=len(projects), desc='Querying project data', unit='project', position=0, leave=True):
+                idx = future_to_index[future]
+                try:
+                    proj_result = future.result()
+                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
+                    logger.error(f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}")
+                    proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
+                ordered_results[idx] = proj_result
+                logger.debug(f"Fetched tasks for project {proj_result.project_entry.name} ({idx+1}/{len(projects)})")
+
+        # Replace any remaining None with empty project shells (should be rare)
+        for i, maybe_proj in enumerate(ordered_results):
+            if maybe_proj is None:
+                pentry = projects[i]
+                ordered_results[i] = Project(id=pentry.id, project_entry=pentry, tasks=[], is_archived=False)
+
+        result = cast(list[Project], ordered_results)  # ordered list of projects
 
         self.projects_cache = result
         return self.projects_cache
@@ -129,20 +158,23 @@ class DatabaseProjects:
         projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}
         mapping_project_id_to_root: dict[str, "Project"] = {}
 
-        # Build active project hierarchy in parallel
-        active_roots = Parallel(n_jobs=-1)(delayed(self._get_root_project)(project.id) for project in tqdm(
-            projects.values(), desc='Building active project hierarchy', unit='project', total=len(projects)))
-        for project, root in zip(projects.values(), active_roots):
-            mapping_project_id_to_root[project.id] = root
+        logger.info("Building project hierarchy (active + archived) with thread pool")
+        all_projects_seq: list[Project] = list(projects.values()) + list(archived_projects.values())
+        if not all_projects_seq:
+            return mapping_project_id_to_root
 
-        # Build archived project hierarchy in parallel
-        archived_roots = Parallel(n_jobs=-1)(delayed(self._get_root_project)(project.id)
-                                             for project in tqdm(archived_projects.values(),
-                                                                 desc='Building archived project hierarchy',
-                                                                 unit='project',
-                                                                 total=len(archived_projects)))
-        for project, root in zip(archived_projects.values(), archived_roots):
-            mapping_project_id_to_root[project.id] = root
+        max_workers = min(8, len(all_projects_seq))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_pid = {executor.submit(self._get_root_project, p.id): p.id for p in all_projects_seq}
+            for future in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc='Building project hierarchy', unit='project'):
+                pid = future_to_pid[future]
+                try:
+                    root = future.result()
+                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover
+                    logger.error(f"Hierarchy resolution failed for project {pid}: {e.__class__.__name__}: {e}")
+                    continue
+                if root is not None:
+                    mapping_project_id_to_root[pid] = root
 
         return mapping_project_id_to_root
 
@@ -182,11 +214,17 @@ class DatabaseProjects:
         self.mapping_project_name_to_color = name_to_color
         return name_to_color
 
-    def _get_root_project(self, project_id: int):
-        project = try_n_times(lambda: self.fetch_project_by_id(project_id), 3)
-        if project.project_entry.parent_id is None:
+    def _get_root_project(self, project_id: str) -> Optional[Project]:
+        """Resolve the root ancestor project following parent chain."""
+        project = try_n_times(partial(self.fetch_project_by_id, project_id), 3)
+        if project is None:
+            logger.error(f"Could not fetch project {project_id} after retries")
+            return None
+        parent_id = project.project_entry.parent_id
+        if parent_id is None:
             return project
-        return self._get_root_project(project.project_entry.parent_id)
+        # Recurse up
+        return self._get_root_project(parent_id)
 
     def _fetch_projects_data(self) -> list[ProjectEntry]:
         data = run([
@@ -203,13 +241,23 @@ class DatabaseProjects:
 
         return projects
 
-    def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
+    def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str] | None = None):
+        logger.debug("Anonymizing projects in DatabaseProjects")
         if not self.projects_cache:
+            logger.debug("Projects not fetched yet. Fetching now.")
             self.fetch_projects(include_tasks=True)
+            
+        logger.debug(f"Project cache has {len(self.projects_cache) if self.projects_cache else 0} projects")
+         # Ensure the color mapping is initialized
 
         if not self.mapping_project_name_to_color:
             _ = self.fetch_mapping_project_name_to_color()
 
+        mapping_ref = self.mapping_project_name_to_color
+        if mapping_ref is None:
+            logger.error("Project name to color mapping not initialized; aborting anonymization.")
+            return
         for ori_name, anonym_name in tqdm(project_mapping.items(), desc="Anonymizing projects", unit="project"):
             logger.info(f"Anonymizing project '{ori_name}' to '{anonym_name}'")
-            self.mapping_project_name_to_color[anonym_name] = self.mapping_project_name_to_color[ori_name]
+            if ori_name in mapping_ref:
+                mapping_ref[anonym_name] = mapping_ref[ori_name]

@@ -1,43 +1,42 @@
 import json
 from functools import partial
 from subprocess import DEVNULL, PIPE, run
-from typing import Any
 
 from loguru import logger
 from tqdm import tqdm
 
 from todoist.stats import extract_task_due_date
-from todoist.types import Event, _Event_API_V9
+from todoist.types import Event, EventEntry
+
 from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times
-from joblib import Parallel, delayed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class DatabaseActivity:
     """Database class to fetch activity data from the Todoist API"""
     def __init__(self):
+        # Participate in cooperative multiple inheritance so other mixins get initialized
         super().__init__()
 
     def reset(self):
         pass
     
     def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
-        if events_already_fetched is None:
-            events_already_fetched = set()
         """
         Fetches activity events from the Todoist API using a sliding window approach.
         This method adaptively fetches activity data going backwards in time window by window(week by week) in fixed windows size(nweeks_window_size arg).
         Fetching stops after a number of consecutive empty windows(early_stop_after_n_windows), which avoids unnecessary fetching far into the past.
         Arg events_already_fetched is a set of events that have already been fetched, to avoid duplicates in the returned result. Events already in this set will be excluded from the final output.
         """
+        if events_already_fetched is None:
+            events_already_fetched = set()
         n_empty_weeks: int = 0
         iterated_weeks: int = 0
         total_events: list[Event] = []
         logger.debug(f"Start fetch_activity_adaptively: window_size={nweeks_window_size}, early_stop={early_stop_after_n_windows}")
         while n_empty_weeks < early_stop_after_n_windows:
             window_events: list[Event] = self.fetch_activity(nweeks_window_size, iterated_weeks)
-            logger.debug(f"Fetching activity: window_size={nweeks_window_size}, offset={iterated_weeks} weeks")
             iterated_weeks += nweeks_window_size
-            logger.debug(f"Fetched {len(window_events)} events in current window")
             events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
             if len(events_not_already_fetched) == 0:
                 n_empty_weeks += 1
@@ -50,6 +49,14 @@ class DatabaseActivity:
             events_already_fetched.update(new_events)
             logger.debug(f"Total events so far: {len(total_events)}")
         logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
+        
+        # extending with already fetched events to avoid losing them
+        total_events.extend(events_already_fetched)
+        total_events = list(set(total_events))  # deduplication
+        logger.debug(f"Total events after merging with already fetched and deduplication: {len(total_events)}")
+        
+        # final sorting
+        total_events.sort(key=lambda x: x.event_entry.event_date, reverse=True)  # from newest to oldest
         return total_events
 
             
@@ -64,7 +71,7 @@ class DatabaseActivity:
         result: list[Event] = []
 
         def process_page(page: int) -> list[Event]:
-            events: list[Event] = self._fetch_activity_page(page)
+            events: list[EventEntry] = self._fetch_activity_page(page)
             page_events: list[Event] = []
             for event in events:
                 # TODO: Implement a factory method to create the correct Event subclass
@@ -74,19 +81,34 @@ class DatabaseActivity:
             return page_events
 
         pages = range(starting_page, starting_page + max_pages)
-            # pages = range(0, max_pages + 1)
-            #     all_events = Parallel(n_jobs=-1)(
-            # delayed(process_page)(pages[0]), delayed(process_page)(pages[1]),
-            # delayed(process_page)(pages[2]), delayed(process_page)(pages[3])),
-            # ..., delayed(process_page)(pages[max_pages]))
-        all_events = Parallel(n_jobs=-1)(
-            delayed(process_page)(page)
-            for page in tqdm(pages, desc='Querying activity data', unit='page', total=max_pages))
-        for events in all_events:
-            result.extend(events)
+        logger.info(f"Starting activity fetch over pages [{starting_page}, {starting_page + max_pages - 1}] (total={max_pages})")
+
+        # Use ThreadPoolExecutor instead of joblib for simpler, standard concurrency
+        results_by_page: dict[int, list[Event]] = {}
+        max_workers = min(8, max_pages) if max_pages > 0 else 0
+        if max_workers == 0:
+            logger.warning("No pages requested (max_pages=0). Returning empty result.")
+            return result
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_page = {executor.submit(process_page, page): page for page in pages}
+            for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
+                page = future_to_page[future]
+                page_events = future.result()
+                results_by_page[page] = page_events
+                logger.debug(f"Fetched {len(page_events)} events from page {page}")
+
+        # Preserve page order when extending results
+        for page in pages:
+            events_for_page = results_by_page.get(page, [])
+            if not events_for_page:
+                logger.debug(f"No events collected for page {page}")
+            result.extend(events_for_page)
+
+        logger.info(f"Finished fetching activity pages. Total events collected: {len(result)}")
         return result
 
-    def _fetch_activity_page(self, page: int) -> list[_Event_API_V9]:
+    def _fetch_activity_page(self, page: int) -> list[EventEntry]:
         limit: int = 50
 
         url = f"https://api.todoist.com/sync/v9/activity/get?page={page}&limit={limit}"
@@ -98,7 +120,7 @@ class DatabaseActivity:
         decoded_result: dict = json.loads(response.stdout)
         total_events_count: int = decoded_result['count']
 
-        events = list(map(lambda event: safe_instantiate_entry(_Event_API_V9, **event), decoded_result['events']))
+        events = list(map(lambda event: safe_instantiate_entry(EventEntry, **event), decoded_result['events']))
         if total_events_count > limit:
             for offset in range(limit, total_events_count, limit):
                 url = f"https://api.todoist.com/sync/v9/activity/get?page={page}&limit={limit}&offset={offset}"
@@ -108,7 +130,7 @@ class DatabaseActivity:
                                check=True)
                 load_fn = partial(json.loads, response.stdout)
 
-                decoded_result = try_n_times(load_fn, 3)
+                decoded_result = try_n_times(load_fn, 3) # type: ignore
                 if decoded_result is None:
                     logger.error(f"Could not decode response (page={page}, offset={offset})")
                     logger.error(f'Type: {type(decoded_result)}')
@@ -116,12 +138,12 @@ class DatabaseActivity:
 
                 for event_kwargs in decoded_result['events']:
                     dataclass_params = {
-                        key: value for key, value in event_kwargs.items() if key in _Event_API_V9.__dataclass_fields__
+                        key: value for key, value in event_kwargs.items() if key in EventEntry.__dataclass_fields__
                     }
-                    events.append(_Event_API_V9(
+                    events.append(EventEntry(
                         **dataclass_params,
                         new_api_kwargs={key: value for key, value in event_kwargs.items()
-                                        if key not in _Event_API_V9.__dataclass_fields__}
+                                        if key not in EventEntry.__dataclass_fields__}
                     ))
 
 
