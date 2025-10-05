@@ -130,7 +130,7 @@ class DatabaseActivity:
                                check=True)
                 load_fn = partial(json.loads, response.stdout)
 
-                decoded_result = try_n_times(load_fn, 3) # type: ignore
+                decoded_result = try_n_times(load_fn, 3) # type: ignore[assignment]  # try_n_times may return None on failure
                 if decoded_result is None:
                     logger.error(f"Could not decode response (page={page}, offset={offset})")
                     logger.error(f'Type: {type(decoded_result)}')
