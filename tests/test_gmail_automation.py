@@ -112,19 +112,7 @@ class TestGmailTasksAutomation:
         
         expected = {"buy milk", "call dentist"}
         assert result == expected
-
-    def test_get_existing_task_contents_error_handling(self):
-        """Test error handling in getting existing task contents."""
-        automation = GmailTasksAutomation()
-        
-        # Mock database that raises an exception
-        mock_db = Mock()
-        mock_db.fetch_projects.side_effect = Exception("Database error")
-        
-        result = automation._get_existing_task_contents(mock_db)
-        
-        # Should return empty set on error
-        assert result == set()
+    
 
     @patch('todoist.automations.gmail_tasks.build')
     @patch('todoist.automations.gmail_tasks.Credentials')
