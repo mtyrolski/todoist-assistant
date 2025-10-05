@@ -250,7 +250,7 @@ class DatabaseProjects:
             self.fetch_projects(include_tasks=True)
             
         logger.debug(f"Project cache has {len(self.projects_cache) if self.projects_cache else 0} projects")
-         # Ensure the color mapping is initialized
+        # Ensure the color mapping is initialized
 
         if not self.mapping_project_name_to_color:
             _ = self.fetch_mapping_project_name_to_color()
