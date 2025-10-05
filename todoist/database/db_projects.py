@@ -243,6 +243,8 @@ class DatabaseProjects:
 
     def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str] | None = None):
         logger.debug("Anonymizing projects in DatabaseProjects")
+        if label_mapping is None:
+            label_mapping = {}
         if not self.projects_cache:
             logger.debug("Projects not fetched yet. Fetching now.")
             self.fetch_projects(include_tasks=True)
