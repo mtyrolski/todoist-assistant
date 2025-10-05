@@ -30,6 +30,7 @@ class DatabaseActivity:
         """
         if events_already_fetched is None:
             events_already_fetched = set()
+        
         n_empty_weeks: int = 0
         iterated_weeks: int = 0
         total_events: list[Event] = []
