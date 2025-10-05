@@ -14,10 +14,18 @@ class Database(Anonymizable, DatabaseActivity, DatabaseProjects, DatabaseTasks, 
         super().__init__()
 
     def reset(self):
-        for bs in Database.__bases__:
-            if hasattr(bs, 'reset'):
-                logger.debug(f'Resetting {bs.__name__}...')
-                assert hasattr(bs, 'reset'), f'{bs.__name__} is not resettable'
+        # Walk through MRO and invoke reset on each mixin that defines it
+        for cls in type(self).__mro__:
+            if cls in (Database, object, Anonymizable):
+                continue
+            reset_fn = getattr(cls, 'reset', None)
+            if callable(reset_fn):
+                logger.debug(f'Resetting {cls.__name__}...')
+                # Call the bound method on self if it exists
+                try:
+                    reset_fn(self)  # type: ignore[misc]
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.error(f"Reset failed for {cls.__name__}: {e.__class__.__name__}: {e}")
 
     @property
     def anonimizable_subdatabases(self):
@@ -30,8 +38,12 @@ class Database(Anonymizable, DatabaseActivity, DatabaseProjects, DatabaseTasks, 
         """
         Anonymizes project and label names in the database.
         """
-
         for bs in self.anonimizable_subdatabases:
             logger.debug(f'Anonymizing {bs.__name__}...')
             assert hasattr(bs, 'anonymize_sub_db'), f'{bs.__name__} is not anonymizable'
-            bs.anonymize_sub_db(self, project_mapping, label_mapping)
+            # Call the mixin method on self; signature may accept label_mapping optionally
+            try:
+                bs.anonymize_sub_db(self, project_mapping, label_mapping=label_mapping)  # type: ignore[arg-type]
+            except TypeError:
+                # Backward compatibility for methods that accept only project_mapping
+                bs.anonymize_sub_db(self, project_mapping)  # type: ignore[misc]

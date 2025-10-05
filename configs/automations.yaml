@@ -3,25 +3,11 @@ defaults:
   - _self_
 
 # Activity automation configurations
-activity_last_week:
+activity:
   _target_: todoist.automations.activity.Activity
-  name: Activity Last Week
-  nweeks: 1
-
-activity_2_weeks:
-  _target_: todoist.automations.activity.Activity
-  name: Activity 2 Weeks
-  nweeks: 2
-
-activity_last_month:
-  _target_: todoist.automations.activity.Activity
-  name: Activity Last Month
-  nweeks: 4
-
-activity_last_10_years:
-  _target_: todoist.automations.activity.Activity
-  name: Activity Last 10 years
-  nweeks: 520
+  name: Activity Fetching Automation
+  nweeks_window_size: 6 # 6 weeks window
+  early_stop_after_n_windows: 2 # Stop if 2 consecutive windows yield no new events
 
 # Multiply automation configuration
 multiply:
@@ -57,12 +43,9 @@ template:
 
 automations:
   - ${template}
-  - ${activity_last_week}
-  - ${activity_2_weeks}
-  - ${activity_last_month}
-  - ${activity_last_10_years}
+  - ${activity}
   - ${multiply}
-  - ${gmail_tasks}
+  # - ${gmail_tasks}
 
 hydra:
   searchpath:
