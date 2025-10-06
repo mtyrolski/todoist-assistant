@@ -6,30 +6,9 @@ recurring tasks are properly filtered out from the rescheduled tasks list.
 """
 import pytest
 import pandas as pd
-from loguru import logger
 
 from todoist.types import Task, TaskEntry
-
-
-def process_rescheduled_tasks(df_activity, active_tasks):
-    """
-    Process and return rescheduled tasks data - copied from tasks.py for testing.
-    """
-    rescheduled_tasks = df_activity[df_activity['type'] == 'rescheduled'] \
-        .groupby(['title', 'parent_project_name', 'root_project_name']) \
-        .size() \
-        .sort_values(ascending=False) \
-        .reset_index(name='reschedule_count')
-
-    # Get names of currently active recurring tasks (to exclude them)
-    active_recurring_tasks = filter(lambda task: task.is_recurring, active_tasks)
-    recurring_task_names = set(task.task_entry.content for task in active_recurring_tasks)
-
-    # Filter out rescheduled tasks that correspond to currently recurring tasks
-    filtered_tasks = rescheduled_tasks[~rescheduled_tasks['title'].isin(recurring_task_names)]
-    logger.debug(f"Found {len(filtered_tasks)} rescheduled tasks")
-
-    return filtered_tasks
+from todoist.dashboard.subpages.tasks import process_rescheduled_tasks
 
 
 @pytest.fixture
