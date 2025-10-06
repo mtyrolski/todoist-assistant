@@ -1,4 +1,4 @@
-.PHONY: init_local_env run_dashboard clear_local_env test
+.PHONY: init_local_env run_dashboard clear_local_env test run-chat
 
 init_local_env: # syncs history, fetches activity
 	uv run python3 -m todoist.automations.init_env --config-dir configs --config-name automations
@@ -11,6 +11,9 @@ run_dashboard:
 
 run_demo:
 	PYTHONPATH=. uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False demo
+
+run-chat: ## Run the LangGraph + Chainlit chat interface
+	PYTHONPATH=. uv run chainlit run ui/chainlit_app.py
 
 clear_local_env:
 	rm -f activity.joblib
