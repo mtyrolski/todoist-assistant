@@ -113,7 +113,7 @@ The repository includes build scripts to create a self-contained Windows executa
 
 ```bash
 # Install build dependencies
-pip install pyinstaller pillow
+pip install -e '.[build]'
 
 # Run the build script
 python build_windows.py

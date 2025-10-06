@@ -15,7 +15,8 @@ def check_dependencies():
     """Check if required build dependencies are installed."""
     print("Checking build dependencies...")
     
-    required_packages = ['pyinstaller', 'streamlit', 'pandas', 'plotly']
+    # Check if build dependencies from pyproject.toml are available
+    required_packages = ['pyinstaller', 'PIL']
     missing_packages = []
     
     for package in required_packages:
@@ -23,14 +24,14 @@ def check_dependencies():
             __import__(package)
             print(f"✓ {package}")
         except ImportError:
-            missing_packages.append(package)
+            missing_packages.append(package if package != 'PIL' else 'pillow')
             print(f"✗ {package} (missing)")
     
     if missing_packages:
-        print("\nInstalling missing packages...")
-        subprocess.check_call([
-            sys.executable, '-m', 'pip', 'install'
-        ] + missing_packages)
+        print("\nMissing packages detected.")
+        print("Please install build dependencies with:")
+        print("  pip install -e '.[build]'")
+        return False
     
     return True
 
@@ -41,23 +42,20 @@ def create_icon():
     
     icon_path = icon_dir / 'icon.ico'
     if not icon_path.exists():
-        # Create a simple placeholder icon using PIL if available
-        try:
-            from PIL import Image, ImageDraw
-            
-            # Create a simple icon
-            img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            # Draw a simple checkmark or task-like icon
-            draw.rectangle([10, 10, 54, 54], fill=(70, 130, 180), outline=(0, 0, 0), width=2)
-            draw.line([20, 32, 30, 42], fill=(255, 255, 255), width=3)
-            draw.line([30, 42, 44, 22], fill=(255, 255, 255), width=3)
-            
-            img.save(icon_path, format='ICO')
-            print(f"✓ Created icon: {icon_path}")
-        except ImportError:
-            print("! PIL not available, skipping icon creation")
+        # Create a simple placeholder icon using PIL
+        from PIL import Image, ImageDraw
+        
+        # Create a simple icon
+        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Draw a simple checkmark or task-like icon
+        draw.rectangle([10, 10, 54, 54], fill=(70, 130, 180), outline=(0, 0, 0), width=2)
+        draw.line([20, 32, 30, 42], fill=(255, 255, 255), width=3)
+        draw.line([30, 42, 44, 22], fill=(255, 255, 255), width=3)
+        
+        img.save(icon_path, format='ICO')
+        print(f"✓ Created icon: {icon_path}")
     else:
         print(f"✓ Icon exists: {icon_path}")
 

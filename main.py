@@ -12,6 +12,9 @@ import time
 from pathlib import Path
 import shutil
 
+# Server startup delay in seconds - time to wait for Streamlit server to initialize
+SERVER_STARTUP_DELAY = 3
+
 
 def get_app_data_dir():
     """Get or create the application data directory."""
@@ -77,10 +80,10 @@ def launch_dashboard():
     # Change to app directory for relative paths
     os.chdir(current_dir)
     
-    # Launch Streamlit
+    # Launch Streamlit using uv run
     app_path = current_dir / 'todoist' / 'dashboard' / 'app.py'
     cmd = [
-        sys.executable, '-m', 'streamlit', 'run', 
+        'uv', 'run', 'streamlit', 'run', 
         str(app_path),
         '--client.showErrorDetails=False',
         '--server.headless=True',
@@ -93,8 +96,8 @@ def launch_dashboard():
     # Start the Streamlit process
     process = subprocess.Popen(cmd, env=env)
     
-    # Wait a bit for the server to start
-    time.sleep(3)
+    # Wait for the server to start
+    time.sleep(SERVER_STARTUP_DELAY)
     
     # Open browser
     webbrowser.open('http://localhost:8501')
