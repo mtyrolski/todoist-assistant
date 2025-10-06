@@ -21,6 +21,10 @@ def main():
     st.write("Map archived projects to current active projects for better statistics and reporting.")
     st.info("This tool helps you link old archived projects to current main projects, making your statistics more cohesive.")
     
+    # Display file path prominently
+    file_path = Path('personal/archived_root_projects.py').absolute()
+    st.info(f"📄 **Mapping File:** `{file_path}`")
+    
     # Load current mappings
     try:
         current_mappings = get_adjusting_mapping()
@@ -28,20 +32,27 @@ def main():
         st.error(f"Error loading current mappings: {str(e)}")
         current_mappings = {}
     
-    # Show current mappings
+    # Show current mappings with improved UI
     st.subheader("Current Mappings")
     if current_mappings:
-        st.write("Existing archived project mappings:")
+        # Group by active project (master project)
+        grouped_mappings = {}
         for archived_name, active_name in current_mappings.items():
-            col1, col2, col3 = st.columns([2, 1, 2])
-            with col1:
-                st.write(f"📦 **{archived_name}**")
-            with col2:
-                st.write("→")
-            with col3:
-                st.write(f"📁 **{active_name}**")
+            if active_name not in grouped_mappings:
+                grouped_mappings[active_name] = []
+            grouped_mappings[active_name].append(archived_name)
+        
+        # Display grouped mappings in nice boxes
+        for active_project, archived_projects in grouped_mappings.items():
+            with st.container():
+                st.markdown(f"### 📁 {active_project}")
+                cols = st.columns(min(len(archived_projects), 3))
+                for idx, archived_proj in enumerate(archived_projects):
+                    with cols[idx % 3]:
+                        st.info(f"📦 {archived_proj}")
+                st.divider()
     else:
-        st.info("No current mappings found.")
+        st.info("No current mappings found. Create your first mapping below!")
     
     # Demo/Sample data section
     st.subheader("Demo: Create New Mappings")
@@ -112,26 +123,26 @@ def main():
     else:
         st.info("All available archived projects are already mapped.")
     
-    # Preview section
-    st.subheader("Preview Adjustment File")
-    
-    # Combine current and new mappings for preview
-    preview_mappings = current_mappings.copy()
-    if 'new_mappings' in st.session_state:
-        preview_mappings.update(st.session_state.new_mappings)
-    
-    # Generate preview content
-    preview_content = generate_adjustment_file_content(preview_mappings)
-    
-    st.code(preview_content, language='python')
+    # Preview section (optional, collapsible)
+    with st.expander("📄 Preview Adjustment File", expanded=False):
+        # Combine current and new mappings for preview
+        preview_mappings = current_mappings.copy()
+        if 'new_mappings' in st.session_state:
+            preview_mappings.update(st.session_state.new_mappings)
+        
+        # Generate preview content
+        preview_content = generate_adjustment_file_content(preview_mappings)
+        
+        st.code(preview_content, language='python')
     
     # Remove mapping functionality
     if 'new_mappings' in st.session_state and st.session_state.new_mappings:
-        st.subheader("Remove Pending Mappings")
+        st.subheader("Pending Mappings")
+        st.write("These mappings will be added when you save:")
         for archived_name, active_name in st.session_state.new_mappings.items():
             col1, col2 = st.columns([4, 1])
             with col1:
-                st.write(f"📦 **{archived_name}** → 📁 **{active_name}**")
+                st.success(f"📦 **{archived_name}** → 📁 **{active_name}**")
             with col2:
                 if st.button("Remove", key=f"remove_{archived_name}"):
                     del st.session_state.new_mappings[archived_name]
@@ -139,23 +150,28 @@ def main():
     
     # Save functionality
     if 'new_mappings' in st.session_state and st.session_state.new_mappings:
-        st.subheader("Save Changes")
+        st.divider()
+        st.subheader("💾 Save Changes")
+        
+        # Combine current and new mappings for saving
+        preview_mappings = current_mappings.copy()
+        preview_mappings.update(st.session_state.new_mappings)
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Save to File", type="primary", key="save_mappings"):
+            if st.button("💾 Save to File", type="primary", key="save_mappings", use_container_width=True):
                 try:
                     save_adjustment_file(preview_mappings)
-                    st.success("Adjustment file saved successfully!")
-                    st.success(f"File saved to: {Path('personal/archived_root_projects.py').absolute()}")
+                    st.success("✅ Adjustment file saved successfully!")
+                    st.success(f"📄 File saved to: `{Path('personal/archived_root_projects.py').absolute()}`")
                     # Clear session state
                     st.session_state.new_mappings = {}
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error saving file: {str(e)}")
+                    st.error(f"❌ Error saving file: {str(e)}")
         
         with col2:
-            if st.button("Clear All Changes", key="clear_changes"):
+            if st.button("🗑️ Clear All Changes", key="clear_changes", use_container_width=True):
                 st.session_state.new_mappings = {}
                 st.rerun()
     
