@@ -16,11 +16,12 @@ def process_rescheduled_tasks(df_activity, active_tasks):
         .sort_values(ascending=False) \
         .reset_index(name='reschedule_count')
 
-    active_non_recurring_tasks = filter(lambda task: task.is_non_recurring, active_tasks)
-    act_nonrec_tasks_names = set(task.task_entry.content for task in active_non_recurring_tasks)
+    # Get names of currently active recurring tasks (to exclude them)
+    active_recurring_tasks = filter(lambda task: task.is_recurring, active_tasks)
+    recurring_task_names = set(task.task_entry.content for task in active_recurring_tasks)
 
-    # COLS: title	parent_project_name	root_project_name	reschedule_count
-    filtered_tasks = rescheduled_tasks[rescheduled_tasks['title'].isin(act_nonrec_tasks_names)]
+    # Filter out rescheduled tasks that correspond to currently recurring tasks
+    filtered_tasks = rescheduled_tasks[~rescheduled_tasks['title'].isin(recurring_task_names)]
     logger.debug(f"Found {len(filtered_tasks)} rescheduled tasks")
 
     return filtered_tasks
