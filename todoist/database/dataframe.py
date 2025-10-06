@@ -25,9 +25,13 @@ def extract_name(event: Event) -> str | None:
     return None
 
 
-def get_adjusting_mapping() -> dict[str, str]:
+def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
     """
-    Loads mapping adjustments from all Python scripts in the 'personal' directory.
+    Loads mapping adjustments from Python scripts in the 'personal' directory.
+    
+    Args:
+        specific_file: Optional specific filename to load. If None, loads all Python files.
+                      If provided, only loads from that specific file.
     """
     personal_dir = Path('personal')
 
@@ -45,9 +49,15 @@ def get_adjusting_mapping() -> dict[str, str]:
                 '}\n\n'
             ])
         logger.info(f'Created empty adjustments file in {personal_dir}')
+        return {}
 
-    scripts = [s for s in listdir(personal_dir) if s.endswith('.py')]
-    logger.info(f'Found {len(scripts)} scripts in personal directory')
+    # Determine which files to load
+    if specific_file:
+        scripts = [specific_file] if (personal_dir / specific_file).exists() else []
+        logger.info(f'Loading specific mapping file: {specific_file}')
+    else:
+        scripts = [s for s in listdir(personal_dir) if s.endswith('.py')]
+        logger.info(f'Found {len(scripts)} scripts in personal directory')
 
     final_mapping: dict[str, str] = {}
     for script in scripts:
