@@ -7,6 +7,6 @@ render_control_panel_page = control_panel.render_control_panel_page
 render_log_viewer_page = log_viewer.render_log_viewer_page
 render_project_adjustment_page = project_adjustment.render_project_adjustment_page
 
-___all__ = [
+__all__ = [
     'render_home_page', 'render_project_insights_page', 'render_task_analysis_page', 'render_control_panel_page', 'render_log_viewer_page', 'render_project_adjustment_page'
 ]

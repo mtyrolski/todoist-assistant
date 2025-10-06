@@ -4,13 +4,11 @@ Provides a drag-and-drop interface to replace manual file editing.
 """
 
 import streamlit as st
-import os
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-from todoist.types import Project
 from todoist.database.base import Database
-from todoist.database.dataframe import get_adjusting_mapping, ADJUSTMENTS_VARIABLE_NAME
+from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
 
 
 DEFAULT_MAPPING_FILE = 'archived_root_projects.py'
@@ -282,7 +280,7 @@ def render_project_adjustment_page(dbio: Database) -> None:
     if 'new_mappings' in st.session_state and st.session_state.new_mappings:
         st.subheader("Pending Mappings")
         st.write("These mappings will be added when you save:")
-        for archived_name, active_name in st.session_state.new_mappings.items():
+        for archived_name, active_name in list(st.session_state.new_mappings.items()):
             col1, col2 = st.columns([4, 1])
             with col1:
                 st.success(f"📦 **{archived_name}** → 📁 **{active_name}**")
