@@ -3,7 +3,8 @@ import streamlit as st
 from todoist.dashboard.utils import extract_metrics, get_badges
 from todoist.types import (Project)
 from todoist.plots import (current_tasks_types, plot_events_over_time, plot_most_popular_labels,
-                           plot_completed_tasks_periodically, cumsum_completed_tasks_periodically)
+                           plot_completed_tasks_periodically, cumsum_completed_tasks_periodically,
+                           plot_task_lifespans)
 
 
 @st.cache_data
@@ -46,6 +47,9 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
     # Badges
     badges: str = get_badges(active_projects)
     st.markdown(badges)
+
+    st.header("Task Lifespans: Time to Completion")
+    st.plotly_chart(plot_task_lifespans(df_activity), use_container_width=True)
 
     st.header("Periodically Completed Tasks Per Project")
     st.plotly_chart(plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors))
