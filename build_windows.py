@@ -190,17 +190,28 @@ def create_installation_instructions(package_dir: Path) -> None:
     """
     instructions = """# Todoist Assistant - Windows Installation
 
+## Important: Extract the ZIP First
+
+Before installing, right-click the downloaded ZIP, choose "Extract All...", and run `install.bat` from the extracted folder. Running directly from inside the ZIP will fail to find files.
+
 ## Quick Start
 
-1. **Install**: Double-click `install.bat` to install Todoist Assistant
-2. **Configure**: On first run, you'll be prompted to configure your Todoist API key
-3. **Run**: Use the desktop shortcut or Start Menu to launch the application
+1. Double-click `install.bat` to install Todoist Assistant
+2. On first run, you'll be prompted to configure your Todoist API key
+3. Launch from the Desktop shortcut or Start Menu entry
+
+## Install Locations
+
+- When run as Administrator: `C:\\Program Files\\TodoistAssistant`
+- When run as a normal user: `%LocalAppData%\\Programs\\TodoistAssistant`
+
+Both options create Start Menu and Desktop shortcuts.
 
 ## Manual Installation
 
 If the automatic installer doesn't work:
 
-1. Copy `TodoistAssistant.exe` to a folder of your choice
+1. Copy `TodoistAssistant.exe` to a folder you control (e.g., `C:\\Users\\<you>\\Apps\\TodoistAssistant`)
 2. Double-click `TodoistAssistant.exe` to run
 3. Follow the configuration prompts
 
@@ -213,13 +224,14 @@ If the automatic installer doesn't work:
 
 ## Troubleshooting
 
-- **Antivirus Warning**: Some antivirus programs may flag the executable. This is a false positive common with PyInstaller-built applications.
-- **Configuration Issues**: The configuration file is stored in `%APPDATA%\\TodoistAssistant\\.env`
-- **Port Issues**: If port 8501 is busy, the application will try to use another port
+- Antivirus/SmartScreen: You may see a warning for apps built with PyInstaller. Use "More info" -> "Run anyway" if you trust this app.
+- Configuration file: Stored in `%APPDATA%\\TodoistAssistant\\.env`
+- Port Issues: If port 8501 is busy, the app tries another port automatically.
+- Access denied or path not found: Re-run `install.bat` after extracting the ZIP, or run as Administrator to install into Program Files.
 
 ## Uninstallation
 
-Use the uninstaller in the Start Menu or manually delete the installation folder.
+Use the "Uninstall Todoist Assistant" entry in the Start Menu (inside the Todoist Assistant folder), or manually delete the installation folder and shortcuts.
 """
     
     with open(package_dir / 'INSTALL_INSTRUCTIONS.md', 'w', encoding='utf-8') as f:

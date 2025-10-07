@@ -2177,7 +2177,7 @@ wheels = [
 
 [[package]]
 name = "todoist-assistant"
-version = "0.1.0"
+version = "0.1.12"
 source = { editable = "." }
 dependencies = [
     { name = "google-api-python-client" },
