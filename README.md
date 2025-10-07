@@ -112,10 +112,8 @@ flowchart TD
 The repository includes build scripts to create a self-contained Windows executable:
 
 ```bash
-# Install build dependencies using uv
-uv pip install --extra build .
+uv sync --extra build --extra dev
 
-# Run the build script
 uv run python build_windows.py
 ```
 
