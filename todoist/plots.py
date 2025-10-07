@@ -683,3 +683,270 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
                       yaxis=dict(autorange=True, fixedrange=False))
 
     return fig
+
+
+def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
+    """
+    Plots completed task lifespans (time-to-completion) with a logarithmic scale.
+    
+    This chart visualizes the duration between when tasks were added and completed,
+    providing insights into task completion patterns. The X-axis uses a logarithmic 
+    scale to effectively display a wide range of durations.
+    
+    Parameters:
+    df (pd.DataFrame): DataFrame containing event data with columns:
+                      - parent_item_id: unique task identifier
+                      - type: event type ('added', 'completed', etc.)
+                      - date: timestamp of the event (index)
+                      - title: task name
+    
+    Returns:
+    go.Figure: Plotly figure object representing task lifespans with:
+              - Logarithmic X-axis showing duration
+              - Publication-quality styling
+              - Hover tooltips with task details
+              - Light/dark mode support
+              - Responsive layout
+    
+    Notes:
+    - Only includes tasks with both 'added' and 'completed' events
+    - Handles missing/invalid data gracefully
+    - Durations are computed as time between first 'added' and last 'completed' event
+    - Uses appropriate SI time units (seconds/minutes/hours/days) for display
+    """
+    from loguru import logger
+    import numpy as np
+    
+    # Filter for tasks with both 'added' and 'completed' events
+    added_events = df[df['type'] == 'added'].copy()
+    completed_events = df[df['type'] == 'completed'].copy()
+    
+    # Find tasks that have both added and completed events
+    added_task_ids = set(added_events['parent_item_id'].dropna())
+    completed_task_ids = set(completed_events['parent_item_id'].dropna())
+    common_task_ids = added_task_ids.intersection(completed_task_ids)
+    
+    logger.info(f'Found {len(common_task_ids)} tasks with both added and completed events')
+    
+    # Compute lifespans
+    lifespans = []
+    for task_id in common_task_ids:
+        # Get first 'added' event
+        task_added = added_events[added_events['parent_item_id'] == task_id]
+        if task_added.empty:
+            continue
+        added_date = task_added.index.min()
+        
+        # Get last 'completed' event
+        task_completed = completed_events[completed_events['parent_item_id'] == task_id]
+        if task_completed.empty:
+            continue
+        completed_date = task_completed.index.max()
+        
+        # Compute duration
+        duration = completed_date - added_date
+        duration_seconds = duration.total_seconds()
+        
+        # Skip invalid durations (negative or zero)
+        if duration_seconds <= 0:
+            logger.debug(f'Skipping task {task_id} with non-positive duration: {duration_seconds}s')
+            continue
+        
+        # Get task name (from completed event, or fallback to added event)
+        task_name = (task_completed['title'].iloc[-1] if not task_completed.empty 
+                    else task_added['title'].iloc[0] if not task_added.empty 
+                    else f'Task {task_id}')
+        
+        lifespans.append({
+            'task_id': task_id,
+            'task_name': task_name,
+            'added_date': added_date,
+            'completed_date': completed_date,
+            'duration_seconds': duration_seconds
+        })
+    
+    logger.info(f'Computed {len(lifespans)} valid task lifespans')
+    
+    # Handle empty data
+    if not lifespans:
+        fig = go.Figure()
+        fig.update_layout(
+            template='plotly_dark',
+            title={
+                'text': 'Task Lifespans (No Data Available)',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
+            },
+            xaxis={'title': 'Time to Completion', 'showgrid': True},
+            yaxis={'title': 'Frequency', 'showgrid': True},
+            plot_bgcolor='#111318',
+            paper_bgcolor='#111318',
+            font=dict(color='#ffffff', size=12, family='Arial, sans-serif')
+        )
+        return fig
+    
+    # Sort by duration for better visualization
+    lifespans_sorted = sorted(lifespans, key=lambda x: x['duration_seconds'])
+    
+    # Extract data for plotting
+    durations_seconds = [item['duration_seconds'] for item in lifespans_sorted]
+    
+    # Determine appropriate time unit and convert durations
+    max_duration = max(durations_seconds)
+    min_duration = min(durations_seconds)
+    
+    # Choose time unit based on the range of durations
+    if max_duration < 3600:  # Less than 1 hour
+        time_unit = 'minutes'
+        time_divisor = 60
+        unit_label = 'min'
+    elif max_duration < 86400:  # Less than 1 day
+        time_unit = 'hours'
+        time_divisor = 3600
+        unit_label = 'hr'
+    elif max_duration < 604800:  # Less than 1 week
+        time_unit = 'days'
+        time_divisor = 86400
+        unit_label = 'days'
+    else:
+        time_unit = 'days'
+        time_divisor = 86400
+        unit_label = 'days'
+    
+    durations_converted = [d / time_divisor for d in durations_seconds]
+    
+    # Create hover text with detailed information
+    hover_texts = []
+    for item, duration_converted in zip(lifespans_sorted, durations_converted):
+        # Format timestamps
+        added_str = item['added_date'].strftime('%Y-%m-%d %H:%M:%S')
+        completed_str = item['completed_date'].strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Format duration in multiple units for clarity
+        duration_s = item['duration_seconds']
+        if duration_s < 60:
+            duration_display = f"{duration_s:.1f} seconds"
+        elif duration_s < 3600:
+            duration_display = f"{duration_s/60:.1f} minutes"
+        elif duration_s < 86400:
+            duration_display = f"{duration_s/3600:.1f} hours"
+        else:
+            duration_display = f"{duration_s/86400:.1f} days"
+        
+        hover_text = (
+            f"<b>{item['task_name']}</b><br>"
+            f"Task ID: {item['task_id']}<br>"
+            f"<br>"
+            f"<b>Added:</b> {added_str}<br>"
+            f"<b>Completed:</b> {completed_str}<br>"
+            f"<br>"
+            f"<b>Duration:</b> {duration_display}<br>"
+            f"<extra></extra>"
+        )
+        hover_texts.append(hover_text)
+    
+    # Create histogram with logarithmic bins
+    # Use logarithmic binning for better distribution visualization
+    log_durations = np.log10(durations_converted)
+    n_bins = min(50, max(10, len(lifespans_sorted) // 10))  # Adaptive number of bins
+    
+    # Create the figure with histogram
+    fig = go.Figure()
+    
+    fig.add_trace(go.Histogram(
+        x=durations_converted,
+        nbinsx=n_bins,
+        marker=dict(
+            color='#4169E1',  # Royal Blue for task completion
+            line=dict(color='#ffffff', width=0.5),
+            opacity=0.85
+        ),
+        hovertemplate=(
+            '<b>Duration Range:</b> %{x:.2f} ' + unit_label + '<br>'
+            '<b>Count:</b> %{y}<br>'
+            '<extra></extra>'
+        ),
+        name='Task Count'
+    ))
+    
+    # Add individual task markers (scatter plot overlay for hover details)
+    # Use a small scatter plot to enable individual task hover
+    fig.add_trace(go.Scatter(
+        x=durations_converted,
+        y=[0.5] * len(durations_converted),  # Place at bottom
+        mode='markers',
+        marker=dict(
+            size=4,
+            color='#FF8C00',  # Dark Orange for individual markers
+            opacity=0.6,
+            line=dict(width=0.5, color='#ffffff')
+        ),
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_texts,
+        name='Individual Tasks',
+        showlegend=True
+    ))
+    
+    # Update layout with publication-quality styling
+    fig.update_layout(
+        template='plotly_dark',
+        title={
+            'text': f'Task Lifespans: Time to Completion (n={len(lifespans_sorted)})',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff', 'weight': 'bold'}
+        },
+        xaxis={
+            'title': {
+                'text': f'Time to Completion ({unit_label})',
+                'font': {'size': 14, 'color': '#ffffff', 'family': 'Arial, sans-serif'}
+            },
+            'type': 'log',  # Logarithmic scale
+            'showgrid': True,
+            'gridwidth': 1,
+            'gridcolor': 'rgba(255,255,255,0.15)',
+            'showline': True,
+            'linewidth': 2,
+            'linecolor': 'rgba(255,255,255,0.3)',
+            'tickfont': {'size': 12, 'color': '#e6e6e6'},
+            'dtick': 1,  # One tick per power of 10
+        },
+        yaxis={
+            'title': {
+                'text': 'Frequency (Number of Tasks)',
+                'font': {'size': 14, 'color': '#ffffff', 'family': 'Arial, sans-serif'}
+            },
+            'showgrid': True,
+            'gridwidth': 1,
+            'gridcolor': 'rgba(255,255,255,0.15)',
+            'showline': True,
+            'linewidth': 2,
+            'linecolor': 'rgba(255,255,255,0.3)',
+            'tickfont': {'size': 12, 'color': '#e6e6e6'},
+        },
+        plot_bgcolor='#111318',
+        paper_bgcolor='#111318',
+        font=dict(color='#ffffff', size=12, family='Arial, sans-serif'),
+        hoverlabel=dict(
+            bgcolor='#1e1e1e',
+            bordercolor='#444',
+            font=dict(size=12, color='#ffffff', family='Arial, sans-serif')
+        ),
+        legend=dict(
+            x=0.98,
+            y=0.98,
+            xanchor='right',
+            yanchor='top',
+            bgcolor='rgba(17, 19, 24, 0.8)',
+            bordercolor='rgba(255,255,255,0.3)',
+            borderwidth=1,
+            font=dict(size=11, color='#ffffff')
+        ),
+        margin=dict(l=80, r=60, t=80, b=60),
+        autosize=True,  # Responsive to container
+        # Support light mode as well
+        colorway=['#4169E1', '#FF8C00', '#2E8B57', '#DC143C', '#9370DB']
+    )
+    
+    return fig
