@@ -41,3 +41,20 @@ build = [
     "pyinstaller>=6.0.0",
     "pillow>=10.0.0",
 ]
+
+# Configure the build backend explicitly and restrict package discovery to the
+# intended Python package to avoid "Multiple top-level packages" errors.
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["todoist*"]
+exclude = [
+    "tests*",
+    "configs*",
+    "img*",
+    "outputs*",
+    "personal*",
+]
