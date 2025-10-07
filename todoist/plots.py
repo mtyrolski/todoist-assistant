@@ -690,8 +690,9 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     Plots completed task lifespans (time-to-completion) with a logarithmic scale.
     
     This chart visualizes the duration between when tasks were added and completed,
-    providing insights into task completion patterns. The X-axis uses a logarithmic 
-    scale to effectively display a wide range of durations.
+    providing insights into task completion patterns. The visualization uses a smooth
+    density curve (kernel density estimation) scaled to actual task counts, displayed
+    on a logarithmic X-axis to effectively show a wide range of durations.
     
     Parameters:
     df (pd.DataFrame): DataFrame containing event data with columns:
@@ -702,6 +703,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     
     Returns:
     go.Figure: Plotly figure object representing task lifespans with:
+              - Smooth density curve showing distribution
               - Logarithmic X-axis showing duration
               - Publication-quality styling
               - Hover tooltips with task details
@@ -713,6 +715,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     - Handles missing/invalid data gracefully
     - Durations are computed as time between first 'added' and last 'completed' event
     - Uses appropriate SI time units (seconds/minutes/hours/days) for display
+    - Uses Gaussian KDE (kernel density estimation) for smooth distribution visualization
     """
     from loguru import logger
     import numpy as np
@@ -846,47 +849,97 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         )
         hover_texts.append(hover_text)
     
-    # Create histogram with logarithmic bins
-    # Use logarithmic binning for better distribution visualization
-    log_durations = np.log10(durations_converted)
-    n_bins = min(50, max(10, len(lifespans_sorted) // 10))  # Adaptive number of bins
+    # Create density plot (KDE) scaled to actual counts
+    # Use kernel density estimation for smooth distribution visualization
+    from scipy import stats
     
-    # Create the figure with histogram
+    # Create the figure
     fig = go.Figure()
     
-    fig.add_trace(go.Histogram(
-        x=durations_converted,
-        nbinsx=n_bins,
-        marker=dict(
-            color='#4169E1',  # Royal Blue for task completion
-            line=dict(color='#ffffff', width=0.5),
-            opacity=0.85
-        ),
-        hovertemplate=(
-            '<b>Duration Range:</b> %{x:.2f} ' + unit_label + '<br>'
-            '<b>Count:</b> %{y}<br>'
-            '<extra></extra>'
-        ),
-        name='Task Count'
-    ))
-    
-    # Add individual task markers (scatter plot overlay for hover details)
-    # Use a small scatter plot to enable individual task hover
-    fig.add_trace(go.Scatter(
-        x=durations_converted,
-        y=[0.5] * len(durations_converted),  # Place at bottom
-        mode='markers',
-        marker=dict(
-            size=4,
-            color='#FF8C00',  # Dark Orange for individual markers
-            opacity=0.6,
-            line=dict(width=0.5, color='#ffffff')
-        ),
-        hovertemplate='%{customdata}<extra></extra>',
-        customdata=hover_texts,
-        name='Individual Tasks',
-        showlegend=True
-    ))
+    # Check if we have enough data for KDE (need at least 2 points)
+    if len(lifespans_sorted) < 2:
+        # Fall back to simple scatter plot for single task
+        fig.add_trace(go.Scatter(
+            x=durations_converted,
+            y=[1.0] * len(durations_converted),
+            mode='markers',
+            marker=dict(
+                size=10,
+                color='#4169E1',
+                opacity=0.8,
+                line=dict(width=1, color='#ffffff')
+            ),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_texts,
+            name='Tasks',
+            showlegend=True
+        ))
+    else:
+        # Generate KDE in log space for better visualization
+        log_durations = np.log10(durations_converted)
+        
+        # Create KDE
+        kde = stats.gaussian_kde(log_durations, bw_method='scott')
+        
+        # Generate points for smooth curve (in log space)
+        log_min = np.floor(np.log10(min(durations_converted)))
+        log_max = np.ceil(np.log10(max(durations_converted)))
+        log_x_smooth = np.linspace(log_min, log_max, 500)
+        x_smooth = 10 ** log_x_smooth  # Convert back to linear space
+        
+        # Evaluate KDE and scale to actual counts
+        kde_values = kde(log_x_smooth)
+        # Scale KDE to represent actual counts instead of probability density
+        # Integrate the KDE over the range and scale to match total count
+        kde_integral = np.trapezoid(kde_values, log_x_smooth)
+        kde_scaled = kde_values * (len(lifespans_sorted) / kde_integral)
+        
+        # Add density curve
+        fig.add_trace(go.Scatter(
+            x=x_smooth,
+            y=kde_scaled,
+            mode='lines',
+            fill='tozeroy',
+            line=dict(
+                color='#4169E1',  # Royal Blue for task completion
+                width=2.5
+            ),
+            fillcolor='rgba(65, 105, 225, 0.3)',  # Semi-transparent fill
+            hovertemplate=(
+                '<b>Duration:</b> %{x:.2f} ' + unit_label + '<br>'
+                '<b>Estimated Count:</b> %{y:.1f}<br>'
+                '<extra></extra>'
+            ),
+            name='Task Distribution'
+        ))
+        
+        # Add individual task markers (scatter plot overlay for hover details)
+        # Position markers along the curve for better visual integration
+        # For each task, find the approximate y-value on the density curve
+        marker_y_values = []
+        for duration in durations_converted:
+            log_duration = np.log10(duration)
+            # Find closest point on the KDE curve
+            idx = np.argmin(np.abs(log_x_smooth - log_duration))
+            y_val = kde_scaled[idx] * 0.1  # Place markers at 10% of curve height
+            marker_y_values.append(y_val)
+        
+        fig.add_trace(go.Scatter(
+            x=durations_converted,
+            y=marker_y_values,
+            mode='markers',
+            marker=dict(
+                size=5,
+                color='#FF8C00',  # Dark Orange for individual markers
+                opacity=0.7,
+                line=dict(width=0.5, color='#ffffff'),
+                symbol='circle'
+            ),
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_texts,
+            name='Individual Tasks',
+            showlegend=True
+        ))
     
     # Update layout with publication-quality styling
     fig.update_layout(
