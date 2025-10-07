@@ -1,79 +1,119 @@
 #!/usr/bin/env python3
-"""
-Build script for creating Windows executable package.
-This script handles the entire build process including PyInstaller and packaging.
+"""Build script for creating Windows executable package.
+
+This module handles the entire build process including PyInstaller compilation
+and distribution package creation for Windows deployment.
 """
 
-import os
-import sys
-import subprocess
+from __future__ import annotations
+
 import shutil
-from pathlib import Path
+import subprocess
+import sys
 import zipfile
+from pathlib import Path
+from typing import Final
 
-def check_dependencies():
-    """Check if required build dependencies are installed."""
+# Build configuration constants
+ICON_SIZE: Final[tuple[int, int]] = (64, 64)
+ICON_COLORS: Final[dict[str, tuple[int, int, int]]] = {
+    'background': (70, 130, 180),
+    'border': (0, 0, 0),
+    'checkmark': (255, 255, 255),
+}
+PACKAGE_VERSION: Final[str] = '1.0'
+REQUIRED_BUILD_PACKAGES: Final[list[str]] = ['pyinstaller', 'PIL']
+
+
+def check_dependencies() -> bool:
+    """Verify that required build dependencies are installed.
+    
+    Returns:
+        True if all dependencies are available, False otherwise.
+    """
     print("Checking build dependencies...")
     
-    # Check if build dependencies from pyproject.toml are available
-    required_packages = ['pyinstaller', 'PIL']
-    missing_packages = []
+    missing_packages: list[str] = []
     
-    for package in required_packages:
+    for package in REQUIRED_BUILD_PACKAGES:
         try:
             __import__(package)
             print(f"✓ {package}")
         except ImportError:
-            missing_packages.append(package if package != 'PIL' else 'pillow')
+            package_name = 'pillow' if package == 'PIL' else package
+            missing_packages.append(package_name)
             print(f"✗ {package} (missing)")
     
     if missing_packages:
         print("\nMissing packages detected.")
         print("Please install build dependencies with:")
-        print("  pip install -e '.[build]'")
+        print("  uv pip install --extra build .")
         return False
     
     return True
 
-def create_icon():
-    """Create a simple icon file if one doesn't exist."""
-    icon_dir = Path('img')
-    icon_dir.mkdir(exist_ok=True)
-    
-    icon_path = icon_dir / 'icon.ico'
-    if not icon_path.exists():
-        # Create a simple placeholder icon using PIL
-        from PIL import Image, ImageDraw
-        
-        # Create a simple icon
-        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        
-        # Draw a simple checkmark or task-like icon
-        draw.rectangle([10, 10, 54, 54], fill=(70, 130, 180), outline=(0, 0, 0), width=2)
-        draw.line([20, 32, 30, 42], fill=(255, 255, 255), width=3)
-        draw.line([30, 42, 44, 22], fill=(255, 255, 255), width=3)
-        
-        img.save(icon_path, format='ICO')
-        print(f"✓ Created icon: {icon_path}")
-    else:
-        print(f"✓ Icon exists: {icon_path}")
 
-def build_executable():
-    """Build the executable using PyInstaller."""
-    print("\nBuilding executable with PyInstaller...")
+def create_icon(icon_dir: Path = Path('img')) -> None:
+    """Create application icon if it doesn't exist.
     
-    # Clean previous builds
-    for dir_name in ['build', 'dist', '__pycache__']:
-        if Path(dir_name).exists():
-            shutil.rmtree(dir_name)
+    Args:
+        icon_dir: Directory where the icon should be created.
+    """
+    from PIL import Image, ImageDraw
+    
+    icon_dir.mkdir(exist_ok=True)
+    icon_path = icon_dir / 'icon.ico'
+    
+    if icon_path.exists():
+        print(f"✓ Icon exists: {icon_path}")
+        return
+    
+    # Create icon with checkmark design
+    img = Image.new('RGBA', ICON_SIZE, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Draw task checkbox
+    draw.rectangle(
+        [10, 10, 54, 54],
+        fill=ICON_COLORS['background'],
+        outline=ICON_COLORS['border'],
+        width=2
+    )
+    
+    # Draw checkmark
+    draw.line([20, 32, 30, 42], fill=ICON_COLORS['checkmark'], width=3)
+    draw.line([30, 42, 44, 22], fill=ICON_COLORS['checkmark'], width=3)
+    
+    img.save(icon_path, format='ICO')
+    print(f"✓ Created icon: {icon_path}")
+
+
+def clean_build_directories() -> None:
+    """Remove previous build artifacts."""
+    build_dirs = ['build', 'dist', '__pycache__']
+    
+    for dir_name in build_dirs:
+        dir_path = Path(dir_name)
+        if dir_path.exists():
+            shutil.rmtree(dir_path)
             print(f"✓ Cleaned {dir_name}")
+
+
+def build_executable(spec_file: str = 'todoist_assistant.spec') -> bool:
+    """Build the executable using PyInstaller.
     
-    # Run PyInstaller
-    spec_file = 'todoist_assistant.spec'
+    Args:
+        spec_file: Path to the PyInstaller specification file.
+        
+    Returns:
+        True if build succeeded, False otherwise.
+    """
+    print("\nBuilding executable with PyInstaller...")
+    clean_build_directories()
+    
     cmd = [sys.executable, '-m', 'PyInstaller', spec_file, '--clean']
-    
     print(f"Running: {' '.join(cmd)}")
+    
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode != 0:
@@ -85,58 +125,51 @@ def build_executable():
     print("✓ PyInstaller completed successfully")
     return True
 
-def create_distribution_package():
-    """Create a distribution package with installer."""
-    print("\nCreating distribution package...")
+
+def find_executable() -> Path | None:
+    """Locate the built executable in the dist directory.
     
+    Returns:
+        Path to the executable if found, None otherwise.
+    """
     dist_dir = Path('dist')
-    # Check for both Windows (.exe) and Unix executables
-    exe_path = dist_dir / 'TodoistAssistant.exe'
-    unix_exe_path = dist_dir / 'TodoistAssistant'
     
-    if exe_path.exists():
-        source_exe = exe_path
-        target_name = 'TodoistAssistant.exe'
-    elif unix_exe_path.exists():
-        source_exe = unix_exe_path
-        target_name = 'TodoistAssistant.exe'  # Rename for Windows distribution
-    else:
-        print(f"✗ Executable not found in {dist_dir}")
-        return False
+    for exe_name in ['TodoistAssistant.exe', 'TodoistAssistant']:
+        exe_path = dist_dir / exe_name
+        if exe_path.exists():
+            return exe_path
     
-    print(f"✓ Found executable: {source_exe}")
+    return None
+
+
+def copy_support_files(package_dir: Path) -> None:
+    """Copy supporting files to the distribution package.
     
-    # Create package directory
-    package_dir = Path('TodoistAssistant_Windows')
-    if package_dir.exists():
-        shutil.rmtree(package_dir)
-    package_dir.mkdir()
-    
-    # Copy executable
-    shutil.copy2(source_exe, package_dir / target_name)
-    print(f"✓ Copied executable as {target_name}")
-    
-    # Copy supporting files
-    files_to_copy = [
-        'install.bat',
-        '.env.example',
-        'README.md',
-        'LICENSE'
-    ]
-    
+    Args:
+        package_dir: Target directory for the package files.
+    """
+    # Copy individual files
+    files_to_copy = ['install.bat', '.env.example', 'README.md', 'LICENSE']
     for file_name in files_to_copy:
-        if Path(file_name).exists():
-            shutil.copy2(file_name, package_dir / file_name)
+        file_path = Path(file_name)
+        if file_path.exists():
+            shutil.copy2(file_path, package_dir / file_name)
             print(f"✓ Copied {file_name}")
     
     # Copy directories
-    dirs_to_copy = ['configs', 'img']
-    for dir_name in dirs_to_copy:
-        if Path(dir_name).exists():
-            shutil.copytree(dir_name, package_dir / dir_name)
+    for dir_name in ['configs', 'img']:
+        dir_path = Path(dir_name)
+        if dir_path.exists():
+            shutil.copytree(dir_path, package_dir / dir_name)
             print(f"✓ Copied {dir_name}/")
+
+
+def create_installation_instructions(package_dir: Path) -> None:
+    """Generate installation instructions for the package.
     
-    # Create installation instructions
+    Args:
+        package_dir: Directory where instructions should be created.
+    """
     instructions = """# Todoist Assistant - Windows Installation
 
 ## Quick Start
@@ -171,12 +204,44 @@ If the automatic installer doesn't work:
 Use the uninstaller in the Start Menu or manually delete the installation folder.
 """
     
-    with open(package_dir / 'INSTALL_INSTRUCTIONS.md', 'w') as f:
+    with open(package_dir / 'INSTALL_INSTRUCTIONS.md', 'w', encoding='utf-8') as f:
         f.write(instructions)
     print("✓ Created installation instructions")
+
+
+def create_distribution_package() -> bool:
+    """Create the complete distribution package with installer.
     
-    # Create ZIP package
-    zip_path = Path(f'TodoistAssistant_Windows_v1.0.zip')
+    Returns:
+        True if package creation succeeded, False otherwise.
+    """
+    print("\nCreating distribution package...")
+    
+    # Find executable
+    source_exe = find_executable()
+    if source_exe is None:
+        print("✗ Executable not found in dist/")
+        return False
+    
+    print(f"✓ Found executable: {source_exe}")
+    
+    # Create package directory
+    package_dir = Path('TodoistAssistant_Windows')
+    if package_dir.exists():
+        shutil.rmtree(package_dir)
+    package_dir.mkdir()
+    
+    # Copy executable
+    target_exe = package_dir / 'TodoistAssistant.exe'
+    shutil.copy2(source_exe, target_exe)
+    print(f"✓ Copied executable as {target_exe.name}")
+    
+    # Copy supporting files and create instructions
+    copy_support_files(package_dir)
+    create_installation_instructions(package_dir)
+    
+    # Create ZIP archive
+    zip_path = Path(f'TodoistAssistant_Windows_v{PACKAGE_VERSION}.zip')
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for file_path in package_dir.rglob('*'):
             if file_path.is_file():
@@ -185,50 +250,57 @@ Use the uninstaller in the Start Menu or manually delete the installation folder
     
     print(f"✓ Created distribution package: {zip_path}")
     
-    # Show package contents
+    # Display package contents
     print(f"\nPackage contents ({package_dir}):")
     for item in sorted(package_dir.rglob('*')):
         if item.is_file():
-            size = item.stat().st_size / (1024 * 1024)  # MB
-            print(f"  {item.relative_to(package_dir)} ({size:.1f} MB)")
+            size_mb = item.stat().st_size / (1024 * 1024)
+            print(f"  {item.relative_to(package_dir)} ({size_mb:.1f} MB)")
     
     return True
 
-def main():
-    """Main build process."""
+
+def main() -> int:
+    """Execute the build process.
+    
+    Returns:
+        Exit code (0 for success, 1 for failure).
+    """
     print("=" * 60)
     print("        Todoist Assistant - Windows Build Script")
     print("=" * 60)
     
     try:
-        # Step 1: Check dependencies
+        # Verify dependencies
         if not check_dependencies():
             return 1
         
-        # Step 2: Create icon
+        # Create icon
         create_icon()
         
-        # Step 3: Build executable
+        # Build executable
         if not build_executable():
             return 1
         
-        # Step 4: Create distribution package
+        # Create distribution package
         if not create_distribution_package():
             return 1
         
         print("\n" + "=" * 60)
         print("✓ Build completed successfully!")
         print("=" * 60)
-        print("\nDistribution package created: TodoistAssistant_Windows_v1.0.zip")
+        print(f"\nDistribution package created: TodoistAssistant_Windows_v{PACKAGE_VERSION}.zip")
         print("This package contains everything needed for Windows installation.")
         
         return 0
         
+    except KeyboardInterrupt:
+        print("\n\n✗ Build cancelled by user")
+        return 130
     except Exception as e:
         print(f"\n✗ Build failed: {e}")
-        import traceback
-        traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

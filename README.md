@@ -112,11 +112,11 @@ flowchart TD
 The repository includes build scripts to create a self-contained Windows executable:
 
 ```bash
-# Install build dependencies
-pip install -e '.[build]'
+# Install build dependencies using uv
+uv pip install --extra build .
 
 # Run the build script
-python build_windows.py
+uv run python build_windows.py
 ```
 
 This creates a complete Windows package with:
@@ -133,7 +133,7 @@ This creates a complete Windows package with:
 
 ### Recommended Setup Environment
 
-> **Note for windows:** The application now provides build scripts for creating a native Windows executable package. However, if you prefer manual setup, it is still recommended to use a Linux environment or WSL for development.  
+> **Note for Windows:** The application provides build scripts for creating a native Windows executable package. For development, it is recommended to use a Linux environment or WSL.  
 > If you are on Windows, consider installing [Ubuntu 20.04 (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) to get started with a Linux subsystem.
 
 

@@ -21,7 +21,13 @@ if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
 REM Copy executable and files
 echo Copying files...
-copy "TodoistAssistant.exe" "%INSTALL_DIR%\" >nul
+if exist "TodoistAssistant.exe" (
+    copy "TodoistAssistant.exe" "%INSTALL_DIR%\" >nul
+) else (
+    echo Error: TodoistAssistant.exe not found
+    pause
+    exit /b 1
+)
 if exist "configs" xcopy "configs" "%INSTALL_DIR%\configs\" /E /I /Q >nul
 if exist ".env.example" copy ".env.example" "%INSTALL_DIR%\" >nul
 if exist "README.md" copy "README.md" "%INSTALL_DIR%\" >nul
