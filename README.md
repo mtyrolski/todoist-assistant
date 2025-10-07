@@ -89,8 +89,12 @@ flowchart TD
     Automations allow custom triggers and actions like fetching activity, apply templates, ...
   - **Integrations** *(experimental)*   
     Integrations open the door to connect with external services like Twitter or Gmail. The Gmail Tasks automation can automatically create Todoist tasks from actionable emails.
-  - **Agentic AI Module** *(incoming)*
-    Summarizes activity logs into actionable insights, provides on-demand or daily productivity snapshots, detects trends like peak hours or bottlenecks, tracks progress toward goals, supports plain-language queries, and tailors reports by projects, labels, or timeframes.
+  - **Agentic AI Module**
+    A LangGraph-based chat interface powered by Hugging Face LLMs. Features include:
+    - Interactive chat for querying Todoist events
+    - Secure Python REPL tool for data analysis
+    - Read-only access to events with sandboxed execution
+    - Support for natural language queries and direct code execution
 
 <div style="text-align: center;">
   <img src="img/home_header.png" alt="home_1" width="900"/>
@@ -169,7 +173,111 @@ The following [Makefile](Makefile) commands are available for managing the local
 
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
+- **`make run-chat`:** Launches the LangGraph + Chainlit chat interface for interactive event analysis.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
+
+## Chat Interface (Agentic AI)
+
+The Todoist Assistant now includes an interactive chat interface powered by LangGraph and Hugging Face LLMs.
+
+### Features
+- **Natural Language Queries:** Ask questions about your Todoist events in plain English
+- **Secure REPL Tool:** Execute Python code with read-only access to your events
+- **Sandboxed Execution:** Safe code execution with timeout and output limits
+- **Interactive UI:** Clean Chainlit interface with markdown support
+
+### Setup
+
+1. **Configure Environment Variables**
+   Copy `.env.example` to `.env` and add your Hugging Face API token:
+   ```bash
+   HUGGINGFACEHUB_API_TOKEN=your_token_here
+   HF_MODEL_ID=HuggingFaceH4/zephyr-7b-beta
+   EVENTS_PATH=.data/events.json
+   ```
+
+2. **Prepare Events Data (Optional)**
+   If you want to use your own events, export them to `.data/events.json`:
+   ```python
+   import json
+   from todoist.activity import fetch_activity
+   from todoist.database.base import Database
+   
+   dbio = Database('.env')
+   activity_db, _, _ = fetch_activity(dbio, nweeks=520)
+   
+   # Convert events to JSON format
+   events_data = [
+       {
+           "id": event.id,
+           "date": event.date.isoformat(),
+           "event_entry": {
+               "id": event.event_entry.id,
+               "object_type": event.event_entry.object_type,
+               "object_id": event.event_entry.object_id,
+               "event_type": event.event_entry.event_type,
+               "event_date": event.event_entry.event_date,
+               "parent_project_id": event.event_entry.parent_project_id,
+               "parent_item_id": event.event_entry.parent_item_id,
+               "initiator_id": event.event_entry.initiator_id,
+               "extra_data": event.event_entry.extra_data,
+               "extra_data_id": event.event_entry.extra_data_id,
+               "v2_object_id": event.event_entry.v2_object_id,
+               "v2_parent_item_id": event.event_entry.v2_parent_item_id,
+               "v2_parent_project_id": event.event_entry.v2_parent_project_id,
+           }
+       }
+       for event in list(activity_db)[:100]  # Limit to 100 for demo
+   ]
+   
+   with open('.data/events.json', 'w') as f:
+       json.dump(events_data, f, indent=2)
+   ```
+
+3. **Launch the Chat Interface**
+   ```bash
+   make run-chat
+   ```
+   
+   Or directly:
+   ```bash
+   PYTHONPATH=. chainlit run ui/chainlit_app.py
+   ```
+
+### Usage Examples
+
+**Natural Language Query:**
+```
+How many events do I have?
+```
+
+**Direct REPL Execution:**
+```
+/repl
+len(events)
+```
+
+**Analyze Event Types:**
+```
+/repl
+[e.event_type for e in events[:5]]
+```
+
+**Filter and Count:**
+```
+/repl
+completed = [e for e in events if e.event_type == 'completed']
+print(f"Completed tasks: {len(completed)}")
+len(completed)
+```
+
+### Security Features
+- **Sandboxed Execution:** Code runs in an isolated subprocess with timeout
+- **Import Restrictions:** No imports allowed (including `os`, `sys`, etc.)
+- **Attribute Restrictions:** Dangerous dunder methods are blocked
+- **Safe Builtins:** Only whitelisted built-in functions available
+- **Output Limits:** Large outputs are automatically truncated
+- **Read-Only Data:** Events are exposed as an immutable tuple
 
 
 ## Manual Usage

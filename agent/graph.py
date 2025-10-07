@@ -3,7 +3,7 @@ LangGraph agent with Hugging Face LLM and REPL tool.
 """
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_huggingface import HuggingFaceEndpoint
 from langgraph.graph import END, StateGraph
 
@@ -165,7 +165,7 @@ def create_agent_graph(events: list[Event]) -> StateGraph:
 
 
 def run_agent_with_message(
-    graph: StateGraph,
+    graph: Any,
     user_message: str,
     message_history: list[BaseMessage] | None = None
 ) -> tuple[str, list[BaseMessage]]:

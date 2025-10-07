@@ -16,3 +16,5 @@ outputs/
 todoist/scripts/*.log
 # Screenshots added temporarily
 *.png
+# Chainlit config
+.chainlit/
