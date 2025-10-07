@@ -9,7 +9,7 @@ from todoist.stats import extract_task_due_date
 from todoist.types import Event, EventEntry
 
 from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class DatabaseActivity:
@@ -80,6 +80,13 @@ class DatabaseActivity:
                 assert event_date is not None
                 page_events.append(Event(event_entry=event, id=event.id, date=event_date))
             return page_events
+        
+        def process_page_with_retry(page: int) -> list[Event]:
+            """Process page with built-in retry logic."""
+            result = try_n_times(partial(process_page, page), 3)
+            if result is None:
+                raise RuntimeError(f"Failed to fetch events for page {page} after 3 retry attempts")
+            return result
 
         pages = range(starting_page, starting_page + max_pages)
         logger.info(f"Starting activity fetch over pages [{starting_page}, {starting_page + max_pages - 1}] (total={max_pages})")
@@ -92,20 +99,10 @@ class DatabaseActivity:
             return result
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_page = {executor.submit(lambda p=page: try_n_times(partial(process_page, p), 3), page): page for page in pages}
+            future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
             for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
                 page = future_to_page[future]
-                try:
-                    page_events = future.result(timeout=60)
-                    if page_events is None:
-                        logger.error(f"Failed to fetch events for page {page} after retries. Using empty list.")
-                        page_events = []
-                except TimeoutError:
-                    logger.error(f"Timeout while fetching events for page {page}. Using empty list.")
-                    page_events = []
-                except Exception as e:
-                    logger.error(f"Unexpected error fetching page {page}: {e.__class__.__name__}: {e}. Using empty list.")
-                    page_events = []
+                page_events = future.result(timeout=60)
                 results_by_page[page] = page_events
                 logger.debug(f"Fetched {len(page_events)} events from page {page}")
 

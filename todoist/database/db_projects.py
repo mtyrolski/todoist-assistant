@@ -1,6 +1,6 @@
 import json
 from subprocess import DEVNULL, PIPE, run
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import cast, Optional
 
 from loguru import logger
@@ -90,6 +90,13 @@ class DatabaseProjects:
             task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
             tasks: list[Task] = [Task(id=task.id, task_entry=task) for task in task_entries]
             return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
+        
+        def process_project_with_retry(project: ProjectEntry) -> Project:
+            """Process project with built-in retry logic."""
+            result = try_n_times(partial(process_project, project), 3)
+            if result is None:
+                raise RuntimeError(f"Failed to fetch project {project.id} after 3 retry attempts")
+            return result
 
         if not projects:
             logger.info("No projects returned from API.")
@@ -100,17 +107,11 @@ class DatabaseProjects:
         max_workers = min(8, len(projects))
         ordered_results: list[Optional[Project]] = [None] * len(projects)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {executor.submit(lambda proj=proj: try_n_times(partial(process_project, proj), 3), proj): idx for idx, proj in enumerate(projects)}
+            future_to_index = {executor.submit(process_project_with_retry, proj): idx for idx, proj in enumerate(projects)}
             for future in tqdm(as_completed(future_to_index), total=len(projects), desc='Querying project data', unit='project', position=0, leave=True):
                 idx = future_to_index[future]
                 try:
                     proj_result = future.result(timeout=60)
-                    if proj_result is None:
-                        logger.error(f"Failed fetching project index {idx} after retries. Using empty project shell.")
-                        proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
-                except TimeoutError:
-                    logger.error(f"Timeout fetching project index {idx}. Using empty project shell.")
-                    proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
                     logger.error(f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}")
                     proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
@@ -164,6 +165,13 @@ class DatabaseProjects:
         projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}
         mapping_project_id_to_root: dict[str, "Project"] = {}
 
+        def get_root_project_with_retry(project_id: str) -> Optional[Project]:
+            """Get root project with built-in retry logic."""
+            result = try_n_times(partial(self._get_root_project, project_id), 3)
+            if result is None:
+                raise RuntimeError(f"Failed to resolve hierarchy for project {project_id} after 3 retry attempts")
+            return result
+
         logger.info("Building project hierarchy (active + archived) with thread pool")
         all_projects_seq: list[Project] = list(projects.values()) + list(archived_projects.values())
         if not all_projects_seq:
@@ -171,18 +179,13 @@ class DatabaseProjects:
 
         max_workers = min(8, len(all_projects_seq))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_pid = {executor.submit(lambda pid=p.id: try_n_times(partial(self._get_root_project, pid), 3), p.id): p.id for p in all_projects_seq}
+            future_to_pid = {executor.submit(get_root_project_with_retry, p.id): p.id for p in all_projects_seq}
             for future in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc='Building project hierarchy', unit='project'):
                 pid = future_to_pid[future]
                 try:
                     root = future.result(timeout=60)
                     if root is not None:
                         mapping_project_id_to_root[pid] = root
-                    else:
-                        logger.error(f"Hierarchy resolution failed for project {pid} after retries.")
-                except TimeoutError:
-                    logger.error(f"Timeout resolving hierarchy for project {pid}.")
-                    continue
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover
                     logger.error(f"Hierarchy resolution failed for project {pid}: {e.__class__.__name__}: {e}")
                     continue
