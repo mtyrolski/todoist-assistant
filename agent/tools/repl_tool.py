@@ -105,19 +105,25 @@ def _execute_in_subprocess(
         }
         restricted_globals["events"] = events
         
-        # Compile and execute code
-        compiled_code = compile(code, "<repl>", "exec")
-        local_vars: dict[str, Any] = {}
-        exec(compiled_code, restricted_globals, local_vars)
-        
-        # Get the last expression value if any
+        # Try to compile as eval (single expression) first
         last_value = None
-        if local_vars:
-            # Try to get the last assigned variable or expression result
-            for key in reversed(list(local_vars.keys())):
-                if not key.startswith("_"):
-                    last_value = local_vars[key]
-                    break
+        local_vars: dict[str, Any] = {}
+        
+        try:
+            # Try as expression first
+            compiled_code = compile(code, "<repl>", "eval")
+            last_value = eval(compiled_code, restricted_globals, local_vars)
+        except SyntaxError:
+            # Not an expression, execute as statements
+            compiled_code = compile(code, "<repl>", "exec")
+            exec(compiled_code, restricted_globals, local_vars)
+            
+            # Get the last assigned variable if any
+            if local_vars:
+                for key in reversed(list(local_vars.keys())):
+                    if not key.startswith("_"):
+                        last_value = local_vars[key]
+                        break
         
         # Restore stdout
         sys.stdout = old_stdout
