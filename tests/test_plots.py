@@ -114,7 +114,9 @@ def test_plot_task_lifespans_empty_data(empty_events_df):
     fig = plot_task_lifespans(empty_events_df)
     
     assert isinstance(fig, go.Figure)
-    assert 'No Data' in fig.layout.title.text
+    # Changed to check for the specific error message
+    assert 'Task Lifespans' in fig.layout.title.text
+    assert ('No Data' in fig.layout.title.text or 'No Task Events' in fig.layout.title.text)
 
 
 def test_plot_task_lifespans_only_added_events():
@@ -136,9 +138,10 @@ def test_plot_task_lifespans_only_added_events():
     
     fig = plot_task_lifespans(df)
     
-    # Should handle this gracefully with no data message
+    # Should handle this gracefully with specific error message
     assert isinstance(fig, go.Figure)
-    assert 'No Data' in fig.layout.title.text
+    assert 'Task Lifespans' in fig.layout.title.text
+    assert 'No Tasks with Both Added and Completed Events' in fig.layout.title.text
 
 
 def test_plot_task_lifespans_only_completed_events():
@@ -160,9 +163,10 @@ def test_plot_task_lifespans_only_completed_events():
     
     fig = plot_task_lifespans(df)
     
-    # Should handle this gracefully with no data message
+    # Should handle this gracefully with specific error message
     assert isinstance(fig, go.Figure)
-    assert 'No Data' in fig.layout.title.text
+    assert 'Task Lifespans' in fig.layout.title.text
+    assert 'No Tasks with Both Added and Completed Events' in fig.layout.title.text
 
 
 def test_plot_task_lifespans_negative_duration():

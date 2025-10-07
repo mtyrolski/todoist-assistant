@@ -720,9 +720,35 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     from loguru import logger
     import numpy as np
     
+    # Debug: Check DataFrame structure
+    logger.debug(f'DataFrame shape: {df.shape}')
+    logger.debug(f'DataFrame columns: {df.columns.tolist()}')
+    
+    # Check if required columns exist
+    if 'type' not in df.columns:
+        logger.error(f'DataFrame missing "type" column. Available columns: {df.columns.tolist()}')
+        return go.Figure().update_layout(
+            template='plotly_dark',
+            title={'text': 'Error: Invalid data structure', 'x': 0.5, 'xanchor': 'center'},
+            plot_bgcolor='#111318',
+            paper_bgcolor='#111318',
+        )
+    
+    if 'parent_item_id' not in df.columns:
+        logger.error(f'DataFrame missing "parent_item_id" column. Available columns: {df.columns.tolist()}')
+        return go.Figure().update_layout(
+            template='plotly_dark',
+            title={'text': 'Error: Invalid data structure', 'x': 0.5, 'xanchor': 'center'},
+            plot_bgcolor='#111318',
+            paper_bgcolor='#111318',
+        )
+    
     # Filter for tasks with both 'added' and 'completed' events
     added_events = df[df['type'] == 'added'].copy()
     completed_events = df[df['type'] == 'completed'].copy()
+    
+    logger.info(f'Total events in DataFrame: {len(df)}')
+    logger.info(f'Added events: {len(added_events)}, Completed events: {len(completed_events)}')
     
     # Find tasks that have both added and completed events
     added_task_ids = set(added_events['parent_item_id'].dropna())
@@ -730,6 +756,11 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     common_task_ids = added_task_ids.intersection(completed_task_ids)
     
     logger.info(f'Found {len(common_task_ids)} tasks with both added and completed events')
+    
+    if len(common_task_ids) == 0:
+        logger.warning(f'No tasks found with both added and completed events.')
+        logger.warning(f'Added task IDs (first 5): {list(added_task_ids)[:5]}')
+        logger.warning(f'Completed task IDs (first 5): {list(completed_task_ids)[:5]}')
     
     # Compute lifespans
     lifespans = []
@@ -772,11 +803,20 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     
     # Handle empty data
     if not lifespans:
+        logger.warning('No valid task lifespans computed - returning empty chart')
         fig = go.Figure()
+        
+        # Create a more informative message
+        info_text = 'No Data Available'
+        if len(added_events) == 0 and len(completed_events) == 0:
+            info_text = 'No Task Events Found'
+        elif len(common_task_ids) == 0:
+            info_text = 'No Tasks with Both Added and Completed Events'
+        
         fig.update_layout(
             template='plotly_dark',
             title={
-                'text': 'Task Lifespans (No Data Available)',
+                'text': f'Task Lifespans ({info_text})',
                 'x': 0.5,
                 'xanchor': 'center',
                 'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
@@ -785,7 +825,19 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             yaxis={'title': 'Frequency', 'showgrid': True},
             plot_bgcolor='#111318',
             paper_bgcolor='#111318',
-            font=dict(color='#ffffff', size=12, family='Arial, sans-serif')
+            font=dict(color='#ffffff', size=12, family='Arial, sans-serif'),
+            annotations=[
+                dict(
+                    text='<b>Tip:</b> Tasks need both "added" and "completed" events to appear in this chart.',
+                    xref='paper',
+                    yref='paper',
+                    x=0.5,
+                    y=0.5,
+                    showarrow=False,
+                    font=dict(size=14, color='#888888'),
+                    align='center'
+                )
+            ]
         )
         return fig
     
@@ -878,68 +930,108 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         # Generate KDE in log space for better visualization
         log_durations = np.log10(durations_converted)
         
-        # Create KDE
-        kde = stats.gaussian_kde(log_durations, bw_method='scott')
-        
-        # Generate points for smooth curve (in log space)
-        log_min = np.floor(np.log10(min(durations_converted)))
-        log_max = np.ceil(np.log10(max(durations_converted)))
-        log_x_smooth = np.linspace(log_min, log_max, 500)
-        x_smooth = 10 ** log_x_smooth  # Convert back to linear space
-        
-        # Evaluate KDE and scale to actual counts
-        kde_values = kde(log_x_smooth)
-        # Scale KDE to represent actual counts instead of probability density
-        # Integrate the KDE over the range and scale to match total count
-        kde_integral = np.trapezoid(kde_values, log_x_smooth)
-        kde_scaled = kde_values * (len(lifespans_sorted) / kde_integral)
-        
-        # Add density curve
-        fig.add_trace(go.Scatter(
-            x=x_smooth,
-            y=kde_scaled,
-            mode='lines',
-            fill='tozeroy',
-            line=dict(
-                color='#4169E1',  # Royal Blue for task completion
-                width=2.5
-            ),
-            fillcolor='rgba(65, 105, 225, 0.3)',  # Semi-transparent fill
-            hovertemplate=(
-                '<b>Duration:</b> %{x:.2f} ' + unit_label + '<br>'
-                '<b>Estimated Count:</b> %{y:.1f}<br>'
-                '<extra></extra>'
-            ),
-            name='Task Distribution'
-        ))
-        
-        # Add individual task markers (scatter plot overlay for hover details)
-        # Position markers along the curve for better visual integration
-        # For each task, find the approximate y-value on the density curve
-        marker_y_values = []
-        for duration in durations_converted:
-            log_duration = np.log10(duration)
-            # Find closest point on the KDE curve
-            idx = np.argmin(np.abs(log_x_smooth - log_duration))
-            y_val = kde_scaled[idx] * 0.1  # Place markers at 10% of curve height
-            marker_y_values.append(y_val)
-        
-        fig.add_trace(go.Scatter(
-            x=durations_converted,
-            y=marker_y_values,
-            mode='markers',
-            marker=dict(
-                size=5,
-                color='#FF8C00',  # Dark Orange for individual markers
-                opacity=0.7,
-                line=dict(width=0.5, color='#ffffff'),
-                symbol='circle'
-            ),
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=hover_texts,
-            name='Individual Tasks',
-            showlegend=True
-        ))
+        # Check if we have enough variance for KDE
+        if np.std(log_durations) < 1e-6:
+            logger.warning('All tasks have very similar durations - falling back to scatter plot')
+            # Fall back to scatter plot when data has no variance
+            fig.add_trace(go.Scatter(
+                x=durations_converted,
+                y=[1.0] * len(durations_converted),
+                mode='markers',
+                marker=dict(
+                    size=8,
+                    color='#4169E1',
+                    opacity=0.8,
+                    line=dict(width=1, color='#ffffff')
+                ),
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_texts,
+                name='Tasks',
+                showlegend=True
+            ))
+        else:
+            # Create KDE
+            try:
+                kde = stats.gaussian_kde(log_durations, bw_method='scott')
+            except (np.linalg.LinAlgError, ValueError) as e:
+                logger.warning(f'KDE failed ({e}), falling back to scatter plot')
+                # Fall back to scatter plot if KDE fails
+                fig.add_trace(go.Scatter(
+                    x=durations_converted,
+                    y=[1.0] * len(durations_converted),
+                    mode='markers',
+                    marker=dict(
+                        size=8,
+                        color='#4169E1',
+                        opacity=0.8,
+                        line=dict(width=1, color='#ffffff')
+                    ),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_texts,
+                    name='Tasks',
+                    showlegend=True
+                ))
+            else:
+                # KDE succeeded - create density plot
+                # Generate points for smooth curve (in log space)
+                log_min = np.floor(np.log10(min(durations_converted)))
+                log_max = np.ceil(np.log10(max(durations_converted)))
+                log_x_smooth = np.linspace(log_min, log_max, 500)
+                x_smooth = 10 ** log_x_smooth  # Convert back to linear space
+                
+                # Evaluate KDE and scale to actual counts
+                kde_values = kde(log_x_smooth)
+                # Scale KDE to represent actual counts instead of probability density
+                # Integrate the KDE over the range and scale to match total count
+                kde_integral = np.trapezoid(kde_values, log_x_smooth)
+                kde_scaled = kde_values * (len(lifespans_sorted) / kde_integral)
+                
+                # Add density curve
+                fig.add_trace(go.Scatter(
+                    x=x_smooth,
+                    y=kde_scaled,
+                    mode='lines',
+                    fill='tozeroy',
+                    line=dict(
+                        color='#4169E1',  # Royal Blue for task completion
+                        width=2.5
+                    ),
+                    fillcolor='rgba(65, 105, 225, 0.3)',  # Semi-transparent fill
+                    hovertemplate=(
+                        '<b>Duration:</b> %{x:.2f} ' + unit_label + '<br>'
+                        '<b>Estimated Count:</b> %{y:.1f}<br>'
+                        '<extra></extra>'
+                    ),
+                    name='Task Distribution'
+                ))
+                
+                # Add individual task markers (scatter plot overlay for hover details)
+                # Position markers along the curve for better visual integration
+                # For each task, find the approximate y-value on the density curve
+                marker_y_values = []
+                for duration in durations_converted:
+                    log_duration = np.log10(duration)
+                    # Find closest point on the KDE curve
+                    idx = np.argmin(np.abs(log_x_smooth - log_duration))
+                    y_val = kde_scaled[idx] * 0.1  # Place markers at 10% of curve height
+                    marker_y_values.append(y_val)
+                
+                fig.add_trace(go.Scatter(
+                    x=durations_converted,
+                    y=marker_y_values,
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color='#FF8C00',  # Dark Orange for individual markers
+                        opacity=0.7,
+                        line=dict(width=0.5, color='#ffffff'),
+                        symbol='circle'
+                    ),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_texts,
+                    name='Individual Tasks',
+                    showlegend=True
+                ))
     
     # Update layout with publication-quality styling
     fig.update_layout(
