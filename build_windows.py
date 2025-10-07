@@ -1,11 +1,9 @@
-#!/usr/bin/env python3
 """Build script for creating Windows executable package.
 
 This module handles the entire build process including PyInstaller compilation
 and distribution package creation for Windows deployment.
 """
 
-from __future__ import annotations
 
 import shutil
 import subprocess
@@ -13,6 +11,9 @@ import sys
 import zipfile
 from pathlib import Path
 from typing import Final
+import argparse
+
+from loguru import logger
 
 # Build configuration constants
 ICON_SIZE: Final[tuple[int, int]] = (64, 64)
@@ -22,7 +23,10 @@ ICON_COLORS: Final[dict[str, tuple[int, int, int]]] = {
     'checkmark': (255, 255, 255),
 }
 PACKAGE_VERSION: Final[str] = '1.0'
-REQUIRED_BUILD_PACKAGES: Final[list[str]] = ['pyinstaller', 'PIL']
+# Note: module import names are case-sensitive on Linux. PyInstaller's importable
+# module is "PyInstaller" (capitalized), while the pip package name is
+# "pyinstaller" (lowercase). Keep both correct here.
+REQUIRED_BUILD_PACKAGES: Final[list[str]] = ['PyInstaller', 'PIL']
 
 
 def check_dependencies() -> bool:
@@ -31,23 +35,30 @@ def check_dependencies() -> bool:
     Returns:
         True if all dependencies are available, False otherwise.
     """
-    print("Checking build dependencies...")
+    logger.info("Checking build dependencies...")
     
     missing_packages: list[str] = []
     
     for package in REQUIRED_BUILD_PACKAGES:
         try:
             __import__(package)
-            print(f"✓ {package}")
+            logger.success(f"{package}")
         except ImportError:
-            package_name = 'pillow' if package == 'PIL' else package
+            # Map import names to pip package names for helpful instructions
+            if package == 'PIL':
+                package_name = 'pillow'
+            elif package == 'PyInstaller':
+                package_name = 'pyinstaller'
+            else:
+                package_name = package
             missing_packages.append(package_name)
-            print(f"✗ {package} (missing)")
+            logger.error(f"{package} (missing)")
     
     if missing_packages:
-        print("\nMissing packages detected.")
-        print("Please install build dependencies with:")
-        print("  uv pip install --extra build .")
+        logger.warning("Missing packages detected.")
+        logger.info("Please install build dependencies with one of:")
+        logger.info("  uv pip install -e \".[build]\"")
+        logger.info("  uv sync --extra build")
         return False
     
     return True
@@ -65,7 +76,7 @@ def create_icon(icon_dir: Path = Path('img')) -> None:
     icon_path = icon_dir / 'icon.ico'
     
     if icon_path.exists():
-        print(f"✓ Icon exists: {icon_path}")
+        logger.success(f"Icon exists: {icon_path}")
         return
     
     # Create icon with checkmark design
@@ -85,7 +96,7 @@ def create_icon(icon_dir: Path = Path('img')) -> None:
     draw.line([30, 42, 44, 22], fill=ICON_COLORS['checkmark'], width=3)
     
     img.save(icon_path, format='ICO')
-    print(f"✓ Created icon: {icon_path}")
+    logger.success(f"Created icon: {icon_path}")
 
 
 def clean_build_directories() -> None:
@@ -96,10 +107,10 @@ def clean_build_directories() -> None:
         dir_path = Path(dir_name)
         if dir_path.exists():
             shutil.rmtree(dir_path)
-            print(f"✓ Cleaned {dir_name}")
+            logger.success(f"Cleaned {dir_name}")
 
 
-def build_executable(spec_file: str = 'todoist_assistant.spec') -> bool:
+def build_executable(spec_file: str = 'todoist_assistant.spec', *, verbose: bool = False) -> bool:
     """Build the executable using PyInstaller.
     
     Args:
@@ -108,21 +119,28 @@ def build_executable(spec_file: str = 'todoist_assistant.spec') -> bool:
     Returns:
         True if build succeeded, False otherwise.
     """
-    print("\nBuilding executable with PyInstaller...")
+    logger.info("\nBuilding executable with PyInstaller...")
     clean_build_directories()
-    
+
     cmd = [sys.executable, '-m', 'PyInstaller', spec_file, '--clean']
-    print(f"Running: {' '.join(cmd)}")
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
+    if verbose:
+        # Increase verbosity of PyInstaller output. When a .spec file is provided,
+        # makespec-only flags like --debug are not allowed. Use --log-level only.
+        if spec_file.lower().endswith('.spec'):
+            cmd += ['--log-level', 'DEBUG']
+        else:
+            cmd += ['--log-level', 'DEBUG', '--debug', 'all']
+
+    logger.info(f"Running: {' '.join(cmd)}")
+
+    # Stream output live (do not capture) so the user sees progress
+    result = subprocess.run(cmd)
+
     if result.returncode != 0:
-        print("✗ PyInstaller failed:")
-        print(result.stdout)
-        print(result.stderr)
+        logger.error("PyInstaller failed (see output above)")
         return False
-    
-    print("✓ PyInstaller completed successfully")
+
+    logger.success("PyInstaller completed successfully")
     return True
 
 
@@ -154,14 +172,14 @@ def copy_support_files(package_dir: Path) -> None:
         file_path = Path(file_name)
         if file_path.exists():
             shutil.copy2(file_path, package_dir / file_name)
-            print(f"✓ Copied {file_name}")
+            logger.success(f"Copied {file_name}")
     
     # Copy directories
     for dir_name in ['configs', 'img']:
         dir_path = Path(dir_name)
         if dir_path.exists():
             shutil.copytree(dir_path, package_dir / dir_name)
-            print(f"✓ Copied {dir_name}/")
+            logger.success(f"Copied {dir_name}/")
 
 
 def create_installation_instructions(package_dir: Path) -> None:
@@ -206,7 +224,7 @@ Use the uninstaller in the Start Menu or manually delete the installation folder
     
     with open(package_dir / 'INSTALL_INSTRUCTIONS.md', 'w', encoding='utf-8') as f:
         f.write(instructions)
-    print("✓ Created installation instructions")
+    logger.success("Created installation instructions")
 
 
 def create_distribution_package() -> bool:
@@ -215,15 +233,15 @@ def create_distribution_package() -> bool:
     Returns:
         True if package creation succeeded, False otherwise.
     """
-    print("\nCreating distribution package...")
+    logger.info("\nCreating distribution package...")
     
     # Find executable
     source_exe = find_executable()
     if source_exe is None:
-        print("✗ Executable not found in dist/")
+        logger.error("Executable not found in dist/")
         return False
-    
-    print(f"✓ Found executable: {source_exe}")
+
+    logger.success(f"Found executable: {source_exe}")
     
     # Create package directory
     package_dir = Path('TodoistAssistant_Windows')
@@ -234,7 +252,7 @@ def create_distribution_package() -> bool:
     # Copy executable
     target_exe = package_dir / 'TodoistAssistant.exe'
     shutil.copy2(source_exe, target_exe)
-    print(f"✓ Copied executable as {target_exe.name}")
+    logger.success(f"Copied executable as {target_exe.name}")
     
     # Copy supporting files and create instructions
     copy_support_files(package_dir)
@@ -248,14 +266,14 @@ def create_distribution_package() -> bool:
                 arcname = file_path.relative_to(package_dir.parent)
                 zipf.write(file_path, arcname)
     
-    print(f"✓ Created distribution package: {zip_path}")
+    logger.success(f"Created distribution package: {zip_path}")
     
     # Display package contents
-    print(f"\nPackage contents ({package_dir}):")
+    logger.info(f"\nPackage contents ({package_dir}):")
     for item in sorted(package_dir.rglob('*')):
         if item.is_file():
             size_mb = item.stat().st_size / (1024 * 1024)
-            print(f"  {item.relative_to(package_dir)} ({size_mb:.1f} MB)")
+            logger.info(f"  {item.relative_to(package_dir)} ({size_mb:.1f} MB)")
     
     return True
 
@@ -266,9 +284,21 @@ def main() -> int:
     Returns:
         Exit code (0 for success, 1 for failure).
     """
-    print("=" * 60)
-    print("        Todoist Assistant - Windows Build Script")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Build and package Todoist Assistant for Windows")
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging and PyInstaller debug output')
+    args = parser.parse_args()
+
+    # Configure logger level
+    if args.verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>")
+    else:
+        logger.remove()
+        logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>")
+
+    logger.info("=" * 60)
+    logger.info("        Todoist Assistant - Windows Build Script")
+    logger.info("=" * 60)
     
     try:
         # Verify dependencies
@@ -279,26 +309,26 @@ def main() -> int:
         create_icon()
         
         # Build executable
-        if not build_executable():
+        if not build_executable(verbose=args.verbose):
             return 1
         
         # Create distribution package
         if not create_distribution_package():
             return 1
-        
-        print("\n" + "=" * 60)
-        print("✓ Build completed successfully!")
-        print("=" * 60)
-        print(f"\nDistribution package created: TodoistAssistant_Windows_v{PACKAGE_VERSION}.zip")
-        print("This package contains everything needed for Windows installation.")
-        
+
+        logger.info("\n" + "=" * 60)
+        logger.success("Build completed successfully!")
+        logger.info("=" * 60)
+        logger.info(f"\nDistribution package created: TodoistAssistant_Windows_v{PACKAGE_VERSION}.zip")
+        logger.info("This package contains everything needed for Windows installation.")
+
         return 0
         
     except KeyboardInterrupt:
-        print("\n\n✗ Build cancelled by user")
+        logger.error("\n\nBuild cancelled by user")
         return 130
     except Exception as e:
-        print(f"\n✗ Build failed: {e}")
+        logger.exception(f"\nBuild failed: {e}")
         return 1
 
 
