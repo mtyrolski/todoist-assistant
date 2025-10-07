@@ -1,6 +1,6 @@
 import json
 from subprocess import DEVNULL, PIPE, run
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from typing import cast, Optional
 
 from loguru import logger
@@ -100,11 +100,17 @@ class DatabaseProjects:
         max_workers = min(8, len(projects))
         ordered_results: list[Optional[Project]] = [None] * len(projects)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {executor.submit(process_project, proj): idx for idx, proj in enumerate(projects)}
+            future_to_index = {executor.submit(lambda proj=proj: try_n_times(partial(process_project, proj), 3), proj): idx for idx, proj in enumerate(projects)}
             for future in tqdm(as_completed(future_to_index), total=len(projects), desc='Querying project data', unit='project', position=0, leave=True):
                 idx = future_to_index[future]
                 try:
-                    proj_result = future.result()
+                    proj_result = future.result(timeout=60)
+                    if proj_result is None:
+                        logger.error(f"Failed fetching project index {idx} after retries. Using empty project shell.")
+                        proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
+                except TimeoutError:
+                    logger.error(f"Timeout fetching project index {idx}. Using empty project shell.")
+                    proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
                     logger.error(f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}")
                     proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
@@ -165,16 +171,21 @@ class DatabaseProjects:
 
         max_workers = min(8, len(all_projects_seq))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_pid = {executor.submit(self._get_root_project, p.id): p.id for p in all_projects_seq}
+            future_to_pid = {executor.submit(lambda pid=p.id: try_n_times(partial(self._get_root_project, pid), 3), p.id): p.id for p in all_projects_seq}
             for future in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc='Building project hierarchy', unit='project'):
                 pid = future_to_pid[future]
                 try:
-                    root = future.result()
+                    root = future.result(timeout=60)
+                    if root is not None:
+                        mapping_project_id_to_root[pid] = root
+                    else:
+                        logger.error(f"Hierarchy resolution failed for project {pid} after retries.")
+                except TimeoutError:
+                    logger.error(f"Timeout resolving hierarchy for project {pid}.")
+                    continue
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover
                     logger.error(f"Hierarchy resolution failed for project {pid}: {e.__class__.__name__}: {e}")
                     continue
-                if root is not None:
-                    mapping_project_id_to_root[pid] = root
 
         return mapping_project_id_to_root
 
