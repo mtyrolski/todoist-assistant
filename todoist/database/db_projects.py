@@ -186,11 +186,11 @@ class DatabaseProjects:
                 pid = future_to_pid[future]
                 try:
                     root = future.result(timeout=60)
-                    if root is not None:
-                        mapping_project_id_to_root[pid] = root
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover
                     logger.error(f"Hierarchy resolution failed for project {pid}: {e.__class__.__name__}: {e}")
                     continue
+                if root is not None:
+                    mapping_project_id_to_root[pid] = root
 
         return mapping_project_id_to_root
 
