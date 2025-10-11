@@ -7,7 +7,7 @@ from loguru import logger
 from tqdm import tqdm
 from functools import partial
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
 
 
 class DatabaseProjects:
@@ -90,6 +90,14 @@ class DatabaseProjects:
             task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
             tasks: list[Task] = [Task(id=task.id, task_entry=task) for task in task_entries]
             return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
+        
+        def process_project_with_retry(project: ProjectEntry) -> Project:
+            """Process project with built-in retry logic."""
+            return with_retry(
+                partial(process_project, project),
+                operation_name=f"fetch project {project.id}",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
 
         if not projects:
             logger.info("No projects returned from API.")
@@ -100,11 +108,11 @@ class DatabaseProjects:
         max_workers = min(8, len(projects))
         ordered_results: list[Optional[Project]] = [None] * len(projects)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {executor.submit(process_project, proj): idx for idx, proj in enumerate(projects)}
+            future_to_index = {executor.submit(process_project_with_retry, proj): idx for idx, proj in enumerate(projects)}
             for future in tqdm(as_completed(future_to_index), total=len(projects), desc='Querying project data', unit='project', position=0, leave=True):
                 idx = future_to_index[future]
                 try:
-                    proj_result = future.result()
+                    proj_result = future.result(timeout=60)
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
                     logger.error(f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}")
                     proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
@@ -158,6 +166,14 @@ class DatabaseProjects:
         projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}
         mapping_project_id_to_root: dict[str, "Project"] = {}
 
+        def get_root_project_with_retry(project_id: str) -> Optional[Project]:
+            """Get root project with built-in retry logic."""
+            return with_retry(
+                partial(self._get_root_project, project_id),
+                operation_name=f"resolve hierarchy for project {project_id}",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
+
         logger.info("Building project hierarchy (active + archived) with thread pool")
         all_projects_seq: list[Project] = list(projects.values()) + list(archived_projects.values())
         if not all_projects_seq:
@@ -165,11 +181,11 @@ class DatabaseProjects:
 
         max_workers = min(8, len(all_projects_seq))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_pid = {executor.submit(self._get_root_project, p.id): p.id for p in all_projects_seq}
+            future_to_pid = {executor.submit(get_root_project_with_retry, p.id): p.id for p in all_projects_seq}
             for future in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc='Building project hierarchy', unit='project'):
                 pid = future_to_pid[future]
                 try:
-                    root = future.result()
+                    root = future.result(timeout=60)
                 except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover
                     logger.error(f"Hierarchy resolution failed for project {pid}: {e.__class__.__name__}: {e}")
                     continue

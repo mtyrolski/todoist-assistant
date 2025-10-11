@@ -15,6 +15,7 @@ from pickle import UnpicklingError
 from zlib import error as ZlibError
 from lzma import LZMAError
 import time
+import random
 
 T = TypeVar('T', set, dict)
 LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
@@ -116,6 +117,11 @@ def get_api_key() -> str:
 
 U = TypeVar('U')
 
+# Retry configuration constants
+RETRY_MAX_ATTEMPTS = 3
+RETRY_BACKOFF_MEAN = 10.0  # seconds
+RETRY_BACKOFF_STD = 3.0    # seconds
+
 
 def try_n_times(fn: Callable[[], U], n) -> U | None:
     """
@@ -134,6 +140,61 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
                 logger.debug(f"Waiting {wait_time} seconds before retrying...")
                 time.sleep(wait_time)
     return None
+
+
+def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMPTS, 
+                       backoff_mean: float = RETRY_BACKOFF_MEAN, 
+                       backoff_std: float = RETRY_BACKOFF_STD) -> U | None:
+    """
+    Try to run a function with Gaussian backoff retry logic.
+    
+    Args:
+        fn: Function to retry (should take no arguments)
+        max_attempts: Maximum number of retry attempts
+        backoff_mean: Mean wait time in seconds for Gaussian backoff
+        backoff_std: Standard deviation for Gaussian backoff
+    
+    Returns:
+        Result of the function if successful, None if all attempts fail
+    """
+    # pylint: disable=broad-exception-caught
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:  # pragma: no cover - logged and retried
+            logger.error(f"Exception {e} occurred on attempt {attempt + 1}/{max_attempts}")
+            if attempt < max_attempts - 1:
+                # Gaussian backoff with floor of 0.1s to ensure positive wait time
+                wait_time = max(0.1, random.gauss(backoff_mean, backoff_std))
+                logger.debug(f"Waiting {wait_time:.2f} seconds before retrying...")
+                time.sleep(wait_time)
+    return None
+
+
+def with_retry(fn: Callable[[], U], operation_name: str = "operation",
+               max_attempts: int = RETRY_MAX_ATTEMPTS,
+               backoff_mean: float = RETRY_BACKOFF_MEAN,
+               backoff_std: float = RETRY_BACKOFF_STD) -> U:
+    """
+    Wrapper that executes a function with retry logic and raises exception on failure.
+    
+    Args:
+        fn: Function to execute with retry
+        operation_name: Name of operation for error messages
+        max_attempts: Maximum number of retry attempts
+        backoff_mean: Mean wait time in seconds for Gaussian backoff
+        backoff_std: Standard deviation for Gaussian backoff
+    
+    Returns:
+        Result of the function
+        
+    Raises:
+        RuntimeError: If all retry attempts fail
+    """
+    result = retry_with_backoff(fn, max_attempts, backoff_mean, backoff_std)
+    if result is None:
+        raise RuntimeError(f"Failed to execute {operation_name} after {max_attempts} retry attempts")
+    return result
 
 
 def load_config(config_name: str, config_path: str) -> DictConfig:

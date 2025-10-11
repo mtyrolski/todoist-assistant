@@ -8,7 +8,7 @@ from tqdm import tqdm
 from todoist.stats import extract_task_due_date
 from todoist.types import Event, EventEntry
 
-from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times
+from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -80,6 +80,14 @@ class DatabaseActivity:
                 assert event_date is not None
                 page_events.append(Event(event_entry=event, id=event.id, date=event_date))
             return page_events
+        
+        def process_page_with_retry(page: int) -> list[Event]:
+            """Process page with built-in retry logic."""
+            return with_retry(
+                partial(process_page, page),
+                operation_name=f"fetch events for page {page}",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
 
         pages = range(starting_page, starting_page + max_pages)
         logger.info(f"Starting activity fetch over pages [{starting_page}, {starting_page + max_pages - 1}] (total={max_pages})")
@@ -92,10 +100,10 @@ class DatabaseActivity:
             return result
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_page = {executor.submit(process_page, page): page for page in pages}
+            future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
             for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
                 page = future_to_page[future]
-                page_events = future.result()
+                page_events = future.result(timeout=60)
                 results_by_page[page] = page_events
                 logger.debug(f"Fetched {len(page_events)} events from page {page}")
 
