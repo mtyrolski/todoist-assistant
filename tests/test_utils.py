@@ -19,7 +19,12 @@ from todoist.utils import (
     LocalStorage,
     LocalStorageError,
     Cache,
-    Anonymizable
+    Anonymizable,
+    retry_with_backoff,
+    with_retry,
+    RETRY_MAX_ATTEMPTS,
+    RETRY_BACKOFF_MEAN,
+    RETRY_BACKOFF_STD
 )
 
 
@@ -482,3 +487,134 @@ def test_load_config_clears_global_hydra():
         
         # Verify clear is called before other operations
         mock_instance.clear.assert_called_once()
+
+
+# Test retry_with_backoff
+def test_retry_with_backoff_success_first_attempt():
+    """Test retry_with_backoff when function succeeds on first attempt."""
+    def successful_function():
+        return "success"
+    
+    result = retry_with_backoff(successful_function, max_attempts=3)
+    assert result == "success"
+
+
+def test_retry_with_backoff_success_after_failures():
+    """Test retry_with_backoff when function succeeds after some failures."""
+    call_count = {'count': 0}
+    
+    def eventually_successful():
+        call_count['count'] += 1
+        if call_count['count'] < 3:
+            raise ValueError("Not yet")
+        return "success"
+    
+    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
+        result = retry_with_backoff(eventually_successful, max_attempts=5)
+    
+    assert result == "success"
+    assert call_count['count'] == 3
+
+
+def test_retry_with_backoff_all_failures():
+    """Test retry_with_backoff when function fails all attempts."""
+    def always_fails():
+        raise RuntimeError("Always fails")
+    
+    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
+        result = retry_with_backoff(always_fails, max_attempts=3)
+    
+    assert result is None
+
+
+def test_retry_with_backoff_uses_gaussian_backoff():
+    """Test retry_with_backoff uses Gaussian backoff between retries."""
+    def always_fails():
+        raise ValueError("Fail")
+    
+    with patch('todoist.utils.time.sleep') as mock_sleep, \
+         patch('todoist.utils.random.gauss') as mock_gauss:
+        # Mock Gaussian to return predictable values
+        mock_gauss.side_effect = [5.5, 12.3, 8.9]
+        
+        retry_with_backoff(always_fails, max_attempts=4, backoff_mean=10.0, backoff_std=3.0)
+        
+        # Verify Gaussian was called with correct parameters
+        assert mock_gauss.call_count == 3  # n-1 sleeps for n attempts
+        for call in mock_gauss.call_args_list:
+            assert call[0] == (10.0, 3.0)
+        
+        # Verify sleep was called with Gaussian values
+        assert mock_sleep.call_count == 3
+        assert mock_sleep.call_args_list[0][0][0] == 5.5
+        assert mock_sleep.call_args_list[1][0][0] == 12.3
+        assert mock_sleep.call_args_list[2][0][0] == 8.9
+
+
+def test_retry_with_backoff_minimum_wait_time():
+    """Test retry_with_backoff enforces minimum wait time of 0.1s."""
+    def always_fails():
+        raise ValueError("Fail")
+    
+    with patch('todoist.utils.time.sleep') as mock_sleep, \
+         patch('todoist.utils.random.gauss') as mock_gauss:
+        # Mock Gaussian to return negative values
+        mock_gauss.side_effect = [-5.0, -2.0, 0.05]
+        
+        retry_with_backoff(always_fails, max_attempts=4)
+        
+        # Verify minimum wait time is enforced
+        for call in mock_sleep.call_args_list:
+            assert call[0][0] >= 0.1
+
+
+def test_retry_with_backoff_constants():
+    """Test that retry constants are defined and have reasonable values."""
+    assert RETRY_MAX_ATTEMPTS > 0
+    assert RETRY_BACKOFF_MEAN > 0
+    assert RETRY_BACKOFF_STD > 0
+
+
+# Test with_retry
+def test_with_retry_success():
+    """Test with_retry succeeds and returns result."""
+    def successful_function():
+        return "success"
+    
+    result = with_retry(successful_function, operation_name="test op")
+    assert result == "success"
+
+
+def test_with_retry_raises_on_failure():
+    """Test with_retry raises RuntimeError when all attempts fail."""
+    def always_fails():
+        raise RuntimeError("Always fails")
+    
+    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
+        with pytest.raises(RuntimeError) as exc_info:
+            with_retry(always_fails, operation_name="test operation", max_attempts=3)
+        
+        assert "Failed to execute test operation after 3 retry attempts" in str(exc_info.value)
+
+
+def test_with_retry_uses_custom_parameters():
+    """Test with_retry passes custom parameters to retry_with_backoff."""
+    call_count = {'count': 0}
+    
+    def eventually_successful():
+        call_count['count'] += 1
+        if call_count['count'] < 4:
+            raise ValueError("Not yet")
+        return "success"
+    
+    with patch('todoist.utils.time.sleep'):
+        result = with_retry(
+            eventually_successful,
+            operation_name="custom op",
+            max_attempts=5,
+            backoff_mean=15.0,
+            backoff_std=5.0
+        )
+    
+    assert result == "success"
+    assert call_count['count'] == 4

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from todoist.stats import extract_task_due_date
 from todoist.types import Event, EventEntry
 
-from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times
+from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -83,10 +83,11 @@ class DatabaseActivity:
         
         def process_page_with_retry(page: int) -> list[Event]:
             """Process page with built-in retry logic."""
-            result = try_n_times(partial(process_page, page), 3)
-            if result is None:
-                raise RuntimeError(f"Failed to fetch events for page {page} after 3 retry attempts")
-            return result
+            return with_retry(
+                partial(process_page, page),
+                operation_name=f"fetch events for page {page}",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
 
         pages = range(starting_page, starting_page + max_pages)
         logger.info(f"Starting activity fetch over pages [{starting_page}, {starting_page + max_pages - 1}] (total={max_pages})")

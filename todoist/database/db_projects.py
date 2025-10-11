@@ -7,7 +7,7 @@ from loguru import logger
 from tqdm import tqdm
 from functools import partial
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
 
 
 class DatabaseProjects:
@@ -93,10 +93,11 @@ class DatabaseProjects:
         
         def process_project_with_retry(project: ProjectEntry) -> Project:
             """Process project with built-in retry logic."""
-            result = try_n_times(partial(process_project, project), 3)
-            if result is None:
-                raise RuntimeError(f"Failed to fetch project {project.id} after 3 retry attempts")
-            return result
+            return with_retry(
+                partial(process_project, project),
+                operation_name=f"fetch project {project.id}",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
 
         if not projects:
             logger.info("No projects returned from API.")
@@ -167,10 +168,11 @@ class DatabaseProjects:
 
         def get_root_project_with_retry(project_id: str) -> Optional[Project]:
             """Get root project with built-in retry logic."""
-            result = try_n_times(partial(self._get_root_project, project_id), 3)
-            if result is None:
-                raise RuntimeError(f"Failed to resolve hierarchy for project {project_id} after 3 retry attempts")
-            return result
+            return with_retry(
+                partial(self._get_root_project, project_id),
+                operation_name=f"resolve hierarchy for project {project_id}",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
 
         logger.info("Building project hierarchy (active + archived) with thread pool")
         all_projects_seq: list[Project] = list(projects.values()) + list(archived_projects.values())
