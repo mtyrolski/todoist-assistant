@@ -41,14 +41,11 @@ class DatabaseActivity:
             events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
             if len(events_not_already_fetched) == 0:
                 n_empty_weeks += 1
-                logger.debug(f"No events found, empty_weeks_count={n_empty_weeks}")
             else:
                 n_empty_weeks = 0
-                logger.debug("Events found, resetting empty_weeks_count to 0")
             new_events = [e for e in window_events if e not in events_already_fetched]
             total_events.extend(new_events)
             events_already_fetched.update(new_events)
-            logger.debug(f"Total events so far: {len(total_events)}")
         logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
         
         # extending with already fetched events to avoid losing them
@@ -105,8 +102,10 @@ class DatabaseActivity:
                 page = future_to_page[future]
                 page_events = future.result(timeout=60)
                 results_by_page[page] = page_events
-                logger.debug(f"Fetched {len(page_events)} events from page {page}")
-
+        
+            
+        # logger.debug(f"Fetched {len(page_events)} events from page {page}")
+        logger.debug(f'Fetched events by page (idx, len): {[ (page, len(events)) for page, events in results_by_page.items() ]}')
         # Preserve page order when extending results
         for page in pages:
             events_for_page = results_by_page.get(page, [])
