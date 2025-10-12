@@ -11,12 +11,10 @@ from todoist.types import Event, EventEntry
 from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+TIMEOUT_SECONDS = 10
 
 class DatabaseActivity:
     """Database class to fetch activity data from the Todoist API"""
-    def __init__(self):
-        # Participate in cooperative multiple inheritance so other mixins get initialized
-        super().__init__()
 
     def reset(self):
         pass
@@ -58,8 +56,6 @@ class DatabaseActivity:
         return total_events
 
             
-    
-
     def fetch_activity(self, max_pages: int = 4, starting_page: int = 0) -> list[Event]:
         """
         Fetches the activity data from the Todoist API.
@@ -100,7 +96,7 @@ class DatabaseActivity:
             future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
             for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
                 page = future_to_page[future]
-                page_events = future.result(timeout=60)
+                page_events = future.result(timeout=TIMEOUT_SECONDS)
                 results_by_page[page] = page_events
         
             
