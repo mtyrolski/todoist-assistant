@@ -6,6 +6,8 @@ import inspect
 import pytest
 from unittest.mock import patch, MagicMock, call
 
+from todoist.api import EndpointCallResult, TodoistEndpoints
+from todoist.api.client import RequestSpec
 from todoist.database.db_tasks import DatabaseTasks
 from todoist.database.db_projects import DatabaseProjects
 from todoist.database.db_activity import DatabaseActivity
@@ -91,24 +93,10 @@ def sample_project_entry():
     )
 
 
-@patch('todoist.database.db_tasks.run')
-@patch('todoist.database.db_tasks.get_api_key')
-@patch('todoist.database.db_tasks.try_n_times')
-def test_insert_task_basic(mock_try_n_times, mock_get_api_key, mock_run, db_tasks):
-    """Test basic task insertion."""
-    # Mock the API response
-    mock_get_api_key.return_value = "test_api_key"
-    mock_response = MagicMock()
-    mock_response.stdout = json.dumps({
-        'id': '3501',
-        'content': 'Buy milk',
-        'description': '',
-        'project_id': '226095',
-        'is_completed': False,
-        'priority': 1
-    }).encode()
-    mock_run.return_value = mock_response
-    mock_try_n_times.return_value = {
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_task_basic(mock_request_json, db_tasks):
+    """Test basic task insertion using the API client abstraction."""
+    mock_request_json.return_value = {
         'id': '3501',
         'content': 'Buy milk',
         'description': '',
@@ -117,21 +105,19 @@ def test_insert_task_basic(mock_try_n_times, mock_get_api_key, mock_run, db_task
         'priority': 1
     }
 
-    # Test task insertion
     result = db_tasks.insert_task(content="Buy milk", project_id="226095")
 
-    # Verify the result
     assert result['id'] == '3501'
     assert result['content'] == 'Buy milk'
     assert result['project_id'] == '226095'
 
-    # Verify API call was made correctly
-    mock_run.assert_called_once()
-    call_args = mock_run.call_args[0][0]  # Get the command arguments
-    assert 'curl' in call_args
-    assert 'https://api.todoist.com/rest/v2/tasks' in call_args
-    assert '-X' in call_args
-    assert 'POST' in call_args
+    mock_request_json.assert_called_once()
+    spec_arg = mock_request_json.call_args.args[0]
+    assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.endpoint == TodoistEndpoints.CREATE_TASK
+    assert spec_arg.json_body['content'] == 'Buy milk'
+    assert spec_arg.json_body['project_id'] == '226095'
+    assert mock_request_json.call_args.kwargs['operation_name'] == 'create task'
 
 
 def test_insert_task_signature_parameters(db_tasks):
@@ -149,48 +135,33 @@ def test_insert_task_signature_parameters(db_tasks):
         assert param in actual_params, f"Parameter '{param}' should be in insert_task signature"
 
 
-@patch('todoist.database.db_tasks.run')
-@patch('todoist.database.db_tasks.get_api_key')
-def test_remove_task(mock_get_api_key, mock_run, db_tasks):
-    """Test task removal."""
-    mock_get_api_key.return_value = "test_api_key"
-    mock_response = MagicMock()
-    mock_response.returncode = 0
-    mock_response.stdout = b''  # Empty response for successful DELETE
-    mock_run.return_value = mock_response
+@patch('todoist.database.db_tasks.TodoistAPIClient.request')
+def test_remove_task(mock_request, db_tasks):
+    """Test task removal via the API client abstraction."""
+    mock_request.return_value = EndpointCallResult(
+        endpoint=TodoistEndpoints.DELETE_TASK.format(task_id="task123"),
+        request_headers={},
+        request_params={},
+        status_code=204,
+        elapsed=0.1,
+        text="",
+        json=None,
+    )
 
-    # Test task removal
     result = db_tasks.remove_task("task123")
 
-    # Verify the result
     assert result is True
-
-    # Verify API call was made correctly
-    mock_run.assert_called_once()
-    call_args = mock_run.call_args[0][0]  # Get the command arguments
-    assert 'curl' in call_args
-    assert 'https://api.todoist.com/rest/v2/tasks/task123' in call_args
-    assert '-X' in call_args
-    assert 'DELETE' in call_args
+    mock_request.assert_called_once()
+    spec_arg = mock_request.call_args.args[0]
+    assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.endpoint.url.endswith("/task123")
+    assert mock_request.call_args.kwargs['operation_name'] == 'delete task task123'
 
 
-@patch('todoist.database.db_tasks.run')
-@patch('todoist.database.db_tasks.get_api_key')
-@patch('todoist.database.db_tasks.try_n_times')
-def test_fetch_task_by_id(mock_try_n_times, mock_get_api_key, mock_run, db_tasks):
-    """Test fetching task by ID."""
-    mock_get_api_key.return_value = "test_api_key"
-    mock_response = MagicMock()
-    mock_response.stdout = json.dumps({
-        "id": "2995104339",
-        "content": "Buy Milk",
-        "description": "",
-        "project_id": "2203306141",
-        "is_completed": False,
-        "priority": 1
-    }).encode()
-    mock_run.return_value = mock_response
-    mock_try_n_times.return_value = {
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_fetch_task_by_id(mock_request_json, db_tasks):
+    """Test fetching task by ID via the API client abstraction."""
+    mock_request_json.return_value = {
         "id": "2995104339",
         "content": "Buy Milk",
         "description": "",
@@ -199,48 +170,37 @@ def test_fetch_task_by_id(mock_try_n_times, mock_get_api_key, mock_run, db_tasks
         "priority": 1
     }
 
-    # Test fetching task
     result = db_tasks.fetch_task_by_id("2995104339")
 
-    # Verify the result
     assert result['id'] == "2995104339"
     assert result['content'] == "Buy Milk"
 
-    # Verify API call was made correctly
-    mock_run.assert_called_once()
-    call_args = mock_run.call_args[0][0]
-    assert 'curl' in call_args
-    assert 'https://api.todoist.com/rest/v2/tasks/2995104339' in call_args
-    assert '-X' in call_args
-    assert 'GET' in call_args
+    mock_request_json.assert_called_once()
+    spec_arg = mock_request_json.call_args.args[0]
+    assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.endpoint.url.endswith("/2995104339")
+    assert mock_request_json.call_args.kwargs['operation_name'] == 'fetch task 2995104339'
 
 
-@patch('todoist.database.db_tasks.run')
-@patch('todoist.database.db_tasks.get_api_key')
-@patch('todoist.database.db_tasks.try_n_times')
-def test_insert_task_from_template_valid_overrides(mock_try_n_times, mock_get_api_key, mock_run, db_tasks, sample_task_entry):
-    """Test insert_task_from_template with valid overrides."""
-    # Mock the API call
-    mock_get_api_key.return_value = "test_api_key"
-    mock_response = MagicMock()
-    mock_response.stdout = json.dumps({'id': 'new_task_id'}).encode()
-    mock_run.return_value = mock_response
-    mock_try_n_times.return_value = {'id': 'new_task_id'}
-    
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_task_from_template_valid_overrides(mock_request_json, db_tasks, sample_task_entry):
+    """Test insert_task_from_template with valid overrides via API client."""
+    mock_request_json.return_value = {'id': 'new_task_id'}
+
     template_task = Task(id="template_task", task_entry=sample_task_entry)
 
-    # Test with valid overrides
     result = db_tasks.insert_task_from_template(
-        template_task, 
+        template_task,
         content="New Task Content",
         priority=3
     )
 
-    # Verify result
     assert result['id'] == 'new_task_id'
-    
-    # Verify that the API was called (indicating the method worked)
-    mock_run.assert_called_once()
+    mock_request_json.assert_called_once()
+    spec_arg = mock_request_json.call_args.args[0]
+    assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.json_body['content'] == 'New Task Content'
+    assert spec_arg.json_body['priority'] == 3
 
 
 def test_insert_task_from_template_invalid_overrides(db_tasks, sample_task_entry):
@@ -265,13 +225,10 @@ def test_database_projects_initialization(db_projects):
     assert db_projects.mapping_project_name_to_color is None
 
 
-@patch('todoist.database.db_projects.run')
-@patch('todoist.database.db_projects.get_api_key')
-def test_fetch_archived_projects_caching(mock_get_api_key, mock_run, db_projects):
+@patch('todoist.database.db_projects.TodoistAPIClient.request_json')
+def test_fetch_archived_projects_caching(mock_request_json, db_projects):
     """Test fetch_archived_projects with caching behavior."""
-    mock_get_api_key.return_value = "test_api_key"
-    mock_response = MagicMock()
-    mock_response.stdout = json.dumps([{
+    mock_request_json.return_value = [{
         "id": "12345",
         "name": "Archived Project",
         "color": "blue",
@@ -290,22 +247,23 @@ def test_fetch_archived_projects_caching(mock_get_api_key, mock_run, db_projects
         "v2_parent_id": None,
         "sync_id": None,
         "collapsed": False
-    }]).encode()
-    mock_run.return_value = mock_response
+    }]
 
-    # First call should make API request
     result1 = db_projects.fetch_archived_projects()
     assert len(result1) == 1
     assert result1[0].id == "12345"
     assert result1[0].is_archived is True
-    mock_run.assert_called_once()
+    mock_request_json.assert_called_once()
+    spec_arg = mock_request_json.call_args.args[0]
+    assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.endpoint == TodoistEndpoints.LIST_ARCHIVED_PROJECTS
 
-    # Second call should use cache
+    mock_request_json.reset_mock()
+
     result2 = db_projects.fetch_archived_projects()
     assert len(result2) == 1
     assert result1 == result2
-    # Still only one call (cached)
-    mock_run.assert_called_once()
+    mock_request_json.assert_not_called()
 
 
 def test_reset_clears_caches(db_projects):
@@ -324,13 +282,10 @@ def test_reset_clears_caches(db_projects):
 
 
 @patch('todoist.database.db_projects.safe_instantiate_entry')
-@patch('todoist.database.db_projects.run')
-@patch('todoist.database.db_projects.get_api_key')
-def test_fetch_project_by_id(mock_get_api_key, mock_run, mock_safe_instantiate, db_projects):
+@patch('todoist.database.db_projects.TodoistAPIClient.request_json')
+def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projects):
     """Test fetching a single project by ID."""
-    mock_get_api_key.return_value = "test_api_key"
-    mock_response = MagicMock()
-    mock_response.stdout = json.dumps({
+    mock_request_json.return_value = {
         "project": {
             "id": "12345",
             "name": "Test Project",
@@ -351,22 +306,24 @@ def test_fetch_project_by_id(mock_get_api_key, mock_run, mock_safe_instantiate, 
             "sync_id": None,
             "collapsed": False
         }
-    }).encode()
-    mock_run.return_value = mock_response
-    
-    # Create a mock ProjectEntry
+    }
+
     mock_project_entry = MagicMock()
     mock_project_entry.id = "12345"
     mock_safe_instantiate.return_value = mock_project_entry
 
-    # Test fetching project
     result = db_projects.fetch_project_by_id("12345")
 
-    # Verify result
     assert isinstance(result, Project)
     assert result.id == "12345"
     assert result.is_archived is False
     assert len(result.tasks) == 0
+
+    mock_request_json.assert_called_once()
+    spec_arg = mock_request_json.call_args.args[0]
+    assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.endpoint == TodoistEndpoints.GET_PROJECT_DATA
+    assert spec_arg.data == {"project_id": "12345"}
 
 
 @patch('todoist.database.db_activity.logger')

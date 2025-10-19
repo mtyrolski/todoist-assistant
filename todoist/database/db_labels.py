@@ -1,20 +1,27 @@
-import json
-from subprocess import DEVNULL, PIPE, run
-
 from tqdm import tqdm
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB
 from loguru import logger
+
+from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
+from todoist.api.client import EndpointCallResult
 
 
 class DatabaseLabels:
     def __init__(self):
         super().__init__()
+        self._api_client = TodoistAPIClient()
         self._labels: list[dict] = []
         self._mapping_label_name_to_color: dict[str, str] = {}
         self._fetch_label_data()
 
     def reset(self):
         self._fetch_label_data()
+
+    @property
+    def last_call_details(self) -> EndpointCallResult | None:
+        """Expose metadata about the most recent API call."""
+
+        return self._api_client.last_call_result
 
     def fetch_label_colors(self) -> dict[str, str]:
         """
@@ -34,24 +41,15 @@ class DatabaseLabels:
         """
         Fetches label data from the Todoist API and populates local attributes.
         """
-        url = "https://api.todoist.com/rest/v2/labels"
-        headers = {"Authorization": f"Bearer {get_api_key()}"}
-
-        cmds = ["curl", url, "-H", f"Authorization: {headers['Authorization']}"]
-
-        response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
-
-        if response.returncode != 0:
-            logger.error("Error fetching labels from Todoist.")
+        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
+        labels = self._api_client.request_json(spec, operation_name="list labels")
+        if not isinstance(labels, list):
+            logger.error("Unexpected payload returned when fetching labels")
             return
 
-        try:
-            labels = json.loads(response.stdout)
-            self._labels = labels
-            self._mapping_label_name_to_color = {label['name']: label['color'] for label in labels}
-            logger.info(f"Fetched {len(labels)} labels.")
-        except json.JSONDecodeError:
-            logger.error("Failed to decode label data from Todoist API.")
+        self._labels = labels
+        self._mapping_label_name_to_color = {label['name']: label['color'] for label in labels}
+        logger.info(f"Fetched {len(labels)} labels.")
 
     def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
         if not self._labels:
