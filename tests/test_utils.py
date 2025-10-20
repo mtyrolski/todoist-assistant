@@ -8,6 +8,7 @@ import os
 from unittest.mock import patch, MagicMock, mock_open
 from dataclasses import dataclass
 from typing import KeysView
+from todoist.utils import MaxRetriesExceeded
 
 from todoist.utils import (
     get_all_fields_of_dataclass,
@@ -591,9 +592,8 @@ def test_with_retry_raises_on_failure():
         raise RuntimeError("Always fails")
     
     with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(MaxRetriesExceeded) as exc_info:
             with_retry(always_fails, operation_name="test operation", max_attempts=3)
-        
         assert "Failed to execute test operation after 3 retry attempts" in str(exc_info.value)
 
 
