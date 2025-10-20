@@ -36,6 +36,7 @@ template:
     conference_postmortem: ${academic.conference_postmortem}
     poster_creation: ${academic.poster_creation}
     read_paper: ${academic.read_paper}
+    phd_supervisor_scan: ${academic.phd_supervisor_scan}
     
     # Communication templates
     msg: ${communication.msg}
@@ -50,3 +51,4 @@ automations:
 hydra:
   searchpath:
     - file://configs
+    - file://configs/templates

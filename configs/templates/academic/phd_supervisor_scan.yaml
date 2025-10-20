@@ -1,0 +1,314 @@
+_target_: todoist.automations.template.TaskTemplate
+content: PhD Supervisor Comprehensive Scan
+description: Deep-dive scan of a potential PhD supervisor including research profile, lab, students, and outreach
+due_date_days_difference: 0
+priority: 1
+children:
+  # 1) Publications and Research Output
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Publications and Research Output
+    description: Collect and vet publications, domains, conferences, and impact
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Compile publication list (Google Scholar/DBLP)
+        description: Export list; capture titles, venues, years, authors; note h-index, i10-index
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Verify publication domains
+            description: Tag each paper domain/topic; cluster into areas; note evolution over time
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Verify venues and conferences
+            description: Classify journals/conferences and their tiers (CORE/Scimago/FT/ERA)
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Validate author order and contribution
+            description: Note first/last authorship patterns; corresponding author; collaboration density
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Assess publication cadence
+        description: Chart papers per year; detect gaps; note sabbaticals or shifts in focus
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Identify top 5 flagship works
+            description: Select most cited or award-winning works; analyze impact and follow-ups
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Cross-validate citations
+            description: Compare citations in Google Scholar vs Scopus/Dimensions; note discrepancies
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Map collaboration network
+        description: Co-author graph; recurring collaborators; international partnerships
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Institutions of collaborators
+            description: Catalog affiliations; tier; region; depth of collaboration
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Grants and projects involvement
+            description: Note major grants, funding bodies, and project roles related to publications
+            due_date_days_difference: 0
+
+  # 2) Lab/Group Profile
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Lab and Group Profile
+    description: Size, structure, funding, infrastructure, and culture of the lab/group
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Determine lab size and composition
+        description: Count current PhD, MSc, postdocs, RAs; admins; alumni; turnover rate
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Big research group or not?
+            description: Classify as small/medium/large; implications for supervision intensity
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Funding and resourcing check
+            description: Internal/external grants; computing resources; travel budget policies
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Lab culture and expectations
+        description: Meeting frequency, authorship norms, code/data practices, open science stance
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Onboarding and mentoring
+            description: Onboarding guides, reading groups, mentor pairing; writing workshops
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Work-life balance and intensity
+            description: Hours expectations; crunch periods; conference seasons; PTO norms
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Infrastructure and tooling
+        description: Lab wikis, repos, CI/CD, cluster/GPUs, data access, IRB practices
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Reproducibility checklist
+            description: Artifact availability, data/code policies, repeatability of results
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Collaboration stack
+            description: Tools used (Slack/Teams, Notion, Overleaf, GitHub), access policies
+            due_date_days_difference: 0
+
+  # 3) Students and Outcomes
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Students and Outcomes
+    description: Investigate past and current PhD students, output frequency, tiers, and diversity
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Past PhD students outcomes
+        description: For each past student, capture frequency, tier, domain, diversity during PhD
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Past students papers analysis
+            description: Frequency per year; venue tiers; domains; solo vs collaborative ratio
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Post-PhD placements
+            description: Academia/industry placements, fellowship awards, notable achievements
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Current PhD students outputs
+        description: Track current students’ papers, cadence, tiers, and domains
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Current students papers analysis
+            description: Frequency per year; venue tiers; domains; thesis alignment
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Diversity of research during PhD
+            description: Breadth vs depth; interdisciplinary work; toolkits adopted
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Alumni and community feedback
+        description: Glassdoor, Reddit, personal blogs, lab pages; triangulate signals
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Source info logging
+            description: Maintain "Source Info" and "Additional Notes" for each insight
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Red flags and green flags
+            description: Create checklist; time-to-degree, authorship fairness, funding stability
+            due_date_days_difference: 0
+
+  # 4) Institution and Program
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Institution and Program Details
+    description: Country, affiliation, deadlines, requirements, and policies
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Country and institution profile
+        description: Country, institution rank, department standing, cost of living
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Visa and relocation constraints
+            description: Visa policies, dependents, housing, relocation support
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Financial package
+            description: Stipend, tuition, fees, health insurance, gaps, side work policy
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Program deadlines and requirements
+        description: Application due dates, degree requirements, exams, teaching loads
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Application materials checklist
+            description: CV, SOP, research proposal, writing samples, references
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Internal deadlines calendar
+            description: Create calendar of milestones and buffer times
+            due_date_days_difference: 0
+
+  # 5) Structured Research Table (columns as tasks)
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Structure investigation table
+    description: Create a table with columns Who, Status, My Notes, Lab/Affiliation, Country, Program Details, Past/Current Students Papers, Source Info, Additional Notes, Big Research Group, Domain of supervisor research
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Who
+        description: Capture supervisor name and key identifiers (homepage, ORCID, Scholar)
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Status
+        description: Track investigation status (scanning, shortlisted, contacted, meeting, decision)
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - My Notes
+        description: Freeform notes summary and rationale for fit
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Lab/Affiliation
+        description: Department, lab/group, center, associated institutes
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Country
+        description: Location, time zone overlap, travel/logistics
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Institutional Program Details
+        description: Application dates, requirements, deadlines, eligibility
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Past PhD Students papers
+        description: Frequency, publication tiers, domains, research diversity during PhD
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Current PhD Students papers
+        description: Frequency, publication tiers, domains, research diversity during PhD
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Source Info
+        description: URLs and provenance of insights (pages, posts, videos)
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Additional Notes
+        description: Open items, follow-ups, uncertainties
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Big Research Group or no?
+        description: Binary or scale indicator of group size and implications
+        due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Table column - Domain of supervisor research
+        description: Core areas, secondary lines, evolving directions
+        due_date_days_difference: 0
+
+  # 6) Outreach and Networking
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Outreach and Networking
+    description: Proactive outreach to supervisor and lab members; intros; meetings
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Find contact information
+        description: Email(s), assistant, lab admin, Twitter/Bluesky, LinkedIn, form
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Identify mutual contacts for intro
+            description: Alumni, collaborators, conference peers who could introduce
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Draft initial reachout email
+            description: Personal intro; research alignment; specific questions; short and clear
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Refine emails with AI/mentor
+        description: Improve clarity, brevity, tone, and ask; tailor per supervisor
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Prepare 2-3 versions
+            description: Variants for cold email, warm intro, student inquiry
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Proofread and finalize
+            description: Fix typos, links, signatures
+            due_date_days_difference: 0
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Send outreach and track
+        description: Send email/LinkedIn; log date; set follow-up reminders
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Follow-up part 1 (7 days)
+            description: Brief nudge; add a new point/value
+            due_date_days_difference: 7
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Follow-up part 2 (14 days)
+            description: Escalate politely; propose times for a short call
+            due_date_days_difference: 14
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Meet current PhD students
+        description: 1-3 short chats to gauge lab culture, supervision style, workload
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Prepare question list for students
+            description: Expectations, authorship, resources, career support, red/green flags
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Validate my own fit and intensity
+            description: Compare my working style, goals, and intensity with lab norms
+            due_date_days_difference: 0
+
+  # 7) Synthesis and Decision
+  - _target_: todoist.automations.template.TaskTemplate
+    content: Synthesis and Decision
+    description: Score fit, risks, and next steps; plan application timeline or decline
+    due_date_days_difference: 0
+    children:
+      - _target_: todoist.automations.template.TaskTemplate
+        content: Scorecard and rubric
+        description: Weight publications, mentorship, lab size, program, logistics
+        due_date_days_difference: 0
+        children:
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Decision draft
+            description: Proceed, monitor, or decline; record reasoning and evidence
+            due_date_days_difference: 0
+          - _target_: todoist.automations.template.TaskTemplate
+            content: Next steps plan
+            description: If proceeding, list application tasks, references, and internal deadlines
+            due_date_days_difference: 0
