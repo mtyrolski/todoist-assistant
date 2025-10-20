@@ -1,15 +1,16 @@
+import inspect
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
-from loguru import logger
-from todoist.types import Task
-import inspect
-from tqdm import tqdm
 from typing import Optional
+
+from loguru import logger
+from tqdm import tqdm
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.utils import with_retry, RETRY_MAX_ATTEMPTS
+from todoist.types import Task
+from todoist.utils import RETRY_MAX_ATTEMPTS, with_retry
 
 
 class DatabaseTasks:
@@ -272,31 +273,31 @@ class DatabaseTasks:
         logger.info(f"Inserting {len(tasks_data)} tasks with thread pool")
         max_workers = min(8, len(tasks_data))
         ordered_results: list[Optional[dict]] = [None] * len(tasks_data)
-        
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {
-                executor.submit(insert_single_task_with_retry, task_data, idx): idx 
+                executor.submit(insert_single_task_with_retry, task_data, idx): idx
                 for idx, task_data in enumerate(tasks_data)
             }
-            
             for future in tqdm(
-                as_completed(future_to_index), 
-                total=len(tasks_data), 
-                desc='Inserting tasks', 
-                unit='task', 
-                position=0, 
+                as_completed(future_to_index),
+                total=len(tasks_data),
+                desc='Inserting tasks',
+                unit='task',
+                position=0,
                 leave=True
             ):
                 idx = future_to_index[future]
                 try:
                     result = future.result(timeout=60)
-                    ordered_results[idx] = result
-                except Exception as e:
-                    logger.error(f"Exception occurred while inserting task at index {idx}: {e}")
-                    ordered_results[idx] = {}
+                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
+                    logger.error(f"Failed inserting task at index {idx}: {e.__class__.__name__}: {e}")
+                    result = {}
+                ordered_results[idx] = result
+                logger.debug(f"Inserted task {idx+1}/{len(tasks_data)}")
 
         # Replace any remaining None with empty dicts (should be rare)
-        # Replace any remaining None with empty dicts (should be rare)
-        ordered_results = [result if result is not None else {} for result in ordered_results]
-        
+        for i in range(len(ordered_results)):
+            if ordered_results[i] is None:
+                ordered_results[i] = {}
+
         return ordered_results
