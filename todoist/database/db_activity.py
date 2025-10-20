@@ -11,6 +11,7 @@ from todoist.api.client import EndpointCallResult
 from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+TIMEOUT_SECONDS = 10
 
 class DatabaseActivity:
     """Database class to fetch activity data from the Todoist API"""
@@ -48,14 +49,11 @@ class DatabaseActivity:
             events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
             if len(events_not_already_fetched) == 0:
                 n_empty_weeks += 1
-                logger.debug(f"No events found, empty_weeks_count={n_empty_weeks}")
             else:
                 n_empty_weeks = 0
-                logger.debug("Events found, resetting empty_weeks_count to 0")
             new_events = [e for e in window_events if e not in events_already_fetched]
             total_events.extend(new_events)
             events_already_fetched.update(new_events)
-            logger.debug(f"Total events so far: {len(total_events)}")
         logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
         
         # extending with already fetched events to avoid losing them
@@ -68,8 +66,6 @@ class DatabaseActivity:
         return total_events
 
             
-    
-
     def fetch_activity(self, max_pages: int = 4, starting_page: int = 0) -> list[Event]:
         """
         Fetches the activity data from the Todoist API.
@@ -110,10 +106,12 @@ class DatabaseActivity:
             future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
             for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
                 page = future_to_page[future]
-                page_events = future.result(timeout=60)
+                page_events = future.result(timeout=TIMEOUT_SECONDS)
                 results_by_page[page] = page_events
-                logger.debug(f"Fetched {len(page_events)} events from page {page}")
-
+        
+            
+        # logger.debug(f"Fetched {len(page_events)} events from page {page}")
+        logger.debug(f'Fetched events by page (idx, len): {[ (page, len(events)) for page, events in results_by_page.items() ]}')
         # Preserve page order when extending results
         for page in pages:
             events_for_page = results_by_page.get(page, [])

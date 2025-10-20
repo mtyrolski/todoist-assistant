@@ -170,6 +170,9 @@ def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMP
                 time.sleep(wait_time)
     return None
 
+class MaxRetriesExceeded(Exception):
+    """Custom exception to indicate that maximum retry attempts have been exceeded."""
+    pass
 
 def with_retry(fn: Callable[[], U], operation_name: str = "operation",
                max_attempts: int = RETRY_MAX_ATTEMPTS,
@@ -193,7 +196,7 @@ def with_retry(fn: Callable[[], U], operation_name: str = "operation",
     """
     result = retry_with_backoff(fn, max_attempts, backoff_mean, backoff_std)
     if result is None:
-        raise RuntimeError(f"Failed to execute {operation_name} after {max_attempts} retry attempts")
+        raise MaxRetriesExceeded(f"Failed to execute {operation_name} after {max_attempts} retry attempts")
     return result
 
 
