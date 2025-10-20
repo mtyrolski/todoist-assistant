@@ -1,20 +1,26 @@
-import json
 import uuid
-from subprocess import run, PIPE, DEVNULL
-from todoist.utils import get_api_key, try_n_times
 from loguru import logger
-from functools import partial
 from todoist.types import Task
 import inspect
+
+from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
+from todoist.api.client import EndpointCallResult
 
 
 class DatabaseTasks:
     """Database class to manage tasks in the Todoist API"""
     def __init__(self):
         super().__init__()
+        self._api_client = TodoistAPIClient()
 
     def reset(self):
         pass
+
+    @property
+    def last_call_details(self) -> EndpointCallResult | None:
+        """Expose metadata about the most recent API call."""
+
+        return self._api_client.last_call_result
 
     def insert_task_from_template(self, task: Task, **overrrides) -> dict:
         """
@@ -107,13 +113,6 @@ class DatabaseTasks:
             'duration': None,
             'deadline': None}
         """
-        url = "https://api.todoist.com/rest/v2/tasks"
-        headers = {
-            "Content-Type": "application/json",
-            "X-Request-Id": str(uuid.uuid4()),
-            "Authorization": f"Bearer {get_api_key()}"
-        }
-
         payload = {
             "content": content,
             "description": description,
@@ -134,25 +133,23 @@ class DatabaseTasks:
             "deadline_lang": deadline_lang
         }
 
-        # Remove keys with None values
         payload = {k: v for k, v in payload.items() if v is not None}
-        cmds = [
-            "curl", url, "-X", "POST", "--data",
-            json.dumps(payload), "-H", "Content-Type: application/json", "-H",
-            f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"
-        ]
 
-        response = run(cmds, stdout=PIPE, stderr=PIPE, check=True)
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.CREATE_TASK,
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-Id": str(uuid.uuid4()),
+            },
+            json_body=payload,
+        )
 
-        load_fn = partial(json.loads, response.stdout)
-
-        decoded_result = try_n_times(load_fn, 3)
-        if decoded_result is None:
-            logger.error(f'Response: {response.stdout}')
-            logger.error(f'Type: {type(decoded_result)}')
-            logger.error(f'Keys: {decoded_result.keys()}')
-
-        return decoded_result
+        logger.debug("Creating task via Todoist API", payload=payload)
+        result = self._api_client.request_json(spec, operation_name="create task")
+        if result is None:
+            logger.error("Todoist API returned empty response for task creation")
+            return {}
+        return result
 
     def remove_task(self, task_id: str) -> bool:
         """
@@ -162,36 +159,21 @@ class DatabaseTasks:
         - True if the task was removed successfully.
         - False otherwise.
         """
-        url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
-        headers = {
-            "Content-Type": "application/json",
-            "X-Request-Id": str(uuid.uuid4()),
-            "Authorization": f"Bearer {get_api_key()}"
-        }
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.DELETE_TASK.format(task_id=task_id),
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-Id": str(uuid.uuid4()),
+            },
+        )
 
-        cmds = [
-            "curl", url, "-X", "DELETE", "-H", "Content-Type: application/json", "-H",
-            f"X-Request-Id: {headers['X-Request-Id']}", "-H", f"Authorization: {headers['Authorization']}"
-        ]
-
-        response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=False)
-        if response.returncode != 0:
-            logger.error("Error deleting task from Todoist.")
+        logger.debug("Deleting task", task_id=task_id)
+        result = self._api_client.request(spec, operation_name=f"delete task {task_id}")
+        if result.status_code not in (200, 204):
+            logger.error("Unexpected status when deleting task", status=result.status_code)
             return False
-
-        # No content (204) is returned for successful DELETE calls to Todoist
-        if not response.stdout.strip():
-            return True
-
-        # If there's content, attempt to parse it
-        try:
-            decoded_result = json.loads(response.stdout)
-            logger.debug(f"Response after delete: {decoded_result}")
-        except json.JSONDecodeError:
-            # If it fails to decode, consider it non-fatal
-            logger.debug("Empty or invalid JSON returned after delete.")
-            return True
-
+        if result.text:
+            logger.debug("Todoist delete response", body=result.text)
         return True
 
     def fetch_task_by_id(self, task_id: str) -> dict:
@@ -229,21 +211,13 @@ class DatabaseTasks:
                 "url": "https://todoist.com/showTask?id=2995104339"
             }
         """
-        url = f"https://api.todoist.com/rest/v2/tasks/{task_id}"
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {get_api_key()}"}
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.GET_TASK.format(task_id=task_id),
+            headers={"Content-Type": "application/json"},
+        )
 
-        cmds = [
-            "curl", url, "-X", "GET", "-H", "Content-Type: application/json", "-H",
-            f"Authorization: {headers['Authorization']}"
-        ]
-
-        response = run(cmds, stdout=PIPE, stderr=DEVNULL, check=True)
-
-        load_fn = partial(json.loads, response.stdout)
-
-        decoded_result = try_n_times(load_fn, 3)
-        if decoded_result is None:
-            logger.error(f'Type: {type(decoded_result)}')
-            logger.error(f'Keys: {decoded_result.keys()}')
-
-        return decoded_result
+        result = self._api_client.request_json(spec, operation_name=f"fetch task {task_id}")
+        if result is None:
+            logger.error("Todoist API returned empty response for fetch_task_by_id")
+            return {}
+        return result

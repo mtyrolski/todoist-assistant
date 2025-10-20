@@ -1,5 +1,3 @@
-import json
-from subprocess import DEVNULL, PIPE, run
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import cast, Optional
 
@@ -7,12 +5,15 @@ from loguru import logger
 from tqdm import tqdm
 from functools import partial
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
+from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
+from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
+from todoist.api.client import EndpointCallResult
 
 
 class DatabaseProjects:
     def __init__(self):
         super().__init__()
+        self._api_client = TodoistAPIClient()
         self.archived_projects_cache: dict[str, Project] | None = None    # Not initialized yet
         self.projects_cache: list[Project] | None = None    # Not initialized yet
         self.mapping_project_name_to_color: dict[str, str] | None = None    # Not initialized yet
@@ -26,18 +27,22 @@ class DatabaseProjects:
         self.projects_cache = None
         self.pull()
 
+    @property
+    def last_call_details(self) -> EndpointCallResult | None:
+        """Expose metadata about the most recent API call."""
+
+        return self._api_client.last_call_result
+
     def fetch_archived_projects(self) -> list[Project]:
         if self.archived_projects_cache is not None:
             return list(self.archived_projects_cache.values())
 
-        data = run([
-            'curl', 'https://api.todoist.com/sync/v9/projects/get_archived', '-H',
-            f'Authorization: Bearer {get_api_key()}'
-        ],
-                   stdout=PIPE,
-                   stderr=DEVNULL,
-                   check=True)
-        data_dicts: list[dict] = json.loads(data.stdout)
+        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_ARCHIVED_PROJECTS)
+        data_dicts = self._api_client.request_json(spec, operation_name="list archived projects")
+        if not isinstance(data_dicts, list):
+            logger.error("Unexpected payload returned when fetching archived projects")
+            self.archived_projects_cache = {}
+            return []
         entries = map(lambda raw_dict: safe_instantiate_entry(ProjectEntry, **raw_dict), data_dicts)
         self.archived_projects_cache = {
             entry.id: Project(id=entry.id, project_entry=entry, tasks=[], is_archived=True) for entry in entries
@@ -48,15 +53,18 @@ class DatabaseProjects:
         """
         Does not include tasks. Falls back to the archived projects if the project is not found
         """
-        data = run([
-            'curl', 'https://api.todoist.com/sync/v9/projects/get_data', '-H', f'Authorization: Bearer {get_api_key()}',
-            '-d', f'project_id={project_id}'
-        ],
-                   stdout=PIPE,
-                   stderr=DEVNULL,
-                   check=True)
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.GET_PROJECT_DATA,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={"project_id": project_id},
+        )
 
-        result_dict = json.loads(data.stdout)
+        result_dict = self._api_client.request_json(
+            spec, operation_name=f"get project {project_id}"
+        )
+        if not isinstance(result_dict, dict):
+            logger.error("Unexpected payload returned when fetching project", project_id=project_id)
+            raise RuntimeError(f"Todoist API returned invalid data for project {project_id}")
 
         if 'project' not in result_dict:
             logger.error(
@@ -131,16 +139,21 @@ class DatabaseProjects:
         return self.projects_cache
 
     def fetch_project_tasks(self, project_id: str) -> list[TaskEntry]:
-        data = run([
-            'curl', 'https://api.todoist.com/sync/v9/projects/get_data', '-H', f'Authorization: Bearer {get_api_key()}',
-            '-d', f'project_id={project_id}'
-        ],
-                   stdout=PIPE,
-                   stderr=DEVNULL,
-                   check=True)
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.GET_PROJECT_DATA,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={"project_id": project_id},
+        )
+
+        result_dict = self._api_client.request_json(
+            spec, operation_name=f"get project tasks {project_id}"
+        )
+        if not isinstance(result_dict, dict):
+            logger.error("Unexpected payload returned when fetching project tasks", project_id=project_id)
+            return []
 
         tasks = []
-        for task in json.loads(data.stdout)['items']:
+        for task in result_dict['items']:
             tasks.append(safe_instantiate_entry(TaskEntry, **task))
 
         return tasks
@@ -243,16 +256,22 @@ class DatabaseProjects:
         return self._get_root_project(parent_id)
 
     def _fetch_projects_data(self) -> list[ProjectEntry]:
-        data = run([
-            'curl', 'https://api.todoist.com/sync/v9/sync', '-H', f'Authorization: Bearer {get_api_key()}', '-d',
-            'sync_token=*', '-d', 'resource_types=[\"projects\"]'
-        ],
-                   stdout=PIPE,
-                   stderr=DEVNULL,
-                   check=True)
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.SYNC_PROJECTS,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                'sync_token': '*',
+                'resource_types': '["projects"]',
+            },
+        )
+
+        result_dict = self._api_client.request_json(spec, operation_name="sync projects")
+        if not isinstance(result_dict, dict):
+            logger.error("Unexpected payload returned when syncing projects")
+            return []
 
         projects = []
-        for project in json.loads(data.stdout)['projects']:
+        for project in result_dict['projects']:
             projects.append(safe_instantiate_entry(ProjectEntry, **project))
 
         return projects

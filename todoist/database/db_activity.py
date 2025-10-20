@@ -1,6 +1,4 @@
-import json
 from functools import partial
-from subprocess import DEVNULL, PIPE, run
 
 from loguru import logger
 from tqdm import tqdm
@@ -8,7 +6,9 @@ from tqdm import tqdm
 from todoist.stats import extract_task_due_date
 from todoist.types import Event, EventEntry
 
-from todoist.utils import get_api_key, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
+from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
+from todoist.api.client import EndpointCallResult
+from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -17,9 +17,16 @@ class DatabaseActivity:
     def __init__(self):
         # Participate in cooperative multiple inheritance so other mixins get initialized
         super().__init__()
+        self._api_client = TodoistAPIClient()
 
     def reset(self):
         pass
+
+    @property
+    def last_call_details(self) -> EndpointCallResult | None:
+        """Expose metadata about the most recent API call."""
+
+        return self._api_client.last_call_result
     
     def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
         """
@@ -120,30 +127,36 @@ class DatabaseActivity:
     def _fetch_activity_page(self, page: int) -> list[EventEntry]:
         limit: int = 50
 
-        url = f"https://api.todoist.com/sync/v9/activity/get?page={page}&limit={limit}"
-        response = run(["curl", url, "-H", f"Authorization: Bearer {get_api_key()}"],
-                       stdout=PIPE,
-                       stderr=DEVNULL,
-                       check=True)
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.LIST_ACTIVITY,
+            params={"page": page, "limit": limit},
+        )
+        decoded_result = self._api_client.request_json(
+            spec, operation_name=f"fetch activity page {page}"
+        )
+        if not isinstance(decoded_result, dict):
+            raise RuntimeError("Unexpected response payload when fetching activity page")
 
-        decoded_result: dict = json.loads(response.stdout)
         total_events_count: int = decoded_result['count']
 
         events = list(map(lambda event: safe_instantiate_entry(EventEntry, **event), decoded_result['events']))
         if total_events_count > limit:
             for offset in range(limit, total_events_count, limit):
-                url = f"https://api.todoist.com/sync/v9/activity/get?page={page}&limit={limit}&offset={offset}"
-                response = run(["curl", url, "-H", f"Authorization: Bearer {get_api_key()}"],
-                               stdout=PIPE,
-                               stderr=DEVNULL,
-                               check=True)
-                load_fn = partial(json.loads, response.stdout)
-
-                decoded_result = try_n_times(load_fn, 3) # type: ignore[assignment]  # try_n_times may return None on failure
-                if decoded_result is None:
-                    logger.error(f"Could not decode response (page={page}, offset={offset})")
-                    logger.error(f'Type: {type(decoded_result)}')
-                    logger.error(f'Keys: {decoded_result.keys()}')
+                offset_spec = RequestSpec(
+                    endpoint=TodoistEndpoints.LIST_ACTIVITY,
+                    params={"page": page, "limit": limit, "offset": offset},
+                )
+                decoded_result = self._api_client.request_json(
+                    offset_spec,
+                    operation_name=f"fetch activity page {page} offset {offset}",
+                )
+                if not isinstance(decoded_result, dict):
+                    logger.error(
+                        "Unexpected payload when fetching paginated activity",
+                        page=page,
+                        offset=offset,
+                    )
+                    continue
 
                 for event_kwargs in decoded_result['events']:
                     dataclass_params = {
