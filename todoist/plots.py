@@ -1040,7 +1040,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             'text': f'Task Lifespans: Time to Completion (n={len(lifespans_sorted)})',
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff', 'weight': 'bold'}
+            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
         },
         xaxis={
             'title': {
