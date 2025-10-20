@@ -296,8 +296,7 @@ class DatabaseTasks:
                     ordered_results[idx] = {}
 
         # Replace any remaining None with empty dicts (should be rare)
-        for i in range(len(ordered_results)):
-            if ordered_results[i] is None:
-                ordered_results[i] = {}
+        # Replace any remaining None with empty dicts (should be rare)
+        ordered_results = [result if result is not None else {} for result in ordered_results]
         
         return ordered_results
