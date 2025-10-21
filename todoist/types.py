@@ -275,6 +275,7 @@ def events_to_dataframe(
         'root_project_id': [],
         'root_project_name': [],
         'parent_item_id': [],
+        'task_id': [],
     }
     old_count = len(events)
     event = list(filter(lambda x: x.event_entry.event_type in SUPPORTED_EVENT_TYPES, events))
@@ -297,6 +298,10 @@ def events_to_dataframe(
         mapping_data['parent_project_id'].append(event.event_entry.parent_project_id)
         mapping_data['parent_project_name'].append(project_id_to_name.get(event.event_entry.parent_project_id, ''))
         mapping_data['parent_item_id'].append(event.event_entry.parent_item_id)
+        # Compute robust task identifier
+        ee = event.event_entry
+        task_id = ee.parent_item_id or ee.object_id or ee.v2_parent_item_id or ee.v2_object_id
+        mapping_data['task_id'].append(task_id)
 
     logger.info(f'Processed {len(mapping_data["id"])} events')
 

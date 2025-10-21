@@ -734,8 +734,14 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             paper_bgcolor='#111318',
         )
     
-    if 'parent_item_id' not in df.columns:
-        logger.error(f'DataFrame missing "parent_item_id" column. Available columns: {df.columns.tolist()}')
+    # Accept either 'task_id' (preferred) or 'parent_item_id' as identifier
+    identifier_col = None
+    if 'task_id' in df.columns:
+        identifier_col = 'task_id'
+    elif 'parent_item_id' in df.columns:
+        identifier_col = 'parent_item_id'
+    else:
+        logger.error(f'DataFrame missing both "task_id" and "parent_item_id" columns. Available columns: {df.columns.tolist()}')
         return go.Figure().update_layout(
             template='plotly_dark',
             title={'text': 'Error: Invalid data structure', 'x': 0.5, 'xanchor': 'center'},
@@ -745,20 +751,21 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     
     # Filter for tasks with both 'added' and 'completed' events
     added_events = df[df['type'] == 'added'].copy()
-    completed_events = df[df['type'] == 'completed'].copy()
+    # Some backends may label completion as 'completed' (expected) or other variants.
+    completed_events = df[df['type'].isin(['completed'])].copy()
     
     logger.info(f'Total events in DataFrame: {len(df)}')
     logger.info(f'Added events: {len(added_events)}, Completed events: {len(completed_events)}')
     
     # Find tasks that have both added and completed events
-    added_task_ids = set(added_events['parent_item_id'].dropna())
-    completed_task_ids = set(completed_events['parent_item_id'].dropna())
+    added_task_ids = set(added_events[identifier_col].dropna())
+    completed_task_ids = set(completed_events[identifier_col].dropna())
     common_task_ids = added_task_ids.intersection(completed_task_ids)
     
     logger.info(f'Found {len(common_task_ids)} tasks with both added and completed events')
     
     if len(common_task_ids) == 0:
-        logger.warning(f'No tasks found with both added and completed events.')
+        logger.warning('No tasks found with both added and completed events.')
         logger.warning(f'Added task IDs (first 5): {list(added_task_ids)[:5]}')
         logger.warning(f'Completed task IDs (first 5): {list(completed_task_ids)[:5]}')
     
@@ -766,13 +773,13 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     lifespans = []
     for task_id in common_task_ids:
         # Get first 'added' event
-        task_added = added_events[added_events['parent_item_id'] == task_id]
+        task_added = added_events[added_events[identifier_col] == task_id]
         if task_added.empty:
             continue
         added_date = task_added.index.min()
         
         # Get last 'completed' event
-        task_completed = completed_events[completed_events['parent_item_id'] == task_id]
+        task_completed = completed_events[completed_events[identifier_col] == task_id]
         if task_completed.empty:
             continue
         completed_date = task_completed.index.max()
@@ -849,23 +856,18 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     
     # Determine appropriate time unit and convert durations
     max_duration = max(durations_seconds)
-    min_duration = min(durations_seconds)
     
     # Choose time unit based on the range of durations
     if max_duration < 3600:  # Less than 1 hour
-        time_unit = 'minutes'
         time_divisor = 60
         unit_label = 'min'
     elif max_duration < 86400:  # Less than 1 day
-        time_unit = 'hours'
         time_divisor = 3600
         unit_label = 'hr'
     elif max_duration < 604800:  # Less than 1 week
-        time_unit = 'days'
         time_divisor = 86400
         unit_label = 'days'
     else:
-        time_unit = 'days'
         time_divisor = 86400
         unit_label = 'days'
     

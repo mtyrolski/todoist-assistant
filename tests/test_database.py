@@ -499,3 +499,131 @@ def test_task_entry_duration_edge_cases():
     # Test with non-dict duration
     task_entry.duration = "not_a_dict"
     assert task_entry.duration_kwargs is None
+
+
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_tasks_empty_list(mock_request_json, db_tasks):
+    """Test insert_tasks with empty list."""
+    result = db_tasks.insert_tasks([])
+    assert result == []
+    mock_request_json.assert_not_called()
+
+
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_tasks_single_task(mock_request_json, db_tasks):
+    """Test insert_tasks with a single task."""
+    mock_request_json.return_value = {
+        'id': 'task1',
+        'content': 'Test Task 1',
+        'project_id': 'project123',
+        'priority': 1
+    }
+
+    tasks_data = [
+        {"content": "Test Task 1", "project_id": "project123"}
+    ]
+    
+    results = db_tasks.insert_tasks(tasks_data)
+    
+    assert len(results) == 1
+    assert results[0]['id'] == 'task1'
+    assert results[0]['content'] == 'Test Task 1'
+    mock_request_json.assert_called_once()
+
+
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
+    """Test insert_tasks with multiple tasks in parallel."""
+    # Mock different responses for different tasks
+    def mock_response_side_effect(spec, **kwargs):
+        content = spec.json_body.get('content', '')
+        if 'Task 1' in content:
+            return {'id': 'task1', 'content': content, 'priority': 1}
+        elif 'Task 2' in content:
+            return {'id': 'task2', 'content': content, 'priority': 2}
+        elif 'Task 3' in content:
+            return {'id': 'task3', 'content': content, 'priority': 3}
+        return {'id': 'unknown', 'content': content}
+    
+    mock_request_json.side_effect = mock_response_side_effect
+
+    tasks_data = [
+        {"content": "Test Task 1", "priority": 1},
+        {"content": "Test Task 2", "priority": 2},
+        {"content": "Test Task 3", "priority": 3},
+    ]
+    
+    results = db_tasks.insert_tasks(tasks_data)
+    
+    assert len(results) == 3
+    assert results[0]['id'] == 'task1'
+    assert results[1]['id'] == 'task2'
+    assert results[2]['id'] == 'task3'
+    assert mock_request_json.call_count == 3
+
+
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_tasks_with_failure(mock_request_json, db_tasks):
+    """Test insert_tasks when one task fails."""
+    call_count = {'count': 0}
+    
+    def mock_response_with_failure(spec, **kwargs):
+        call_count['count'] += 1
+        content = spec.json_body.get('content', '')
+        if 'Task 2' in content:
+            # Simulate failure for Task 2
+            raise Exception("API Error")
+        return {'id': f'task{call_count["count"]}', 'content': content}
+    
+    mock_request_json.side_effect = mock_response_with_failure
+
+    tasks_data = [
+        {"content": "Test Task 1"},
+        {"content": "Test Task 2"},
+        {"content": "Test Task 3"},
+    ]
+    
+    results = db_tasks.insert_tasks(tasks_data)
+    
+    assert len(results) == 3
+    # Task 1 and 3 should succeed
+    assert 'id' in results[0]
+    assert 'id' in results[2]
+    # Task 2 should fail and return empty dict (after retries)
+    assert results[1] == {}
+
+
+@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+def test_insert_tasks_preserves_order(mock_request_json, db_tasks):
+    """Test that insert_tasks preserves the order of results despite parallel execution."""
+    import time
+    
+    def mock_response_with_delay(spec, **kwargs):
+        content = spec.json_body.get('content', '')
+        # Add variable delays to simulate real network conditions
+        if 'Task 1' in content:
+            time.sleep(0.03)
+            return {'id': 'task1', 'content': content}
+        elif 'Task 2' in content:
+            time.sleep(0.01)
+            return {'id': 'task2', 'content': content}
+        elif 'Task 3' in content:
+            time.sleep(0.02)
+            return {'id': 'task3', 'content': content}
+        return {'id': 'unknown', 'content': content}
+    
+    mock_request_json.side_effect = mock_response_with_delay
+
+    tasks_data = [
+        {"content": "Test Task 1"},
+        {"content": "Test Task 2"},
+        {"content": "Test Task 3"},
+    ]
+    
+    results = db_tasks.insert_tasks(tasks_data)
+    
+    # Despite Task 2 completing first, results should be in original order
+    assert len(results) == 3
+    assert results[0]['id'] == 'task1'
+    assert results[1]['id'] == 'task2'
+    assert results[2]['id'] == 'task3'
