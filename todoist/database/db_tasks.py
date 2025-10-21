@@ -1,10 +1,16 @@
-import uuid
-from loguru import logger
-from todoist.types import Task
 import inspect
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
+from typing import Optional
+
+from loguru import logger
+from tqdm import tqdm
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
+from todoist.types import Task
+from todoist.utils import RETRY_MAX_ATTEMPTS, with_retry
 
 
 class DatabaseTasks:
@@ -221,3 +227,77 @@ class DatabaseTasks:
             logger.error("Todoist API returned empty response for fetch_task_by_id")
             return {}
         return result
+
+    def insert_tasks(self, tasks_data: list[dict]) -> list[dict]:
+        """
+        Inserts multiple tasks into the Todoist API in parallel using threading.
+        
+        This method provides thread-safe parallel task insertion with retry logic,
+        similar to how fetch_projects works in db_projects.py.
+
+        Parameters:
+        - tasks_data (list[dict]): List of dictionaries, where each dictionary contains
+          the parameters for insert_task (content, description, project_id, etc.)
+
+        Returns:
+        - list[dict]: List of responses from the Todoist API in the same order as input.
+          Failed insertions will have an empty dict.
+          
+        Example:
+            tasks_data = [
+                {"content": "Buy milk", "project_id": "123", "priority": 2},
+                {"content": "Call dentist", "due_string": "tomorrow"},
+            ]
+            results = db.insert_tasks(tasks_data)
+        """
+        if not tasks_data:
+            logger.info("No tasks to insert")
+            return []
+
+        def insert_single_task(task_data: dict, index: int) -> dict:
+            """Insert a single task with its data."""
+            try:
+                return self.insert_task(**task_data)
+            except Exception as e:
+                logger.error(f"Failed to insert task at index {index}: {e}")
+                return {}
+
+        def insert_single_task_with_retry(task_data: dict, index: int) -> dict:
+            """Insert a single task with built-in retry logic."""
+            return with_retry(
+                partial(insert_single_task, task_data, index),
+                operation_name=f"insert task {index} (content: {task_data.get('content', 'N/A')})",
+                max_attempts=RETRY_MAX_ATTEMPTS
+            )
+
+        logger.info(f"Inserting {len(tasks_data)} tasks with thread pool")
+        max_workers = min(8, len(tasks_data))
+        ordered_results: list[Optional[dict]] = [None] * len(tasks_data)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(insert_single_task_with_retry, task_data, idx): idx
+                for idx, task_data in enumerate(tasks_data)
+            }
+            for future in tqdm(
+                as_completed(future_to_index),
+                total=len(tasks_data),
+                desc='Inserting tasks',
+                unit='task',
+                position=0,
+                leave=True
+            ):
+                idx = future_to_index[future]
+                try:
+                    result = future.result(timeout=60)
+                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
+                    logger.error(f"Failed inserting task at index {idx}: {e.__class__.__name__}: {e}")
+                    result = {}
+                ordered_results[idx] = result
+                logger.debug(f"Inserted task {idx+1}/{len(tasks_data)}")
+
+        # Replace any remaining None with empty dicts (should be rare)
+        for i in range(len(ordered_results)):
+            if ordered_results[i] is None:
+                ordered_results[i] = {}
+
+        return ordered_results
