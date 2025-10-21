@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
-from threading import Lock, local
+from threading import Condition, Lock, local
 from time import perf_counter
 from typing import Any, Mapping, MutableMapping, Optional
 
@@ -11,6 +12,8 @@ import requests
 from loguru import logger
 
 from todoist.utils import (
+    DEFAULT_MAX_REQUESTS_PER_MINUTE,
+    RATE_LIMIT_WINDOW_SECONDS,
     RETRY_BACKOFF_MEAN,
     RETRY_BACKOFF_STD,
     RETRY_MAX_ATTEMPTS,
@@ -45,6 +48,7 @@ class RequestSpec:
     json_body: Any | None = None
     timeout: TimeoutSettings = field(default_factory=TimeoutSettings)
     max_attempts: Optional[int] = None
+    rate_limited: bool = False
 
 
 @dataclass(slots=True)
@@ -67,17 +71,21 @@ class TodoistAPIClient:
         self,
         *,
         default_timeout: TimeoutSettings | None = None,
+        max_requests_per_minute: int | None = DEFAULT_MAX_REQUESTS_PER_MINUTE,
         max_attempts: int = RETRY_MAX_ATTEMPTS,
         backoff_mean: float = RETRY_BACKOFF_MEAN,
         backoff_std: float = RETRY_BACKOFF_STD,
     ) -> None:
         self._session_local = local()
         self._default_timeout = default_timeout or TimeoutSettings()
+        self._max_requests_per_minute = max_requests_per_minute
         self._max_attempts = max_attempts
         self._backoff_mean = backoff_mean
         self._backoff_std = backoff_std
         self._last_call_lock = Lock()
         self._last_call_result: EndpointCallResult | None = None
+        self._rate_condition: Condition = Condition()
+        self._request_timestamps: deque[float] = deque()
 
     @property
     def last_call_result(self) -> EndpointCallResult | None:
@@ -85,6 +93,12 @@ class TodoistAPIClient:
 
         with self._last_call_lock:
             return self._last_call_result
+
+    @property
+    def max_requests_per_minute(self) -> int | None:
+        """Return the configured requests-per-minute throttle (``None`` disables it)."""
+
+        return self._max_requests_per_minute
 
     def request(
         self,
@@ -102,6 +116,8 @@ class TodoistAPIClient:
         op_name = operation_name or spec.endpoint.name
 
         def _do_request() -> EndpointCallResult:
+            if spec.rate_limited:
+                self._acquire_request_slot(op_name)
             start = perf_counter()
             logger.debug(
                 "Calling Todoist endpoint",
@@ -225,3 +241,34 @@ class TodoistAPIClient:
             session = requests.Session()
             self._session_local.session = session
         return session
+
+    def _acquire_request_slot(self, operation_name: str) -> None:
+        """Throttle requests to respect the configured RPM ceiling."""
+
+        max_rpm = self._max_requests_per_minute
+        if max_rpm is None or max_rpm <= 0:
+            return
+
+        with self._rate_condition:
+            while True:
+                now = perf_counter()
+                cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+                slot_released = False
+                while self._request_timestamps and self._request_timestamps[0] <= cutoff:
+                    self._request_timestamps.popleft()
+                    slot_released = True
+                if slot_released:
+                    self._rate_condition.notify_all()
+                if len(self._request_timestamps) < max_rpm:
+                    self._request_timestamps.append(now)
+                    return
+
+                wait_time = self._request_timestamps[0] + RATE_LIMIT_WINDOW_SECONDS - now
+                wait_time = max(wait_time, 0.05)
+                logger.debug(
+                    "Rate limit reached, delaying request",
+                    operation=operation_name,
+                    max_rpm=max_rpm,
+                    wait=f"{wait_time:.2f}s",
+                )
+                self._rate_condition.wait(timeout=wait_time)

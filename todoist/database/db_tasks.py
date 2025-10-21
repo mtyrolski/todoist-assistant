@@ -148,6 +148,7 @@ class DatabaseTasks:
                 "X-Request-Id": str(uuid.uuid4()),
             },
             json_body=payload,
+            rate_limited=True,
         )
 
         logger.debug("Creating task via Todoist API", payload=payload)
@@ -300,4 +301,4 @@ class DatabaseTasks:
             if ordered_results[i] is None:
                 ordered_results[i] = {}
 
-        return ordered_results
+        return [result or {} for result in ordered_results]

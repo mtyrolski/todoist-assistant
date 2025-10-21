@@ -122,6 +122,10 @@ RETRY_MAX_ATTEMPTS = 3
 RETRY_BACKOFF_MEAN = 10.0  # seconds
 RETRY_BACKOFF_STD = 3.0    # seconds
 
+# Rate limit configuration constants
+DEFAULT_MAX_REQUESTS_PER_MINUTE = 45
+RATE_LIMIT_WINDOW_SECONDS = 60.0
+
 
 def try_n_times(fn: Callable[[], U], n) -> U | None:
     """
