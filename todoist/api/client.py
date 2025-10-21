@@ -119,13 +119,7 @@ class TodoistAPIClient:
             if spec.rate_limited:
                 self._acquire_request_slot(op_name)
             start = perf_counter()
-            logger.debug(
-                "Calling Todoist endpoint",
-                endpoint=spec.endpoint.name,
-                method=spec.endpoint.method,
-                url=spec.endpoint.url,
-                params=params,
-            )
+
             try:
                 response = self._get_session().request(
                     method=spec.endpoint.method,
@@ -154,12 +148,7 @@ class TodoistAPIClient:
                 raise RuntimeError(f"HTTP error calling {spec.endpoint.name}") from exc
 
             elapsed = perf_counter() - start
-            logger.debug(
-                "Received response",
-                endpoint=spec.endpoint.name,
-                status=response.status_code,
-                elapsed=f"{elapsed:.3f}s",
-            )
+
 
             try:
                 response.raise_for_status()
