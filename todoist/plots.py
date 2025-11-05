@@ -686,29 +686,58 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
 
 
 def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
-    """Plot a KDE of task completion lifespans using vectorised computations."""
+    """Plot distribution of task completion lifespans with sensible fallbacks."""
 
     from loguru import logger
     import numpy as np
     from scipy import stats
 
-    def _empty_figure(message: str) -> go.Figure:
-        fig = go.Figure()
+    def _apply_common_layout(fig: go.Figure, *, title_text: str, x_title: str) -> go.Figure:
         fig.update_layout(
+            autosize=True,
             template="plotly_dark",
             title={
-                "text": f"Task Lifespans ({message})",
+                "text": title_text,
                 "x": 0.5,
                 "xanchor": "center",
                 "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
             },
-            xaxis={"title": "Time to Completion", "showgrid": True},
-            yaxis={"title": "Density", "showgrid": True},
             plot_bgcolor="#111318",
             paper_bgcolor="#111318",
+            margin=dict(l=80, r=60, t=80, b=60),
             font=dict(color="#ffffff", size=12, family="Arial, sans-serif"),
+            legend=dict(
+                x=0.98,
+                y=0.98,
+                xanchor="right",
+                yanchor="top",
+                bgcolor="rgba(17, 19, 24, 0.8)",
+                bordercolor="rgba(255,255,255,0.3)",
+                borderwidth=1,
+                font=dict(size=11, color="#ffffff"),
+            ),
+        )
+
+        fig.update_xaxes(
+            title={"text": x_title, "font": {"size": 14, "color": "#ffffff"}},
+            type="log",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.15)",
+            tickfont={"size": 12, "color": "#e6e6e6"},
+            zeroline=False,
+        )
+        fig.update_yaxes(
+            title={"text": "Frequency", "font": {"size": 14, "color": "#ffffff"}},
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.15)",
+            tickfont={"size": 12, "color": "#e6e6e6"},
+            rangemode="tozero",
         )
         return fig
+
+    def _empty_figure(message: str) -> go.Figure:
+        fig = go.Figure()
+        return _apply_common_layout(fig, title_text=f"Task Lifespans ({message})", x_title="Time to Completion")
 
     if "type" not in df.columns:
         logger.error("DataFrame missing required 'type' column")
@@ -722,7 +751,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     event_mask = df["type"].isin({"added", "completed"})
     if not event_mask.any():
         logger.info("No added/completed events available for lifespan plot")
-        return _empty_figure("No task events found")
+        return _empty_figure("No Task Events")
 
     events = df.loc[event_mask, [identifier, "type"]].copy()
     timestamps = pd.to_datetime(df.index[event_mask])
@@ -734,7 +763,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     common_ids = added_times.index.intersection(completed_times.index)
     if common_ids.empty:
         logger.info("No tasks have both added and completed events")
-        return _empty_figure("No completed tasks found")
+        return _empty_figure("No Tasks with Both Added and Completed Events")
 
     durations = (completed_times.loc[common_ids] - added_times.loc[common_ids]).dt.total_seconds().to_numpy(dtype=float)
     durations = durations[durations > 0]
@@ -752,80 +781,69 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     durations_converted = durations / divisor
     log_durations = np.log10(durations_converted)
+    total_count = int(durations_converted.size)
 
-    if durations_converted.size < 2 or np.isclose(log_durations.var(), 0.0):
-        logger.info("Insufficient variance for KDE; providing minimal output")
-        fig = _empty_figure("Insufficient data")
+    fig = go.Figure()
+
+    # Histogram of task durations (count-based for frequency interpretation)
+    fig.add_trace(
+        go.Histogram(
+            x=durations_converted,
+            name="Task durations",
+            opacity=0.55,
+            marker=dict(color="#4169E1"),
+            hovertemplate="Duration: %{x:.2f} " + unit_label + "<br>Count: %{y}<extra></extra>",
+        )
+    )
+
+    # Scatter of individual task durations for quick inspection
+    scatter_y = np.ones(total_count)
+    fig.add_trace(
+        go.Scatter(
+            x=durations_converted,
+            y=scatter_y,
+            mode="markers",
+            marker=dict(color="#F4D03F", size=9, line=dict(color="#111318", width=1)),
+            name="Individual tasks",
+            hovertemplate="Duration: %{x:.2f} " + unit_label + "<extra></extra>",
+        )
+    )
+
+    # Optional KDE overlay when data variability allows it
+    if total_count >= 2 and not np.isclose(log_durations.var(), 0.0):
+        kde = stats.gaussian_kde(log_durations, bw_method="scott")
+        log_bounds = np.linspace(np.floor(log_durations.min()), np.ceil(log_durations.max()), 512)
+        x_values = np.power(10.0, log_bounds)
+        densities = kde(log_bounds)
+        integral = float(np.trapezoid(densities, x_values))
+        if np.isfinite(integral) and integral > 0:
+            densities = densities * (total_count / integral)
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values,
+                    y=densities,
+                    mode="lines",
+                    line=dict(color="#1ABC9C", width=3),
+                    name="Smoothed frequency",
+                    hovertemplate="Duration: %{x:.2f} " + unit_label + "<br>Frequency: %{y:.2f}<extra></extra>",
+                )
+            )
+        else:
+            logger.warning("KDE normalisation failed; skipping smoothed overlay")
+    else:
         fig.add_annotation(
-            text="Need at least two distinct task durations to draw a density curve.",
+            text="Add more completed tasks to see a smooth distribution.",
             xref="paper",
             yref="paper",
             x=0.5,
-            y=0.5,
+            y=0.85,
             showarrow=False,
             font=dict(color="#bbbbbb"),
         )
-        return fig
 
-    kde = stats.gaussian_kde(log_durations, bw_method="scott")
-    log_bounds = np.linspace(np.floor(log_durations.min()), np.ceil(log_durations.max()), 512)
-    x_values = np.power(10.0, log_bounds)
-    densities = kde(log_bounds)
-    integral = np.trapezoid(densities, x_values)
-    if not np.isfinite(integral) or integral <= 0:
-        logger.warning("KDE normalisation failed; returning empty plot")
-        return _empty_figure("Unable to compute density")
-    densities /= integral
+    fig.update_layout(barmode="overlay", bargap=0.15)
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=densities,
-            mode="lines",
-            line=dict(color="#4169E1", width=3),
-            fill="tozeroy",
-            fillcolor="rgba(65, 105, 225, 0.25)",
-            hovertemplate="Duration: %{x:.2f} " + unit_label + "<br>Density: %{y:.3f}<extra></extra>",
-            name="Task lifespan density",
-        )
-    )
+    title_text = f"Task Lifespans: Time to Completion (n={total_count})"
+    x_title = f"Time to Completion ({unit_label})"
 
-    fig.update_layout(
-        template="plotly_dark",
-        title={
-            "text": f"Task Lifespans: Time to Completion (n={durations_converted.size})",
-            "x": 0.5,
-            "xanchor": "center",
-            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
-        },
-        xaxis={
-            "title": {"text": f"Time to Completion ({unit_label})", "font": {"size": 14, "color": "#ffffff"}},
-            "type": "log",
-            "showgrid": True,
-            "gridcolor": "rgba(255,255,255,0.15)",
-            "tickfont": {"size": 12, "color": "#e6e6e6"},
-            "dtick": 1,
-        },
-        yaxis={
-            "title": {"text": "Density", "font": {"size": 14, "color": "#ffffff"}},
-            "showgrid": True,
-            "gridcolor": "rgba(255,255,255,0.15)",
-            "tickfont": {"size": 12, "color": "#e6e6e6"},
-        },
-        plot_bgcolor="#111318",
-        paper_bgcolor="#111318",
-        margin=dict(l=80, r=60, t=80, b=60),
-        legend=dict(
-            x=0.98,
-            y=0.98,
-            xanchor="right",
-            yanchor="top",
-            bgcolor="rgba(17, 19, 24, 0.8)",
-            bordercolor="rgba(255,255,255,0.3)",
-            borderwidth=1,
-            font=dict(size=11, color="#ffffff"),
-        ),
-    )
-
-    return fig
+    return _apply_common_layout(fig, title_text=title_text, x_title=x_title)
