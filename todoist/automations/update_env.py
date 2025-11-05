@@ -7,6 +7,7 @@ from todoist.database.base import Database
 from todoist.utils import try_n_times
 from functools import partial
 from todoist.automations.activity import Activity
+import sys
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
@@ -21,7 +22,7 @@ def main(config: DictConfig) -> None:
     automations = list(filter(lambda x: not x.is_long, automations))
 
     # if Activity among automations, we need to run the longest (still left) one.
-    activity_automations: list[Activity] = list(filter(lambda x: isinstance(x, Activity), automations))
+    activity_automations: list[Automation] = list(filter(lambda x: isinstance(x, Activity), automations))
     rest_automations = list(filter(lambda x: not isinstance(x, Activity), automations))
     if activity_automations:
         longest_automation = max(activity_automations, key=lambda x: x.nweeks)
@@ -44,4 +45,7 @@ def main(config: DictConfig) -> None:
 
 if __name__ == '__main__':
     # pylint: disable=no-value-for-parameter
+    # set logger level to >= INFO
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     main()
