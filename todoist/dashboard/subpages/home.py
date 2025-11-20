@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from todoist.dashboard.utils import extract_metrics, get_badges
 from todoist.types import (Project)
-from todoist.plots import (current_tasks_types, plot_events_over_time, plot_most_popular_labels,
+from todoist.plots import (current_tasks_types, plot_events_over_time, plot_heatmap_of_events_by_day_and_hour, plot_most_popular_labels,
                            plot_completed_tasks_periodically, cumsum_completed_tasks_periodically,
                            plot_task_lifespans)
 
@@ -56,6 +56,9 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
 
     st.header("Cumulative Periodically Completed Tasks Per Project")
     st.plotly_chart(cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors))
+
+    st.header("Heatmap of Events by Day and Hour")
+    st.plotly_chart(plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range))
 
     st.header("Events Over Time")
     st.plotly_chart(plot_events_over_time(df_activity, beg_range, end_range, granularity))

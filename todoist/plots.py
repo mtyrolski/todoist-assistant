@@ -785,30 +785,6 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     fig = go.Figure()
 
-    # Histogram of task durations (count-based for frequency interpretation)
-    fig.add_trace(
-        go.Histogram(
-            x=durations_converted,
-            name="Task durations",
-            opacity=0.55,
-            marker=dict(color="#4169E1"),
-            hovertemplate="Duration: %{x:.2f} " + unit_label + "<br>Count: %{y}<extra></extra>",
-        )
-    )
-
-    # Scatter of individual task durations for quick inspection
-    scatter_y = np.ones(total_count)
-    fig.add_trace(
-        go.Scatter(
-            x=durations_converted,
-            y=scatter_y,
-            mode="markers",
-            marker=dict(color="#F4D03F", size=9, line=dict(color="#111318", width=1)),
-            name="Individual tasks",
-            hovertemplate="Duration: %{x:.2f} " + unit_label + "<extra></extra>",
-        )
-    )
-
     # Optional KDE overlay when data variability allows it
     if total_count >= 2 and not np.isclose(log_durations.var(), 0.0):
         kde = stats.gaussian_kde(log_durations, bw_method="scott")
@@ -843,7 +819,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(barmode="overlay", bargap=0.15)
 
-    title_text = f"Task Lifespans: Time to Completion (n={total_count})"
+    title_text = "Task Lifespans: Time to Completion"
     x_title = f"Time to Completion ({unit_label})"
 
     return _apply_common_layout(fig, title_text=title_text, x_title=x_title)
