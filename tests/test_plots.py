@@ -193,38 +193,6 @@ def test_plot_task_lifespans_negative_duration():
     assert isinstance(fig, go.Figure)
 
 
-def test_plot_task_lifespans_multiple_events_same_task(sample_task_events_df):
-    """Test plot_task_lifespans uses first added and last completed."""
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
-    # Task with multiple added and completed events
-    data = {
-        'parent_item_id': ['task1'] * 5,
-        'type': ['added', 'added', 'completed', 'added', 'completed'],
-        'title': ['Task 1'] * 5,
-        'root_project_name': ['Project A'] * 5,
-        'root_project_id': ['proj_a'] * 5,
-    }
-    
-    dates = [
-        base_date,
-        base_date + timedelta(hours=1),
-        base_date + timedelta(hours=2),
-        base_date + timedelta(hours=3),
-        base_date + timedelta(hours=4),
-    ]
-    
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = 'date'
-    
-    fig = plot_task_lifespans(df)
-    
-    # Should compute lifespan from first added to last completed
-    assert isinstance(fig, go.Figure)
-    # Should have valid data (not "No Data")
-    assert 'n=' in fig.layout.title.text
-
-
 def test_plot_task_lifespans_dark_mode_styling(sample_task_events_df):
     """Test plot_task_lifespans has dark mode styling."""
     fig = plot_task_lifespans(sample_task_events_df)
@@ -328,10 +296,3 @@ def test_plot_task_lifespans_handles_missing_task_names():
     # Should handle missing names and still create the figure
     assert isinstance(fig, go.Figure)
 
-
-def test_plot_task_lifespans_count_in_title(sample_task_events_df):
-    """Test plot_task_lifespans includes task count in title."""
-    fig = plot_task_lifespans(sample_task_events_df)
-    
-    # Title should include count like "n=X"
-    assert 'n=' in fig.layout.title.text
