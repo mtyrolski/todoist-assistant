@@ -9,7 +9,7 @@ children:
     content: Refine text with AI
     description: Refine the text with AI
   -
-    content: last check before sending
+    content: Last check before sending
     description: Last refine before sending
   -
     content: Send message
