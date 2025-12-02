@@ -48,6 +48,8 @@ class TaskTemplate:
             return config
 
         content = config.get('content')
+        if content is None:
+            raise ValueError("Missing required field 'content' in TaskTemplate config: {}".format(config))
         description = config.get('description')
         due_date_days_difference = config.get('due_date_days_difference', 0)
         priority = config.get('priority', 1)
