@@ -727,7 +727,7 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     fig = go.Figure()
 
     for root_project_name in df_weekly_per_project.columns:
-        project_series = df_weekly_per_project[root_project_name].fillna(method='ffill').fillna(0)
+        project_series = df_weekly_per_project[root_project_name].ffill().fillna(0)
         completed, current = _split_completed_vs_current(project_series, current_label)
 
         if not completed.empty:
