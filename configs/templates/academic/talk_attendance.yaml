@@ -1,27 +1,22 @@
 # Talk/Session Attendance Template
-_target_: todoist.automations.template.TaskTemplate
 content: Talk/Session Attendance
 description: Attend and get the most out of a talk/session
-due_date_days_difference: 0
-priority: 1
 children:
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Read abstract & speaker bio
     description: Skim abstract and bio before the talk
     due_date_days_difference: -1
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Prepare 1-2 questions
     description: Think of questions to ask during/after the session
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Attend talk & take notes
     description: Focus on main ideas, jot down questions
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Summarize key points
     description: Write a summary of the talk
     due_date_days_difference: 1
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Reach out to speaker (if relevant)
     description: Send a question or comment as a follow-up if interested
     due_date_days_difference: 2
