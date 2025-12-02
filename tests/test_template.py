@@ -151,13 +151,9 @@ class TestTaskTemplateFromConfig:
             'priority': 2,
             'due_date_days_difference': 1,
         }
-        
-        result = TaskTemplate.from_config(config)
-        
-        # Content will be None since it's not provided in config
-        assert result.content is None
-        assert result.priority == 2
-        assert result.due_date_days_difference == 1
+        with pytest.raises(ValueError):
+            TaskTemplate.from_config(config)
+
 
     def test_deeply_nested_children(self):
         """Test deeply nested children structure."""
