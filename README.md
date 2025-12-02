@@ -301,7 +301,7 @@ The template loader automatically applies sane defaults (priority 1 and a same-d
 each entry into a `TaskTemplate`, so the YAML examples above do not need `_target_` blocks for every task or subtask.
 
 - `Template` automation will transform all tasks marked with labels `@template-call` by attaching specified subtasks, `read_paper` and other templates similarly. See [todoist/automations/template.py](todoist/automations/template.py) for details.
-- `Activity` fetches all evenets from specific time range. See [todoist/automations/activity.py](todoist/automations/activity.py) for details.
+- `Activity` fetches all events from specific time range. See [todoist/automations/activity.py](todoist/automations/activity.py) for details.
 - Similarly other automations defined in (todoist/automations)[todoist/automations] folder can be enhanced or inspected and even implemented new ones by inheritance with base automation [todoist/automations/base.py](todoist/automations/base.py).
 
 ## Gmail Tasks Automation *(experimental)*
