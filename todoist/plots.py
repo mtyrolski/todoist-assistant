@@ -519,6 +519,10 @@ def _current_period_label(end_date: datetime, granularity: str, index: pd.Dateti
 
     try:
         label = index[index >= pd.Timestamp(end_date)].min()
+        if label is not pd.NaT and label is not None:
+            label = label.to_pydatetime()
+        else:
+            label = None
     except (TypeError, ValueError):
         label = None
     return cast(datetime | None, label)
