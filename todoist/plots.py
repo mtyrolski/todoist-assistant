@@ -723,6 +723,7 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     # Append 0 from the left (one day before the minimum date)
     min_date = df_weekly_per_project.index.min() - timedelta(days=7 if 'W' in granularity else 14)
     df_weekly_per_project.loc[min_date] = 0
+    df_weekly_per_project = df_weekly_per_project.sort_index()
 
     fig = go.Figure()
 
