@@ -268,28 +268,22 @@ automations:
     task_templates:
       # Call template with preparation and follow-up subtasks
       call:
-        _target_: todoist.automations.template.TaskTemplate
         content: Call
         description: Call someone
-        due_date_days_difference: 0
-        priority: 1
         children:
-          - _target_: todoist.automations.template.TaskTemplate
+          -
             content: Setup meeting
             description: Should be put on calendar.
             due_date_days_difference: -3
-          - _target_: todoist.automations.template.TaskTemplate
+          -
             content: Prepare content for a meeting
             description: Prepare notes and bullet points to cover.
             due_date_days_difference: -1
-      
+
       # Paper reading workflow template
       read_paper:
-        _target_: todoist.automations.template.TaskTemplate
         content: Read Paper
         description: Read a research paper
-        due_date_days_difference: 0
-        priority: 1
         children:
           # Child tasks omitted for brevity...
 
@@ -303,6 +297,9 @@ automations:
     nweeks: 4
 ...
 ```
+The template loader automatically applies sane defaults (priority 1 and a same-day `due_date_days_difference` of `0`) and wraps
+each entry into a `TaskTemplate`, so the YAML examples above do not need `_target_` blocks for every task or subtask.
+
 - `Template` automation will transform all tasks marked with labels `@template-call` by attaching specified subtasks, `read_paper` and other templates similarly. See [todoist/automations/template.py](todoist/automations/template.py) for details.
 - `Activity` fetches all evenets from specific time range. See [todoist/automations/activity.py](todoist/automations/activity.py) for details.
 - Similarly other automations defined in (todoist/automations)[todoist/automations] folder can be enhanced or inspected and even implemented new ones by inheritance with base automation [todoist/automations/base.py](todoist/automations/base.py).

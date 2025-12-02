@@ -1,23 +1,16 @@
 # Pull Request Review Template
-_target_: todoist.automations.template.TaskTemplate
 content: Review PR
 description: Review a pull request
-due_date_days_difference: 0
-priority: 1
 children:
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Read PR & Task content
     description: Read the pull request
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Check code
     description: Check the code
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Manually test the code
     description: Manually test the code along with unit tests and other checks
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Write review
     description: Write the review
-    due_date_days_difference: 0

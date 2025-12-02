@@ -1,23 +1,16 @@
 # Message Template
-_target_: todoist.automations.template.TaskTemplate
 content: Message
 description: Send a message
-due_date_days_difference: 0
-priority: 1
 children:
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Write message
     description: Write the message to be sent
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Refine text with AI
     description: Refine the text with AI
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: last check before sending
     description: Last refine before sending
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Send message
     description: Send the message
-    due_date_days_difference: 0
