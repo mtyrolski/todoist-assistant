@@ -1,23 +1,19 @@
 # Feature Development Template
-_target_: todoist.automations.template.TaskTemplate
 content: Feature Development
 description: Implement a feature
-due_date_days_difference: 0
-priority: 1
 children:
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Define requirements
     description: Define the requirements for the feature
     due_date_days_difference: -10
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Design feature
     description: Design the feature
     due_date_days_difference: -5
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Develop feature
     description: Develop the feature
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Test feature
     description: Test the feature
     due_date_days_difference: 2

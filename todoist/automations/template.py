@@ -1,5 +1,5 @@
 from inspect import signature
-from typing import Final, Iterable
+from typing import Any, Final, Iterable, Mapping
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
@@ -17,21 +17,49 @@ class TaskTemplate:
     Attributes:
         content (str): The main text or title of the task.
         description (str, optional): Additional details about the task.
-        due_date_days_difference (int or None, optional): The number of days from today until the task is due.
+        due_date_days_difference (int or None, optional): The number of days from today until the task is due. Defaults to 0
+            (same day as the parent) when not provided.
         priority (int): The priority level of the task, where a higher value indicates higher priority. Defaults to 1.
         children (list[TaskTemplate]): A list of child TaskTemplate objects representing subtasks.
     """
     def __init__(self,
                  content: str,
-                 description: str = None,
-                 due_date_days_difference: int | None = None,
+                 description: str | None = None,
+                 due_date_days_difference: int | None = 0,
                  priority: int = 1,
-                 children: list['TaskTemplate'] = []):
+                 children: list['TaskTemplate'] | None = None):
         self.due_date_days_difference = due_date_days_difference
         self.content = content
         self.description = description
         self.priority = priority
-        self.children: list['TaskTemplate'] = children
+        self.children: list['TaskTemplate'] = children or []
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any] | 'TaskTemplate') -> 'TaskTemplate':
+        """Create a :class:`TaskTemplate` from a plain mapping.
+
+        The YAML config files used to rely on Hydra targets for every task and
+        subtask. This helper lets us load simpler dictionaries by applying the
+        defaults defined in :class:`TaskTemplate` and recursively converting
+        children.
+        """
+
+        if isinstance(config, TaskTemplate):
+            return config
+
+        content = config.get('content')
+        if content is None:
+            raise ValueError(f"Missing required field 'content' in TaskTemplate config: {config}")
+        description = config.get('description')
+        due_date_days_difference = config.get('due_date_days_difference', 0)
+        priority = config.get('priority', 1)
+        children = [cls.from_config(child) for child in config.get('children', [])]
+
+        return cls(content=content,
+                   description=description,
+                   due_date_days_difference=due_date_days_difference,
+                   priority=priority,
+                   children=children)
 
     @classmethod
     def priority_on_todoist(cls, priority: int) -> int:
@@ -61,9 +89,12 @@ class TaskTemplate:
 
 
 class Template(Automation):
-    def __init__(self, task_templates: dict[str, TaskTemplate]):
+    def __init__(self, task_templates: dict[str, TaskTemplate | Mapping[str, Any]]):
         super().__init__("Template", 0.1)
-        self.task_templates = task_templates
+        self.task_templates = {
+            name: TaskTemplate.from_config(task_template)
+            for name, task_template in task_templates.items()
+        }
 
     def _tick(self, db: Database) -> None:
         logger.info("Running Template automation")

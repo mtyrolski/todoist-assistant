@@ -1,27 +1,20 @@
 # Conference Paper Scan Template
-_target_: todoist.automations.template.TaskTemplate
 content: Fast Paper Scan
 description: Efficiently scan through papers/posters at a conference
-due_date_days_difference: 0
-priority: 1
 children:
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Download/bookmark papers of interest
     description: Collect PDFs, links, or photos of posters
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Skim abstracts
     description: Quickly read abstracts for relevance
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Mark high-priority reads
     description: Star or note which ones to read in depth
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Add notes/tags
     description: Tag with topics/methods for later review
-    due_date_days_difference: 0
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Plan in-depth reads
     description: Schedule time post-conference for deeper reading
     due_date_days_difference: 1

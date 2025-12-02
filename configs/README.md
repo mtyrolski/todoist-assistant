@@ -61,4 +61,6 @@ python3 -m todoist.automations.run --config-dir configs --config-name automation
 2. Add the template reference to `templates.yaml`
 3. Add the template reference to `automations/template.yaml`
 
-The hierarchical structure makes it easy to understand and maintain the various automation templates.
+Template files no longer need `_target_` boilerplate for every entry. `TaskTemplate` defaults apply priority `1` and a same-day
+`due_date_days_difference` of `0` automatically, so only non-default values need to be specified. The hierarchical structure
+makes it easy to understand and maintain the various automation templates.

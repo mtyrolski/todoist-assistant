@@ -1,88 +1,70 @@
-_target_: todoist.automations.template.TaskTemplate
 content: PhD Supervisor Comprehensive Scan
 description: Deep-dive scan of a potential PhD supervisor including research profile, lab, students, and outreach
-due_date_days_difference: 0
-priority: 1
 children:
   # 1) Publications and Research Output
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Publications and Research Output
     description: Collect and vet publications, domains, conferences, and impact
-    due_date_days_difference: 0
     children:
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Compile publication list (Google Scholar/DBLP)
         description: Export list; capture titles, venues, years, authors; note h-index, i10-index
-        due_date_days_difference: 0
         children: []
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Assess publication cadence
         description: Chart papers per year; detect gaps; note sabbaticals or shifts in focus
-        due_date_days_difference: 0
         children: []
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Map collaboration network
         description: Co-author graph; recurring collaborators; international partnerships
-        due_date_days_difference: 0
         children: []
 
   # 2) Lab/Group Profile
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Lab and Group Profile
     description: Size, structure, funding, infrastructure, and culture of the lab/group
-    due_date_days_difference: 0
     children:
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Determine lab size and composition
         description: Count current PhD, MSc, postdocs, RAs; admins; alumni; turnover rate
-        due_date_days_difference: 0
         children: []
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Lab culture and expectations
         description: Meeting frequency, authorship norms, code/data practices, open science stance
-        due_date_days_difference: 0
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Infrastructure and tooling
         description: Lab wikis, repos, CI/CD, cluster/GPUs, data access, IRB practices
-        due_date_days_difference: 0
   # 3) Students and Outcomes
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Students and Outcomes
     description: Investigate past and current PhD students, output frequency, tiers, and diversity
-    due_date_days_difference: 0
     children: []
 
   # 4) Institution and Program
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Institution and Program Details
     description: Country, affiliation, deadlines, requirements, and policies
-    due_date_days_difference: 0
     children:
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Program deadlines and requirements
         description: Application due dates, degree requirements, exams, teaching loads
-        due_date_days_difference: 0
         children: []
   # 5) Structured Research Table (columns as tasks)
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Structure investigation table
     description: Create a table with columns Who, Status, My Notes, Lab/Affiliation, Country, Program Details, Past/Current Students Papers, Source Info, Additional Notes, Big Research Group, Domain of supervisor research
-    due_date_days_difference: 0
     children: []
   # 6) Outreach and Networking
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Outreach and Networking
     description: Proactive outreach to supervisor and lab members; intros; meetings
-    due_date_days_difference: 0
     children: []
   # 7) Synthesis and Decision
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Synthesis and Decision
     description: Score fit, risks, and next steps; plan application timeline or decline
-    due_date_days_difference: 0
     children:
-      - _target_: todoist.automations.template.TaskTemplate
+      -
         content: Scorecard and rubric
         description: Weight publications, mentorship, lab size, program, logistics
-        due_date_days_difference: 0
         children: []

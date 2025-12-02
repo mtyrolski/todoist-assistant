@@ -6,7 +6,12 @@ import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 
-from todoist.plots import plot_task_lifespans
+from todoist.plots import (
+    plot_completed_tasks_periodically,
+    plot_cumulative_events_over_time,
+    cumsum_completed_tasks_periodically,
+    plot_task_lifespans,
+)
 
 
 @pytest.fixture
@@ -292,7 +297,80 @@ def test_plot_task_lifespans_handles_missing_task_names():
     df.index.name = 'date'
     
     fig = plot_task_lifespans(df)
-    
+
     # Should handle missing names and still create the figure
     assert isinstance(fig, go.Figure)
+
+
+def _weekly_completion_df() -> pd.DataFrame:
+    base_date = datetime(2024, 6, 3, 12, 0, 0)  # Monday
+    data = {
+        'root_project_name': ['Project A', 'Project A', 'Project A'],
+        'root_project_id': ['proj_a'] * 3,
+        'type': ['completed', 'completed', 'completed'],
+        'parent_item_id': ['task1', 'task2', 'task3'],
+        'title': ['Task 1', 'Task 2', 'Task 3'],
+    }
+    dates = [
+        base_date - timedelta(days=2),  # previous Saturday (prior week)
+        base_date + timedelta(days=0),  # Monday current week
+        base_date + timedelta(days=1),  # Tuesday current week
+    ]
+    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
+    df.index.name = 'date'
+    return df
+
+
+def test_plot_completed_tasks_periodically_keeps_current_week():
+    """Ensure the current partial week stays visible with dotted styling."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 10)
+
+    fig = plot_completed_tasks_periodically(
+        df, beg_date, end_date, granularity='W-SUN', project_colors={'Project A': '#123456'}
+    )
+
+    dotted_traces = [trace for trace in fig.data if 'current' in trace.name.lower()]
+    assert dotted_traces, 'Current period trace should be present'
+    dotted_trace = dotted_traces[0]
+
+    assert dotted_trace.line.dash == 'dot'
+    assert any(pd.to_datetime(x) > end_date for x in dotted_trace.x)
+
+
+def test_cumsum_completed_tasks_periodically_keeps_current_week():
+    """Cumulative periodic plot should retain the ongoing week."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 10)
+
+    fig = cumsum_completed_tasks_periodically(
+        df, beg_date, end_date, granularity='W-SUN', project_colors={'Project A': '#123456'}
+    )
+
+    dotted_traces = [trace for trace in fig.data if 'current' in trace.name.lower()]
+    assert dotted_traces, 'Current period cumulative trace should be present'
+    dotted_trace = dotted_traces[0]
+
+    assert dotted_trace.line.dash == 'dot'
+    assert any(pd.to_datetime(x) > end_date for x in dotted_trace.x)
+
+
+def test_plot_cumulative_events_over_time_includes_partial_period():
+    """Cumulative events plot should surface the in-progress period."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 10)
+
+    fig = plot_cumulative_events_over_time(df, beg_date, end_date, granularity='W-SUN')
+
+    dotted_traces = [trace for trace in fig.data if 'current period' in trace.name.lower()]
+    assert dotted_traces, 'Partial period cumulative trace should be present'
+    dotted_trace = dotted_traces[0]
+    assert dotted_trace.line.dash == 'dot'
+    assert any(pd.to_datetime(x) > end_date for x in dotted_trace.x)
 

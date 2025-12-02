@@ -1,27 +1,25 @@
 # Conference Postmortem Template
-_target_: todoist.automations.template.TaskTemplate
 content: Conference/Summer School Postmortem
 description: Reflect and follow up after the event
 due_date_days_difference: 5
-priority: 1
 children:
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Summarize learnings
     description: Write a summary of what you learned/achieved
     due_date_days_difference: 1
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Organize notes & materials
     description: Sort your notes, slides, papers, business cards
     due_date_days_difference: 2
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Reach out to new contacts
     description: Thank new connections, send relevant info or ask follow-up questions
     due_date_days_difference: 3
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Add action items to todo list
     description: Add any research, reading, or collaboration tasks to your todo list
     due_date_days_difference: 4
-  - _target_: todoist.automations.template.TaskTemplate
+  -
     content: Update academic CV/website
     description: Add talks, posters, or experiences to your CV or website
     due_date_days_difference: 5
