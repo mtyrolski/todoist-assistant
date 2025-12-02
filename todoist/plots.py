@@ -503,6 +503,39 @@ def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: 
     return fig
 
 
+def _current_period_label(end_date: datetime, granularity: str, index: pd.DatetimeIndex | None = None) -> datetime | None:
+    """Return the label for the period that contains ``end_date``.
+
+    If an index is provided, the label is taken as the first value greater than or
+    equal to ``end_date`` to match existing resample output. This avoids guessing
+    the exact boundary for anchored frequencies (e.g., ``W-SUN``).
+    """
+
+    if index is None or index.empty:
+        try:
+            return cast(datetime, pd.Period(end_date, freq=granularity).end_time.to_pydatetime())
+        except Exception:  # pragma: no cover - defensive fallback for unusual freqs
+            return None
+
+    try:
+        label = index[index >= pd.Timestamp(end_date)].min()
+    except (TypeError, ValueError):
+        label = None
+    return cast(datetime | None, label)
+
+
+def _split_completed_vs_current(series: pd.Series, current_label: datetime | None
+                                 ) -> tuple[pd.Series, pd.Series | None]:
+    """Split a time series into historical points and the current in-progress point."""
+
+    if current_label is None or series.empty or current_label not in series.index:
+        return series, None
+
+    historical = series.loc[series.index < current_label]
+    current = series.loc[[current_label]]
+    return historical, current
+
+
 def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
                                      granularity: str) -> go.Figure:
     """
@@ -517,9 +550,29 @@ def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_d
     Returns:
     go.Figure: Plotly figure object representing the cumulative events over time.
     """
-    df_filtered = df.loc[beg_date:end_date]
-    cumulative_events = df_filtered.resample(granularity).size().cumsum()
-    fig = go.Figure(data=[go.Scatter(x=cumulative_events.index, y=cumulative_events.values, mode='lines')])
+    df_filtered = df.loc[:end_date]
+    cumulative_events = df_filtered.resample(granularity, label='right', closed='right').size().cumsum()
+    cumulative_events = cumulative_events[cumulative_events.index >= beg_date]
+
+    current_label = _current_period_label(end_date, granularity, cumulative_events.index)
+    completed, current = _split_completed_vs_current(cumulative_events, current_label)
+
+    fig = go.Figure()
+
+    if not completed.empty:
+        fig.add_trace(go.Scatter(x=completed.index, y=completed.values, mode='lines', name='Events'))
+
+    if current is not None:
+        connector = pd.concat([completed.tail(1), current]) if not completed.empty else current
+        fig.add_trace(go.Scatter(
+            x=connector.index,
+            y=connector.values,
+            mode='lines+markers',
+            line=dict(dash='dot'),
+            name='Events (current period)',
+            showlegend=False,
+        ))
+
     fig.update_layout(title_text='Cumulative Events Over Time',
                       xaxis_title='Date',
                       yaxis_title='Cumulative Number of Events')
@@ -585,23 +638,44 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
     Returns:
     go.Figure: Plotly figure object representing the number of completed tasks per project over time.
     """
-    df_weekly_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
-                                                                  ]).resample(granularity).size().unstack(level=0)
+    df_completed = df[df['type'] == 'completed'].loc[:end_date]
+    df_weekly_per_project = df_completed.groupby(['root_project_name'
+                                                 ]).resample(granularity, label='right', closed='right').size().unstack(level=0)
     df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index <= end_date]
+
+    current_label = _current_period_label(end_date, granularity, df_weekly_per_project.index)
 
     fig = go.Figure()
 
     for root_project_name in df_weekly_per_project.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df_weekly_per_project.index,
-                y=df_weekly_per_project[root_project_name],
-                name=root_project_name,
-                line_shape='spline',
-                mode='lines+markers',
-                line=dict(color=project_colors.get(root_project_name, '#808080')),
-            ))
+        project_series = df_weekly_per_project[root_project_name].fillna(0)
+        completed, current = _split_completed_vs_current(project_series, current_label)
+
+        if not completed.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=completed.index,
+                    y=completed,
+                    name=root_project_name,
+                    legendgroup=root_project_name,
+                    line_shape='spline',
+                    mode='lines+markers',
+                    line=dict(color=project_colors.get(root_project_name, '#808080')),
+                ))
+
+        if current is not None:
+            connector = pd.concat([completed.tail(1), current]) if not completed.empty else current
+            fig.add_trace(
+                go.Scatter(
+                    x=connector.index,
+                    y=connector,
+                    name=f"{root_project_name} (current)",
+                    legendgroup=root_project_name,
+                    showlegend=False,
+                    line_shape='spline',
+                    mode='lines+markers',
+                    line=dict(color=project_colors.get(root_project_name, '#808080'), dash='dot'),
+                ))
 
     # Update x-axis
     fig.update_xaxes(
@@ -634,39 +708,49 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     Returns:
     go.Figure: Plotly figure object representing the cumulative number of completed tasks per project over time.
     """
-    df_weekly_per_project = df[df['type'] == 'completed'].groupby(['root_project_name'
-                                                                  ]).resample(granularity).size().unstack(level=0)
+    df_completed = df[df['type'] == 'completed'].loc[:end_date]
+    df_weekly_per_project = df_completed.groupby(['root_project_name'
+                                                 ]).resample(granularity, label='right', closed='right').size().unstack(level=0)
     df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index <= end_date]
     df_weekly_per_project = df_weekly_per_project.cumsum()
+
+    current_label = _current_period_label(end_date, granularity, df_weekly_per_project.index)
 
     # Append 0 from the left (one day before the minimum date)
     min_date = df_weekly_per_project.index.min() - timedelta(days=7 if 'W' in granularity else 14)
     df_weekly_per_project.loc[min_date] = 0
 
-    # Append the maximum value of each project from the right (one day after the maximum date)
-    max_date = df_weekly_per_project.index.max() + timedelta(days=1)
-    for root_project_name in df_weekly_per_project.columns:
-        df_weekly_per_project.loc[max_date, root_project_name] = df_weekly_per_project[root_project_name].max()
-
-    # Sort the index
-    df_weekly_per_project = df_weekly_per_project.sort_index()
-
-    # Interpolate to ensure all dots are connected
-    df_weekly_per_project = df_weekly_per_project.interpolate(method='linear', axis=0)
-
     fig = go.Figure()
 
     for root_project_name in df_weekly_per_project.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df_weekly_per_project.index,
-                y=df_weekly_per_project[root_project_name],
-                name=root_project_name,
-                line_shape='spline',
-                mode='lines+markers',
-                line=dict(color=project_colors.get(root_project_name, '#808080')),
-            ))
+        project_series = df_weekly_per_project[root_project_name].fillna(method='ffill').fillna(0)
+        completed, current = _split_completed_vs_current(project_series, current_label)
+
+        if not completed.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=completed.index,
+                    y=completed,
+                    name=root_project_name,
+                    legendgroup=root_project_name,
+                    line_shape='spline',
+                    mode='lines+markers',
+                    line=dict(color=project_colors.get(root_project_name, '#808080')),
+                ))
+
+        if current is not None:
+            connector = pd.concat([completed.tail(1), current]) if not completed.empty else current
+            fig.add_trace(
+                go.Scatter(
+                    x=connector.index,
+                    y=connector,
+                    name=f"{root_project_name} (current)",
+                    legendgroup=root_project_name,
+                    showlegend=False,
+                    line_shape='spline',
+                    mode='lines+markers',
+                    line=dict(color=project_colors.get(root_project_name, '#808080'), dash='dot'),
+                ))
 
     # Update x-axis
     fig.update_xaxes(
