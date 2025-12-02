@@ -504,28 +504,32 @@ def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: 
 
 
 def _current_period_label(end_date: datetime, granularity: str, index: pd.DatetimeIndex | None = None) -> datetime | None:
-    """Return the label for the period that contains ``end_date``.
+    """Return the resample label that contains ``end_date``.
 
-    If an index is provided, the label is taken as the first value greater than or
-    equal to ``end_date`` to match existing resample output. This avoids guessing
-    the exact boundary for anchored frequencies (e.g., ``W-SUN``).
+    Prefer an existing label from ``index`` to stay aligned with previously
+    materialised resample bins. When no such label exists (e.g., the current
+    period has no events yet), fall back to computing the theoretical period end
+    using :class:`pandas.Period` so downstream plots can still surface an empty
+    "current" bucket.
     """
 
+    fallback: datetime | None = None
+    try:
+        fallback = cast(datetime, pd.Period(end_date, freq=granularity).end_time.to_pydatetime(warn=False))
+    except Exception:  # pragma: no cover - defensive fallback for unusual freqs
+        fallback = None
+
     if index is None or index.empty:
-        try:
-            return cast(datetime, pd.Period(end_date, freq=granularity).end_time.to_pydatetime())
-        except Exception:  # pragma: no cover - defensive fallback for unusual freqs
-            return None
+        return fallback
 
     try:
         label = index[index >= pd.Timestamp(end_date)].min()
         if label is not pd.NaT and label is not None:
-            label = label.to_pydatetime()
-        else:
-            label = None
+            return cast(datetime, label.to_pydatetime(warn=False))
     except (TypeError, ValueError):
-        label = None
-    return cast(datetime | None, label)
+        return fallback
+
+    return fallback
 
 
 def _split_completed_vs_current(series: pd.Series, current_label: datetime | None
@@ -538,6 +542,26 @@ def _split_completed_vs_current(series: pd.Series, current_label: datetime | Non
     historical = series.loc[series.index < current_label]
     current = series.loc[[current_label]]
     return historical, current
+
+
+def _ensure_current_point(series: pd.Series, current_label: datetime | None, *, strategy: str = 'zero') -> pd.Series:
+    """Guarantee ``series`` contains ``current_label`` so dotted traces can be drawn."""
+
+    if current_label is None:
+        return series
+
+    timestamp = pd.Timestamp(current_label)
+    if timestamp in series.index:
+        return series
+
+    series = series.copy()
+    if strategy == 'last' and not series.empty:
+        fill_value = series.iloc[-1]
+    else:
+        fill_value = 0
+
+    series.loc[timestamp] = fill_value
+    return series.sort_index()
 
 
 def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
@@ -559,6 +583,7 @@ def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_d
     cumulative_events = cumulative_events[cumulative_events.index >= beg_date]
 
     current_label = _current_period_label(end_date, granularity, cumulative_events.index)
+    cumulative_events = _ensure_current_point(cumulative_events, current_label, strategy='last')
     completed, current = _split_completed_vs_current(cumulative_events, current_label)
 
     fig = go.Figure()
@@ -642,9 +667,15 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
     Returns:
     go.Figure: Plotly figure object representing the number of completed tasks per project over time.
     """
-    df_completed = df[df['type'] == 'completed'].loc[:end_date]
-    df_weekly_per_project = df_completed.groupby(['root_project_name'
-                                                 ]).resample(granularity, label='right', closed='right').size().unstack(level=0)
+    df_completed = df[df['type'] == 'completed'].loc[:end_date].copy()
+    df_completed.index = pd.to_datetime(df_completed.index)
+    df_weekly_per_project = (
+        df_completed
+        .groupby([pd.Grouper(freq=granularity, label='right', closed='right'), 'root_project_name'])
+        .size()
+        .unstack('root_project_name')
+        .sort_index()
+    )
     df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
 
     current_label = _current_period_label(end_date, granularity, df_weekly_per_project.index)
@@ -653,6 +684,7 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
 
     for root_project_name in df_weekly_per_project.columns:
         project_series = df_weekly_per_project[root_project_name].fillna(0)
+        project_series = _ensure_current_point(project_series, current_label, strategy='zero')
         completed, current = _split_completed_vs_current(project_series, current_label)
 
         if not completed.empty:
@@ -712,9 +744,15 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     Returns:
     go.Figure: Plotly figure object representing the cumulative number of completed tasks per project over time.
     """
-    df_completed = df[df['type'] == 'completed'].loc[:end_date]
-    df_weekly_per_project = df_completed.groupby(['root_project_name'
-                                                 ]).resample(granularity, label='right', closed='right').size().unstack(level=0)
+    df_completed = df[df['type'] == 'completed'].loc[:end_date].copy()
+    df_completed.index = pd.to_datetime(df_completed.index)
+    df_weekly_per_project = (
+        df_completed
+        .groupby([pd.Grouper(freq=granularity, label='right', closed='right'), 'root_project_name'])
+        .size()
+        .unstack('root_project_name')
+        .sort_index()
+    )
     df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
     df_weekly_per_project = df_weekly_per_project.cumsum()
 
@@ -729,6 +767,7 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
 
     for root_project_name in df_weekly_per_project.columns:
         project_series = df_weekly_per_project[root_project_name].ffill().fillna(0)
+        project_series = _ensure_current_point(project_series, current_label, strategy='last')
         completed, current = _split_completed_vs_current(project_series, current_label)
 
         if not completed.empty:
