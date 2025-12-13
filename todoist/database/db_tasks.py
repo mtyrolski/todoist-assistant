@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import inspect
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
-from typing import Optional
+from typing import Any
 
 from loguru import logger
 from tqdm import tqdm
@@ -10,7 +12,7 @@ from tqdm import tqdm
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
 from todoist.types import Task
-from todoist.utils import RETRY_MAX_ATTEMPTS, with_retry
+from todoist.utils import MaxRetriesExceeded, RETRY_MAX_ATTEMPTS, with_retry
 
 
 class DatabaseTasks:
@@ -28,7 +30,7 @@ class DatabaseTasks:
 
         return self._api_client.last_call_result
 
-    def insert_task_from_template(self, task: Task, **overrrides) -> dict:
+    def insert_task_from_template(self, task: Task, **overrrides: Any) -> dict[str, Any]:
         """
         Insert a task into the database using a template and optional overrides.
         This method creates a new task by merging the task template provided in the
@@ -57,24 +59,26 @@ class DatabaseTasks:
         final_kwargs = {k: v for k, v in merged_kwargs.items() if k in param_names}
         return self.insert_task(**final_kwargs)
 
-    def insert_task(self,
-                    content: str,
-                    description: str = None,
-                    project_id: str = None,
-                    section_id: str = None,
-                    parent_id: str = None,
-                    order: int = None,
-                    labels: list[str] = None,
-                    priority: int = 1,
-                    due_string: str = None,
-                    due_date: str = None,
-                    due_datetime: str = None,
-                    due_lang: str = None,
-                    assignee_id: str = None,
-                    duration: int = None,
-                    duration_unit: str = None,
-                    deadline_date: str = None,
-                    deadline_lang: str = None) -> dict:
+    def insert_task(
+        self,
+        content: str,
+        description: str | None = None,
+        project_id: str | None = None,
+        section_id: str | None = None,
+        parent_id: str | None = None,
+        order: int | None = None,
+        labels: list[str] | None = None,
+        priority: int = 1,
+        due_string: str | None = None,
+        due_date: str | None = None,
+        due_datetime: str | None = None,
+        due_lang: str | None = None,
+        assignee_id: int | str | None = None,
+        duration: int | None = None,
+        duration_unit: str | None = None,
+        deadline_date: str | None = None,
+        deadline_lang: str | None = None,
+    ) -> dict[str, Any]:
         """
         Inserts a new task into the Todoist API.
 
@@ -152,11 +156,13 @@ class DatabaseTasks:
         )
 
         logger.debug("Creating task via Todoist API", payload=payload)
-        result = self._api_client.request_json(spec, operation_name="create task")
+        result: Any | None = self._api_client.request_json(spec, operation_name="create task")
         if result is None:
             logger.error("Todoist API returned empty response for task creation")
             return {}
-        return result
+        if isinstance(result, dict):
+            return result
+        return {"result": result}
 
     def remove_task(self, task_id: str) -> bool:
         """
@@ -183,7 +189,74 @@ class DatabaseTasks:
             logger.debug("Todoist delete response", body=result.text)
         return True
 
-    def fetch_task_by_id(self, task_id: str) -> dict:
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        content: str | None = None,
+        description: str | None = None,
+        labels: list[str] | None = None,
+        priority: int | None = None,
+        due_string: str | None = None,
+        due_date: str | None = None,
+        due_datetime: str | None = None,
+        due_lang: str | None = None,
+        duration: int | None = None,
+        duration_unit: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing task via the Todoist REST API.
+
+        Note: Todoist REST `POST /rest/v2/tasks/{task_id}` may return either:
+        - `204 No Content` (common; empty body)
+        - `200 OK` with a JSON task payload
+
+        This method returns the JSON payload when present, otherwise `{}`.
+        """
+
+        payload = {
+            "content": content,
+            "description": description,
+            "labels": labels,
+            "priority": priority,
+            "due_string": due_string,
+            "due_date": due_date,
+            "due_datetime": due_datetime,
+            "due_lang": due_lang,
+            "duration": duration,
+            "duration_unit": duration_unit,
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        if not payload:
+            return {}
+
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.UPDATE_TASK.format(task_id=task_id),
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-Id": str(uuid.uuid4()),
+            },
+            json_body=payload,
+            rate_limited=True,
+        )
+
+        logger.debug("Updating task via Todoist API", task_id=task_id, payload=payload)
+        call_result = self._api_client.request(
+            spec,
+            expect_json=True,
+            operation_name=f"update task {task_id}",
+        )
+        if call_result.json is None:
+            return {}
+        if isinstance(call_result.json, dict):
+            return call_result.json
+        return {"result": call_result.json}
+
+    def update_task_content(self, task_id: str, content: str) -> dict[str, Any]:
+        """Convenience helper to update task content only."""
+
+        return self.update_task(task_id, content=content)
+
+    def fetch_task_by_id(self, task_id: str) -> dict[str, Any]:
         """
         Fetches a task by its ID from the Todoist API.
 
@@ -223,13 +296,15 @@ class DatabaseTasks:
             headers={"Content-Type": "application/json"},
         )
 
-        result = self._api_client.request_json(spec, operation_name=f"fetch task {task_id}")
+        result: Any | None = self._api_client.request_json(spec, operation_name=f"fetch task {task_id}")
         if result is None:
             logger.error("Todoist API returned empty response for fetch_task_by_id")
             return {}
-        return result
+        if isinstance(result, dict):
+            return result
+        return {"result": result}
 
-    def insert_tasks(self, tasks_data: list[dict]) -> list[dict]:
+    def insert_tasks(self, tasks_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Inserts multiple tasks into the Todoist API in parallel using threading.
         
@@ -255,15 +330,15 @@ class DatabaseTasks:
             logger.info("No tasks to insert")
             return []
 
-        def insert_single_task(task_data: dict, index: int) -> dict:
+        def insert_single_task(task_data: dict[str, Any], index: int) -> dict[str, Any]:
             """Insert a single task with its data."""
             try:
                 return self.insert_task(**task_data)
-            except Exception as e:
-                logger.error(f"Failed to insert task at index {index}: {e}")
+            except (RuntimeError, ValueError, TypeError, KeyError) as e:
+                logger.error(f"Failed to insert task at index {index}: {e.__class__.__name__}: {e}")
                 return {}
 
-        def insert_single_task_with_retry(task_data: dict, index: int) -> dict:
+        def insert_single_task_with_retry(task_data: dict[str, Any], index: int) -> dict[str, Any]:
             """Insert a single task with built-in retry logic."""
             return with_retry(
                 partial(insert_single_task, task_data, index),
@@ -273,7 +348,7 @@ class DatabaseTasks:
 
         logger.info(f"Inserting {len(tasks_data)} tasks with thread pool")
         max_workers = min(8, len(tasks_data))
-        ordered_results: list[Optional[dict]] = [None] * len(tasks_data)
+        ordered_results: list[dict[str, Any] | None] = [None] * len(tasks_data)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {
                 executor.submit(insert_single_task_with_retry, task_data, idx): idx
@@ -290,7 +365,7 @@ class DatabaseTasks:
                 idx = future_to_index[future]
                 try:
                     result = future.result(timeout=60)
-                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
+                except (MaxRetriesExceeded, RuntimeError, ValueError, TypeError, OSError) as e:  # pragma: no cover - defensive
                     logger.error(f"Failed inserting task at index {idx}: {e.__class__.__name__}: {e}")
                     result = {}
                 ordered_results[idx] = result
