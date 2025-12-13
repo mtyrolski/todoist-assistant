@@ -1,7 +1,7 @@
 import argparse
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from loguru import logger
 
@@ -77,6 +77,19 @@ def _filter_out_flat_labels(labels: Iterable[str], flat_label_pattern: re.Patter
 
 def _task_parent_id(task: Task) -> str | None:
     return task.task_entry.parent_id or task.task_entry.v2_parent_id
+
+
+def _resolve_parent_targets(task: Task, *, flat_expansions: dict[str, list[str]]) -> Sequence[str | None]:
+    """Return the parent IDs that new copies of `task` should attach to.
+
+    If a task's parent was previously expanded (and likely deleted), we must attach
+    new children to the newly created parent copies, not the original parent id.
+    """
+
+    parent_id = _task_parent_id(task)
+    if parent_id is None:
+        return (None,)
+    return tuple(flat_expansions.get(parent_id, [parent_id]))
 
 
 def _depth_sort_parent_first(tasks: list[Task]) -> list[Task]:
@@ -193,10 +206,17 @@ class Multiply(Automation):
         tasks_to_process = self._select_tasks_to_process(all_tasks)
         tasks_to_process = _depth_sort_parent_first(tasks_to_process)
 
+        # When a parent task is expanded we may delete the original. Any later child
+        # expansions must point at the newly created parent copies.
+        flat_expansions: dict[str, list[str]] = {}
+
         logger.info(f"Found {len(tasks_to_process)} tasks to expand")
         for task in tasks_to_process:
             is_leaf = task.id not in parent_ids
-            self._process_task(db, task, is_leaf=is_leaf)
+            parent_targets = _resolve_parent_targets(task, flat_expansions=flat_expansions)
+            created_ids = self._process_task(db, task, is_leaf=is_leaf, parent_targets=parent_targets)
+            if created_ids:
+                flat_expansions[task.id] = created_ids
 
     def _select_tasks_to_process(self, all_tasks: list[Task]) -> list[Task]:
         selected: list[Task] = []
@@ -207,30 +227,38 @@ class Multiply(Automation):
                 selected.append(task)
         return selected
 
-    def _process_task(self, db: Database, task: Task, *, is_leaf: bool) -> None:
+    def _process_task(
+        self,
+        db: Database,
+        task: Task,
+        *,
+        is_leaf: bool,
+        parent_targets: Sequence[str | None],
+    ) -> list[str]:
         deep = _find_deep_directive(task.task_entry.content, self._deep_token_pattern)
 
         try:
             flat_n = _flat_factor_from_labels(task.task_entry.labels, self._flat_label_pattern)
         except ValueError as e:
             logger.error(f"Task {task.id}: {e}")
-            return
+            return []
 
         # Deep token has priority and must be applied only to leaf tasks.
         if deep is not None:
             if not is_leaf:
                 self._strip_deep_token_on_non_leaf(db, task, deep)
-                return
+                return []
             if flat_n is not None:
                 logger.warning(
                     f"Task {task.id}: has both deep token and flat label; applying deep and ignoring flat"
                 )
-            self._expand_deep(db, task, deep)
-            return
+            self._expand_deep(db, task, deep, parent_targets=parent_targets)
+            return []
 
         if flat_n is not None:
-            self._expand_flat(db, task, flat_n)
-            return
+            return self._expand_flat(db, task, flat_n, parent_targets=parent_targets)
+
+        return []
 
     def _strip_deep_token_on_non_leaf(self, db: Database, task: Task, deep: _DeepDirective) -> None:
         stripped = _strip_span(task.task_entry.content, deep.token_span)
@@ -242,18 +270,38 @@ class Multiply(Automation):
         )
         db.update_task_content(task.id, stripped)
 
-    def _expand_flat(self, db: Database, task: Task, n: int) -> None:
+    def _expand_flat(self, db: Database, task: Task, n: int, *, parent_targets: Sequence[str | None]) -> list[str]:
         labels = _filter_out_flat_labels(task.task_entry.labels, self._flat_label_pattern)
         base = task.task_entry.content
 
-        for i in range(1, n + 1):
-            content = _render(self.config.flat_leaf_template, base=base, i=i, n=n)
-            logger.debug(f"Creating flat task: {content}")
-            db.insert_task_from_template(task, content=content, labels=labels)
+        created_ids: list[str] = []
+
+        # If the parent was expanded earlier, replicate this task under each parent copy.
+        for parent_id in parent_targets:
+            for i in range(1, n + 1):
+                content = _render(self.config.flat_leaf_template, base=base, i=i, n=n)
+                logger.debug(f"Creating flat task: {content}")
+                overrides: dict[str, object] = {"content": content, "labels": labels}
+                if parent_id is not None:
+                    overrides["parent_id"] = parent_id
+
+                created = db.insert_task_from_template(task, **overrides)
+                new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+                if new_id:
+                    created_ids.append(new_id)
 
         self._remove_source_task_if_configured(db, task.id)
 
-    def _expand_deep(self, db: Database, task: Task, deep: _DeepDirective) -> None:
+        return created_ids
+
+    def _expand_deep(
+        self,
+        db: Database,
+        task: Task,
+        deep: _DeepDirective,
+        *,
+        parent_targets: Sequence[str | None],
+    ) -> None:
         if deep.n <= 0:
             logger.error(f"Task {task.id}: deep multiplication factor must be > 0")
             return
@@ -261,53 +309,66 @@ class Multiply(Automation):
         labels = _filter_out_flat_labels(task.task_entry.labels, self._flat_label_pattern)
         part_suffix = _render_part_suffix(deep.part, self.config.deep_part_suffix_template)
 
-        # We cannot update task content via API (no endpoint wired), so to avoid
-        # re-processing we replace+delete the source task by default.
-        root_task_id = task.id
         base_content = _strip_span(task.task_entry.content, deep.token_span)
-        if self.config.replace_parent_for_deep:
-            logger.debug(f"Creating replacement parent for task {task.id}")
-            created = db.insert_task_from_template(task, content=base_content, labels=labels)
-            root_task_id = str(created.get("id", ""))
-            if not root_task_id:
-                logger.error(f"Task {task.id}: failed to create replacement parent; skipping")
-                return
-        else:
-            # Keep original task as the parent; strip the token in-place for idempotency.
-            db.update_task_content(task.id, base_content)
+        original_parent_id = _task_parent_id(task)
 
-        batch_title = _render(self.config.deep_batch_template, part_suffix=part_suffix, part=deep.part)
-        logger.debug(f"Creating batch subtask under {root_task_id}: {batch_title}")
-        batch_created = db.insert_task_from_template(
-            task,
-            content=batch_title,
-            labels=labels,
-            parent_id=root_task_id,
-        )
-        batch_id = str(batch_created.get("id", ""))
-        if not batch_id:
-            logger.error(f"Task {task.id}: failed to create batch task; skipping")
-            return
+        # If the parent was expanded, we can't "move" the existing task under the new
+        # parent copies (Todoist doesn't support parent changes via update). In that case
+        # we must replace+delete even if config.replace_parent_for_deep is False.
+        must_replace_parent = self.config.replace_parent_for_deep
+        if parent_targets != [original_parent_id]:
+            must_replace_parent = True
 
-        for i in range(1, deep.n + 1):
-            leaf_title = _render(
-                self.config.deep_leaf_template,
-                base=base_content,
-                i=i,
-                n=deep.n,
-                part_suffix=part_suffix,
-                part=deep.part,
-            )
-            logger.debug(f"Creating deep subtask under {batch_id}: {leaf_title}")
-            db.insert_task_from_template(
+        for parent_id in parent_targets:
+            # We cannot reliably update+keep the source task for idempotency if we need to
+            # fork multiple copies (or re-parent). Use replacement parents.
+            if must_replace_parent:
+                logger.debug(f"Creating replacement parent for task {task.id}")
+                overrides: dict[str, object] = {"content": base_content, "labels": labels}
+                if parent_id is not None:
+                    overrides["parent_id"] = parent_id
+                created = db.insert_task_from_template(task, **overrides)
+                root_task_id = str(created.get("id", ""))
+                if not root_task_id:
+                    logger.error(f"Task {task.id}: failed to create replacement parent; skipping")
+                    continue
+            else:
+                # Keep original task as the parent; strip the token in-place for idempotency.
+                root_task_id = task.id
+                db.update_task_content(task.id, base_content)
+
+            batch_title = _render(self.config.deep_batch_template, part_suffix=part_suffix, part=deep.part)
+            logger.debug(f"Creating batch subtask under {root_task_id}: {batch_title}")
+            batch_created = db.insert_task_from_template(
                 task,
-                content=leaf_title,
+                content=batch_title,
                 labels=labels,
-                parent_id=batch_id,
+                parent_id=root_task_id,
             )
+            batch_id = str(batch_created.get("id", ""))
+            if not batch_id:
+                logger.error(f"Task {task.id}: failed to create batch task; skipping")
+                continue
+
+            for i in range(1, deep.n + 1):
+                leaf_title = _render(
+                    self.config.deep_leaf_template,
+                    base=base_content,
+                    i=i,
+                    n=deep.n,
+                    part_suffix=part_suffix,
+                    part=deep.part,
+                )
+                logger.debug(f"Creating deep subtask under {batch_id}: {leaf_title}")
+                db.insert_task_from_template(
+                    task,
+                    content=leaf_title,
+                    labels=labels,
+                    parent_id=batch_id,
+                )
 
         # Remove the original task (the one containing the token) to keep this idempotent.
-        if self.config.replace_parent_for_deep or self.config.remove_source_task_after_expansion:
+        if must_replace_parent or self.config.remove_source_task_after_expansion:
             self._remove_source_task_if_configured(db, task.id)
 
     def _remove_source_task_if_configured(self, db: Database, task_id: str) -> None:
