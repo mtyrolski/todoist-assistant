@@ -1,6 +1,5 @@
 """Definitions for Todoist API endpoints."""
 
-from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -28,6 +27,7 @@ class TodoistEndpoints:
     # Tasks
     CREATE_TASK = Endpoint("create_task", "POST", f"{REST_BASE}/tasks")
     GET_TASK = Endpoint("get_task", "GET", f"{REST_BASE}/tasks/{{task_id}}")
+    UPDATE_TASK = Endpoint("update_task", "POST", f"{REST_BASE}/tasks/{{task_id}}")
     DELETE_TASK = Endpoint("delete_task", "DELETE", f"{REST_BASE}/tasks/{{task_id}}")
 
     # Labels

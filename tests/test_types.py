@@ -2,14 +2,12 @@
 Tests for data structure creation and modification in todoist.types module.
 """
 import datetime as dt
-import pytest
-from unittest.mock import patch, MagicMock
 
 from todoist.types import (
     ProjectEntry, TaskEntry, EventEntry,
     Project, Task, Event,
     is_recurring_task, is_non_recurring_task,
-    is_event_rescheduled, events_to_dataframe
+    is_event_rescheduled
 )
 
 

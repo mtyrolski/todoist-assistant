@@ -82,7 +82,7 @@ class DatabaseProjects:
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
         logger.debug(f"Fetching projects (include_tasks={include_tasks})")
         if self.projects_cache is not None:
-            logger.debug(f"Using cached projects")
+            logger.debug("Using cached projects")
             return self.projects_cache
         logger.debug("Projects not fetched yet. Fetching now.")
 

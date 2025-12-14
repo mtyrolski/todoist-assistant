@@ -1,6 +1,5 @@
 """Reusable HTTP client helpers for the Todoist API."""
 
-from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field

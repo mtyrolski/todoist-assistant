@@ -1,4 +1,3 @@
-from loguru import logger
 from todoist.activity import quick_summarize
 from todoist.automations.base import Automation
 from todoist.database.base import Database
