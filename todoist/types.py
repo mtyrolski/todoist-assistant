@@ -166,7 +166,6 @@ class Task:
     def is_non_recurring(self) -> bool:
         return is_non_recurring_task(self)
 
-
 @dataclass
 class Project:
     id: str
