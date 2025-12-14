@@ -62,12 +62,12 @@ class _FakeDb:
         return True
 
 
-def test_tasks_sorted_by_depth_parent_before_child():
+def test_tasks_sorted_by_depth_child_before_parent():
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="P", labels=["X2"]))
     child = Task(id="2", task_entry=_task_entry(task_id="2", content="C", labels=["X2"], parent_id="1"))
 
-    # Deliberately provide child first; Multiply should process parent before child.
+    # Deliberately provide child first; Multiply should process child before parent (DFS post-order).
     db = _FakeDb(tasks=[child, parent])
     Multiply()._tick(db)
 
-    assert db.removed_ids == ["1", "2"]
+    assert db.removed_ids == ["2", "1"]

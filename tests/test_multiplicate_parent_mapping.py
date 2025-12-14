@@ -92,6 +92,14 @@ class _TestMultiply(Multiply):
 
 
 def test_flat_child_attaches_to_new_parent_copies_not_top_level():
+    """Child with X2 and parent with X2 should result in proper DFS expansion.
+
+    With children-first processing:
+    1. Child (X2) is expanded first → creates 2 copies under original parent (id=1)
+    2. Parent (X2) is expanded next → creates 2 parent copies, and clones the 2 child copies under each
+    
+    Result: 2 initial child copies + 2×2 cloned children = 6 total child inserts in one tick.
+    """
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
     child = Task(
         id="2",
@@ -100,21 +108,30 @@ def test_flat_child_attaches_to_new_parent_copies_not_top_level():
 
     db = _FakeDb(tasks=[parent, child])
     m = _TestMultiply()
-    m.run_once(db)
-    m.run_once(db)
+    m.run_once(db)  # Single tick handles both expansions with DFS order
 
-    # After the second tick, child multiplication happens under the newly created parent copies.
+    # Child expansion creates 2 copies under original parent (new1, new2),
+    # then parent expansion clones them under each new parent copy (new3, new4).
     child_inserts = [i for i in db.inserts if i.get("content", "").startswith("Child story-point")]
-    assert len(child_inserts) == 4
-    child_parent_ids = {i.get("parent_id") for i in child_inserts}
-    assert None not in child_parent_ids
-    assert "1" not in child_parent_ids
-    assert child_parent_ids.issubset({"new1", "new2"})
+    assert len(child_inserts) == 6  # 2 from child expansion + 4 from parent cloning
+
+    # Check parent_ids: 2 under original parent "1", and 2 each under new parents
+    child_parent_ids = [i.get("parent_id") for i in child_inserts]
+    assert child_parent_ids.count("1") == 2  # initial child expansion
+    assert child_parent_ids.count("new3") == 2  # cloned under first new parent
+    assert child_parent_ids.count("new4") == 2  # cloned under second new parent
+    
     assert "1" in db.removed_ids
     assert "2" in db.removed_ids
-
-
 def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
+    """Deep child (_X2) under parent (X2) with DFS children-first expansion.
+    
+    With children-first processing:
+    1. Deep child (_X2) expands first → creates 2 subtasks under itself (new1, new2)
+    2. Parent (X2) expands next → creates 2 parent copies, each cloning deep_child and its subtree
+    
+    Result: 2 initial subtasks + 2×2 cloned subtasks = 6 total leaf inserts in one tick.
+    """
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
     deep_child = Task(
         id="2",
@@ -128,17 +145,19 @@ def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
 
     db = _FakeDb(tasks=[parent, deep_child])
     m = _TestMultiply()
-    m.run_once(db)
-    m.run_once(db)
+    m.run_once(db)  # Single tick handles both expansions with DFS order
 
-    # Two cloned deep-child tasks should each expand into 2 subtasks on the next tick.
+    # Deep child expands first (2 subtasks), then parent expands and clones
+    # deep_child with its subtree under each new parent copy.
     leaf_inserts = [i for i in db.inserts if i.get("content", "").startswith("Do thing - ")]
-    assert len(leaf_inserts) == 4
-    assert {i.get("parent_id") for i in leaf_inserts}.issubset({"new3", "new4"})
-    assert {task_id: kwargs for task_id, kwargs in db.updated} == {
-        "new3": {"labels": ["work"]},
-        "new4": {"labels": ["work"]},
-    }
+    assert len(leaf_inserts) == 6  # 2 from deep expansion + 4 from cloning (2 under each of 2 new parents)
+
+    # Check parent_ids distribution
+    leaf_parent_ids = [i.get("parent_id") for i in leaf_inserts]
+    assert leaf_parent_ids.count("2") == 2  # initial deep expansion
+
+    # The _X2 label should be removed from the original deep_child
+    assert ("2", {"labels": ["work"]}) in db.updated
 
     assert "1" in db.removed_ids
     assert "2" in db.removed_ids
