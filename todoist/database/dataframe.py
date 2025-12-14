@@ -1,3 +1,4 @@
+from todoist.constants import EventExtraField
 from todoist.database.base import Database
 from todoist.types import SUPPORTED_EVENT_TYPES, Event, events_to_dataframe
 import pandas as pd
@@ -18,10 +19,10 @@ def extract_name(event: Event) -> str | None:
     Extracts the event name from the event's extra data.
     """
     extra = event.event_entry.extra_data
-    if 'content' in extra:
-        return extra['content']
-    if 'name' in extra:
-        return extra['name']
+    if EventExtraField.CONTENT in extra:
+        return extra[EventExtraField.CONTENT]
+    if EventExtraField.NAME in extra:
+        return extra[EventExtraField.NAME]
     return None
 
 

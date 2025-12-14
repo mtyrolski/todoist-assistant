@@ -5,6 +5,8 @@ from typing import Any
 from loguru import logger
 from pandas import DataFrame
 
+from todoist.constants import EventExtraField, EventType
+
 
 @dataclass
 class _ProjectEntry_API_V9:
@@ -192,14 +194,14 @@ def is_event_rescheduled(event: 'Event') -> bool:
         
     """
     return all([
-        event.event_entry.event_type == 'updated',
-        'due_date' in event.event_entry.extra_data,
-        'last_due_date' in event.event_entry.extra_data,
+        event.event_entry.event_type == EventType.UPDATED.value,
+        EventExtraField.DUE_DATE in event.event_entry.extra_data,
+        EventExtraField.LAST_DUE_DATE in event.event_entry.extra_data,
     ])
 
 
 _EVENT_SUBTYPES_MAPPING = {
-    'rescheduled': is_event_rescheduled,
+    EventType.RESCHEDULED: is_event_rescheduled,
 }
 
 
@@ -220,10 +222,10 @@ class Event:
 
     @property
     def name(self) -> str | None:
-        if 'content' in self.event_entry.extra_data:
-            return self.event_entry.extra_data['content']
-        if 'name' in self.event_entry.extra_data:
-            return self.event_entry.extra_data['name']
+        if EventExtraField.CONTENT in self.event_entry.extra_data:
+            return self.event_entry.extra_data[EventExtraField.CONTENT]
+        if EventExtraField.NAME in self.event_entry.extra_data:
+            return self.event_entry.extra_data[EventExtraField.NAME]
         return None
 
     @property
@@ -236,14 +238,19 @@ class Event:
         For example, 'updated' is a basic type,
         but it is extended with 1 subtype 'rescheduled' (of 'updated').
         """
-        matched_types = [event_type for event_type, is_match in _EVENT_SUBTYPES_MAPPING.items() if is_match(self)]
+        matched_types = [event_type.value for event_type, is_match in _EVENT_SUBTYPES_MAPPING.items() if is_match(self)]
         if len(matched_types) > 0:
             assert len(matched_types) == 1, 'More than one event type matched'
             return matched_types[0]
         return self.event_entry.event_type
 
 
-SUPPORTED_EVENT_TYPES = ['added', 'updated', 'completed', 'deleted']
+SUPPORTED_EVENT_TYPES = [
+    EventType.ADDED.value,
+    EventType.UPDATED.value,
+    EventType.COMPLETED.value,
+    EventType.DELETED.value,
+]
 
 
 def events_to_dataframe(

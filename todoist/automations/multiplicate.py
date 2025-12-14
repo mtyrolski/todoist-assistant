@@ -6,6 +6,7 @@ from typing import Iterable, Sequence
 from loguru import logger
 
 from todoist.automations.base import Automation
+from todoist.constants import TaskField
 from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
 
@@ -374,9 +375,9 @@ class Multiply(Automation):
                 old_parent_id, current_new_parent_id = stack.pop()
                 for child in children_by_parent.get(old_parent_id, []):
                     overrides: dict[str, object] = {
-                        "content": child.task_entry.content,
-                        "labels": list(child.task_entry.labels),
-                        "parent_id": current_new_parent_id,
+                        TaskField.CONTENT.value: child.task_entry.content,
+                        TaskField.LABELS.value: list(child.task_entry.labels),
+                        TaskField.PARENT_ID.value: current_new_parent_id,
                     }
                     created = db.insert_task_from_template(child, **overrides)
                     new_child_id = str(created.get("id", "")) if isinstance(created, dict) else ""
@@ -414,9 +415,12 @@ class Multiply(Automation):
             for i in range(1, n + 1):
                 content = _render(self.config.flat_leaf_template, base=base, i=i, n=n)
                 logger.debug(f"Creating flat task: {content}")
-                overrides: dict[str, object] = {"content": content, "labels": labels}
+                overrides: dict[str, object] = {
+                    TaskField.CONTENT.value: content,
+                    TaskField.LABELS.value: labels,
+                }
                 if parent_id is not None:
-                    overrides["parent_id"] = parent_id
+                    overrides[TaskField.PARENT_ID.value] = parent_id
 
                 created = db.insert_task_from_template(task, **overrides)
                 new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
