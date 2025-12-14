@@ -14,6 +14,19 @@
   </tr>
 </table>
 
+## Table of Contents
+- [Library Design Overview](#library-design-overview)
+- [Demo Video](#demo-video)
+- [Installation](#installation)
+  - [Recommended Setup Environment](#recommended-setup-environment)
+  - [Setup Instructions (Linux / Ubuntu / Debian)](#setup-instructions-linux--ubuntu--debian)
+- [Makefile Usage (recommended)](#makefile-usage-recommended)
+- [Manual Usage](#manual-usage)
+  - [Updating Activity Database](#updating-activity-database)
+  - [Automatons Manual launch](#automatons-manual-launch)
+  - [Dashboard Usage](#dashboard-usage)
+  - [Background Observer](#background-observer)
+
 ## Library Design Overview
 
 
@@ -169,6 +182,7 @@ The following [Makefile](Makefile) commands are available for managing the local
 
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
+- **`make run_observer`:** Runs the background observer that refreshes recent activity, resets local caches, and triggers short automations (templates, multiply, etc.) every 30 seconds.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
 
 
@@ -189,6 +203,14 @@ This line launches all automations defined in `configs/automations.yaml`. Update
 ```
 python3 -m todoist.automations.run --config-dir configs --config-name automations
 ```
+
+### Background Observer
+
+Keep the short automations running continuously against fresh activity data:
+```
+python3 -m todoist.automations.run_observer --config-dir configs --config-name automations
+```
+This entrypoint pulls the latest week of activity, updates the cached events, refreshes the local database view, and then runs the non-activity automations so multipliers/templates don’t re-expand already-processed tasks.
 
 ### Dashboard Usage
 
