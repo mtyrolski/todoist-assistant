@@ -1,10 +1,7 @@
 """
 Tests for timeout and retry functionality in database threading operations.
 """
-import pytest
-from unittest.mock import Mock, patch
-from concurrent.futures import TimeoutError as FutureTimeoutError
-from todoist.types import ProjectEntry
+from unittest.mock import patch
 
 
 def test_timeout_parameter_is_applied():

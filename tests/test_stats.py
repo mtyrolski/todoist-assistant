@@ -3,7 +3,6 @@ Tests for statistics and helper functions in todoist.stats module.
 """
 import pytest
 from datetime import datetime
-from unittest.mock import MagicMock
 
 from todoist.stats import (
     all_tasks,

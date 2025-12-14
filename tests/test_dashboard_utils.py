@@ -3,8 +3,6 @@ Tests for helper functions in todoist.dashboard.utils and todoist.automations.mu
 """
 import pytest
 import pandas as pd
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
 
 from todoist.dashboard.utils import extract_metrics, get_badges
 from todoist.automations.multiplicate import is_multiplication_label, extract_multiplication_factor

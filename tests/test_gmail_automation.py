@@ -1,7 +1,6 @@
 """Tests for Gmail Tasks Automation."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from todoist.automations.gmail_tasks import GmailTasksAutomation
 
 
