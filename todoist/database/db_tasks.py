@@ -9,6 +9,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
+from todoist.constants import TaskField
 from todoist.api.client import EndpointCallResult
 from todoist.types import Task
 from todoist.utils import MaxRetriesExceeded, RETRY_MAX_ATTEMPTS, with_retry
@@ -123,23 +124,23 @@ class DatabaseTasks:
             'deadline': None}
         """
         payload = {
-            "content": content,
-            "description": description,
-            "project_id": project_id,
-            "section_id": section_id,
-            "parent_id": parent_id,
-            "order": order,
-            "labels": labels,
-            "priority": priority,
-            "due_string": due_string,
-            "due_date": due_date,
-            "due_datetime": due_datetime,
-            "due_lang": due_lang,
-            "assignee_id": assignee_id,
-            "duration": duration,
-            "duration_unit": duration_unit,
-            "deadline_date": deadline_date,
-            "deadline_lang": deadline_lang
+            TaskField.CONTENT.value: content,
+            TaskField.DESCRIPTION.value: description,
+            TaskField.PROJECT_ID.value: project_id,
+            TaskField.SECTION_ID.value: section_id,
+            TaskField.PARENT_ID.value: parent_id,
+            TaskField.ORDER.value: order,
+            TaskField.LABELS.value: labels,
+            TaskField.PRIORITY.value: priority,
+            TaskField.DUE_STRING.value: due_string,
+            TaskField.DUE_DATE.value: due_date,
+            TaskField.DUE_DATETIME.value: due_datetime,
+            TaskField.DUE_LANG.value: due_lang,
+            TaskField.ASSIGNEE_ID.value: assignee_id,
+            TaskField.DURATION.value: duration,
+            TaskField.DURATION_UNIT.value: duration_unit,
+            TaskField.DEADLINE_DATE.value: deadline_date,
+            TaskField.DEADLINE_LANG.value: deadline_lang,
         }
 
         payload = {k: v for k, v in payload.items() if v is not None}
@@ -213,16 +214,16 @@ class DatabaseTasks:
         """
 
         payload = {
-            "content": content,
-            "description": description,
-            "labels": labels,
-            "priority": priority,
-            "due_string": due_string,
-            "due_date": due_date,
-            "due_datetime": due_datetime,
-            "due_lang": due_lang,
-            "duration": duration,
-            "duration_unit": duration_unit,
+            TaskField.CONTENT.value: content,
+            TaskField.DESCRIPTION.value: description,
+            TaskField.LABELS.value: labels,
+            TaskField.PRIORITY.value: priority,
+            TaskField.DUE_STRING.value: due_string,
+            TaskField.DUE_DATE.value: due_date,
+            TaskField.DUE_DATETIME.value: due_datetime,
+            TaskField.DUE_LANG.value: due_lang,
+            TaskField.DURATION.value: duration,
+            TaskField.DURATION_UNIT.value: duration_unit,
         }
         payload = {k: v for k, v in payload.items() if v is not None}
         if not payload:
@@ -341,7 +342,9 @@ class DatabaseTasks:
             """Insert a single task with built-in retry logic."""
             return with_retry(
                 partial(insert_single_task, task_data, index),
-                operation_name=f"insert task {index} (content: {task_data.get('content', 'N/A')})",
+                operation_name=(
+                    f"insert task {index} (content: {task_data.get(TaskField.CONTENT.value, 'N/A')})"
+                ),
                 max_attempts=RETRY_MAX_ATTEMPTS
             )
 

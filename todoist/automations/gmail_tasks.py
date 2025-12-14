@@ -16,6 +16,7 @@ from googleapiclient.errors import HttpError
 from loguru import logger
 
 from todoist.automations.base import Automation
+from todoist.constants import TaskField
 from todoist.database.base import Database
 from todoist.utils import Cache
 
@@ -134,9 +135,9 @@ class GmailTasksAutomation(Automation):
             priority = 3  # High priority
             
         return {
-            'content': content,
-            'description': description,
-            'priority': priority
+            TaskField.CONTENT.value: content,
+            TaskField.DESCRIPTION.value: description,
+            TaskField.PRIORITY.value: priority,
         }
     
     def _get_existing_task_contents(self, db: Database) -> set[str]:
@@ -246,23 +247,23 @@ class GmailTasksAutomation(Automation):
                     task_data = self._extract_task_content(subject, snippet, sender)
                     
                     # Check for duplicates
-                    normalized_content = task_data['content'].lower().strip()
+                    normalized_content = task_data[TaskField.CONTENT.value].lower().strip()
                     if normalized_content in existing_task_contents:
-                        logger.debug(f"Skipping duplicate task: {task_data['content']}")
+                        logger.debug(f"Skipping duplicate task: {task_data[TaskField.CONTENT.value]}")
                         continue
-                        
+
                     # Create task in Todoist
                     result = db.insert_task(
-                        content=task_data['content'],
-                        description=task_data['description'],
-                        priority=task_data['priority'],
+                        content=task_data[TaskField.CONTENT.value],
+                        description=task_data[TaskField.DESCRIPTION.value],
+                        priority=task_data[TaskField.PRIORITY.value],
                         labels=['gmail-task']  # Add label to identify Gmail-generated tasks
                     )
                     
                     if 'error' not in result:
                         tasks_created += 1
                         existing_task_contents.add(normalized_content)  # Prevent duplicates in this run
-                        logger.info(f"Created task: {task_data['content']}")
+                        logger.info(f"Created task: {task_data[TaskField.CONTENT.value]}")
                         # Mark this message as processed
                         if msg_id:
                             logger.debug(f"Marking email as processed: {msg_id}")
