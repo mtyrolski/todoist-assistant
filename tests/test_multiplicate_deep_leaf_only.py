@@ -50,7 +50,7 @@ class _FakeDb:
         self._projects = [SimpleNamespace(tasks=tasks)]
         self.inserts: list[dict] = []
         self.removed_ids: list[str] = []
-        self.updated: list[tuple[str, str]] = []
+        self.updated: list[tuple[str, dict]] = []
         self._counter = 0
 
     def fetch_projects(self, include_tasks: bool = True):
@@ -66,8 +66,8 @@ class _FakeDb:
         self.removed_ids.append(task_id)
         return True
 
-    def update_task_content(self, task_id: str, content: str):
-        self.updated.append((task_id, content))
+    def update_task(self, task_id: str, **kwargs):
+        self.updated.append((task_id, kwargs))
         return {"id": task_id}
 
 
@@ -76,10 +76,10 @@ class _TestMultiply(Multiply):
         self._tick(db)
 
 
-def test_deep_token_on_non_leaf_is_stripped_and_not_expanded():
+def test_deep_label_on_non_leaf_creates_subtasks_and_removes_multiplier_label():
     parent = Task(
         id="1",
-        task_entry=_task_entry(task_id="1", content="Parent @_X3 - part J", labels=["work"]),
+        task_entry=_task_entry(task_id="1", content="Parent", labels=["_X3", "work"]),
     )
     child = Task(
         id="2",
@@ -89,21 +89,31 @@ def test_deep_token_on_non_leaf_is_stripped_and_not_expanded():
     db = _FakeDb(tasks=[parent, child])
     _TestMultiply().run_once(db)
 
-    assert db.updated == [("1", "Parent")]
-    assert db.inserts == []
+    assert [i["content"] for i in db.inserts] == [
+        "Parent - 1/3",
+        "Parent - 2/3",
+        "Parent - 3/3",
+    ]
+    assert all(i.get("parent_id") == "1" for i in db.inserts)
+    assert all(i.get("labels") == ["work"] for i in db.inserts)
+    assert db.updated == [("1", {"labels": ["work"]})]
     assert db.removed_ids == []
 
 
-def test_deep_token_prioritized_over_flat_label():
+def test_deep_label_prioritized_over_flat_label():
     task = Task(
         id="1",
-        task_entry=_task_entry(task_id="1", content="Do thing @_X2 - part J", labels=["X9", "work"]),
+        task_entry=_task_entry(task_id="1", content="Do thing", labels=["_X2", "X9", "work"]),
     )
 
     db = _FakeDb(tasks=[task])
     _TestMultiply().run_once(db)
 
-    # Deep expansion: replacement parent + batch + 2 leaves
-    assert len(db.inserts) == 4
-    assert db.inserts[0]["content"] == "Do thing"
-    assert db.inserts[1]["content"] == "Batch of work - part J"
+    assert [i["content"] for i in db.inserts] == [
+        "Do thing - 1/2",
+        "Do thing - 2/2",
+    ]
+    assert all(i.get("parent_id") == "1" for i in db.inserts)
+    assert all(i.get("labels") == ["work"] for i in db.inserts)
+    # Both multiplier labels removed from the parent
+    assert db.updated == [("1", {"labels": ["work"]})]

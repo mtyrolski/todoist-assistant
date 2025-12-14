@@ -47,27 +47,42 @@ def _task_entry(
 
 class _FakeDb:
     def __init__(self, tasks: list[Task]):
-        self._projects = [SimpleNamespace(tasks=tasks)]
+        self._tasks: dict[str, Task] = {t.id: t for t in tasks}
+        self._projects = [SimpleNamespace(tasks=list(self._tasks.values()))]
         self.inserts: list[dict] = []
         self.removed_ids: list[str] = []
-        self.updated: list[tuple[str, str]] = []
+        self.updated: list[tuple[str, dict]] = []
         self._counter = 0
 
     def fetch_projects(self, include_tasks: bool = True):
         _ = include_tasks
+        self._projects[0].tasks = list(self._tasks.values())
         return self._projects
 
     def insert_task_from_template(self, _task: Task, **overrides):
         self._counter += 1
         self.inserts.append(overrides)
-        return {"id": f"new{self._counter}"}
+        new_id = f"new{self._counter}"
+        content = overrides.get("content", _task.task_entry.content)
+        labels = overrides.get("labels", list(_task.task_entry.labels))
+        parent_id = overrides.get("parent_id", _task.task_entry.parent_id)
+        created_task = Task(
+            id=new_id,
+            task_entry=_task_entry(task_id=new_id, content=content, labels=labels, parent_id=parent_id),
+        )
+        self._tasks[new_id] = created_task
+        return {"id": new_id}
 
     def remove_task(self, task_id: str) -> bool:
         self.removed_ids.append(task_id)
+        self._tasks.pop(task_id, None)
         return True
 
-    def update_task_content(self, task_id: str, content: str):
-        self.updated.append((task_id, content))
+    def update_task(self, task_id: str, **kwargs):
+        self.updated.append((task_id, kwargs))
+        task = self._tasks.get(task_id)
+        if task is not None and "labels" in kwargs:
+            task.task_entry.labels = kwargs["labels"]
         return {"id": task_id}
 
 
@@ -84,44 +99,46 @@ def test_flat_child_attaches_to_new_parent_copies_not_top_level():
     )
 
     db = _FakeDb(tasks=[parent, child])
-    _TestMultiply().run_once(db)
+    m = _TestMultiply()
+    m.run_once(db)
+    m.run_once(db)
 
-    # Parent copies created first
-    parent_inserts = [i for i in db.inserts if i.get("content", "").startswith("Parent")]
-    assert len(parent_inserts) == 2
-
-    # Child copies must point at *new* parent ids, not missing parent_id (top-level)
-    # and not the deleted original parent "1".
-    child_inserts = [i for i in db.inserts if i.get("content", "").startswith("Child")]
-    assert len(child_inserts) >= 2
+    # After the second tick, child multiplication happens under the newly created parent copies.
+    child_inserts = [i for i in db.inserts if i.get("content", "").startswith("Child story-point")]
+    assert len(child_inserts) == 4
     child_parent_ids = {i.get("parent_id") for i in child_inserts}
     assert None not in child_parent_ids
     assert "1" not in child_parent_ids
     assert child_parent_ids.issubset({"new1", "new2"})
+    assert "1" in db.removed_ids
+    assert "2" in db.removed_ids
 
-    # Both source tasks removed for idempotency
-    assert db.removed_ids == ["1", "2"]
 
-
-def test_deep_child_under_expanded_parent_is_reparented_via_replacement_parent():
+def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
     deep_child = Task(
         id="2",
         task_entry=_task_entry(
             task_id="2",
-            content="Do thing @_X2 - part J",
-            labels=["work"],
+            content="Do thing",
+            labels=["_X2", "work"],
             parent_id="1",
         ),
     )
 
     db = _FakeDb(tasks=[parent, deep_child])
-    _TestMultiply().run_once(db)
+    m = _TestMultiply()
+    m.run_once(db)
+    m.run_once(db)
 
-    # Replacement parents for deep child should be created under each new parent copy.
-    replacement_parents = [i for i in db.inserts if i.get("content") == "Do thing"]
-    assert len(replacement_parents) == 2
-    assert {i.get("parent_id") for i in replacement_parents} == {"new1", "new2"}
+    # Two cloned deep-child tasks should each expand into 2 subtasks on the next tick.
+    leaf_inserts = [i for i in db.inserts if i.get("content", "").startswith("Do thing - ")]
+    assert len(leaf_inserts) == 4
+    assert {i.get("parent_id") for i in leaf_inserts}.issubset({"new3", "new4"})
+    assert {task_id: kwargs for task_id, kwargs in db.updated} == {
+        "new3": {"labels": ["work"]},
+        "new4": {"labels": ["work"]},
+    }
 
-    # Deep child source removed
-    assert db.removed_ids == ["1", "2"]
+    assert "1" in db.removed_ids
+    assert "2" in db.removed_ids

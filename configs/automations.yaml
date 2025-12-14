@@ -6,7 +6,7 @@ defaults:
 activity:
   _target_: todoist.automations.activity.Activity
   name: Activity Fetching Automation
-  nweeks_window_size: 6 # 6 weeks window
+  nweeks_window_size: 2 # 6 weeks window
   early_stop_after_n_windows: 2 # Stop if 2 consecutive windows yield no new events
 
 # Multiply automation configuration
