@@ -1,6 +1,7 @@
 from inspect import signature
 from typing import Any, Final, Iterable, Mapping
 from todoist.automations.base import Automation
+from todoist.constants import TaskField
 from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
 from loguru import logger
@@ -47,12 +48,14 @@ class TaskTemplate:
         if isinstance(config, TaskTemplate):
             return config
 
-        content = config.get('content')
+        content = config.get(TaskField.CONTENT.value)
         if content is None:
-            raise ValueError(f"Missing required field 'content' in TaskTemplate config: {config}")
-        description = config.get('description')
+            raise ValueError(
+                f"Missing required field '{TaskField.CONTENT.value}' in TaskTemplate config: {config}"
+            )
+        description = config.get(TaskField.DESCRIPTION.value)
         due_date_days_difference = config.get('due_date_days_difference', 0)
-        priority = config.get('priority', 1)
+        priority = config.get(TaskField.PRIORITY.value, 1)
         children = [cls.from_config(child) for child in config.get('children', [])]
 
         return cls(content=content,
