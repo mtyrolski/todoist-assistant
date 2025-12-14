@@ -2,10 +2,9 @@
 Tests for utility functions in todoist.utils module.
 """
 import pytest
-import time
 import tempfile
 import os
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 from dataclasses import dataclass
 from typing import KeysView
 from todoist.utils import MaxRetriesExceeded

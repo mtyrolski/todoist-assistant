@@ -47,5 +47,5 @@ if __name__ == '__main__':
     # pylint: disable=no-value-for-parameter
     # set logger level to >= INFO
     logger.remove()
-    logger.add(sys.stderr, level="INFO")
+    logger.add(sys.stderr, level="DEBUG")
     main()

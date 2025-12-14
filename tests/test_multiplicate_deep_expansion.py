@@ -11,7 +11,6 @@ def _task_entry(
     labels: list[str],
     parent_id: str | None = None,
 ) -> TaskEntry:
-    # Minimal constructor for the TaskEntry dataclass.
     return TaskEntry(
         id=task_id,
         is_deleted=False,
@@ -49,25 +48,50 @@ def _task_entry(
 class _FakeDb:
     def __init__(self, tasks: list[Task]):
         self._projects = [SimpleNamespace(tasks=tasks)]
+        self.inserts: list[dict] = []
         self.removed_ids: list[str] = []
+        self.updated: dict = {}
+        self._counter = 0
 
     def fetch_projects(self, include_tasks: bool = True):
         return self._projects
 
-    def insert_task_from_template(self, *args, **kwargs):
-        return None
+    def insert_task_from_template(self, _task: Task, **overrides):
+        self._counter += 1
+        self.inserts.append(overrides)
+        return {"id": f"new{self._counter}"}
 
     def remove_task(self, task_id: str) -> bool:
         self.removed_ids.append(task_id)
         return True
 
+    def update_task(self, task_id: str, **kwargs):
+        _ = task_id
+        self.updated = kwargs
+        return {"id": task_id}
 
-def test_tasks_sorted_by_depth_child_before_parent():
-    parent = Task(id="1", task_entry=_task_entry(task_id="1", content="P", labels=["X2"]))
-    child = Task(id="2", task_entry=_task_entry(task_id="2", content="C", labels=["X2"], parent_id="1"))
 
-    # Deliberately provide child first; Multiply should process child before parent (DFS post-order).
-    db = _FakeDb(tasks=[child, parent])
+def test_deep_label_creates_children_under_task_and_removes_multiplier_label():
+    task = Task(
+        id="1",
+        task_entry=_task_entry(
+            task_id="1",
+            content="Do thing",
+            labels=["_X3", "work"],
+        ),
+    )
+
+    db = _FakeDb(tasks=[task])
     Multiply()._tick(db)
 
-    assert db.removed_ids == ["2", "1"]
+    assert [i["content"] for i in db.inserts] == [
+        "Do thing - 1/3",
+        "Do thing - 2/3",
+        "Do thing - 3/3",
+    ]
+    assert all(i.get("parent_id") == "1" for i in db.inserts)
+    assert all(i.get("labels") == ["work"] for i in db.inserts)
+
+    # multiplier label removed from the parent for idempotency
+    assert db.updated == {"labels": ["work"]}
+    assert db.removed_ids == []

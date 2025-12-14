@@ -1,10 +1,9 @@
 """
 Tests for database operations that create and modify data structures.
 """
-import json
 import inspect
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 from todoist.api import EndpointCallResult, TodoistEndpoints
 from todoist.api.client import RequestSpec
