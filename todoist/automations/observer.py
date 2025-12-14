@@ -81,32 +81,3 @@ class AutomationObserver:
         Cache().activity.save(cached_events)
         logger.debug(f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}")
         return set(events)
-
-
-@hydra.main(version_base=None, config_path=None)
-def main(config: DictConfig) -> None:
-    logger.add("automation.log", rotation="500 MB")
-    db = Database('.env')
-    automations: list[Automation] = hydra.utils.instantiate(config.automations)
-
-    activity_automation = next((auto for auto in automations if isinstance(auto, Activity)), None)
-    if activity_automation is None:
-        activity_cfg = getattr(config, "activity", None)
-        if activity_cfg is not None:
-            activity_automation = hydra.utils.instantiate(activity_cfg)
-    if activity_automation is None:
-        raise RuntimeError("Activity automation configuration is required for observer mode.")
-
-    short_automations = [auto for auto in automations if auto is not activity_automation]
-
-    observer = AutomationObserver(
-        db=db,
-        automations=short_automations,
-        activity=activity_automation,
-    )
-    observer.run_forever()
-
-
-if __name__ == "__main__":
-    # pylint: disable=no-value-for-parameter
-    main()
