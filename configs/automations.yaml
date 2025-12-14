@@ -13,9 +13,6 @@ activity:
 multiply:
   _target_: todoist.automations.multiplicate.Multiply
   frequency_in_minutes: 0.1
-  # Deep token example: "Do thing @_X5 - part J" (creates a batch subtask + 5 children)
-  # deep_batch_template: "Batch of work{part_suffix}"
-  # deep_leaf_template: "{base}{part_suffix} - {i}/{n}"
 
 gmail_tasks:
   _target_: todoist.automations.gmail_tasks.GmailTasksAutomation

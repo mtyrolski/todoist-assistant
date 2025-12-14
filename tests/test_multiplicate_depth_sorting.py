@@ -71,3 +71,4 @@ def test_tasks_sorted_by_depth_child_before_parent():
     Multiply()._tick(db)
 
     assert db.removed_ids == ["2", "1"]
+

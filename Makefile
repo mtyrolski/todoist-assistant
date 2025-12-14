@@ -12,6 +12,9 @@ run_dashboard:
 run_demo:
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False demo
 
+run_observer:
+	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.run_observer --config-dir configs --config-name automations
+
 clear_local_env:
 	rm -f activity.joblib
 

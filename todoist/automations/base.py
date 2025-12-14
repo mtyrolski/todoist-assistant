@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 import datetime as dt
 from loguru import logger
-from todoist.database.base import Database
 
+from todoist.database.base import Database
 from todoist.utils import Cache
 
 
