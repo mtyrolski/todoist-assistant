@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PlotCard, type PlotlyFigure } from "./components/PlotCard";
 import { StatCard } from "./components/StatCard";
+import { LoadingBar } from "./components/LoadingBar";
+import { LeaderboardCard, type LeaderboardItem } from "./components/LeaderboardCard";
+import { ServiceMonitor, type ServiceStatus } from "./components/ServiceMonitor";
 
 type Health = { status: string } | null;
 
@@ -16,9 +19,20 @@ type DashboardHome = {
     previousPeriod: string;
   };
   badges: { p1: number; p2: number; p3: number; p4: number };
+  leaderboards?: {
+    parentProjects: { items: LeaderboardItem[]; figure: PlotlyFigure };
+    rootProjects: { items: LeaderboardItem[]; figure: PlotlyFigure };
+    period: { current: string; previous: string };
+  };
   figures: Record<string, PlotlyFigure>;
   refreshedAt: string;
   error?: string;
+};
+
+type DashboardStatus = {
+  services: ServiceStatus[];
+  apiCache: { lastRefresh: string | null };
+  now: string;
 };
 
 export default function Page() {
@@ -32,6 +46,9 @@ export default function Page() {
   const lastRefreshNonce = useRef<number>(0);
   const [dashboard, setDashboard] = useState<DashboardHome | null>(null);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [status, setStatus] = useState<DashboardStatus | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [statusRefreshNonce, setStatusRefreshNonce] = useState(0);
 
   useEffect(() => {
     const fetchHealth = async () => {
@@ -82,15 +99,39 @@ export default function Page() {
     return () => controller.abort();
   }, [granularity, weeks, refreshNonce]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        setLoadingStatus(true);
+        const qs = new URLSearchParams({ refresh: statusRefreshNonce ? "true" : "false" });
+        const res = await fetch(`/api/dashboard/status?${qs.toString()}`, { signal: controller.signal });
+        if (!res.ok) throw new Error("status");
+        const payload = (await res.json()) as DashboardStatus;
+        setStatus(payload);
+      } catch {
+        setStatus(null);
+      } finally {
+        setLoadingStatus(false);
+      }
+    };
+    load();
+    return () => controller.abort();
+  }, [statusRefreshNonce]);
+
   const periodLabel = useMemo(() => {
     if (!dashboard) return null;
     return `${dashboard.range.beg} → ${dashboard.range.end}`;
   }, [dashboard]);
 
   const figures = dashboard?.figures ?? {};
+  const parentBoard = dashboard?.leaderboards?.parentProjects?.items ?? null;
+  const rootBoard = dashboard?.leaderboards?.rootProjects?.items ?? null;
+  const [boardMode, setBoardMode] = useState<"parent" | "root">("parent");
 
   return (
     <div className="page">
+      <LoadingBar active={loadingDashboard || loadingStatus} />
       <header className="topbar">
         <div>
           <p className="eyebrow">Todoist Assistant</p>
@@ -166,6 +207,65 @@ export default function Page() {
         <span className="badge badge-p2">P2 {dashboard?.badges.p2 ?? "—"}</span>
         <span className="badge badge-p3">P3 {dashboard?.badges.p3 ?? "—"}</span>
         <span className="badge badge-p4">P4 {dashboard?.badges.p4 ?? "—"}</span>
+      </section>
+
+      <section className="grid2">
+        <section className="card">
+          <header className="cardHeader">
+            <h2>Activity Spotlight</h2>
+            <div className="segmented">
+              <button
+                type="button"
+                className={`seg ${boardMode === "parent" ? "segActive" : ""}`}
+                onClick={() => setBoardMode("parent")}
+              >
+                Parent projects
+              </button>
+              <button
+                type="button"
+                className={`seg ${boardMode === "root" ? "segActive" : ""}`}
+                onClick={() => setBoardMode("root")}
+              >
+                Root projects
+              </button>
+            </div>
+          </header>
+          <div className="muted tiny" style={{ padding: "0 2px 10px" }}>
+            Compares current period vs previous period ({dashboard?.metrics.currentPeriod ?? "—"}).
+          </div>
+          <LeaderboardCard items={boardMode === "parent" ? parentBoard : rootBoard} />
+        </section>
+
+        <section className="stack">
+          <section className="card">
+            <header className="cardHeader">
+              <h2>Admin Control</h2>
+            </header>
+            <p className="muted tiny" style={{ margin: "0 0 12px" }}>
+              For Streamlit admin pages, start `make run_dashboard_streamlit` first.
+            </p>
+            <div className="adminGrid">
+              <a className="adminLink" href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
+                API docs
+                <span className="muted tiny">FastAPI Swagger</span>
+              </a>
+              <a className="adminLink" href="http://127.0.0.1:8000/api/health" target="_blank" rel="noreferrer">
+                API health
+                <span className="muted tiny">Quick ping</span>
+              </a>
+              <a className="adminLink" href="http://127.0.0.1:8501" target="_blank" rel="noreferrer">
+                Legacy Streamlit
+                <span className="muted tiny">Control Panel / Logs / Projects</span>
+              </a>
+              <a className="adminLink" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">
+                Frontend
+                <span className="muted tiny">Open in new tab</span>
+              </a>
+            </div>
+          </section>
+
+          <ServiceMonitor services={status?.services ?? null} onRefresh={() => setStatusRefreshNonce((x) => x + 1)} />
+        </section>
       </section>
 
       <section className="stack">

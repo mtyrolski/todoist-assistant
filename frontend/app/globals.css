@@ -32,6 +32,34 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.loadingBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.loadingBarInner {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, rgba(106, 227, 255, 0), rgba(106, 227, 255, 0.9), rgba(140, 123, 255, 0));
+  transform: translateX(-60%);
+  animation: loadingSlide 0.9s linear infinite;
+}
+
+@keyframes loadingSlide {
+  0% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
 .page {
   max-width: 1200px;
   margin: 0 auto;
@@ -138,6 +166,11 @@ h1 {
   background: linear-gradient(135deg, rgba(106, 227, 255, 0.18), rgba(140, 123, 255, 0.18));
   color: var(--text);
   cursor: pointer;
+}
+
+.buttonSmall {
+  padding: 8px 10px;
+  width: auto;
 }
 
 .button:disabled {
@@ -279,6 +312,167 @@ h1 {
   gap: 18px;
 }
 
+.segmented {
+  display: inline-flex;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.seg {
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.segActive {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.adminGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.adminLink {
+  display: grid;
+  gap: 4px;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  text-decoration: none;
+  color: var(--text);
+}
+
+.adminLink:hover {
+  border-color: rgba(106, 227, 255, 0.45);
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 12px 1fr 1.6fr;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rowMain {
+  display: grid;
+  gap: 2px;
+}
+
+.rowTitle {
+  margin: 0;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.rowDetail {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: transparent;
+  border: 0;
+  color: rgba(232, 236, 242, 0.75);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.04);
+}
+
+.dot-ok {
+  background: var(--ok);
+}
+
+.dot-warn {
+  background: var(--danger);
+}
+
+.dot-neutral {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.leaderboard {
+  display: grid;
+  gap: 12px;
+}
+
+.leaderRow {
+  padding: 10px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.leaderMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.leaderName {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderNumbers {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.leaderBar {
+  margin-top: 10px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.leaderFill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+
 .skeleton {
   position: relative;
   overflow: hidden;
@@ -322,5 +516,17 @@ h1 {
 
   .statsRow {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .adminGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .row {
+    grid-template-columns: 12px 1fr;
+  }
+
+  .rowDetail {
+    grid-column: 1 / -1;
   }
 }

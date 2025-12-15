@@ -5,9 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
 from typing import Any, Literal
 import json
+import os
 import time
 
 import plotly.io as pio
+import plotly.graph_objects as go
 
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
@@ -45,7 +47,7 @@ async def healthcheck() -> dict[str, str]:
 Granularity = Literal["W", "ME", "3ME"]
 
 
-def _extract_metrics(df_activity, granularity: Granularity) -> tuple[list[dict[str, Any]], str, str]:
+def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
     granularity_to_timedelta = {
         "W": timedelta(weeks=1),
         "ME": timedelta(weeks=4),
@@ -61,6 +63,17 @@ def _extract_metrics(df_activity, granularity: Granularity) -> tuple[list[dict[s
     current_period_str = f"{beg_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
     previous_period_str = f"{previous_beg_range.strftime('%Y-%m-%d')} to {previous_end_range.strftime('%Y-%m-%d')}"
 
+    return {
+        "beg": beg_range,
+        "end": end_range,
+        "prevBeg": previous_beg_range,
+        "prevEnd": previous_end_range,
+        "currentLabel": current_period_str,
+        "previousLabel": previous_period_str,
+    }
+
+
+def _extract_metrics(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
     def _get_total_events(beg_, end_) -> int:
         filtered_df = df_activity[(df_activity.index >= beg_) & (df_activity.index <= end_)]
         return len(filtered_df)
@@ -78,8 +91,8 @@ def _extract_metrics(df_activity, granularity: Granularity) -> tuple[list[dict[s
 
     metrics: list[dict[str, Any]] = []
     for metric_name, metric_func, inverse in metric_specs:
-        current_value = int(metric_func(beg_range, end_range))
-        previous_value = int(metric_func(previous_beg_range, previous_end_range))
+        current_value = int(metric_func(periods["beg"], periods["end"]))
+        previous_value = int(metric_func(periods["prevBeg"], periods["prevEnd"]))
         if previous_value:
             delta_percent = round((current_value - previous_value) / previous_value * 100, 2)
         else:
@@ -93,7 +106,7 @@ def _extract_metrics(df_activity, granularity: Granularity) -> tuple[list[dict[s
             }
         )
 
-    return metrics, current_period_str, previous_period_str
+    return metrics
 
 
 def _fig_to_dict(fig) -> dict[str, Any]:
@@ -134,6 +147,102 @@ def _ensure_state(refresh: bool) -> None:
     _state.last_refresh_s = now
 
 
+def _service_statuses() -> list[dict[str, Any]]:
+    def stat_file(path: str) -> dict[str, Any] | None:
+        if not os.path.exists(path):
+            return None
+        try:
+            mtime = os.path.getmtime(path)
+            size = os.path.getsize(path)
+            return {"path": path, "mtime": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"), "size": size}
+        except OSError:
+            return {"path": path, "mtime": None, "size": None}
+
+    api_key_set = bool(os.getenv("API_KEY"))
+    cache_activity = stat_file("activity.joblib")
+    automation_log = stat_file("automation.log")
+
+    observer_recent = False
+    if automation_log and automation_log.get("mtime"):
+        try:
+            log_dt = datetime.fromisoformat(automation_log["mtime"])
+            observer_recent = (datetime.now() - log_dt) < timedelta(minutes=2)
+        except ValueError:
+            observer_recent = False
+
+    return [
+        {"name": "Todoist token", "status": "ok" if api_key_set else "warn", "detail": "API_KEY set" if api_key_set else "API_KEY missing"},
+        {"name": "Activity cache", "status": "ok" if cache_activity else "warn", "detail": cache_activity or "activity.joblib missing"},
+        {"name": "Automation log", "status": "ok" if automation_log else "warn", "detail": automation_log or "automation.log missing"},
+        {"name": "Observer", "status": "ok" if observer_recent else "neutral", "detail": "recent activity" if observer_recent else "not detected"},
+    ]
+
+
+@app.get("/api/dashboard/status", tags=["dashboard"])
+async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
+    """
+    Lightweight status endpoint for UI badges (does not generate plots).
+    """
+    _ = refresh
+    return {
+        "services": _service_statuses(),
+        "apiCache": {
+            "lastRefresh": datetime.fromtimestamp(_state.last_refresh_s).isoformat(timespec="seconds")
+            if _state.last_refresh_s
+            else None
+        },
+        "now": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _leaderboard(df_activity, *, periods: dict[str, Any], column: str, project_colors: dict[str, str]) -> dict[str, Any]:
+    df_cur = df_activity[(df_activity.index >= periods["beg"]) & (df_activity.index <= periods["end"])]
+    df_prev = df_activity[(df_activity.index >= periods["prevBeg"]) & (df_activity.index <= periods["prevEnd"])]
+
+    cur_counts = df_cur[column].fillna("").replace("", "(unknown)").value_counts()
+    prev_counts = df_prev[column].fillna("").replace("", "(unknown)").value_counts()
+    top_names = list(cur_counts.head(10).index)
+
+    items: list[dict[str, Any]] = []
+    for name in top_names:
+        cur = int(cur_counts.get(name, 0))
+        prev = int(prev_counts.get(name, 0))
+        delta_pct = round((cur - prev) / prev * 100, 2) if prev else None
+        items.append(
+            {
+                "name": name,
+                "events": cur,
+                "prevEvents": prev,
+                "deltaPercent": delta_pct,
+                "color": project_colors.get(name, "#808080"),
+            }
+        )
+
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=[it["events"] for it in items][::-1],
+                y=[it["name"] for it in items][::-1],
+                orientation="h",
+                marker=dict(color=[it["color"] for it in items][::-1]),
+                hovertemplate="%{y}<br>%{x} events<extra></extra>",
+            )
+        ]
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        title=None,
+        xaxis_title="Events",
+        yaxis_title="Project",
+        height=360,
+        margin=dict(l=140, r=18, t=10, b=46),
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
+    )
+
+    return {"items": items, "figure": _fig_to_dict(fig)}
+
+
 @app.get("/api/dashboard/home", tags=["dashboard"])
 async def dashboard_home(
     granularity: Granularity = "W",
@@ -161,7 +270,8 @@ async def dashboard_home(
     end_range = df_activity.index.max().to_pydatetime()
     beg_range = end_range - timedelta(weeks=max(1, weeks))
 
-    metrics, current_period, previous_period = _extract_metrics(df_activity, granularity)
+    periods = _period_bounds(df_activity, granularity)
+    metrics = _extract_metrics(df_activity, periods)
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
@@ -189,8 +299,27 @@ async def dashboard_home(
             "granularity": granularity,
             "weeks": weeks,
         },
-        "metrics": {"items": metrics, "currentPeriod": current_period, "previousPeriod": previous_period},
+        "metrics": {
+            "items": metrics,
+            "currentPeriod": periods["currentLabel"],
+            "previousPeriod": periods["previousLabel"],
+        },
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
+        "leaderboards": {
+            "parentProjects": _leaderboard(
+                df_activity,
+                periods=periods,
+                column="parent_project_name",
+                project_colors=project_colors,
+            ),
+            "rootProjects": _leaderboard(
+                df_activity,
+                periods=periods,
+                column="root_project_name",
+                project_colors=project_colors,
+            ),
+            "period": {"current": periods["currentLabel"], "previous": periods["previousLabel"]},
+        },
         "figures": figures,
         "refreshedAt": datetime.now().isoformat(timespec="seconds"),
     }
