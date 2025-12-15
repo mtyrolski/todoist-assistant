@@ -2,6 +2,7 @@ from datetime import datetime
 
 from todoist.automations.activity import Activity
 from todoist.types import Event, EventEntry
+from todoist.utils import Cache
 
 
 def _build_event(event_id: str, event_type: str, date_str: str) -> Event:
@@ -51,3 +52,50 @@ def test_activity_fetch_recent_events_returns_stats():
     assert stats["updated"] == 1
     assert stats["completed"] == 1
     assert db.requested_pages == [2]
+
+
+def test_activity_tick_persists_cache_and_summarizes(tmp_path, monkeypatch):
+    """_tick should persist new events and only mark delta events as new on subsequent runs."""
+    monkeypatch.chdir(tmp_path)
+
+    events = [
+        _build_event("1", "added", "2024-01-01T00:00:00Z"),
+        _build_event("2", "completed", "2024-01-02T00:00:00Z"),
+    ]
+
+    summary_calls: list[tuple[set[Event], set[Event]]] = []
+
+    def _fake_summary(*, events: set[Event], new_events: set[Event]):
+        summary_calls.append((events, new_events))
+
+    monkeypatch.setattr("todoist.automations.activity.quick_summarize", _fake_summary)
+
+    class _FakeDb:
+        def __init__(self, events_to_return: list[Event]):
+            self.events_to_return = events_to_return
+            self.calls: list[tuple[int, int]] = []
+
+        def fetch_activity_adaptively(self, *, nweeks_window_size, early_stop_after_n_windows, events_already_fetched):
+            self.calls.append((nweeks_window_size, early_stop_after_n_windows))
+            return list(self.events_to_return)
+
+    db = _FakeDb(events)
+    activity = Activity(name="Activity Fetching Automation", nweeks_window_size=2, early_stop_after_n_windows=1)
+
+    activity._tick(db)
+    cached_after_first = Cache().activity.load()
+
+    assert db.calls == [(2, 1)]
+    assert cached_after_first == set(events)
+    assert len(summary_calls) == 1
+    assert summary_calls[0][0] == set(events)
+    assert summary_calls[0][1] == set(events)  # all events are new on first run
+
+    # Second run with same events should treat them as already known
+    activity._tick(db)
+    cached_after_second = Cache().activity.load()
+
+    assert cached_after_second == set(events)
+    assert len(summary_calls) == 2
+    assert summary_calls[1][0] == set(events)
+    assert summary_calls[1][1] == set()  # no delta events the second time
