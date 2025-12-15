@@ -1,10 +1,11 @@
 [project]
 name = "todoist-assistant"
-version = "0.1.11"
+version = "0.2.0"
 description = "Interactive Dashboard"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.115.6",
     "google-api-python-client>=2.169.0",
     "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.2.2",
@@ -32,5 +33,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "tweepy>=4.15.0",
     "typer>=0.15.3",
+    "uvicorn>=0.32.0",
     "yapf>=0.43.0",
 ]
