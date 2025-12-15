@@ -75,9 +75,13 @@ class AutomationObserver:
         except LocalStorageError:
             cached_events = set()
 
-        before = len(cached_events)
-        cached_events.update(events)
-        added = len(cached_events) - before
+        new_events = {event for event in events if event not in cached_events}
+        if not new_events:
+            logger.debug("Observer activity cache unchanged; no new events detected.")
+            return set()
+
+        cached_events.update(new_events)
+        added = len(new_events)
         Cache().activity.save(cached_events)
         logger.debug(f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}")
-        return set(events)
+        return new_events
