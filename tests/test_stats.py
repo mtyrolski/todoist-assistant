@@ -1,8 +1,11 @@
 """
 Tests for statistics and helper functions in todoist.stats module.
 """
-import pytest
 from datetime import datetime
+
+import pytest
+
+# pylint: disable=redefined-outer-name
 
 from todoist.stats import (
     all_tasks,
@@ -47,7 +50,7 @@ def project_entry():
 @pytest.fixture
 def task_entry_factory():
     """Factory for creating TaskEntry instances with different priorities and labels."""
-    def _create_task_entry(task_id: str, priority: int = 1, labels: list[str] = None):
+    def _create_task_entry(task_id: str, priority: int = 1, labels: list[str] | None = None):
         if labels is None:
             labels = []
         return TaskEntry(
@@ -369,7 +372,7 @@ def test_try_parse_date_various_valid_formats():
         ("2024-03-15T10:30:45", datetime(2024, 3, 15, 10, 30, 45)),
         ("2024-03-15T10:30:45.999999Z", datetime(2024, 3, 15, 10, 30, 45, 999999)),
     ]
-    
+
     for date_str, expected in test_cases:
         result = try_parse_date(date_str)
         assert result == expected, f"Failed for {date_str}"
@@ -438,11 +441,11 @@ def test_extract_task_due_date_edge_cases():
     # End of year
     result1 = extract_task_due_date("2024-12-31")
     assert result1 == datetime(2024, 12, 31)
-    
+
     # Start of year
     result2 = extract_task_due_date("2025-01-01")
     assert result2 == datetime(2025, 1, 1)
-    
+
     # Leap year date
     result3 = extract_task_due_date("2024-02-29")
     assert result3 == datetime(2024, 2, 29)

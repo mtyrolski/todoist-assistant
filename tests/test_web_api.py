@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import pandas as pd
 import plotly.graph_objects as go
 from fastapi.testclient import TestClient
 
 import todoist.web.api as web_api
 
+# pylint: disable=protected-access
+
 
 def _stub_all_figures(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "current_tasks_types", lambda *args, **kwargs: go.Figure())
     monkeypatch.setattr(web_api, "plot_most_popular_labels", lambda *args, **kwargs: go.Figure())
     monkeypatch.setattr(web_api, "plot_task_lifespans", lambda *args, **kwargs: go.Figure())
     monkeypatch.setattr(web_api, "plot_completed_tasks_periodically", lambda *args, **kwargs: go.Figure())
@@ -26,11 +25,12 @@ def _set_state_with_df(df: pd.DataFrame) -> None:
     web_api._state.active_projects = []
     web_api._state.project_colors = {}
     web_api._state.label_colors = {}
-    web_api._state.db = object()
+    web_api._state.db = None
 
 
 def test_dashboard_home_validates_weeks(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
         return None
 
     monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
@@ -60,6 +60,7 @@ def test_dashboard_home_validates_weeks(monkeypatch) -> None:
 
 def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
         return None
 
     monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
@@ -89,6 +90,7 @@ def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
 
 def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
         return None
 
     monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
@@ -175,4 +177,3 @@ def test_dashboard_status_returns_services() -> None:
     payload = res.json()
     assert isinstance(payload.get("services"), list)
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
-

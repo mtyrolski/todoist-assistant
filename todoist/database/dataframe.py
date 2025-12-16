@@ -29,7 +29,7 @@ def extract_name(event: Event) -> str | None:
 def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
     """
     Loads mapping adjustments from Python scripts in the 'personal' directory.
-    
+
     Args:
         specific_file: Optional specific filename to load. If None, loads all Python files.
                       If provided, only loads from that specific file.
@@ -66,6 +66,9 @@ def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
         module_name = 'personal_script'
 
         spec = importlib.util.spec_from_file_location(module_name, script_path)
+        if spec is None or spec.loader is None:
+            logger.warning("Skipping personal mapping file with no module spec: %s", script_path)
+            continue
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)

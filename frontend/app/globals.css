@@ -252,6 +252,25 @@ h1 {
   margin: 18px 0 10px;
 }
 
+.insightsRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0 10px;
+}
+
+.spotlightGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.insightValue {
+  font-size: 22px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
 .stat {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
   border: 1px solid var(--border);
@@ -521,6 +540,14 @@ h1 {
 
   .statsRow {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .insightsRow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .spotlightGrid {
+    grid-template-columns: 1fr;
   }
 
   .dateRow {

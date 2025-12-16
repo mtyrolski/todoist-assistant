@@ -37,3 +37,9 @@ dependencies = [
     "uvicorn>=0.32.0,<1.0.0",
     "yapf>=0.43.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pylint>=3.0",
+    "pyright>=1.1.0",
+]

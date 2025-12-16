@@ -6,6 +6,7 @@ import { StatCard } from "./components/StatCard";
 import { LoadingBar } from "./components/LoadingBar";
 import { LeaderboardCard, type LeaderboardItem } from "./components/LeaderboardCard";
 import { ServiceMonitor, type ServiceStatus } from "./components/ServiceMonitor";
+import { InsightCard, type InsightItem } from "./components/InsightCard";
 
 type Health = { status: string } | null;
 
@@ -19,6 +20,7 @@ type DashboardHome = {
     previousPeriod: string;
   };
   badges: { p1: number; p2: number; p3: number; p4: number };
+  insights?: { label?: string; items: InsightItem[] };
   leaderboards?: {
     lastCompletedWeek: {
       label: string;
@@ -101,6 +103,9 @@ export default function Page() {
         }
         setDashboard(payload);
       } catch (e) {
+        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
+          return;
+        }
         setDashboard(null);
         setDashboardError(e instanceof Error ? e.message : "Failed to load dashboard");
       } finally {
@@ -121,7 +126,10 @@ export default function Page() {
         if (!res.ok) throw new Error("status");
         const payload = (await res.json()) as DashboardStatus;
         setStatus(payload);
-      } catch {
+      } catch (e) {
+        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
+          return;
+        }
         setStatus(null);
       } finally {
         setLoadingStatus(false);
@@ -139,6 +147,7 @@ export default function Page() {
   const figures = dashboard?.figures ?? {};
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
+  const rootBoard = lastWeek?.rootProjects?.items ?? null;
 
   return (
     <div className="page">
@@ -247,9 +256,20 @@ export default function Page() {
         </div>
       </header>
 
+      <section className="insightsRow">
+        {(dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null)).map((it, idx) =>
+          it ? <InsightCard key={`${it.title}-${idx}`} item={it} /> : <div key={idx} className="stat skeleton" />
+        )}
+        {dashboard?.insights?.label ? (
+          <p className="muted tiny" style={{ gridColumn: "1 / -1", marginTop: "-6px" }}>
+            Insights for {dashboard.insights.label}.
+          </p>
+        ) : null}
+      </section>
+
       <section className="grid2">
-        <PlotCard title="Current Tasks Types" figure={figures.currentTasksTypes} height={420} />
         <PlotCard title="Most Popular Labels" figure={figures.mostPopularLabels} height={420} />
+        <PlotCard title="Task Lifespans: Time to Completion" figure={figures.taskLifespans} height={420} />
       </section>
 
       <section className="statsRow">
@@ -277,15 +297,46 @@ export default function Page() {
         <span className="badge badge-p4">P4 {dashboard?.badges.p4 ?? "—"}</span>
       </section>
 
+      <section className="stack">
+        <PlotCard
+          title="Periodically Completed Tasks Per Project"
+          figure={figures.completedTasksPeriodically}
+          height={520}
+        />
+        <PlotCard
+          title="Cumulative Periodically Completed Tasks Per Project"
+          figure={figures.cumsumCompletedTasksPeriodically}
+          height={520}
+        />
+      </section>
+
+      <section className="stack">
+        <PlotCard title="Heatmap of Events by Day and Hour" figure={figures.heatmapEventsByDayHour} height={520} />
+        <PlotCard title="Events Over Time" figure={figures.eventsOverTime} height={520} />
+      </section>
+
       <section className="grid2">
         <section className="card">
           <header className="cardHeader">
             <h2>Activity Spotlight</h2>
           </header>
           <div className="muted tiny" style={{ padding: "0 2px 10px" }}>
-            Most active parent projects by completed tasks ({lastWeek?.label ?? "—"}).
+            Most active projects by completed tasks ({lastWeek?.label ?? "—"}).
           </div>
-          <LeaderboardCard items={parentBoard} />
+          <div className="spotlightGrid">
+            <div>
+              <p className="muted tiny" style={{ margin: "0 0 10px" }}>
+                Subprojects
+              </p>
+              <LeaderboardCard items={parentBoard} />
+            </div>
+            <div>
+              <p className="muted tiny" style={{ margin: "0 0 10px" }}>
+                Root projects
+              </p>
+              <LeaderboardCard items={rootBoard} />
+            </div>
+          </div>
         </section>
 
         <section className="stack">
@@ -318,22 +369,6 @@ export default function Page() {
 
           <ServiceMonitor services={status?.services ?? null} onRefresh={() => setStatusRefreshNonce((x) => x + 1)} />
         </section>
-      </section>
-
-      <section className="stack">
-        <PlotCard title="Task Lifespans: Time to Completion" figure={figures.taskLifespans} height={460} />
-        <PlotCard
-          title="Periodically Completed Tasks Per Project"
-          figure={figures.completedTasksPeriodically}
-          height={520}
-        />
-        <PlotCard
-          title="Cumulative Periodically Completed Tasks Per Project"
-          figure={figures.cumsumCompletedTasksPeriodically}
-          height={520}
-        />
-        <PlotCard title="Heatmap of Events by Day and Hour" figure={figures.heatmapEventsByDayHour} height={520} />
-        <PlotCard title="Events Over Time" figure={figures.eventsOverTime} height={520} />
       </section>
     </div>
   );

@@ -51,7 +51,7 @@ def quick_summarize(events: EventCollection, new_events: EventCollection):
 def fetch_activity(dbio: Database, nweeks: int) -> tuple[EventCollection, EventCollection, bool]:
     """Fetches activity from the last n_weeks weeks, updates
     local database, and returns the new items.
-    
+
     Third param is a is_corrupted flag indicating if internl error occured and database had to be recreated."""
     fetched_activity: list[Event] = dbio.fetch_activity(max_pages=nweeks)
     logger.info(f'Fetched {len(fetched_activity)} events')
@@ -62,7 +62,7 @@ def fetch_activity(dbio: Database, nweeks: int) -> tuple[EventCollection, EventC
         logger.error('No local activity database found, creating a new one.')
         logger.error(str(e))
         is_corrupted = True
-        all_events = []
+        all_events = set()
     new_events: set[Event] = set()
     for fetched_event in fetched_activity:
         if fetched_event not in all_events:

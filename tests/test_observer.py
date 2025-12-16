@@ -1,9 +1,13 @@
 import datetime as dt
 from pathlib import Path
+from typing import cast
+
+# pylint: disable=protected-access
 
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
+from todoist.database.base import Database
 from todoist.types import Event, EventEntry
 
 
@@ -38,9 +42,9 @@ class _StubDb:
 class _StubAutomation(Automation):
     def __init__(self, name: str):
         super().__init__(name, frequency=0)
-        self.tick_calls: list[_StubDb] = []
+        self.tick_calls: list[Database] = []
 
-    def _tick(self, db: _StubDb):
+    def _tick(self, db: Database):
         self.tick_calls.append(db)
 
 
@@ -63,7 +67,7 @@ def test_observer_runs_automations_on_new_events(tmp_path: Path, monkeypatch):
     activity = _StubActivity(events, {"total": 1, "added": 1})
     automation = _StubAutomation("Auto")
 
-    observer = AutomationObserver(db=db, automations=[automation], activity=activity)
+    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
     observer._run_once()
 
     assert db.reset_calls == 1
@@ -85,7 +89,7 @@ def test_observer_no_new_events_noop(tmp_path: Path, monkeypatch):
     activity = _StubActivity([], {"total": 0})
     automation = _StubAutomation("Auto")
 
-    observer = AutomationObserver(db=db, automations=[automation], activity=activity)
+    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
     observer._run_once()
 
     assert db.reset_calls == 0
@@ -98,6 +102,9 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     class _BrokenStorage:
+        def __init__(self):
+            self.saved = None
+
         def load(self):
             raise LocalStorageError("corrupted")
 
@@ -115,7 +122,7 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
     activity = _StubActivity(events, {"total": 1, "added": 1})
     automation = _StubAutomation("Auto")
 
-    observer = AutomationObserver(db=db, automations=[automation], activity=activity)
+    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
     observer._run_once()
 
     # Should still process despite corrupted cache

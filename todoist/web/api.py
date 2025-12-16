@@ -4,19 +4,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # NOTE: This file is intentionally lightweight (no Streamlit imports).
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 import json
 import os
 import time
 
+import pandas as pd
 import plotly.io as pio
 import plotly.graph_objects as go
 
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
+from todoist.types import Project
 from todoist.plots import (
     cumsum_completed_tasks_periodically,
-    current_tasks_types,
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
@@ -111,17 +112,18 @@ def _extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str
 
 
 def _fig_to_dict(fig) -> dict[str, Any]:
-    return json.loads(pio.to_json(fig, validate=False, pretty=False))
+    payload = pio.to_json(fig, validate=False, pretty=False)
+    return json.loads(payload or "{}")
 
 
 class _DashboardState:
     def __init__(self) -> None:
         self.last_refresh_s: float = 0.0
         self.db: Database | None = None
-        self.df_activity = None
-        self.active_projects = None
-        self.project_colors = None
-        self.label_colors = None
+        self.df_activity: pd.DataFrame | None = None
+        self.active_projects: list[Project] | None = None
+        self.project_colors: dict[str, str] | None = None
+        self.label_colors: dict[str, str] | None = None
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
 
 
@@ -304,6 +306,97 @@ def _completed_share_leaderboard(
     return {"items": items, "totalCompleted": total_completed, "figure": _fig_to_dict(fig)}
 
 
+def _compute_insights(
+    df_activity,
+    *,
+    beg: datetime,
+    end: datetime,
+    project_colors: dict[str, str],
+) -> list[dict[str, Any]]:
+    insights: list[dict[str, Any]] = []
+
+    df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
+
+    # 1) Most active sub-project (completed tasks) in the completed week.
+    project_col = "parent_project_name" if "parent_project_name" in df_period.columns else "root_project_name"
+    df_completed = df_period[df_period["type"] == "completed"]
+    if not df_completed.empty and project_col in df_completed.columns:
+        counts = df_completed[project_col].fillna("").replace("", "(unknown)").value_counts()
+        if not counts.empty:
+            name = str(counts.index[0])
+            completed_i = int(counts.iloc[0])
+            insights.append(
+                {
+                    "title": "Most active project",
+                    "value": name,
+                    "detail": f"{completed_i} completed tasks (last week)",
+                    "color": project_colors.get(name),
+                }
+            )
+
+    # 2) Most rescheduled sub-project (proxy for churn).
+    df_rescheduled = df_period[df_period["type"] == "rescheduled"]
+    if not df_rescheduled.empty and project_col in df_rescheduled.columns:
+        counts = df_rescheduled[project_col].fillna("").replace("", "(unknown)").value_counts()
+        if not counts.empty:
+            name = str(counts.index[0])
+            rescheduled_i = int(counts.iloc[0])
+            insights.append(
+                {
+                    "title": "Most rescheduled project",
+                    "value": name,
+                    "detail": f"{rescheduled_i} reschedules (last week)",
+                    "color": project_colors.get(name),
+                }
+            )
+
+    # 3) Busiest day (all events).
+    try:
+        if not df_period.empty:
+            day_counts = pd.Series(pd.to_datetime(df_period.index).day_name()).value_counts()
+            if not day_counts.empty:
+                day = str(day_counts.index[0])
+                cnt = int(day_counts.iloc[0])
+                insights.append({"title": "Busiest day", "value": day, "detail": f"{cnt} events (last week)"})
+    except Exception:
+        pass
+
+    # 4) Added vs completed (throughput).
+    try:
+        added_i = int((df_period["type"] == "added").sum())
+        completed_i = int((df_period["type"] == "completed").sum())
+        ratio = round((completed_i / added_i), 2) if added_i else None
+        insights.append(
+            {
+                "title": "Added vs completed",
+                "value": f"{added_i} / {completed_i}",
+                "detail": f"Completion/added ratio: {ratio}" if ratio is not None else "No added tasks (last week)",
+            }
+        )
+    except Exception:
+        pass
+
+    # 5) Peak hour (all events) in the completed week.
+    try:
+        if not df_period.empty:
+            hours = pd.to_datetime(df_period.index).to_series(index=df_period.index).dt.hour
+            hour_counts = hours.value_counts()
+            if not hour_counts.empty:
+                peak_hour_raw = hour_counts.index.to_list()[0]
+                peak_hour = int(peak_hour_raw)
+                insights.append(
+                    {
+                        "title": "Peak hour",
+                        "value": f"{peak_hour:02d}:00",
+                        "detail": "Most events (selected range)",
+                    }
+                )
+    except Exception:
+        pass
+
+    return insights[:4]
+
+
 @app.get("/api/dashboard/home", tags=["dashboard"])
 async def dashboard_home(
     granularity: Granularity = "W",
@@ -354,7 +447,6 @@ async def dashboard_home(
         return cached
 
     figures = {
-        "currentTasksTypes": _fig_to_dict(current_tasks_types(active_projects)),
         "mostPopularLabels": _fig_to_dict(plot_most_popular_labels(active_projects, label_colors)),
         "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
         "completedTasksPeriodically": _fig_to_dict(
@@ -367,7 +459,8 @@ async def dashboard_home(
         "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
     }
 
-    last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(df_activity.index.max().to_pydatetime())
+    anchor_dt = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.max())).to_pydatetime())
+    last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(anchor_dt)
     parent_completed_share = _completed_share_leaderboard(
         df_activity,
         beg=last_week_beg,
@@ -396,6 +489,10 @@ async def dashboard_home(
             "previousPeriod": periods["previousLabel"],
         },
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
+        "insights": {
+            "label": last_week_label,
+            "items": _compute_insights(df_activity, beg=last_week_beg, end=last_week_end, project_colors=project_colors),
+        },
         "leaderboards": {
             "lastCompletedWeek": {
                 "label": last_week_label,

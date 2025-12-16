@@ -1,27 +1,36 @@
 from loguru import logger
 import pandas as pd
 import streamlit as st
+from typing import cast
 from todoist.plots import (plot_heatmap_of_events_by_day_and_hour, plot_cumulative_events_over_time,
                            cumsum_plot_per_project)
 from todoist.types import Task
 
 
-def process_rescheduled_tasks(df_activity, active_tasks):
+def process_rescheduled_tasks(df_activity: pd.DataFrame, active_tasks: list[Task]) -> pd.DataFrame:
     """
     Process and return rescheduled tasks data with caching.
     """
-    rescheduled_tasks = df_activity[df_activity['type'] == 'rescheduled'] \
-        .groupby(['title', 'parent_project_name', 'root_project_name']) \
-        .size() \
-        .sort_values(ascending=False) \
-        .reset_index(name='reschedule_count')
+    rescheduled_counts = (
+        df_activity[df_activity["type"] == "rescheduled"]
+        .groupby(["title", "parent_project_name", "root_project_name"])
+        .size()
+    )
+    rescheduled_counts = cast(pd.Series, rescheduled_counts)
+    rescheduled_tasks = cast(
+        pd.DataFrame,
+        rescheduled_counts.sort_values(ascending=False).reset_index(name="reschedule_count"),
+    )
 
     # Get names of currently active recurring tasks (to exclude them)
     active_recurring_tasks = filter(lambda task: task.is_recurring, active_tasks)
     recurring_task_names = set(task.task_entry.content for task in active_recurring_tasks)
 
     # Filter out rescheduled tasks that correspond to currently recurring tasks
-    filtered_tasks = rescheduled_tasks[~rescheduled_tasks['title'].isin(recurring_task_names)]
+    filtered_tasks = cast(
+        pd.DataFrame,
+        rescheduled_tasks[~rescheduled_tasks["title"].isin(list(recurring_task_names))],
+    )
     logger.debug(f"Found {len(filtered_tasks)} rescheduled tasks")
 
     return filtered_tasks

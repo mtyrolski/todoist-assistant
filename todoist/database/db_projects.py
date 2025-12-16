@@ -98,7 +98,7 @@ class DatabaseProjects:
             task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
             tasks: list[Task] = [Task(id=task.id, task_entry=task) for task in task_entries]
             return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
-        
+
         def process_project_with_retry(project: ProjectEntry) -> Project:
             """Process project with built-in retry logic."""
             return with_retry(
@@ -283,7 +283,7 @@ class DatabaseProjects:
         if not self.projects_cache:
             logger.debug("Projects not fetched yet. Fetching now.")
             self.fetch_projects(include_tasks=True)
-            
+
         logger.debug(f"Project cache has {len(self.projects_cache) if self.projects_cache else 0} projects")
         # Ensure the color mapping is initialized
 
