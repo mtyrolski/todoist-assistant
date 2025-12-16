@@ -15,9 +15,9 @@ class TestTaskTemplateFromConfig:
             'due_date_days_difference': 5,
             'priority': 3,
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert result.content == 'Test task'
         assert result.description == 'Test description'
         assert result.due_date_days_difference == 5
@@ -29,9 +29,9 @@ class TestTaskTemplateFromConfig:
         config = {
             'content': 'Minimal task',
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert result.content == 'Minimal task'
         assert result.description is None
         assert result.due_date_days_difference == 0  # Default value
@@ -58,24 +58,24 @@ class TestTaskTemplateFromConfig:
                 }
             ]
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert result.content == 'Parent task'
         assert len(result.children) == 2
-        
+
         # Check first child
         child1 = result.children[0]
         assert child1.content == 'Child task 1'
         assert child1.priority == 2
         assert child1.due_date_days_difference == 0  # Default
         assert child1.children == []
-        
+
         # Check second child with its own children
         child2 = result.children[1]
         assert child2.content == 'Child task 2'
         assert len(child2.children) == 1
-        
+
         # Check grandchild
         grandchild = child2.children[0]
         assert grandchild.content == 'Grandchild task'
@@ -91,9 +91,9 @@ class TestTaskTemplateFromConfig:
             priority=4,
             children=[]
         )
-        
+
         result = TaskTemplate.from_config(existing_template)
-        
+
         # Should return the same object
         assert result is existing_template
         assert result.content == 'Existing task'
@@ -107,9 +107,9 @@ class TestTaskTemplateFromConfig:
             'content': 'Task with empty children',
             'children': [],
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert result.content == 'Task with empty children'
         assert result.children == []
 
@@ -119,9 +119,9 @@ class TestTaskTemplateFromConfig:
             'content': 'Task',
             'description': None,
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert result.description is None
 
     def test_mixed_children_configs_and_templates(self):
@@ -130,7 +130,7 @@ class TestTaskTemplateFromConfig:
             content='Pre-instantiated child',
             priority=2,
         )
-        
+
         config = {
             'content': 'Parent',
             'children': [
@@ -138,9 +138,9 @@ class TestTaskTemplateFromConfig:
                 child_template,
             ]
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert len(result.children) == 2
         assert result.children[0].content == 'Dict child'
         assert result.children[1] is child_template
@@ -175,9 +175,9 @@ class TestTaskTemplateFromConfig:
                 }
             ]
         }
-        
+
         result = TaskTemplate.from_config(config)
-        
+
         assert result.content == 'Level 0'
         level1 = result.children[0]
         assert level1.content == 'Level 1'
@@ -194,7 +194,7 @@ class TestTaskTemplateInit:
     def test_default_values(self):
         """Test that __init__ applies correct defaults."""
         template = TaskTemplate(content='Test')
-        
+
         assert template.content == 'Test'
         assert template.description is None
         assert template.due_date_days_difference == 0
@@ -204,7 +204,7 @@ class TestTaskTemplateInit:
     def test_children_defaults_to_empty_list(self):
         """Test that children defaults to empty list, not None."""
         template = TaskTemplate(content='Test', children=None)
-        
+
         assert template.children == []
         assert template.children is not None
 
@@ -218,7 +218,7 @@ class TestTaskTemplateInit:
             priority=3,
             children=children,
         )
-        
+
         assert template.content == 'Parent'
         assert template.description == 'Desc'
         assert template.due_date_days_difference == 5

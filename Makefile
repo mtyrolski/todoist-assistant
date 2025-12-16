@@ -1,4 +1,7 @@
-.PHONY: init_local_env run_dashboard clear_local_env test
+.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_dashboard_streamlit run_demo run_observer clear_local_env update_and_run test
+
+FRONTEND_DIR := frontend
+FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
 
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env --config-dir configs --config-name automations
@@ -6,7 +9,42 @@ init_local_env: # syncs history, fetches activity
 update_env: # updates history, fetches activity, do templates
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env --config-dir configs --config-name automations
 
-run_dashboard:
+install_app: # installs frontend dependencies
+	npm --prefix $(FRONTEND_DIR) install
+
+ensure_frontend_deps: # installs frontend deps if missing
+	@if [ ! -x "$(FRONTEND_NEXT)" ]; then \
+		echo "Frontend dependencies missing; installing..."; \
+		npm --prefix $(FRONTEND_DIR) install; \
+	fi
+
+run_api:
+	uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
+
+run_frontend: ensure_frontend_deps
+	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
+
+# New meaning: run the "pretty" web dashboard stack (API + frontend)
+run_dashboard: ensure_frontend_deps
+	@bash -c '\
+		set -euo pipefail; \
+		pids=""; api_pid=""; fe_pid=""; \
+		cleanup() { \
+			echo "Stopping dashboard servers..."; \
+			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
+			wait 2>/dev/null || true; \
+		}; \
+		trap cleanup INT TERM EXIT; \
+		uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
+		echo "Dashboard running:"; \
+		echo "  API:      http://127.0.0.1:8000"; \
+		echo "  Frontend: http://127.0.0.1:3000"; \
+		wait -n $$api_pid $$fe_pid; \
+	'
+
+# Preserve old Streamlit dashboard under a new target
+run_dashboard_streamlit:
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False
 
 run_demo:

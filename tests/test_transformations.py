@@ -152,9 +152,9 @@ def test_events_to_dataframe_basic(event1, event2, project1, project2):
         "project1": project1,
         "project2": project2
     }
-    
+
     df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
-    
+
     # Verify dataframe structure
     assert isinstance(df, pd.DataFrame)
     expected_columns = [
@@ -163,10 +163,10 @@ def test_events_to_dataframe_basic(event1, event2, project1, project2):
     ]
     for col in expected_columns:
         assert col in df.columns
-    
+
     # Verify data content
     assert len(df) == 2
-    
+
     # Check event 1 data
     event1_row = df[df['id'] == 'event1'].iloc[0]
     assert event1_row['title'] == 'Task 1 Content'
@@ -175,7 +175,7 @@ def test_events_to_dataframe_basic(event1, event2, project1, project2):
     assert event1_row['parent_project_name'] == 'Project One'
     assert event1_row['root_project_id'] == 'project1'
     assert event1_row['root_project_name'] == 'Project One'
-    
+
     # Check event 2 data
     event2_row = df[df['id'] == 'event2'].iloc[0]
     assert event2_row['title'] == 'Task 2 Content'
@@ -202,29 +202,29 @@ def test_events_to_dataframe_chronological_order(event1, event2, project1, proje
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project1"
     )
-    
+
     future_event = Event(
         event_entry=future_event_entry,
         id="event_future",
         date=dt.datetime(2024, 1, 5, 10, 0, 0)
     )
-    
+
     # Set with events in different order
     activity = {future_event, event1, event2}
     project_id_to_name = {"project1": "Project One", "project2": "Project Two"}
     project_id_to_root = {"project1": project1, "project2": project2}
-    
+
     df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
-    
+
     # Verify chronological order (oldest first)
     dates = df['date'].tolist()
     sorted_dates = sorted(dates)
     assert dates == sorted_dates
-    
+
     # Verify the first row is the oldest event
     first_row = df.iloc[0]
     assert first_row['id'] == 'event1'  # 2024-01-01
-    
+
     # Verify the last row is the newest event
     last_row = df.iloc[-1]
     assert last_row['id'] == 'event_future'  # 2024-01-05
@@ -248,24 +248,24 @@ def test_events_to_dataframe_unsupported_event_types(event1, project1):
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project1"
     )
-    
+
     unsupported_event = Event(
         event_entry=unsupported_event_entry,
         id="event_unsupported",
         date=dt.datetime(2024, 1, 3, 12, 0, 0)
     )
-    
+
     activity = {event1, unsupported_event}
     project_id_to_name = {"project1": "Project One"}
     project_id_to_root = {"project1": project1}
-    
+
     with patch('todoist.types.logger') as mock_logger:
         df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
-        
+
         # Should only contain supported events
         assert len(df) == 1
         assert df.iloc[0]['id'] == 'event1'
-        
+
         # Should log filtering information
         mock_logger.info.assert_called()
 
@@ -288,24 +288,24 @@ def test_events_to_dataframe_missing_project_mapping(event1, project1):
         v2_parent_item_id=None,
         v2_parent_project_id="v2_missing_project"
     )
-    
+
     missing_project_event = Event(
         event_entry=missing_project_event_entry,
         id="event_missing",
         date=dt.datetime(2024, 1, 3, 12, 0, 0)
     )
-    
+
     activity = {event1, missing_project_event}
     project_id_to_name = {"project1": "Project One"}  # Missing project not included
     project_id_to_root = {"project1": project1}   # Missing project not included
-    
+
     with patch('todoist.types.logger') as mock_logger:
         df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
-        
+
         # Should only contain events with valid project mappings
         assert len(df) == 1
         assert df.iloc[0]['id'] == 'event1'
-        
+
         # Should log warning about missing projects
         mock_logger.warning.assert_called()
 
@@ -315,9 +315,9 @@ def test_events_to_dataframe_empty_activity():
     activity = set()
     project_id_to_name = {}
     project_id_to_root = {}
-    
+
     df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
-    
+
     # Should return empty dataframe with correct structure
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 0
@@ -338,7 +338,7 @@ def test_event_name_extraction(event_entry1):
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
     assert content_event.name == "Task 1 Content"
-    
+
     # Test event with 'name' in extra_data
     name_event_entry = EventEntry(
         id="name_event",
@@ -355,14 +355,14 @@ def test_event_name_extraction(event_entry1):
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project1"
     )
-    
+
     name_event = Event(
         event_entry=name_event_entry,
         id="name_event",
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
     assert name_event.name == "Project Name"
-    
+
     # Test event with neither content nor name
     no_name_event_entry = EventEntry(
         id="no_name_event",
@@ -379,7 +379,7 @@ def test_event_name_extraction(event_entry1):
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project1"
     )
-    
+
     no_name_event = Event(
         event_entry=no_name_event_entry,
         id="no_name_event",
@@ -399,17 +399,17 @@ def test_dataframe_column_types(event1, event2, project1, project2):
         "project1": project1,
         "project2": project2
     }
-    
+
     df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
-    
+
     # Check that id columns are strings
     assert df['id'].dtype == 'object'
     assert df['parent_project_id'].dtype == 'object'
     assert df['root_project_id'].dtype == 'object'
-    
+
     # Check that date column contains datetime objects
     assert all(isinstance(d, dt.datetime) for d in df['date'])
-    
+
     # Check that string columns are strings
     assert df['title'].dtype == 'object'
     assert df['type'].dtype == 'object'

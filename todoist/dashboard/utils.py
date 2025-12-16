@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any, cast
 
 import pandas as pd
 import streamlit as st
@@ -44,15 +45,20 @@ def sidebar_date_range(df_activity: pd.DataFrame) -> tuple:
     """
     Creates the date range slider in the sidebar.
     """
-    oldest_date = df_activity.index.min().to_pydatetime()
-    newest_date = df_activity.index.max().to_pydatetime()
+    oldest_date = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.min())).to_pydatetime())
+    newest_date = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.max())).to_pydatetime())
     default_range = (newest_date - timedelta(weeks=12), newest_date)
 
-    return st.sidebar.slider(label='Date range',
-                             min_value=oldest_date,
-                             max_value=newest_date,
-                             step=timedelta(weeks=2),
-                             value=default_range)
+    return cast(
+        tuple,
+        st.sidebar.slider(
+            label='Date range',
+            min_value=oldest_date,
+            max_value=newest_date,
+            step=timedelta(weeks=2),
+            value=default_range,
+        ),
+    )
 
 
 def sidebar_granularity() -> str:
@@ -76,7 +82,7 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> tuple[list[t
 
     timespan = granularity_to_timedelta[granularity]
     # Set current range as the last 'timespan' period in the data
-    end_range = df_activity.index.max().to_pydatetime()
+    end_range = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.max())).to_pydatetime())
     beg_range = end_range - timespan
 
     # Previous period is the same length immediately preceding beg_range
@@ -87,7 +93,7 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> tuple[list[t
     current_period_str = f"{beg_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
     previous_period_str = f"{previous_beg_range.strftime('%Y-%m-%d')} to {previous_end_range.strftime('%Y-%m-%d')}"
 
-    metrics: list[tuple[str, str, str]] = []
+    metrics: list[tuple[str, str, str, bool]] = []
 
     def _get_total_events(df_, beg_, end_):
         filtered_df = df_[(df_.index >= beg_) & (df_.index <= end_)]
@@ -119,10 +125,10 @@ def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> tuple[list[t
 def get_badges(active_projects: list[Project]) -> str:
     """
     Returns a string with the badges of the active projects.
-    
-    Example of four badges: 
+
+    Example of four badges:
     ":violet-badge[:material/star: 10] :orange-badge[⚠️ 5] :blue-badge[🔵 8] :gray-badge[🔧 2]"
-    
+
     This function returns the following badges:
     P1, P2, P3, P4
     """

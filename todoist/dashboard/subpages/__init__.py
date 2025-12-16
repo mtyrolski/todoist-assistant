@@ -1,4 +1,11 @@
-from todoist.dashboard.subpages import home, projects, tasks, control_panel, log_viewer, project_adjustment
+from todoist.dashboard.subpages import (
+    control_panel,
+    home,
+    log_viewer,
+    project_adjustment,
+    projects,
+    tasks,
+)
 
 render_home_page = home.render_home_page
 render_project_insights_page = projects.render_project_insights_page
@@ -8,5 +15,10 @@ render_log_viewer_page = log_viewer.render_log_viewer_page
 render_project_adjustment_page = project_adjustment.render_project_adjustment_page
 
 __all__ = [
-    'render_home_page', 'render_project_insights_page', 'render_task_analysis_page', 'render_control_panel_page', 'render_log_viewer_page', 'render_project_adjustment_page'
+    'render_home_page',
+    'render_project_insights_page',
+    'render_task_analysis_page',
+    'render_control_panel_page',
+    'render_log_viewer_page',
+    'render_project_adjustment_page',
 ]

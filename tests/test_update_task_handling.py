@@ -1,3 +1,8 @@
+"""
+Tests for update_task behavior with different API responses.
+"""
+
+# pylint: disable=protected-access
 
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +16,14 @@ from todoist.database.db_tasks import DatabaseTasks
 class _FakeClient:
     result: EndpointCallResult
 
-    def request(self, spec: RequestSpec, *, expect_json: bool = False, operation_name: str | None = None) -> EndpointCallResult:  # noqa: ARG002
+    def request(
+        self,
+        spec: RequestSpec,
+        *,
+        expect_json: bool = False,
+        operation_name: str | None = None,
+    ) -> EndpointCallResult:
+        _ = (spec, expect_json, operation_name)
         return self.result
 
 

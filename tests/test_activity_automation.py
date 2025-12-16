@@ -1,6 +1,10 @@
 from datetime import datetime
+from typing import cast
+
+# pylint: disable=protected-access
 
 from todoist.automations.activity import Activity
+from todoist.database.base import Database
 from todoist.types import Event, EventEntry
 from todoist.utils import Cache
 
@@ -44,7 +48,7 @@ def test_activity_fetch_recent_events_returns_stats():
     activity = Activity(name="Activity Fetching Automation", nweeks_window_size=1, early_stop_after_n_windows=1)
     db = _FakeDb(events)
 
-    result_events, stats = activity.fetch_recent_events(db, max_pages=2)
+    result_events, stats = activity.fetch_recent_events(cast(Database, db), max_pages=2)
 
     assert result_events == events
     assert stats["total"] == 3
@@ -76,13 +80,14 @@ def test_activity_tick_persists_cache_and_summarizes(tmp_path, monkeypatch):
             self.calls: list[tuple[int, int]] = []
 
         def fetch_activity_adaptively(self, *, nweeks_window_size, early_stop_after_n_windows, events_already_fetched):
+            _ = events_already_fetched
             self.calls.append((nweeks_window_size, early_stop_after_n_windows))
             return list(self.events_to_return)
 
     db = _FakeDb(events)
     activity = Activity(name="Activity Fetching Automation", nweeks_window_size=2, early_stop_after_n_windows=1)
 
-    activity._tick(db)
+    activity._tick(cast(Database, db))
     cached_after_first = Cache().activity.load()
 
     assert db.calls == [(2, 1)]
@@ -92,7 +97,7 @@ def test_activity_tick_persists_cache_and_summarizes(tmp_path, monkeypatch):
     assert summary_calls[0][1] == set(events)  # all events are new on first run
 
     # Second run with same events should treat them as already known
-    activity._tick(db)
+    activity._tick(cast(Database, db))
     cached_after_second = Cache().activity.load()
 
     assert cached_after_second == set(events)

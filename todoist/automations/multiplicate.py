@@ -104,7 +104,7 @@ def _collect_descendants(root_id: str, *, children_by_parent: dict[str, list[Tas
 
 def _make_placeholder_task(info: _CreatedTaskInfo) -> Task:
     """Create a minimal Task object from created task info for tracking in children_by_parent.
-    
+
     Copies structure from source_task to stay compatible with TaskEntry schema changes.
     """
     # Copy all fields from source task_entry, then override the relevant ones
@@ -141,7 +141,7 @@ def _resolve_parent_targets(task: Task, *, flat_expansions: dict[str, list[str]]
 
 def _depth_sort_children_first(tasks: list[Task]) -> list[Task]:
     """Sort tasks so that children are processed before parents (DFS post-order).
-    
+
     This ensures that when a parent task with label X2 has a child with label X3,
     the child is expanded first (creating 3 copies), and then the parent expansion
     will clone the already-expanded subtree.
@@ -258,7 +258,7 @@ class Multiply(Automation):
             created_ids, removed_ids, created_task_infos = self._process_task(
                 db,
                 task,
-                is_leaf=is_leaf,
+                _is_leaf=is_leaf,
                 parent_targets=parent_targets,
                 children_by_parent=children_by_parent,
             )
@@ -289,7 +289,7 @@ class Multiply(Automation):
                                 if any(c.id == removed_id for c in children):
                                     parent_id = pid
                                     break
-                
+
                 if parent_id and parent_id in children_by_parent:
                     children_by_parent[parent_id] = [
                         c for c in children_by_parent[parent_id] if c.id != removed_id
@@ -316,7 +316,7 @@ class Multiply(Automation):
         db: Database,
         task: Task,
         *,
-        is_leaf: bool,
+        _is_leaf: bool,
         parent_targets: Sequence[str | None],
         children_by_parent: dict[str, list[Task]],
     ) -> tuple[list[str], set[str], list[_CreatedTaskInfo]]:
@@ -456,7 +456,7 @@ class Multiply(Automation):
 
     def _expand_deep(self, db: Database, task: Task, n: int) -> list[_CreatedTaskInfo]:
         """Create N subtasks under `task` and remove multiplier labels from the parent.
-        
+
         Returns info about created subtasks for tracking in children_by_parent.
         """
 
@@ -490,7 +490,7 @@ class Multiply(Automation):
         # Remove multiplier labels to keep the automation idempotent.
         logger.debug(f"Updating task {task.id} to remove multiplier label, new labels: {labels}")
         db.update_task(task.id, labels=labels)
-        
+
         return created_task_infos
 
     def _remove_source_task(self, db: Database, task_id: str) -> None:

@@ -2,6 +2,7 @@
 Tests for database operations that create and modify data structures.
 """
 import inspect
+from typing import Any, cast
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -114,6 +115,7 @@ def test_insert_task_basic(mock_request_json, db_tasks):
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.endpoint == TodoistEndpoints.CREATE_TASK
+    assert spec_arg.json_body is not None
     assert spec_arg.json_body['content'] == 'Buy milk'
     assert spec_arg.json_body['project_id'] == '226095'
     assert mock_request_json.call_args.kwargs['operation_name'] == 'create task'
@@ -128,7 +130,7 @@ def test_insert_task_signature_parameters(db_tasks):
         'due_lang', 'assignee_id', 'duration', 'duration_unit', 'deadline_date',
         'deadline_lang'
     ]
-    
+
     actual_params = list(signature.parameters.keys())
     for param in expected_params:
         assert param in actual_params, f"Parameter '{param}' should be in insert_task signature"
@@ -198,6 +200,7 @@ def test_insert_task_from_template_valid_overrides(mock_request_json, db_tasks, 
     mock_request_json.assert_called_once()
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
+    assert spec_arg.json_body is not None
     assert spec_arg.json_body['content'] == 'New Task Content'
     assert spec_arg.json_body['priority'] == 3
 
@@ -208,7 +211,7 @@ def test_insert_task_from_template_invalid_overrides(db_tasks, sample_task_entry
 
     # Test with invalid overrides
     result = db_tasks.insert_task_from_template(
-        template_task, 
+        template_task,
         invalid_param="should_not_work"
     )
 
@@ -270,11 +273,11 @@ def test_reset_clears_caches(db_projects):
     # Set some cache values
     db_projects.archived_projects_cache = {"test": "value"}
     db_projects.projects_cache = ["test"]
-    
+
     # Mock the pull method to avoid actual API calls
     with patch.object(db_projects, 'pull'):
         db_projects.reset()
-    
+
     # Verify caches are cleared
     assert db_projects.archived_projects_cache is None
     assert db_projects.projects_cache is None
@@ -326,15 +329,15 @@ def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projec
 
 
 @patch('todoist.database.db_activity.logger')
-def test_fetch_activity_adaptively_empty_windows(mock_logger, db_activity):
+def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
     """Test adaptive fetching stops after empty windows."""
     with patch.object(db_activity, 'fetch_activity') as mock_fetch:
         # Simulate empty responses
         mock_fetch.return_value = []
-        
+
         # Test with early stop after 2 empty windows
         result = db_activity.fetch_activity_adaptively(
-            nweeks_window_size=1, 
+            nweeks_window_size=1,
             early_stop_after_n_windows=2
         )
 
@@ -344,7 +347,7 @@ def test_fetch_activity_adaptively_empty_windows(mock_logger, db_activity):
 
 
 @patch('todoist.database.db_activity.logger')
-def test_fetch_activity_adaptively_with_events(mock_logger, db_activity):
+def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
     """Test adaptive fetching with events."""
     from todoist.types import Event, EventEntry
     import datetime as dt
@@ -367,7 +370,7 @@ def test_fetch_activity_adaptively_with_events(mock_logger, db_activity):
     with patch.object(db_activity, 'fetch_activity') as mock_fetch:
         # First call returns events, second returns empty
         mock_fetch.side_effect = [[event1], []]
-        
+
         result = db_activity.fetch_activity_adaptively(
             nweeks_window_size=1,
             early_stop_after_n_windows=1
@@ -383,11 +386,11 @@ def test_fetch_activity_signature(db_activity):
     """Test fetch_activity method signature."""
     signature = inspect.signature(db_activity.fetch_activity)
     params = list(signature.parameters.keys())
-    
+
     # Should have parameters for pagination
     assert 'max_pages' in params
     assert 'starting_page' in params
-    
+
     # Check default values
     assert signature.parameters['max_pages'].default == 4
     assert signature.parameters['starting_page'].default == 0
@@ -398,7 +401,7 @@ def test_task_equality(sample_task_entry):
     task1 = Task(id="task123", task_entry=sample_task_entry)
     task2 = Task(id="task123", task_entry=sample_task_entry)
     task3 = Task(id="task456", task_entry=sample_task_entry)
-    
+
     assert task1 == task2
     assert task1 != task3
 
@@ -408,7 +411,7 @@ def test_project_equality(sample_project_entry):
     project1 = Project(id="12345", project_entry=sample_project_entry, tasks=[], is_archived=False)
     project2 = Project(id="12345", project_entry=sample_project_entry, tasks=[], is_archived=False)
     project3 = Project(id="67890", project_entry=sample_project_entry, tasks=[], is_archived=False)
-    
+
     assert project1 == project2
     assert project1 != project3
 
@@ -432,13 +435,13 @@ def test_event_equality_and_hashing():
         id="event1",
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
-    
+
     event1b = Event(
         event_entry=event_entry1,
         id="event1",
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
-    
+
     event2 = Event(
         event_entry=event_entry1,
         id="event2",
@@ -488,7 +491,7 @@ def test_task_entry_duration_edge_cases():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     assert task_entry.duration_kwargs is None
 
     # Test with invalid duration structure
@@ -496,7 +499,7 @@ def test_task_entry_duration_edge_cases():
     assert task_entry.duration_kwargs is None
 
     # Test with non-dict duration
-    task_entry.duration = "not_a_dict"
+    task_entry.duration = cast(Any, "not_a_dict")
     assert task_entry.duration_kwargs is None
 
 
@@ -521,9 +524,9 @@ def test_insert_tasks_single_task(mock_request_json, db_tasks):
     tasks_data = [
         {"content": "Test Task 1", "project_id": "project123"}
     ]
-    
+
     results = db_tasks.insert_tasks(tasks_data)
-    
+
     assert len(results) == 1
     assert results[0]['id'] == 'task1'
     assert results[0]['content'] == 'Test Task 1'
@@ -534,7 +537,7 @@ def test_insert_tasks_single_task(mock_request_json, db_tasks):
 def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
     """Test insert_tasks with multiple tasks in parallel."""
     # Mock different responses for different tasks
-    def mock_response_side_effect(spec, **kwargs):
+    def mock_response_side_effect(spec, **_kwargs):
         content = spec.json_body.get('content', '')
         if 'Task 1' in content:
             return {'id': 'task1', 'content': content, 'priority': 1}
@@ -543,7 +546,7 @@ def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
         elif 'Task 3' in content:
             return {'id': 'task3', 'content': content, 'priority': 3}
         return {'id': 'unknown', 'content': content}
-    
+
     mock_request_json.side_effect = mock_response_side_effect
 
     tasks_data = [
@@ -551,9 +554,9 @@ def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
         {"content": "Test Task 2", "priority": 2},
         {"content": "Test Task 3", "priority": 3},
     ]
-    
+
     results = db_tasks.insert_tasks(tasks_data)
-    
+
     assert len(results) == 3
     assert results[0]['id'] == 'task1'
     assert results[1]['id'] == 'task2'
@@ -565,15 +568,15 @@ def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
 def test_insert_tasks_with_failure(mock_request_json, db_tasks):
     """Test insert_tasks when one task fails."""
     call_count = {'count': 0}
-    
-    def mock_response_with_failure(spec, **kwargs):
+
+    def mock_response_with_failure(spec, **_kwargs):
         call_count['count'] += 1
         content = spec.json_body.get('content', '')
         if 'Task 2' in content:
             # Simulate failure for Task 2
             raise Exception("API Error")
         return {'id': f'task{call_count["count"]}', 'content': content}
-    
+
     mock_request_json.side_effect = mock_response_with_failure
 
     tasks_data = [
@@ -581,9 +584,9 @@ def test_insert_tasks_with_failure(mock_request_json, db_tasks):
         {"content": "Test Task 2"},
         {"content": "Test Task 3"},
     ]
-    
+
     results = db_tasks.insert_tasks(tasks_data)
-    
+
     assert len(results) == 3
     # Task 1 and 3 should succeed
     assert 'id' in results[0]
@@ -596,8 +599,8 @@ def test_insert_tasks_with_failure(mock_request_json, db_tasks):
 def test_insert_tasks_preserves_order(mock_request_json, db_tasks):
     """Test that insert_tasks preserves the order of results despite parallel execution."""
     import time
-    
-    def mock_response_with_delay(spec, **kwargs):
+
+    def mock_response_with_delay(spec, **_kwargs):
         content = spec.json_body.get('content', '')
         # Add variable delays to simulate real network conditions
         if 'Task 1' in content:
@@ -610,7 +613,7 @@ def test_insert_tasks_preserves_order(mock_request_json, db_tasks):
             time.sleep(0.02)
             return {'id': 'task3', 'content': content}
         return {'id': 'unknown', 'content': content}
-    
+
     mock_request_json.side_effect = mock_response_with_delay
 
     tasks_data = [
@@ -618,9 +621,9 @@ def test_insert_tasks_preserves_order(mock_request_json, db_tasks):
         {"content": "Test Task 2"},
         {"content": "Test Task 3"},
     ]
-    
+
     results = db_tasks.insert_tasks(tasks_data)
-    
+
     # Despite Task 2 completing first, results should be in original order
     assert len(results) == 3
     assert results[0]['id'] == 'task1'

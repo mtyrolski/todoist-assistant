@@ -1,6 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
+
+# pylint: disable=protected-access
 
 from todoist.automations.multiplicate import Multiply
+from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
 
 
@@ -54,6 +58,7 @@ class _FakeDb:
         self._counter = 0
 
     def fetch_projects(self, include_tasks: bool = True):
+        _ = include_tasks
         return self._projects
 
     def insert_task_from_template(self, _task: Task, **overrides):
@@ -82,7 +87,7 @@ def test_deep_label_creates_children_under_task_and_removes_multiplier_label():
     )
 
     db = _FakeDb(tasks=[task])
-    Multiply()._tick(db)
+    Multiply()._tick(cast(Database, db))
 
     assert [i["content"] for i in db.inserts] == [
         "Do thing - 1/3",
@@ -94,4 +99,4 @@ def test_deep_label_creates_children_under_task_and_removes_multiplier_label():
 
     # multiplier label removed from the parent for idempotency
     assert db.updated == {"labels": ["work"]}
-    assert db.removed_ids == []
+    assert not db.removed_ids

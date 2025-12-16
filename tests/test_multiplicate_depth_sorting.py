@@ -1,6 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
+
+# pylint: disable=protected-access
 
 from todoist.automations.multiplicate import Multiply
+from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
 
 
@@ -52,9 +56,10 @@ class _FakeDb:
         self.removed_ids: list[str] = []
 
     def fetch_projects(self, include_tasks: bool = True):
+        _ = include_tasks
         return self._projects
 
-    def insert_task_from_template(self, *args, **kwargs):
+    def insert_task_from_template(self, *_args, **_kwargs):
         return None
 
     def remove_task(self, task_id: str) -> bool:
@@ -68,7 +73,6 @@ def test_tasks_sorted_by_depth_child_before_parent():
 
     # Deliberately provide child first; Multiply should process child before parent (DFS post-order).
     db = _FakeDb(tasks=[child, parent])
-    Multiply()._tick(db)
+    Multiply()._tick(cast(Database, db))
 
     assert db.removed_ids == ["2", "1"]
-

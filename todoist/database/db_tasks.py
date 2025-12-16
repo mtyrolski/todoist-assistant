@@ -307,7 +307,7 @@ class DatabaseTasks:
     def insert_tasks(self, tasks_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Inserts multiple tasks into the Todoist API in parallel using threading.
-        
+
         This method provides thread-safe parallel task insertion with retry logic,
         similar to how fetch_projects works in db_projects.py.
 
@@ -318,7 +318,7 @@ class DatabaseTasks:
         Returns:
         - list[dict]: List of responses from the Todoist API in the same order as input.
           Failed insertions will have an empty dict.
-          
+
         Example:
             tasks_data = [
                 {"content": "Buy milk", "project_id": "123", "priority": 2},

@@ -97,7 +97,7 @@ def test_flat_child_attaches_to_new_parent_copies_not_top_level():
     With children-first processing:
     1. Child (X2) is expanded first → creates 2 copies under original parent (id=1)
     2. Parent (X2) is expanded next → creates 2 parent copies, and clones the 2 child copies under each
-    
+
     Result: 2 initial child copies + 2×2 cloned children = 6 total child inserts in one tick.
     """
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
@@ -120,16 +120,16 @@ def test_flat_child_attaches_to_new_parent_copies_not_top_level():
     assert child_parent_ids.count("1") == 2  # initial child expansion
     assert child_parent_ids.count("new3") == 2  # cloned under first new parent
     assert child_parent_ids.count("new4") == 2  # cloned under second new parent
-    
+
     assert "1" in db.removed_ids
     assert "2" in db.removed_ids
 def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
     """Deep child (_X2) under parent (X2) with DFS children-first expansion.
-    
+
     With children-first processing:
     1. Deep child (_X2) expands first → creates 2 subtasks under itself (new1, new2)
     2. Parent (X2) expands next → creates 2 parent copies, each cloning deep_child and its subtree
-    
+
     Result: 2 initial subtasks + 2×2 cloned subtasks = 6 total leaf inserts in one tick.
     """
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))

@@ -3,6 +3,8 @@
 *.joblib
 *.html
 storage
+frontend/node_modules/
+frontend/.next/
 # ignore all pycaches:
 __pycache__/
 *.ipynb

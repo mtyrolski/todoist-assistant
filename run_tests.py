@@ -18,12 +18,12 @@ def run_tests():
         env['PYTHONPATH'] = f"{current_dir}:{env['PYTHONPATH']}"
     else:
         env['PYTHONPATH'] = current_dir
-    
+
     # Run pytest with verbose output
     cmd = [sys.executable, '-m', 'pytest', 'tests/', '-v', '--tb=short']
-    
+
     try:
-        result = subprocess.run(cmd, cwd=current_dir, env=env, 
+        result = subprocess.run(cmd, cwd=current_dir, env=env,
                               capture_output=False, text=True)
         return result.returncode == 0
     except FileNotFoundError:

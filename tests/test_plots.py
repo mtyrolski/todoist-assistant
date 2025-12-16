@@ -4,6 +4,7 @@ Tests for plotting functions in todoist.plots module.
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
+from typing import Any, cast
 import plotly.graph_objects as go
 
 from todoist.plots import (
@@ -19,7 +20,7 @@ def sample_task_events_df():
     """Create a sample DataFrame with task events for testing."""
     # Create tasks with various lifespans
     base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
+
     data = {
         'parent_item_id': [
             # Task 1: completed in 1 hour
@@ -54,7 +55,7 @@ def sample_task_events_df():
         'root_project_name': ['Project A'] * 10,
         'root_project_id': ['proj_a'] * 10,
     }
-    
+
     dates = [
         base_date, base_date + timedelta(hours=1),
         base_date, base_date + timedelta(days=1),
@@ -63,7 +64,7 @@ def sample_task_events_df():
         base_date,
         base_date, base_date + timedelta(minutes=5),
     ]
-    
+
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = 'date'
     return df
@@ -87,26 +88,28 @@ def empty_events_df():
 def test_plot_task_lifespans_returns_figure(sample_task_events_df):
     """Test that plot_task_lifespans returns a Plotly Figure object."""
     fig = plot_task_lifespans(sample_task_events_df)
-    
+
     assert isinstance(fig, go.Figure)
     assert fig.data is not None
-    assert len(fig.data) > 0
+    traces = cast(tuple[Any, ...], fig.data)
+    assert len(traces) > 0
 
 
 def test_plot_task_lifespans_with_valid_data(sample_task_events_df):
     """Test plot_task_lifespans with valid task data."""
     fig = plot_task_lifespans(sample_task_events_df)
-    
+
     # Should have data traces (histogram and scatter)
-    assert len(fig.data) >= 1
-    
+    traces = cast(tuple[Any, ...], fig.data)
+    assert len(traces) >= 1
+
     # Check layout properties
     assert fig.layout.title is not None
     assert 'Task Lifespans' in fig.layout.title.text
-    
+
     # Check x-axis is logarithmic
     assert fig.layout.xaxis.type == 'log'
-    
+
     # Check axis labels exist
     assert fig.layout.xaxis.title is not None
     assert fig.layout.yaxis.title is not None
@@ -117,7 +120,7 @@ def test_plot_task_lifespans_with_valid_data(sample_task_events_df):
 def test_plot_task_lifespans_empty_data(empty_events_df):
     """Test plot_task_lifespans handles empty data gracefully."""
     fig = plot_task_lifespans(empty_events_df)
-    
+
     assert isinstance(fig, go.Figure)
     # Changed to check for the specific error message
     assert 'Task Lifespans' in fig.layout.title.text
@@ -127,7 +130,7 @@ def test_plot_task_lifespans_empty_data(empty_events_df):
 def test_plot_task_lifespans_only_added_events():
     """Test plot_task_lifespans with only 'added' events (no completions)."""
     base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
+
     data = {
         'parent_item_id': ['task1', 'task2', 'task3'],
         'type': ['added', 'added', 'added'],
@@ -135,14 +138,14 @@ def test_plot_task_lifespans_only_added_events():
         'root_project_name': ['Project A'] * 3,
         'root_project_id': ['proj_a'] * 3,
     }
-    
+
     dates = [base_date, base_date + timedelta(days=1), base_date + timedelta(days=2)]
-    
+
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = 'date'
-    
+
     fig = plot_task_lifespans(df)
-    
+
     # Should handle this gracefully with specific error message
     assert isinstance(fig, go.Figure)
     assert 'Task Lifespans' in fig.layout.title.text
@@ -152,7 +155,7 @@ def test_plot_task_lifespans_only_added_events():
 def test_plot_task_lifespans_only_completed_events():
     """Test plot_task_lifespans with only 'completed' events (no added events)."""
     base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
+
     data = {
         'parent_item_id': ['task1', 'task2', 'task3'],
         'type': ['completed', 'completed', 'completed'],
@@ -160,14 +163,14 @@ def test_plot_task_lifespans_only_completed_events():
         'root_project_name': ['Project A'] * 3,
         'root_project_id': ['proj_a'] * 3,
     }
-    
+
     dates = [base_date, base_date + timedelta(days=1), base_date + timedelta(days=2)]
-    
+
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = 'date'
-    
+
     fig = plot_task_lifespans(df)
-    
+
     # Should handle this gracefully with specific error message
     assert isinstance(fig, go.Figure)
     assert 'Task Lifespans' in fig.layout.title.text
@@ -177,7 +180,7 @@ def test_plot_task_lifespans_only_completed_events():
 def test_plot_task_lifespans_negative_duration():
     """Test plot_task_lifespans handles negative durations (completed before added)."""
     base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
+
     data = {
         'parent_item_id': ['task1', 'task1'],
         'type': ['added', 'completed'],
@@ -185,15 +188,15 @@ def test_plot_task_lifespans_negative_duration():
         'root_project_name': ['Project A'] * 2,
         'root_project_id': ['proj_a'] * 2,
     }
-    
+
     # Completed before added (invalid)
     dates = [base_date + timedelta(hours=1), base_date]
-    
+
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = 'date'
-    
+
     fig = plot_task_lifespans(df)
-    
+
     # Should skip invalid duration and show no data
     assert isinstance(fig, go.Figure)
 
@@ -201,7 +204,7 @@ def test_plot_task_lifespans_negative_duration():
 def test_plot_task_lifespans_dark_mode_styling(sample_task_events_df):
     """Test plot_task_lifespans has dark mode styling."""
     fig = plot_task_lifespans(sample_task_events_df)
-    
+
     # Check for dark theme properties by verifying dark background colors
     assert fig.layout.plot_bgcolor == '#111318'
     assert fig.layout.paper_bgcolor == '#111318'
@@ -212,24 +215,23 @@ def test_plot_task_lifespans_dark_mode_styling(sample_task_events_df):
 def test_plot_task_lifespans_responsive_layout(sample_task_events_df):
     """Test plot_task_lifespans has responsive layout properties."""
     fig = plot_task_lifespans(sample_task_events_df)
-    
+
     # Check autosize is enabled for responsiveness
     assert fig.layout.autosize is True
 
 
 def test_plot_task_lifespans_has_gridlines(sample_task_events_df):
-    """Test plot_task_lifespans includes gridlines for readability."""
+    """Task lifespans plot should keep the dashboard gridlines subtle/disabled."""
     fig = plot_task_lifespans(sample_task_events_df)
-    
-    # Check gridlines are enabled
-    assert fig.layout.xaxis.showgrid is True
-    assert fig.layout.yaxis.showgrid is True
+
+    assert fig.layout.xaxis.showgrid is False
+    assert fig.layout.yaxis.showgrid is False
 
 
 def test_plot_task_lifespans_has_legend(sample_task_events_df):
     """Test plot_task_lifespans includes a legend."""
     fig = plot_task_lifespans(sample_task_events_df)
-    
+
     # Check legend configuration
     assert fig.layout.legend is not None
 
@@ -237,7 +239,7 @@ def test_plot_task_lifespans_has_legend(sample_task_events_df):
 def test_plot_task_lifespans_time_unit_selection():
     """Test plot_task_lifespans selects appropriate time units."""
     base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
+
     # Test with very short durations (minutes)
     data_minutes = {
         'parent_item_id': ['task1', 'task1', 'task2', 'task2'],
@@ -252,12 +254,12 @@ def test_plot_task_lifespans_time_unit_selection():
     ]
     df_minutes = pd.DataFrame(data_minutes, index=pd.DatetimeIndex(dates_minutes))
     df_minutes.index.name = 'date'
-    
+
     fig = plot_task_lifespans(df_minutes)
     assert isinstance(fig, go.Figure)
     # Should use minutes or hours
     assert 'min' in fig.layout.xaxis.title.text or 'hr' in fig.layout.xaxis.title.text
-    
+
     # Test with longer durations (days)
     data_days = {
         'parent_item_id': ['task3', 'task3', 'task4', 'task4'],
@@ -272,7 +274,7 @@ def test_plot_task_lifespans_time_unit_selection():
     ]
     df_days = pd.DataFrame(data_days, index=pd.DatetimeIndex(dates_days))
     df_days.index.name = 'date'
-    
+
     fig = plot_task_lifespans(df_days)
     assert isinstance(fig, go.Figure)
     # Should use days
@@ -282,7 +284,7 @@ def test_plot_task_lifespans_time_unit_selection():
 def test_plot_task_lifespans_handles_missing_task_names():
     """Test plot_task_lifespans handles missing task names gracefully."""
     base_date = datetime(2024, 1, 1, 12, 0, 0)
-    
+
     data = {
         'parent_item_id': ['task1', 'task1'],
         'type': ['added', 'completed'],
@@ -290,12 +292,12 @@ def test_plot_task_lifespans_handles_missing_task_names():
         'root_project_name': ['Project A'] * 2,
         'root_project_id': ['proj_a'] * 2,
     }
-    
+
     dates = [base_date, base_date + timedelta(hours=1)]
-    
+
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = 'date'
-    
+
     fig = plot_task_lifespans(df)
 
     # Should handle missing names and still create the figure
@@ -322,41 +324,43 @@ def _weekly_completion_df() -> pd.DataFrame:
 
 
 def test_plot_completed_tasks_periodically_keeps_current_week():
-    """Ensure the current partial week stays visible with dotted styling."""
+    """Current partial period should surface as 'so far' + forecast markers (no dotted connector)."""
 
     df = _weekly_completion_df()
     beg_date = datetime(2024, 5, 27)
-    end_date = datetime(2024, 6, 10)
+    end_date = datetime(2024, 6, 5)
 
     fig = plot_completed_tasks_periodically(
         df, beg_date, end_date, granularity='W-SUN', project_colors={'Project A': '#123456'}
     )
 
-    dotted_traces = [trace for trace in fig.data if 'current' in trace.name.lower()]
-    assert dotted_traces, 'Current period trace should be present'
-    dotted_trace = dotted_traces[0]
+    traces = cast(tuple[Any, ...], fig.data)
+    dotted_traces = [trace for trace in traces if getattr(getattr(trace, "line", None), "dash", None) == "dot"]
+    assert not dotted_traces
 
-    assert dotted_trace.line.dash == 'dot'
-    assert any(pd.to_datetime(x) > end_date for x in dotted_trace.x)
+    forecast_traces = [trace for trace in traces if "(forecast)" in str(getattr(trace, "name", "")).lower()]
+    assert forecast_traces
+    assert any(pd.to_datetime(x) > end_date for x in cast(Any, forecast_traces[0]).x)
 
 
 def test_cumsum_completed_tasks_periodically_keeps_current_week():
-    """Cumulative periodic plot should retain the ongoing week."""
+    """Cumulative plot should surface the partial period as 'so far' + forecast markers."""
 
     df = _weekly_completion_df()
     beg_date = datetime(2024, 5, 27)
-    end_date = datetime(2024, 6, 10)
+    end_date = datetime(2024, 6, 5)
 
     fig = cumsum_completed_tasks_periodically(
         df, beg_date, end_date, granularity='W-SUN', project_colors={'Project A': '#123456'}
     )
 
-    dotted_traces = [trace for trace in fig.data if 'current' in trace.name.lower()]
-    assert dotted_traces, 'Current period cumulative trace should be present'
-    dotted_trace = dotted_traces[0]
+    traces = cast(tuple[Any, ...], fig.data)
+    dotted_traces = [trace for trace in traces if getattr(getattr(trace, "line", None), "dash", None) == "dot"]
+    assert not dotted_traces
 
-    assert dotted_trace.line.dash == 'dot'
-    assert any(pd.to_datetime(x) > end_date for x in dotted_trace.x)
+    forecast_traces = [trace for trace in traces if "(forecast)" in str(getattr(trace, "name", "")).lower()]
+    assert forecast_traces
+    assert any(pd.to_datetime(x) > end_date for x in cast(Any, forecast_traces[0]).x)
 
 
 def test_plot_cumulative_events_over_time_includes_partial_period():
@@ -368,9 +372,9 @@ def test_plot_cumulative_events_over_time_includes_partial_period():
 
     fig = plot_cumulative_events_over_time(df, beg_date, end_date, granularity='W-SUN')
 
-    dotted_traces = [trace for trace in fig.data if 'current period' in trace.name.lower()]
+    traces = cast(tuple[Any, ...], fig.data)
+    dotted_traces = [trace for trace in traces if 'current period' in str(getattr(trace, "name", "")).lower()]
     assert dotted_traces, 'Partial period cumulative trace should be present'
     dotted_trace = dotted_traces[0]
-    assert dotted_trace.line.dash == 'dot'
-    assert any(pd.to_datetime(x) > end_date for x in dotted_trace.x)
-
+    assert cast(Any, dotted_trace).line.dash == 'dot'
+    assert any(pd.to_datetime(x) > end_date for x in cast(Any, dotted_trace).x)

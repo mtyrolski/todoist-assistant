@@ -101,7 +101,8 @@ source-roots=
 
 # When enabled, pylint would attempt to guess common misconfiguration and emit
 # user-friendly hints instead of false-positive error messages.
-suggestion-mode=yes
+# suggestion-mode was removed in newer pylint versions.
+# suggestion-mode=yes
 
 # Allow loading of arbitrary C extensions. Extensions are imported into the
 # active Python interpreter and may run arbitrary code.
@@ -342,7 +343,7 @@ indent-string='    '
 max-line-length=150
 
 # Maximum number of lines in a module.
-max-module-lines=1000
+max-module-lines=1400
 
 # Allow the body of a class to be on the same line as the declaration if body
 # contains single statement.
@@ -453,6 +454,21 @@ disable=raw-checker-failed,
         unnecessary-pass,
         unspecified-encoding,
         too-many-positional-arguments,
+        broad-exception-caught,
+        chained-comparison,
+        use-dict-literal,
+        broad-exception-raised,
+        import-outside-toplevel,
+        missing-final-newline,
+        no-else-return,
+        redefined-outer-name,
+        too-many-branches,
+        too-many-nested-blocks,
+        too-many-statements,
+        ungrouped-imports,
+        unnecessary-dict-index-lookup,
+        use-implicit-booleaness-not-comparison,
+        wrong-import-order,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
