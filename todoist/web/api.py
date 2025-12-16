@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+import asyncio
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # NOTE: This file is intentionally lightweight (no Streamlit imports).
@@ -73,7 +74,7 @@ def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
     }
 
 
-def _extract_metrics(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
     def _get_total_events(beg_, end_) -> int:
         filtered_df = df_activity[(df_activity.index >= beg_) & (df_activity.index <= end_)]
         return len(filtered_df)
@@ -121,17 +122,15 @@ class _DashboardState:
         self.active_projects = None
         self.project_colors = None
         self.label_colors = None
+        self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
 
 
 _state = _DashboardState()
 _STATE_TTL_S = 60.0
+_STATE_LOCK = asyncio.Lock()
 
 
-def _ensure_state(refresh: bool) -> None:
-    now = time.time()
-    if not refresh and _state.db is not None and (now - _state.last_refresh_s) < _STATE_TTL_S:
-        return
-
+def _refresh_state_sync() -> None:
     dbio = Database(".env")
     dbio.pull()
     df_activity = load_activity_data(dbio)
@@ -144,7 +143,20 @@ def _ensure_state(refresh: bool) -> None:
     _state.active_projects = active_projects
     _state.project_colors = project_colors
     _state.label_colors = label_colors
-    _state.last_refresh_s = now
+    _state.last_refresh_s = time.time()
+    _state.home_payload_cache = {}
+
+
+async def _ensure_state(refresh: bool) -> None:
+    now = time.time()
+    if not refresh and _state.db is not None and (now - _state.last_refresh_s) < _STATE_TTL_S:
+        return
+
+    async with _STATE_LOCK:
+        now = time.time()
+        if not refresh and _state.db is not None and (now - _state.last_refresh_s) < _STATE_TTL_S:
+            return
+        await asyncio.to_thread(_refresh_state_sync)
 
 
 def _service_statuses() -> list[dict[str, Any]]:
@@ -183,6 +195,7 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     """
     Lightweight status endpoint for UI badges (does not generate plots).
     """
+    # Intentionally ignore refresh: this endpoint must stay non-blocking and avoid Todoist API calls.
     _ = refresh
     return {
         "services": _service_statuses(),
@@ -195,25 +208,73 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     }
 
 
-def _leaderboard(df_activity, *, periods: dict[str, Any], column: str, project_colors: dict[str, str]) -> dict[str, Any]:
-    df_cur = df_activity[(df_activity.index >= periods["beg"]) & (df_activity.index <= periods["end"])]
-    df_prev = df_activity[(df_activity.index >= periods["prevBeg"]) & (df_activity.index <= periods["prevEnd"])]
+def _parse_yyyy_mm_dd(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD format") from exc
 
-    cur_counts = df_cur[column].fillna("").replace("", "(unknown)").value_counts()
-    prev_counts = df_prev[column].fillna("").replace("", "(unknown)").value_counts()
-    top_names = list(cur_counts.head(10).index)
+
+def _compute_plot_range(
+    df_activity,
+    *,
+    weeks: int,
+    beg: str | None,
+    end: str | None,
+) -> tuple[datetime, datetime]:
+    if (beg is None) ^ (end is None):
+        raise HTTPException(status_code=400, detail="Provide both beg and end, or neither")
+
+    if beg is not None and end is not None:
+        beg_dt = _parse_yyyy_mm_dd(beg)
+        # Make `end` inclusive at the day level for dataframe slicing / plotting.
+        end_dt = _parse_yyyy_mm_dd(end) + timedelta(days=1)
+        if end_dt <= beg_dt:
+            raise HTTPException(status_code=400, detail="end must be after beg")
+        if (end_dt - beg_dt) > timedelta(weeks=260):
+            raise HTTPException(status_code=400, detail="Date range must be <= 260 weeks")
+        return beg_dt, end_dt
+
+    if weeks < 1 or weeks > 260:
+        raise HTTPException(status_code=400, detail="weeks must be between 1 and 260")
+
+    end_range = df_activity.index.max().to_pydatetime()
+    beg_range = end_range - timedelta(weeks=weeks)
+    return beg_range, end_range
+
+
+def _last_completed_week_bounds(anchor: datetime) -> tuple[datetime, datetime, str]:
+    week_start = datetime.combine(anchor.date() - timedelta(days=anchor.weekday()), datetime.min.time())
+    last_week_end = week_start
+    last_week_start = last_week_end - timedelta(days=7)
+    label = f"{last_week_start.strftime('%Y-%m-%d')} to {(last_week_end - timedelta(days=1)).strftime('%Y-%m-%d')}"
+    return last_week_start, last_week_end, label
+
+
+def _completed_share_leaderboard(
+    df_activity,
+    *,
+    beg: datetime,
+    end: datetime,
+    column: str,
+    project_colors: dict[str, str],
+    limit: int = 10,
+) -> dict[str, Any]:
+    df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
+    df_completed = df_period[df_period["type"] == "completed"]
+    total_completed = int(len(df_completed))
+
+    counts = df_completed[column].fillna("").replace("", "(unknown)").value_counts().head(limit)
 
     items: list[dict[str, Any]] = []
-    for name in top_names:
-        cur = int(cur_counts.get(name, 0))
-        prev = int(prev_counts.get(name, 0))
-        delta_pct = round((cur - prev) / prev * 100, 2) if prev else None
+    for name, completed in counts.items():
+        completed_i = int(completed)
+        pct = round((completed_i / total_completed) * 100, 2) if total_completed else 0.0
         items.append(
             {
                 "name": name,
-                "events": cur,
-                "prevEvents": prev,
-                "deltaPercent": delta_pct,
+                "completed": completed_i,
+                "percentOfCompleted": pct,
                 "color": project_colors.get(name, "#808080"),
             }
         )
@@ -221,18 +282,18 @@ def _leaderboard(df_activity, *, periods: dict[str, Any], column: str, project_c
     fig = go.Figure(
         data=[
             go.Bar(
-                x=[it["events"] for it in items][::-1],
+                x=[it["percentOfCompleted"] for it in items][::-1],
                 y=[it["name"] for it in items][::-1],
                 orientation="h",
                 marker=dict(color=[it["color"] for it in items][::-1]),
-                hovertemplate="%{y}<br>%{x} events<extra></extra>",
+                hovertemplate="%{y}<br>%{x:.2f}% of completed tasks<extra></extra>",
             )
         ]
     )
     fig.update_layout(
         template="plotly_dark",
         title=None,
-        xaxis_title="Events",
+        xaxis_title="% of completed tasks",
         yaxis_title="Project",
         height=360,
         margin=dict(l=140, r=18, t=10, b=46),
@@ -240,13 +301,15 @@ def _leaderboard(df_activity, *, periods: dict[str, Any], column: str, project_c
         paper_bgcolor="#111318",
     )
 
-    return {"items": items, "figure": _fig_to_dict(fig)}
+    return {"items": items, "totalCompleted": total_completed, "figure": _fig_to_dict(fig)}
 
 
 @app.get("/api/dashboard/home", tags=["dashboard"])
 async def dashboard_home(
     granularity: Granularity = "W",
     weeks: int = 12,
+    beg: str | None = None,
+    end: str | None = None,
     refresh: bool = False,
 ) -> dict[str, Any]:
     """
@@ -254,10 +317,11 @@ async def dashboard_home(
 
     Notes:
     - `weeks` controls the date range used for time-series plots (Streamlit default ~12 weeks).
+    - `beg`/`end` (YYYY-MM-DD) override `weeks` when provided.
     - `granularity` controls periodic aggregation where applicable.
     - `refresh=true` forces a Todoist API pull + activity reload (otherwise cached briefly).
     """
-    _ensure_state(refresh=refresh)
+    await _ensure_state(refresh=refresh)
 
     df_activity = _state.df_activity
     active_projects = _state.active_projects
@@ -265,18 +329,29 @@ async def dashboard_home(
     label_colors = _state.label_colors
 
     if df_activity is None or active_projects is None or project_colors is None or label_colors is None:
-        return {"error": "Dashboard data unavailable. Run `make init_local_env` and configure `.env`."}
+        return {"error": "Dashboard data unavailable. Please ensure the database is configured and accessible."}
 
-    end_range = df_activity.index.max().to_pydatetime()
-    beg_range = end_range - timedelta(weeks=max(1, weeks))
+    beg_range, end_range = _compute_plot_range(df_activity, weeks=weeks, beg=beg, end=end)
+    beg_label = beg if beg is not None else beg_range.strftime("%Y-%m-%d")
+    end_label = end if end is not None else end_range.strftime("%Y-%m-%d")
 
     periods = _period_bounds(df_activity, granularity)
-    metrics = _extract_metrics(df_activity, periods)
+    metrics = _extract_metrics_dict(df_activity, periods)
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
     p3 = sum(map(p3_tasks, active_projects))
     p4 = sum(map(p4_tasks, active_projects))
+
+    cache_key = (
+        "home",
+        f"g={granularity}",
+        f"beg={beg_label}",
+        f"end={end_label}",
+    )
+    cached = _state.home_payload_cache.get(cache_key)
+    if cached and not refresh:
+        return cached
 
     figures = {
         "currentTasksTypes": _fig_to_dict(current_tasks_types(active_projects)),
@@ -292,10 +367,26 @@ async def dashboard_home(
         "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
     }
 
-    return {
+    last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(df_activity.index.max().to_pydatetime())
+    parent_completed_share = _completed_share_leaderboard(
+        df_activity,
+        beg=last_week_beg,
+        end=last_week_end,
+        column="parent_project_name",
+        project_colors=project_colors,
+    )
+    root_completed_share = _completed_share_leaderboard(
+        df_activity,
+        beg=last_week_beg,
+        end=last_week_end,
+        column="root_project_name",
+        project_colors=project_colors,
+    )
+
+    payload = {
         "range": {
-            "beg": beg_range.strftime("%Y-%m-%d"),
-            "end": end_range.strftime("%Y-%m-%d"),
+            "beg": beg_label,
+            "end": end_label,
             "granularity": granularity,
             "weeks": weeks,
         },
@@ -306,20 +397,16 @@ async def dashboard_home(
         },
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
         "leaderboards": {
-            "parentProjects": _leaderboard(
-                df_activity,
-                periods=periods,
-                column="parent_project_name",
-                project_colors=project_colors,
-            ),
-            "rootProjects": _leaderboard(
-                df_activity,
-                periods=periods,
-                column="root_project_name",
-                project_colors=project_colors,
-            ),
-            "period": {"current": periods["currentLabel"], "previous": periods["previousLabel"]},
+            "lastCompletedWeek": {
+                "label": last_week_label,
+                "beg": last_week_beg.strftime("%Y-%m-%d"),
+                "end": (last_week_end - timedelta(days=1)).strftime("%Y-%m-%d"),
+                "parentProjects": parent_completed_share,
+                "rootProjects": root_completed_share,
+            }
         },
         "figures": figures,
         "refreshedAt": datetime.now().isoformat(timespec="seconds"),
     }
+    _state.home_payload_cache[cache_key] = payload
+    return payload

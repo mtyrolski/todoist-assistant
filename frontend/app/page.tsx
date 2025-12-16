@@ -20,9 +20,13 @@ type DashboardHome = {
   };
   badges: { p1: number; p2: number; p3: number; p4: number };
   leaderboards?: {
-    parentProjects: { items: LeaderboardItem[]; figure: PlotlyFigure };
-    rootProjects: { items: LeaderboardItem[]; figure: PlotlyFigure };
-    period: { current: string; previous: string };
+    lastCompletedWeek: {
+      label: string;
+      beg: string;
+      end: string;
+      parentProjects: { items: LeaderboardItem[]; totalCompleted: number; figure: PlotlyFigure };
+      rootProjects: { items: LeaderboardItem[]; totalCompleted: number; figure: PlotlyFigure };
+    };
   };
   figures: Record<string, PlotlyFigure>;
   refreshedAt: string;
@@ -39,9 +43,13 @@ export default function Page() {
   const [health, setHealth] = useState<Health>(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   const [granularity, setGranularity] = useState<Granularity>("W");
   const [weeks, setWeeks] = useState<number>(12);
+  const [rangeMode, setRangeMode] = useState<"rolling" | "custom">("rolling");
+  const [customBeg, setCustomBeg] = useState<string>("");
+  const [customEnd, setCustomEnd] = useState<string>("");
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
   const lastRefreshNonce = useRef<number>(0);
   const [dashboard, setDashboard] = useState<DashboardHome | null>(null);
@@ -60,7 +68,7 @@ export default function Page() {
         const data = (await res.json()) as Health;
         setHealth(data);
       } catch (err) {
-        setError("Backend not reachable yet. Start `make run_dashboard`.");
+        setError("Unable to connect to the API server. Please check that the backend is running.");
       } finally {
         setLoadingHealth(false);
       }
@@ -76,13 +84,16 @@ export default function Page() {
     const load = async () => {
       try {
         setLoadingDashboard(true);
+        setDashboardError(null);
         const shouldRefresh = refreshNonce !== lastRefreshNonce.current;
         lastRefreshNonce.current = refreshNonce;
-        const qs = new URLSearchParams({
-          granularity,
-          weeks: String(weeks),
-          refresh: shouldRefresh ? "true" : "false"
-        });
+        const qs = new URLSearchParams({ granularity, refresh: shouldRefresh ? "true" : "false" });
+        if (rangeMode === "custom" && customBeg && customEnd) {
+          qs.set("beg", customBeg);
+          qs.set("end", customEnd);
+        } else {
+          qs.set("weeks", String(weeks));
+        }
         const res = await fetch(`/api/dashboard/home?${qs.toString()}`, { signal: controller.signal });
         const payload = (await res.json()) as DashboardHome;
         if (!res.ok || payload.error) {
@@ -91,13 +102,14 @@ export default function Page() {
         setDashboard(payload);
       } catch (e) {
         setDashboard(null);
+        setDashboardError(e instanceof Error ? e.message : "Failed to load dashboard");
       } finally {
         setLoadingDashboard(false);
       }
     };
     load();
     return () => controller.abort();
-  }, [granularity, weeks, refreshNonce]);
+  }, [granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -125,9 +137,8 @@ export default function Page() {
   }, [dashboard]);
 
   const figures = dashboard?.figures ?? {};
-  const parentBoard = dashboard?.leaderboards?.parentProjects?.items ?? null;
-  const rootBoard = dashboard?.leaderboards?.rootProjects?.items ?? null;
-  const [boardMode, setBoardMode] = useState<"parent" | "root">("parent");
+  const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
+  const parentBoard = lastWeek?.parentProjects?.items ?? null;
 
   return (
     <div className="page">
@@ -144,13 +155,17 @@ export default function Page() {
               {loadingHealth ? "Checking API…" : health?.status === "ok" ? "API online" : "API offline"}
             </span>
             {periodLabel && <span className="pill">{periodLabel}</span>}
+            {dashboardError && <span className="pill pill-warn">{dashboardError}</span>}
             {error && <span className="pill pill-warn">{error}</span>}
           </div>
         </div>
         <div className="controls">
-          <label className="control">
-            <span className="muted tiny">Granularity</span>
+          <div className="control">
+            <label className="muted tiny" htmlFor="granularity-select">
+              Granularity
+            </label>
             <select
+              id="granularity-select"
               value={granularity}
               onChange={(e) => setGranularity(e.target.value as Granularity)}
               className="select"
@@ -159,15 +174,68 @@ export default function Page() {
               <option value="ME">Month</option>
               <option value="3ME">Three Months</option>
             </select>
-          </label>
-          <label className="control">
-            <span className="muted tiny">Range</span>
-            <select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} className="select">
-              <option value={12}>Last 12 weeks</option>
-              <option value={26}>Last 26 weeks</option>
-              <option value={52}>Last 52 weeks</option>
-            </select>
-          </label>
+          </div>
+
+          <div className="control">
+            <div className="muted tiny">Time range</div>
+            <div className="segmented">
+              <button
+                type="button"
+                className={`seg ${rangeMode === "rolling" ? "segActive" : ""}`}
+                onClick={() => setRangeMode("rolling")}
+              >
+                Rolling
+              </button>
+              <button
+                type="button"
+                className={`seg ${rangeMode === "custom" ? "segActive" : ""}`}
+                onClick={() => setRangeMode("custom")}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+
+          {rangeMode === "rolling" ? (
+            <div className="control">
+              <label className="muted tiny" htmlFor="range-select">
+                Range
+              </label>
+              <select
+                id="range-select"
+                value={weeks}
+                onChange={(e) => setWeeks(Number(e.target.value))}
+                className="select"
+              >
+                <option value={4}>Last 4 weeks</option>
+                <option value={12}>Last 12 weeks</option>
+                <option value={26}>Last 26 weeks</option>
+                <option value={52}>Last 52 weeks</option>
+              </select>
+            </div>
+          ) : (
+            <div className="control">
+              <label className="muted tiny" htmlFor="beg-input">
+                Beg / End
+              </label>
+              <div className="dateRow">
+                <input
+                  id="beg-input"
+                  className="dateInput"
+                  type="date"
+                  value={customBeg}
+                  onChange={(e) => setCustomBeg(e.target.value)}
+                />
+                <input
+                  id="end-input"
+                  className="dateInput"
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
           <button
             className="button"
             onClick={() => setRefreshNonce((x) => x + 1)}
@@ -213,27 +281,11 @@ export default function Page() {
         <section className="card">
           <header className="cardHeader">
             <h2>Activity Spotlight</h2>
-            <div className="segmented">
-              <button
-                type="button"
-                className={`seg ${boardMode === "parent" ? "segActive" : ""}`}
-                onClick={() => setBoardMode("parent")}
-              >
-                Parent projects
-              </button>
-              <button
-                type="button"
-                className={`seg ${boardMode === "root" ? "segActive" : ""}`}
-                onClick={() => setBoardMode("root")}
-              >
-                Root projects
-              </button>
-            </div>
           </header>
           <div className="muted tiny" style={{ padding: "0 2px 10px" }}>
-            Compares current period vs previous period ({dashboard?.metrics.currentPeriod ?? "—"}).
+            Most active parent projects by completed tasks ({lastWeek?.label ?? "—"}).
           </div>
-          <LeaderboardCard items={boardMode === "parent" ? parentBoard : rootBoard} />
+          <LeaderboardCard items={parentBoard} />
         </section>
 
         <section className="stack">

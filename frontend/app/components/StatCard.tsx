@@ -1,7 +1,7 @@
 "use client";
 
 function formatDelta(deltaPercent: number | null): string {
-  if (deltaPercent === null) return "∞";
+  if (deltaPercent === null) return "N/A";
   const sign = deltaPercent > 0 ? "+" : "";
   return `${sign}${deltaPercent}%`;
 }

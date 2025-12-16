@@ -158,6 +158,27 @@ h1 {
   box-shadow: 0 0 0 4px rgba(106, 227, 255, 0.12);
 }
 
+.dateRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.dateInput {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(10, 14, 20, 0.6);
+  color: var(--text);
+  outline: none;
+}
+
+.dateInput:focus {
+  border-color: rgba(106, 227, 255, 0.55);
+  box-shadow: 0 0 0 4px rgba(106, 227, 255, 0.12);
+}
+
 .button {
   width: 100%;
   padding: 10px 12px;
@@ -259,22 +280,6 @@ h1 {
   gap: 10px;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.pill-good {
-  background: rgba(97, 244, 179, 0.1);
-  border-color: rgba(97, 244, 179, 0.3);
-  color: #c8ffe7;
-}
-
-.pill-warn {
-  background: rgba(255, 123, 123, 0.14);
-  border-color: rgba(255, 123, 123, 0.45);
-  color: #ffc7c7;
-}
-
-.pill-neutral {
-  background: rgba(255, 255, 255, 0.07);
 }
 
 .badges {
@@ -516,6 +521,10 @@ h1 {
 
   .statsRow {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dateRow {
+    grid-template-columns: 1fr;
   }
 
   .adminGrid {

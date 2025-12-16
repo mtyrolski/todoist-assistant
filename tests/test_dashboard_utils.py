@@ -1,5 +1,5 @@
 """
-Practical tests for dashboard utilities and multiplication label helpers.
+Tests for helper functions in todoist.dashboard.utils and todoist.automations.multiplicate modules.
 """
 
 import pytest

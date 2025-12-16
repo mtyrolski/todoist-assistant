@@ -142,6 +142,7 @@ flowchart TD
    - **Node.js 20+ + npm** (for the new Next.js dashboard in `frontend/`)
      - Recommended via `nvm`:
        ```bash
+       # Tip: check https://github.com/nvm-sh/nvm/releases for the latest installer version
        curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh -o /tmp/install_nvm.sh
        bash /tmp/install_nvm.sh
        source ~/.nvm/nvm.sh
@@ -191,10 +192,10 @@ The following [Makefile](Makefile) commands are available for managing the local
 
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make install_app`:** Installs frontend dependencies in `frontend/` (requires Node.js + npm).
-- **`make run_dashboard`:** Launches the new web dashboard stack (FastAPI API + Next.js frontend).
+- **`make run_dashboard`:** Launches the new web dashboard stack (FastAPI API + Next.js frontend); installs frontend deps if missing.
 - **`make run_dashboard_streamlit`:** Launches the legacy Streamlit dashboard.
 - **`make run_api`:** Runs the FastAPI backend only (http://127.0.0.1:8000).
-- **`make run_frontend`:** Runs the Next.js dev server only (http://127.0.0.1:3000).
+- **`make run_frontend`:** Runs the Next.js dev server only (http://127.0.0.1:3000); installs frontend deps if missing.
 - **`make run_observer`:** Runs the background observer that refreshes recent activity, resets local caches, and triggers short automations (templates, multiply, etc.) every 30 seconds.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
 
@@ -230,7 +231,7 @@ This entrypoint pulls the latest week of activity, updates the cached events, re
 #### New web dashboard (recommended)
 
 1. Make sure your Python env is ready and `.env` is configured (Todoist API token).
-2. Install the frontend dependencies:
+2. Install the frontend dependencies (first run only; `make run_dashboard` will also do this automatically):
 ```bash
 make install_app
 ```
@@ -241,6 +242,8 @@ make run_dashboard
 Then open:
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000 (health: `/api/health`)
+
+Note: the frontend is currently pinned to Next.js 14 for stability; upgrading to Next.js 15 can be evaluated later.
 
 #### Legacy Streamlit dashboard
 
