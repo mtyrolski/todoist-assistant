@@ -33,14 +33,14 @@ def test_project_entry_creation():
         sync_id=None,
         collapsed=False
     )
-    
+
     assert project_entry.id == "12345"
     assert project_entry.name == "Test Project"
     assert project_entry.color == "blue"
     assert project_entry.parent_id is None
     assert project_entry.is_archived is False
     assert project_entry.can_assign_tasks is True
-    
+
     # Test string representation
     assert str(project_entry) == "Project Test Project"
     assert repr(project_entry) == "Project Test Project"
@@ -68,7 +68,7 @@ def test_project_entry_with_defaults():
         sync_id=None,
         collapsed=False
     )
-    
+
     # Test default values
     assert project_entry.inbox_project is False
     assert project_entry.description == ''
@@ -111,14 +111,14 @@ def test_task_entry_creation():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     assert task_entry.id == "task123"
     assert task_entry.content == "Test Task"
     assert task_entry.description == "A test task"
     assert task_entry.labels == ["label1", "label2"]
     assert task_entry.checked is False
     assert task_entry.priority == 1
-    
+
     # Test string representation
     assert str(task_entry) == "Task Test Task"
     assert repr(task_entry) == "Task Test Task"
@@ -157,7 +157,7 @@ def test_task_entry_kwargs_property():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     kwargs = task_entry.kwargs
     assert 'content' in kwargs
     assert 'duration_unit' in kwargs
@@ -200,11 +200,11 @@ def test_task_entry_with_duration():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     kwargs = task_entry.kwargs
     assert kwargs['duration_unit'] == "minute"
     assert kwargs['duration'] == 30
-    
+
     duration_kwargs = task_entry.duration_kwargs
     assert duration_kwargs is not None
     assert duration_kwargs['duration'] == 30
@@ -245,7 +245,7 @@ def test_task_entry_due_datetime_property():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     due_dt = task_entry.due_datetime
     assert isinstance(due_dt, dt.datetime)
     assert due_dt.year == 2024
@@ -272,12 +272,12 @@ def test_event_entry_creation():
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project123"
     )
-    
+
     assert event_entry.id == "event123"
     assert event_entry.object_type == "item"
     assert event_entry.event_type == "completed"
     assert event_entry.extra_data["content"] == "Test Task"
-    
+
     # Test string representation
     assert str(event_entry) == "Event item completed"
     assert repr(event_entry) == "Event item completed"
@@ -305,7 +305,7 @@ def test_project_creation():
         sync_id=None,
         collapsed=False
     )
-    
+
     task_entry = TaskEntry(
         id="task123",
         is_deleted=False,
@@ -337,15 +337,15 @@ def test_project_creation():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     task = Task(id="task123", task_entry=task_entry)
     project = Project(id="12345", project_entry=project_entry, tasks=[task], is_archived=False)
-    
+
     assert project.id == "12345"
     assert len(project.tasks) == 1
     assert project.tasks[0].id == "task123"
     assert project.is_archived is False
-    
+
     # Test equality
     project2 = Project(id="12345", project_entry=project_entry, tasks=[], is_archived=False)
     assert project == project2
@@ -385,11 +385,11 @@ def test_task_creation_and_properties():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     task = Task(id="task123", task_entry=task_entry)
     assert task.is_recurring is False
     assert task.is_non_recurring is True
-    
+
     # Test recurring task
     recurring_task_entry = TaskEntry(
         id="task456",
@@ -422,7 +422,7 @@ def test_task_creation_and_properties():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     recurring_task = Task(id="task456", task_entry=recurring_task_entry)
     assert recurring_task.is_recurring is True
     assert recurring_task.is_non_recurring is False
@@ -462,7 +462,7 @@ def test_is_recurring_task_function():
         v2_section_id="v2_section123",
         day_order=None
     )
-    
+
     recurring_task = Task(id="task456", task_entry=recurring_task_entry)
     assert is_recurring_task(recurring_task) is True
     assert is_non_recurring_task(recurring_task) is False
@@ -491,13 +491,13 @@ def test_is_event_rescheduled_function():
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project123"
     )
-    
+
     event = Event(
         event_entry=rescheduled_event_entry,
         id="event123",
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
-    
+
     assert is_event_rescheduled(event) is True
     assert event.event_type == "rescheduled"
 
@@ -519,13 +519,13 @@ def test_event_properties():
         v2_parent_item_id=None,
         v2_parent_project_id="v2_project123"
     )
-    
+
     event = Event(
         event_entry=event_entry,
         id="event123",
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
-    
+
     assert event.name == "Test Task Content"
     assert event.event_type == "completed"
     assert str(event) == "Event event123 (2024-01-01 12:00:00) Test Task Content"

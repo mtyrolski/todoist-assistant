@@ -139,6 +139,16 @@ flowchart TD
    - [Git](https://git-scm.com/)
    - [Make](https://askubuntu.com/a/272020) (for Makefile support)
    - [UV (Python package manager)](https://github.com/astral-sh/uv)
+   - **Node.js 20+ + npm** (for the new Next.js dashboard in `frontend/`)
+     - Recommended via `nvm`:
+       ```bash
+       # Tip: check https://github.com/nvm-sh/nvm/releases for the latest installer version
+       curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh -o /tmp/install_nvm.sh
+       bash /tmp/install_nvm.sh
+       source ~/.nvm/nvm.sh
+       nvm install 20
+       nvm use 20
+       ```
 
 3. **Clone and Set Up the Repository**
 
@@ -181,7 +191,11 @@ flowchart TD
 The following [Makefile](Makefile) commands are available for managing the local environment and running the dashboard:
 
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
-- **`make run_dashboard`:** Launches the Streamlit dashboard for Todoist Assistant.
+- **`make install_app`:** Installs frontend dependencies in `frontend/` (requires Node.js + npm).
+- **`make run_dashboard`:** Launches the new web dashboard stack (FastAPI API + Next.js frontend); installs frontend deps if missing.
+- **`make run_dashboard_streamlit`:** Launches the legacy Streamlit dashboard.
+- **`make run_api`:** Runs the FastAPI backend only (http://127.0.0.1:8000).
+- **`make run_frontend`:** Runs the Next.js dev server only (http://127.0.0.1:3000); installs frontend deps if missing.
 - **`make run_observer`:** Runs the background observer that refreshes recent activity, resets local caches, and triggers short automations (templates, multiply, etc.) every 30 seconds.
 - **`make clear_local_env`:** Clears local environment data by removing the activity cache.
 
@@ -214,14 +228,33 @@ This entrypoint pulls the latest week of activity, updates the cached events, re
 
 ### Dashboard Usage
 
-To run the dashboard, execute the following command:
+#### New web dashboard (recommended)
+
+1. Make sure your Python env is ready and `.env` is configured (Todoist API token).
+2. Install the frontend dependencies (first run only; `make run_dashboard` will also do this automatically):
 ```bash
-streamlit run dashboard.py
+make install_app
+```
+3. Start the full dashboard stack:
+```bash
+make run_dashboard
+```
+Then open:
+- Frontend: http://127.0.0.1:3000
+- API: http://127.0.0.1:8000 (health: `/api/health`)
+
+Note: the frontend is currently pinned to Next.js 14 for stability; upgrading to Next.js 15 can be evaluated later.
+
+#### Legacy Streamlit dashboard
+
+To run the legacy Streamlit dashboard, execute:
+```bash
+make run_dashboard_streamlit
 ```
 <table>
   <tr>
     <td style="text-align: justify; vertical-align: top;">
-      This command starts a Streamlit application that aggregates and displays data retrieved from the Todoist API. The dashboard processes inputs such as active projects, archived projects, and activity events. You can also navigate to Control Panel to launch automations in GUI.
+      The Streamlit UI aggregates and displays data retrieved from the Todoist API. You can navigate to Control Panel to launch automations in GUI.
     </td>
     <td style="text-align: center; vertical-align: top;">
       <img src="img/control_panel.png" alt="control_panel" style="max-width: 100%; height: auto;"/>

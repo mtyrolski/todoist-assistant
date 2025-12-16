@@ -182,7 +182,7 @@ class Project:
 def is_event_rescheduled(event: 'Event') -> bool:
     """
     Check if the event is a reschedule event.
-    
+
     ex. of resheduled event:
     'initiator_id': None,
     'extra_data': {'client': 'Mozilla/xxxx; Todoist/xxxx',
@@ -191,7 +191,7 @@ def is_event_rescheduled(event: 'Event') -> bool:
     'last_due_date': '2025-04-05T21:59:59.000000Z',
     'note_count': 0},
     'extra_data_id': xxxxxx,
-        
+
     """
     return all([
         event.event_entry.event_type == EventType.UPDATED.value,
@@ -232,7 +232,7 @@ class Event:
     def event_type(self) -> str:
         """
         Get the event type.
-        
+
         For now basic types 'added', 'updated', 'completed', 'deleted' are supported
         and some subtypes are supported as well.
         For example, 'updated' is a basic type,

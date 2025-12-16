@@ -1,21 +1,18 @@
-from os import getenv
-from os.path import join
-from os.path import exists
-from pickle import HIGHEST_PROTOCOL
-from typing import Callable, TypeVar, cast
-from joblib import load, dump
-from loguru import logger
-from hydra import compose
-from hydra import initialize
-from hydra.core.global_hydra import GlobalHydra
-from omegaconf import DictConfig
 from abc import ABC, abstractmethod
-from typing import KeysView, Type, Any
-from pickle import UnpicklingError
-from zlib import error as ZlibError
-from lzma import LZMAError
 import time
 import random
+from lzma import LZMAError
+from os import getenv
+from os.path import exists, join
+from pickle import HIGHEST_PROTOCOL, UnpicklingError
+from typing import Any, Callable, KeysView, Type, TypeVar, cast
+from zlib import error as ZlibError
+
+from hydra import compose, initialize
+from hydra.core.global_hydra import GlobalHydra
+from joblib import dump, load
+from loguru import logger
+from omegaconf import DictConfig
 
 T = TypeVar('T', set, dict)
 LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
@@ -61,9 +58,8 @@ class LocalStorage:
         try:
             if exists(self.path):
                 return cast(T, load(self.path))
-            else:
-                default_value = self.resource_class()
-                return cast(T, default_value)
+            default_value = self.resource_class()
+            return cast(T, default_value)
         except LOCAL_STORAGE_EXCEPTIONS as e:
             raise LocalStorageError(f"Failed to load data from {self.path}: {type(e)}. {e}") from e
 
@@ -146,18 +142,18 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
     return None
 
 
-def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMPTS, 
-                       backoff_mean: float = RETRY_BACKOFF_MEAN, 
+def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMPTS,
+                       backoff_mean: float = RETRY_BACKOFF_MEAN,
                        backoff_std: float = RETRY_BACKOFF_STD) -> U | None:
     """
     Try to run a function with Gaussian backoff retry logic.
-    
+
     Args:
         fn: Function to retry (should take no arguments)
         max_attempts: Maximum number of retry attempts
         backoff_mean: Mean wait time in seconds for Gaussian backoff
         backoff_std: Standard deviation for Gaussian backoff
-    
+
     Returns:
         Result of the function if successful, None if all attempts fail
     """
@@ -184,17 +180,17 @@ def with_retry(fn: Callable[[], U], operation_name: str = "operation",
                backoff_std: float = RETRY_BACKOFF_STD) -> U:
     """
     Wrapper that executes a function with retry logic and raises exception on failure.
-    
+
     Args:
         fn: Function to execute with retry
         operation_name: Name of operation for error messages
         max_attempts: Maximum number of retry attempts
         backoff_mean: Mean wait time in seconds for Gaussian backoff
         backoff_std: Standard deviation for Gaussian backoff
-    
+
     Returns:
         Result of the function
-        
+
     Raises:
         RuntimeError: If all retry attempts fail
     """

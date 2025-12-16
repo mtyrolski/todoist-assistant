@@ -1,5 +1,5 @@
 from inspect import signature
-from typing import Any, Final, Iterable, Mapping
+from typing import Any, Final, Iterable, Mapping, cast
 from todoist.automations.base import Automation
 from todoist.constants import TaskField
 from todoist.database.base import Database
@@ -113,7 +113,7 @@ class Template(Automation):
 
         logger.info(f"Found {len(task_to_initialize_from_template)} tasks to initialize from template")
 
-        def insert_subtasks(root_task: Task, parent_id: int, task_template: TaskTemplate,
+        def insert_subtasks(root_task: Task, parent_id: str, task_template: TaskTemplate,
                             parent_due_date: datetime | None):
             for child in task_template.children:
                 if child.due_date_days_difference is not None and parent_due_date is not None:
@@ -122,15 +122,17 @@ class Template(Automation):
                 else:
                     subtask_due_date = None
 
-                child_insertion_result = db.insert_task(content=child.content,
-                                                        description=child.description,
-                                                        project_id=task.task_entry.project_id,
-                                                        parent_id=parent_id,
-                                                        priority=child.priority,
-                                                        due_date=subtask_due_date)
+                child_insertion_result = db.insert_task(
+                    content=child.content,
+                    description=child.description,
+                    project_id=task.task_entry.project_id,
+                    parent_id=parent_id,
+                    priority=child.priority,
+                    due_date=subtask_due_date,
+                )
 
                 if 'id' in child_insertion_result:
-                    insert_subtasks(root_task, child_insertion_result['id'], child, parent_due_date)
+                    insert_subtasks(root_task, cast(str, child_insertion_result['id']), child, parent_due_date)
                 else:
                     logger.error(f"Failed to insert subtask {child.content}")
 
@@ -149,7 +151,7 @@ class Template(Automation):
                 due_datetime_child_str = None
             else:
                 due_datetime_parent = task.task_entry.due_datetime
-                due_datetime_child = (due_datetime_parent + timedelta(days=template_.due_date_days_difference))
+                due_datetime_child = due_datetime_parent + timedelta(days=template_.due_date_days_difference or 0)
                 due_datetime_child_str = due_datetime_child.strftime('%Y-%m-%dT%H:%M:%S')
             labels_root = list(
                 filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))
@@ -165,14 +167,19 @@ class Template(Automation):
                 logger.error(f"Failed to initialize task from template {template_name}")
                 continue
 
-            root_task_id: str = db.fetch_task_by_id(root_insertion_result['id'])
+            root_task_payload = db.fetch_task_by_id(root_insertion_result['id'])
+            if not isinstance(root_task_payload, dict):
+                logger.error("Failed to fetch task payload for initialized template task %s", root_insertion_result['id'])
+                continue
             fix_mapping = {'creator_id': 'user_id'}
 
             drop_mapping = {'self'}
-            root_task_entry = root_task_id | fix_mapping
-            root_task_entry = {
-                k: v for k, v in root_task_entry.items() if k in signature(TaskEntry.__init__).parameters
-            }
+            root_task_entry: dict[str, Any] = dict(root_task_payload)
+            for old_key, new_key in fix_mapping.items():
+                if old_key in root_task_entry and new_key not in root_task_entry:
+                    root_task_entry[new_key] = root_task_entry.pop(old_key)
+
+            root_task_entry = {k: v for k, v in root_task_entry.items() if k in signature(TaskEntry.__init__).parameters}
             lacking_params = set(signature(TaskEntry.__init__).parameters) - set(root_task_entry.keys())
             for param in lacking_params:
                 root_task_entry[param] = None
@@ -181,7 +188,7 @@ class Template(Automation):
                 root_task_entry.pop(drop, None)
 
             root_task = Task(id=root_insertion_result['id'], task_entry=TaskEntry(**root_task_entry))
-            insert_subtasks(root_task, root_insertion_result['id'], template_, due_datetime_child)
+            insert_subtasks(root_task, cast(str, root_insertion_result['id']), template_, due_datetime_child)
 
             db.remove_task(task.id)
             logger.info(f"Initialized task {task.id} from template {template_name}")

@@ -119,4 +119,4 @@ def test_deep_label_creates_subtasks():
     assert leaves[-1]["content"] == "Testowo inner - 5/5"
 
     assert db.updated == [("1", {"labels": ["work"]})]
-    assert db.removed_ids == []
+    assert not db.removed_ids

@@ -28,7 +28,7 @@ class DatabaseActivity:
         """Expose metadata about the most recent API call."""
 
         return self._api_client.last_call_result
-    
+
     def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
         """
         Fetches activity events from the Todoist API using a sliding window approach.
@@ -38,7 +38,7 @@ class DatabaseActivity:
         """
         if events_already_fetched is None:
             events_already_fetched = set()
-        
+
         n_empty_weeks: int = 0
         iterated_weeks: int = 0
         total_events: list[Event] = []
@@ -55,17 +55,17 @@ class DatabaseActivity:
             total_events.extend(new_events)
             events_already_fetched.update(new_events)
         logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
-        
+
         # extending with already fetched events to avoid losing them
         total_events.extend(events_already_fetched)
         total_events = list(set(total_events))  # deduplication
         logger.debug(f"Total events after merging with already fetched and deduplication: {len(total_events)}")
-        
+
         # final sorting
         total_events.sort(key=lambda x: x.event_entry.event_date, reverse=True)  # from newest to oldest
         return total_events
 
-            
+
     def fetch_activity(self, max_pages: int = 4, starting_page: int = 0) -> list[Event]:
         """
         Fetches the activity data from the Todoist API.
@@ -83,7 +83,7 @@ class DatabaseActivity:
                 assert event_date is not None
                 page_events.append(Event(event_entry=event, id=event.id, date=event_date))
             return page_events
-        
+
         def process_page_with_retry(page: int) -> list[Event]:
             """Process page with built-in retry logic."""
             return with_retry(
@@ -108,8 +108,8 @@ class DatabaseActivity:
                 page = future_to_page[future]
                 page_events = future.result(timeout=TIMEOUT_SECONDS)
                 results_by_page[page] = page_events
-        
-            
+
+
         # logger.debug(f"Fetched {len(page_events)} events from page {page}")
         logger.debug(f'Fetched events by page (idx, len): {[ (page, len(events)) for page, events in results_by_page.items() ]}')
         # Preserve page order when extending results

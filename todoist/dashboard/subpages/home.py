@@ -31,7 +31,7 @@ def render_home_page(df_activity: pd.DataFrame, active_projects: list[Project], 
                       delta=metric_delta,
                       delta_color="inverse" if do_inverse else "normal",
                       border=True)
-            
+
             # Add date range information inside the metric box area
             st.markdown(f"""
             <div style="margin-top: 5px; font-size: 9px; line-height: 1.2; padding: 4px 8px; background-color: rgba(255,255,255,0.05); border-radius: 4px;">

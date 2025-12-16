@@ -96,7 +96,11 @@ def anonymize_project_names(df_activity: pd.DataFrame) -> dict[str, str]:
     project_mapping = random.sample(_available_project_names, len(project_names))
     anonymized_projects = dict(zip(project_names, project_mapping))
 
-    df_activity.loc[:, 'parent_project_name'] = df_activity['parent_project_name'].map(anonymized_projects)
-    df_activity.loc[:, 'root_project_name'] = df_activity['root_project_name'].map(anonymized_projects)
+    df_activity.loc[:, 'parent_project_name'] = df_activity['parent_project_name'].map(
+        lambda name: anonymized_projects.get(name, name)
+    )
+    df_activity.loc[:, 'root_project_name'] = df_activity['root_project_name'].map(
+        lambda name: anonymized_projects.get(name, name)
+    )
 
     return anonymized_projects

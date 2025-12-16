@@ -1,5 +1,6 @@
 import streamlit as st
-from omegaconf import OmegaConf
+from omegaconf import DictConfig
+from typing import cast
 from todoist.utils import Cache, load_config
 from loguru import logger
 from todoist.database.base import Database
@@ -13,8 +14,8 @@ import threading
 
 
 def render_control_panel_page(dbio: Database) -> None:
-    config: OmegaConf = load_config('automations', '../configs')
-    automations: list[Automation] = hydra.utils.instantiate(config.automations)
+    config = load_config('automations', '../configs')
+    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
 
     st.title("Automation Control Panel")
     st.write("Manage and execute your automations below:")
@@ -85,9 +86,13 @@ def render_control_panel_page(dbio: Database) -> None:
                     loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
 
                     # Define a function to run the automation in a separate thread
-                    def run_automation():
-                        with contextlib.redirect_stdout(output_stream), contextlib.redirect_stderr(output_stream):
-                            automation.tick(dbio)    # Run the blocking automation
+                    def run_automation(
+                        _automation=automation,
+                        _dbio=dbio,
+                        _output_stream=output_stream,
+                    ):
+                        with contextlib.redirect_stdout(_output_stream), contextlib.redirect_stderr(_output_stream):
+                            _automation.tick(_dbio)    # Run the blocking automation
                         # Ensure final output is captured before thread ends
                         time.sleep(0.1)
 
