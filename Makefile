@@ -1,4 +1,4 @@
-.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_dashboard_streamlit run_demo run_observer clear_local_env update_and_run test
+.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -43,12 +43,23 @@ run_dashboard: ensure_frontend_deps
 		wait -n $$api_pid $$fe_pid; \
 	'
 
-# Preserve old Streamlit dashboard under a new target
-run_dashboard_streamlit:
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False
-
-run_demo:
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False demo
+run_demo: ensure_frontend_deps
+	@bash -c '\
+		set -euo pipefail; \
+		pids=""; api_pid=""; fe_pid=""; \
+		cleanup() { \
+			echo "Stopping demo dashboard servers..."; \
+			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
+			wait 2>/dev/null || true; \
+		}; \
+		trap cleanup INT TERM EXIT; \
+		TODOIST_DASHBOARD_DEMO=1 uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		TODOIST_DASHBOARD_DEMO=1 npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
+		echo "Demo dashboard running (anonymized):"; \
+		echo "  API:      http://127.0.0.1:8000"; \
+		echo "  Frontend: http://127.0.0.1:3000"; \
+		wait -n $$api_pid $$fe_pid; \
+	'
 
 run_observer:
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.run_observer --config-dir configs --config-name automations
@@ -58,7 +69,7 @@ clear_local_env:
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env --config-dir configs --config-name automations && \
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run streamlit run todoist/dashboard/app.py --client.showErrorDetails=False
+	make run_dashboard
 
 test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run pytest -v --tb=short tests/

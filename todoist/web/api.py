@@ -1,20 +1,29 @@
 import asyncio
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-# NOTE: This file is intentionally lightweight (no Streamlit imports).
+# NOTE: This file is intentionally lightweight (dashboard API).
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
+from uuid import uuid4
 import json
 import os
 import time
+import io
+import contextlib
+from pathlib import Path
 
 import pandas as pd
 import plotly.io as pio
 import plotly.graph_objects as go
+import hydra
+from loguru import logger
+from omegaconf import DictConfig
 
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
+from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
 from todoist.types import Project
 from todoist.plots import (
     cumsum_completed_tasks_periodically,
@@ -25,9 +34,12 @@ from todoist.plots import (
     plot_task_lifespans,
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
+from todoist.automations.base import Automation
+from todoist.utils import Cache, load_config
+from todoist.version import get_version
 
 # FastAPI application powering the new web dashboard.
-app = FastAPI(title="Todoist Dashboard API")
+app = FastAPI(title="Todoist Dashboard API", version=get_version())
 
 # Allow the local Next.js dev server to talk to the API without CORS issues.
 app.add_middleware(
@@ -125,18 +137,51 @@ class _DashboardState:
         self.project_colors: dict[str, str] | None = None
         self.label_colors: dict[str, str] | None = None
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
+        self.demo_mode: bool = False
 
 
 _state = _DashboardState()
 _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
+_ADMIN_LOCK = asyncio.Lock()
+_JOBS_LOCK = asyncio.Lock()
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _refresh_state_sync() -> None:
+@dataclass
+class _AdminJob:
+    id: str
+    kind: str
+    status: str  # queued | running | done | failed
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    result: Any | None = None
+    error: str | None = None
+
+
+_JOBS: dict[str, _AdminJob] = {}
+
+
+def _env_demo_mode() -> bool:
+    value = os.getenv("TODOIST_DASHBOARD_DEMO", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _refresh_state_sync(*, demo_mode: bool) -> None:
     dbio = Database(".env")
     dbio.pull()
     df_activity = load_activity_data(dbio)
     active_projects = dbio.fetch_projects(include_tasks=True)
+
+    if demo_mode and not dbio.is_anonymized:
+        from todoist.database.demo import anonymize_label_names, anonymize_project_names
+
+        project_ori2anonym = anonymize_project_names(df_activity)
+        label_ori2anonym = anonymize_label_names(active_projects)
+        dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+
     project_colors = dbio.fetch_mapping_project_name_to_color()
     label_colors = dbio.fetch_label_colors()
 
@@ -147,18 +192,31 @@ def _refresh_state_sync() -> None:
     _state.label_colors = label_colors
     _state.last_refresh_s = time.time()
     _state.home_payload_cache = {}
+    _state.demo_mode = demo_mode
 
 
-async def _ensure_state(refresh: bool) -> None:
+async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
     now = time.time()
-    if not refresh and _state.db is not None and (now - _state.last_refresh_s) < _STATE_TTL_S:
+    desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
+    if (
+        not refresh
+        and _state.db is not None
+        and _state.demo_mode == desired_demo
+        and (now - _state.last_refresh_s) < _STATE_TTL_S
+    ):
         return
 
     async with _STATE_LOCK:
         now = time.time()
-        if not refresh and _state.db is not None and (now - _state.last_refresh_s) < _STATE_TTL_S:
+        desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
+        if (
+            not refresh
+            and _state.db is not None
+            and _state.demo_mode == desired_demo
+            and (now - _state.last_refresh_s) < _STATE_TTL_S
+        ):
             return
-        await asyncio.to_thread(_refresh_state_sync)
+        await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
 
 
 def _service_statuses() -> list[dict[str, Any]]:
@@ -409,7 +467,7 @@ async def dashboard_home(
     Home dashboard payload: metrics, badges, and Plotly figures.
 
     Notes:
-    - `weeks` controls the date range used for time-series plots (Streamlit default ~12 weeks).
+    - `weeks` controls the date range used for time-series plots (default ~12 weeks).
     - `beg`/`end` (YYYY-MM-DD) override `weeks` when provided.
     - `granularity` controls periodic aggregation where applicable.
     - `refresh=true` forces a Todoist API pull + activity reload (otherwise cached briefly).
@@ -507,3 +565,384 @@ async def dashboard_home(
     }
     _state.home_payload_cache[cache_key] = payload
     return payload
+
+
+def _serialize_dt(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    return None
+
+
+def _load_automations() -> list[Automation]:
+    config = load_config("automations", str((_REPO_ROOT / "configs").resolve()))
+    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
+    return automations
+
+
+def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
+    launches = Cache().automation_launches.load().get(automation.name, [])
+    last_launch = launches[-1] if launches else None
+    last_launch_iso = _serialize_dt(last_launch)
+    return {
+        "name": automation.name,
+        "frequencyMinutes": automation.frequency,
+        "isLong": getattr(automation, "is_long", False),
+        "launchCount": len(launches),
+        "lastLaunch": last_launch_iso,
+    }
+
+
+@app.get("/api/admin/automations", tags=["admin"])
+async def admin_automations() -> dict[str, Any]:
+    """List configured automations plus cached launch metadata."""
+
+    automations = _load_automations()
+    return {"automations": [_automation_launch_metadata(a) for a in automations]}
+
+
+def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:
+    output_stream = io.StringIO()
+    started_at = datetime.now()
+    with contextlib.redirect_stdout(output_stream), contextlib.redirect_stderr(output_stream):
+        loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
+        try:
+            task_delegations = automation.tick(dbio)
+        finally:
+            logger.remove(loguru_handler_id)
+    finished_at = datetime.now()
+    return {
+        "name": automation.name,
+        "startedAt": started_at.isoformat(timespec="seconds"),
+        "finishedAt": finished_at.isoformat(timespec="seconds"),
+        "durationSeconds": round((finished_at - started_at).total_seconds(), 3),
+        "output": output_stream.getvalue(),
+        "taskDelegations": task_delegations,
+    }
+
+
+@app.post("/api/admin/automations/run", tags=["admin"])
+async def admin_run_automation(name: str, refresh: bool = False) -> dict[str, Any]:
+    """
+    Run a single automation by name (from configs/automations.yaml).
+
+    Notes:
+    - Uses the same frequency gating as the CLI/observer runner.
+    - `refresh=true` forces the dashboard state to reload after the run.
+    """
+    async with _ADMIN_LOCK:
+        automations = {a.name: a for a in _load_automations()}
+        if name not in automations:
+            raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
+
+        dbio = Database(".env")
+        dbio.pull()
+        result = await asyncio.to_thread(_run_automation_sync, automations[name], dbio=dbio)
+        dbio.reset()
+
+        if refresh:
+            await _ensure_state(refresh=True)
+        return result
+
+
+@app.post("/api/admin/automations/run_all", tags=["admin"])
+async def admin_run_all_automations(refresh: bool = False) -> dict[str, Any]:
+    """Run all configured automations sequentially."""
+
+    async with _ADMIN_LOCK:
+        dbio = Database(".env")
+        dbio.pull()
+        results: list[dict[str, Any]] = []
+        for automation in _load_automations():
+            results.append(await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio))
+            dbio.reset()
+
+        if refresh:
+            await _ensure_state(refresh=True)
+        return {"results": results}
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+async def _save_job(job: _AdminJob) -> None:
+    async with _JOBS_LOCK:
+        _JOBS[job.id] = job
+
+
+async def _get_job(job_id: str) -> _AdminJob:
+    async with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Unknown job id")
+        return job
+
+
+async def _update_job(job_id: str, **fields: Any) -> None:
+    async with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return
+        for key, value in fields.items():
+            setattr(job, key, value)
+
+
+@app.get("/api/admin/jobs/{job_id}", tags=["admin"])
+async def admin_job(job_id: str) -> dict[str, Any]:
+    job = await _get_job(job_id)
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "status": job.status,
+        "createdAt": job.created_at,
+        "startedAt": job.started_at,
+        "finishedAt": job.finished_at,
+        "result": job.result,
+        "error": job.error,
+    }
+
+
+async def _run_automation_job(*, job_id: str, name: str) -> None:
+    await _update_job(job_id, status="running", started_at=_now_iso())
+    try:
+        async with _ADMIN_LOCK:
+            automations = {a.name: a for a in _load_automations()}
+            if name not in automations:
+                raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
+
+            dbio = Database(".env")
+            dbio.pull()
+            result = await asyncio.to_thread(_run_automation_sync, automations[name], dbio=dbio)
+            dbio.reset()
+
+        await _update_job(job_id, status="done", finished_at=_now_iso(), result=result)
+    except Exception as exc:  # pragma: no cover - defensive
+        await _update_job(job_id, status="failed", finished_at=_now_iso(), error=f"{type(exc).__name__}: {exc}")
+
+
+async def _run_all_automations_job(*, job_id: str) -> None:
+    await _update_job(job_id, status="running", started_at=_now_iso())
+    try:
+        async with _ADMIN_LOCK:
+            dbio = Database(".env")
+            dbio.pull()
+            results: list[dict[str, Any]] = []
+            for automation in _load_automations():
+                results.append(await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio))
+                dbio.reset()
+
+        await _update_job(job_id, status="done", finished_at=_now_iso(), result={"results": results})
+    except Exception as exc:  # pragma: no cover - defensive
+        await _update_job(job_id, status="failed", finished_at=_now_iso(), error=f"{type(exc).__name__}: {exc}")
+
+
+@app.post("/api/admin/automations/run_async", tags=["admin"])
+async def admin_run_automation_async(name: str) -> dict[str, Any]:
+    """Start an automation run in the background and return a job id."""
+
+    job = _AdminJob(
+        id=str(uuid4()),
+        kind="automation",
+        status="queued",
+        created_at=_now_iso(),
+    )
+    await _save_job(job)
+    asyncio.create_task(_run_automation_job(job_id=job.id, name=name))
+    return {"jobId": job.id, "status": job.status}
+
+
+@app.post("/api/admin/automations/run_all_async", tags=["admin"])
+async def admin_run_all_automations_async() -> dict[str, Any]:
+    """Start a run of all configured automations in the background and return a job id."""
+
+    job = _AdminJob(
+        id=str(uuid4()),
+        kind="automations",
+        status="queued",
+        created_at=_now_iso(),
+    )
+    await _save_job(job)
+    asyncio.create_task(_run_all_automations_job(job_id=job.id))
+    return {"jobId": job.id, "status": job.status}
+
+
+def _log_files() -> list[dict[str, Any]]:
+    log_files: list[dict[str, Any]] = []
+    for log_path in _REPO_ROOT.rglob("*.log"):
+        if not log_path.is_file():
+            continue
+        try:
+            stat = log_path.stat()
+        except OSError:
+            continue
+        if stat.st_size <= 0:
+            continue
+        log_files.append(
+            {
+                "path": str(log_path.relative_to(_REPO_ROOT)),
+                "size": stat.st_size,
+                "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            }
+        )
+    return sorted(log_files, key=lambda x: x["path"])
+
+
+def _safe_repo_path(rel_path: str, *, suffix: str | None = None) -> Path:
+    candidate = (_REPO_ROOT / rel_path).resolve()
+    if _REPO_ROOT not in candidate.parents and candidate != _REPO_ROOT:
+        raise HTTPException(status_code=400, detail="Path must be within repository")
+    if suffix and candidate.suffix != suffix:
+        raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
+    return candidate
+
+
+@app.get("/api/admin/logs", tags=["admin"])
+async def admin_logs() -> dict[str, Any]:
+    return {"logs": _log_files()}
+
+
+def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=f"Unable to read log file: {exc}") from exc
+
+    total_lines = len(lines)
+    per_page = max(1, min(2000, int(tail_lines)))
+    total_pages = max(1, (total_lines + per_page - 1) // per_page)
+    page_i = max(1, min(int(page), total_pages))
+
+    end_line = total_lines - (page_i - 1) * per_page
+    start_line = max(0, end_line - per_page)
+    content = "".join(lines[start_line:end_line])
+    return {
+        "content": content,
+        "page": page_i,
+        "perPage": per_page,
+        "totalPages": total_pages,
+        "totalLines": total_lines,
+    }
+
+
+@app.get("/api/admin/logs/read", tags=["admin"])
+async def admin_read_log(path: str, tail_lines: int = 40, page: int = 1) -> dict[str, Any]:
+    abs_path = _safe_repo_path(path, suffix=".log")
+    stat = abs_path.stat()
+    payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
+    return {
+        "path": str(abs_path.relative_to(_REPO_ROOT)),
+        "size": stat.st_size,
+        "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        **payload,
+    }
+
+
+def _available_mapping_files() -> list[str]:
+    personal_dir = _REPO_ROOT / "personal"
+    if not personal_dir.exists():
+        return ["archived_root_projects.py"]
+
+    mapping_files: list[str] = []
+    for file in personal_dir.glob("*.py"):
+        if file.name.startswith("__"):
+            continue
+        try:
+            content = file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if ADJUSTMENTS_VARIABLE_NAME in content:
+            mapping_files.append(file.name)
+
+    return sorted(mapping_files) if mapping_files else ["archived_root_projects.py"]
+
+
+def _generate_adjustment_file_content(mappings: dict[str, str]) -> str:
+    content = [
+        "# Adjustments for archived root projects",
+        "# This file was generated by the web dashboard admin UI",
+        "",
+        f"{ADJUSTMENTS_VARIABLE_NAME} = {{",
+    ]
+    for archived_name, active_name in sorted(mappings.items()):
+        content.append(f'    "{archived_name}": "{active_name}",')
+    content.append("}")
+    content.append("")
+    return "\n".join(content)
+
+
+def _load_mapping_file(filename: str) -> dict[str, str]:
+    personal_dir = _REPO_ROOT / "personal"
+    personal_dir.mkdir(exist_ok=True)
+    target = _safe_repo_path(str(Path("personal") / filename), suffix=".py")
+    if not target.exists():
+        target.write_text(_generate_adjustment_file_content({}), encoding="utf-8")
+        return {}
+
+    # Match dataframe.py behavior (exec python file) so the UI shows the effective mapping.
+    import importlib.util
+    import sys
+
+    module_name = "dashboard_adjustments"
+    spec = importlib.util.spec_from_file_location(module_name, target)
+    if spec is None or spec.loader is None:
+        return {}
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    mapping = getattr(module, ADJUSTMENTS_VARIABLE_NAME, {})
+    return mapping if isinstance(mapping, dict) else {}
+
+
+def _save_mapping_file(filename: str, mappings: dict[str, str]) -> None:
+    target = _safe_repo_path(str(Path("personal") / filename), suffix=".py")
+    target.write_text(_generate_adjustment_file_content(mappings), encoding="utf-8")
+
+
+@app.get("/api/admin/project_adjustments", tags=["admin"])
+async def admin_project_adjustments(file: str | None = None, refresh: bool = False) -> dict[str, Any]:
+    """Return mapping files, current mapping content, and project lists for building adjustments."""
+
+    selected = file or _available_mapping_files()[0]
+    mappings = _load_mapping_file(selected)
+
+    await _ensure_state(refresh=refresh)
+    dbio = _state.db
+    if dbio is None:
+        raise HTTPException(status_code=500, detail="Database unavailable")
+
+    active_projects = dbio.fetch_projects(include_tasks=False)
+    archived_projects = dbio.fetch_archived_projects()
+
+    active_root = sorted({p.project_entry.name for p in active_projects if p.project_entry.parent_id is None})
+    archived_names = sorted({p.project_entry.name for p in archived_projects})
+    unmapped_archived = [name for name in archived_names if name not in mappings]
+
+    return {
+        "files": _available_mapping_files(),
+        "selectedFile": selected,
+        "mappings": mappings,
+        "activeRootProjects": active_root,
+        "archivedProjects": archived_names,
+        "unmappedArchivedProjects": unmapped_archived,
+    }
+
+
+@app.put("/api/admin/project_adjustments", tags=["admin"])
+async def admin_save_project_adjustments(
+    file: str,
+    refresh: bool = True,
+    mappings: dict[str, str] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Save mapping dict to the selected mapping file."""
+
+    if not isinstance(mappings, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in mappings.items()):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object of string->string mappings")
+
+    async with _ADMIN_LOCK:
+        _save_mapping_file(file, mappings)
+        if refresh:
+            await _ensure_state(refresh=True)
+    return {"saved": True, "file": file, "count": len(mappings)}

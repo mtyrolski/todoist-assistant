@@ -7,6 +7,7 @@ import { LoadingBar } from "./components/LoadingBar";
 import { LeaderboardCard, type LeaderboardItem } from "./components/LeaderboardCard";
 import { ServiceMonitor, type ServiceStatus } from "./components/ServiceMonitor";
 import { InsightCard, type InsightItem } from "./components/InsightCard";
+import { AdminPanel } from "./components/AdminPanel";
 
 type Health = { status: string } | null;
 
@@ -148,6 +149,8 @@ export default function Page() {
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
   const rootBoard = lastWeek?.rootProjects?.items ?? null;
+  const metricsCurrentPeriod = dashboard?.metrics.currentPeriod ?? "";
+  const metricsPreviousPeriod = dashboard?.metrics.previousPeriod ?? "";
 
   return (
     <div className="page">
@@ -157,7 +160,7 @@ export default function Page() {
           <p className="eyebrow">Todoist Assistant</p>
           <h1>Dashboard</h1>
           <p className="lede">
-            Same signals as the Streamlit home page, in a faster, cleaner dark UI.
+            A fast, local dashboard for your Todoist data and automations.
           </p>
           <div className="status-row">
             <span className={`pill ${health?.status === "ok" ? "pill-good" : "pill-warn"}`}>
@@ -281,8 +284,8 @@ export default function Page() {
               value={m.value}
               deltaPercent={m.deltaPercent}
               inverseDelta={m.inverseDelta}
-              currentPeriod={dashboard.metrics.currentPeriod}
-              previousPeriod={dashboard.metrics.previousPeriod}
+              currentPeriod={metricsCurrentPeriod}
+              previousPeriod={metricsPreviousPeriod}
             />
           ) : (
             <div key={idx} className="stat skeleton" />
@@ -339,33 +342,13 @@ export default function Page() {
           </div>
         </section>
 
-        <section className="stack">
-          <section className="card">
-            <header className="cardHeader">
-              <h2>Admin Control</h2>
-            </header>
-            <p className="muted tiny" style={{ margin: "0 0 12px" }}>
-              For Streamlit admin pages, start `make run_dashboard_streamlit` first.
-            </p>
-            <div className="adminGrid">
-              <a className="adminLink" href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
-                API docs
-                <span className="muted tiny">FastAPI Swagger</span>
-              </a>
-              <a className="adminLink" href="http://127.0.0.1:8000/api/health" target="_blank" rel="noreferrer">
-                API health
-                <span className="muted tiny">Quick ping</span>
-              </a>
-              <a className="adminLink" href="http://127.0.0.1:8501" target="_blank" rel="noreferrer">
-                Legacy Streamlit
-                <span className="muted tiny">Control Panel / Logs / Projects</span>
-              </a>
-              <a className="adminLink" href="http://127.0.0.1:3000" target="_blank" rel="noreferrer">
-                Frontend
-                <span className="muted tiny">Open in new tab</span>
-              </a>
-            </div>
-          </section>
+          <section className="stack">
+          <AdminPanel
+            onAfterMutation={() => {
+              setRefreshNonce((x) => x + 1);
+              setStatusRefreshNonce((x) => x + 1);
+            }}
+          />
 
           <ServiceMonitor services={status?.services ?? null} onRefresh={() => setStatusRefreshNonce((x) => x + 1)} />
         </section>

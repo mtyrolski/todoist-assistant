@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import time
 import random
+import os
 from lzma import LZMAError
 from os import getenv
 from os.path import exists, join
@@ -8,7 +9,7 @@ from pickle import HIGHEST_PROTOCOL, UnpicklingError
 from typing import Any, Callable, KeysView, Type, TypeVar, cast
 from zlib import error as ZlibError
 
-from hydra import compose, initialize
+from hydra import compose, initialize, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from joblib import dump, load
 from loguru import logger
@@ -202,7 +203,10 @@ def with_retry(fn: Callable[[], U], operation_name: str = "operation",
 
 def load_config(config_name: str, config_path: str) -> DictConfig:
     GlobalHydra.instance().clear()
-    initialize(config_path=config_path)
+    if os.path.isabs(config_path):
+        initialize_config_dir(config_dir=config_path)
+    else:
+        initialize(config_path=config_path)
     config: DictConfig = compose(config_name=config_name)
     return config
 

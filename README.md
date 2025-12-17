@@ -97,7 +97,7 @@ flowchart TD
     - *Tasks:* Add, delete, or template-insert tasks.
     - *Activity:* Gathers and aggregates Todoist events such as task additions, deletions, and completions.
   - **Dashboard & Plots:**  
-    Use Streamlit to build interactive dashboards. The Plots module transforms raw data into engaging visualizations that showcase productivity trends.
+    Uses a local FastAPI backend + Next.js frontend to render interactive dashboards. The Plots module transforms raw data into engaging visualizations that showcase productivity trends.
   - **Automations:**
     Automations allow custom triggers and actions like fetching activity, apply templates, ...
   - **Integrations** *(experimental)*   
@@ -193,7 +193,7 @@ The following [Makefile](Makefile) commands are available for managing the local
 - **`make init_local_env`:** Initializes the local environment by syncing history and fetching activity (Only during first run).
 - **`make install_app`:** Installs frontend dependencies in `frontend/` (requires Node.js + npm).
 - **`make run_dashboard`:** Launches the new web dashboard stack (FastAPI API + Next.js frontend); installs frontend deps if missing.
-- **`make run_dashboard_streamlit`:** Launches the legacy Streamlit dashboard.
+- **`make run_demo`:** Launches the web dashboard in anonymized demo mode (same stack, but project/label names are masked).
 - **`make run_api`:** Runs the FastAPI backend only (http://127.0.0.1:8000).
 - **`make run_frontend`:** Runs the Next.js dev server only (http://127.0.0.1:3000); installs frontend deps if missing.
 - **`make run_observer`:** Runs the background observer that refreshes recent activity, resets local caches, and triggers short automations (templates, multiply, etc.) every 30 seconds.
@@ -239,28 +239,17 @@ make install_app
 ```bash
 make run_dashboard
 ```
+Or run an anonymized demo session:
+```bash
+make run_demo
+```
 Then open:
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000 (health: `/api/health`)
 
 Note: the frontend is currently pinned to Next.js 14 for stability; upgrading to Next.js 15 can be evaluated later.
 
-#### Legacy Streamlit dashboard
-
-To run the legacy Streamlit dashboard, execute:
-```bash
-make run_dashboard_streamlit
-```
-<table>
-  <tr>
-    <td style="text-align: justify; vertical-align: top;">
-      The Streamlit UI aggregates and displays data retrieved from the Todoist API. You can navigate to Control Panel to launch automations in GUI.
-    </td>
-    <td style="text-align: center; vertical-align: top;">
-      <img src="img/control_panel.png" alt="control_panel" style="max-width: 100%; height: auto;"/>
-    </td>
-  </tr>
-</table>
+The web dashboard includes an Admin panel section for running automations, viewing logs, and managing project adjustment mappings.
 
 ### Library Integration
 

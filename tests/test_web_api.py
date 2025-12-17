@@ -177,3 +177,12 @@ def test_dashboard_status_returns_services() -> None:
     payload = res.json()
     assert isinstance(payload.get("services"), list)
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
+
+
+def test_openapi_includes_app_version() -> None:
+    client = TestClient(web_api.app)
+    res = client.get("/openapi.json")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["info"]["version"] == web_api.app.version
+    assert payload["info"]["version"] != "0.0.0"
