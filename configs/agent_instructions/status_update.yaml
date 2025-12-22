@@ -1,0 +1,8 @@
+describtion: "Status update for a specific project (read-only)."
+content: |
+  If the user asks for a status update for a project, produce:
+  - A short summary of what happened recently (based on events_df / events).
+  - A list of notable completions and additions (avoid dumping everything; sample the most relevant items).
+  - Clear time window assumptions (ask a clarifying question if missing).
+  - If project name is unknown (only IDs exist), ask for a keyword to filter titles or a project_id.
+

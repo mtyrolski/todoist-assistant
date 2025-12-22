@@ -357,25 +357,58 @@ h1 {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.adminGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.adminRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.adminLink {
-  display: grid;
-  gap: 4px;
+.adminRowRight {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.rowTight {
+  padding: 10px 10px;
+  grid-template-columns: 12px 1fr auto;
+}
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.rowDetails {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+}
+
+.codeBlock {
+  margin: 10px 0 0;
   padding: 12px 12px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  text-decoration: none;
-  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(232, 236, 242, 0.85);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.adminLink:hover {
-  border-color: rgba(106, 227, 255, 0.45);
+.cardInner {
+  padding: 14px 14px 16px;
+}
+
+.scrollArea {
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 6px;
 }
 
 .list {
@@ -551,10 +584,6 @@ h1 {
   }
 
   .dateRow {
-    grid-template-columns: 1fr;
-  }
-
-  .adminGrid {
     grid-template-columns: 1fr;
   }
 

@@ -1,11 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { ComponentProps } from "react";
+import type { PlotParams } from "react-plotly.js";
+import type { ComponentType } from "react";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
-
-type PlotProps = ComponentProps<typeof Plot>;
+const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
 export type PlotlyFigure = {
   data: unknown[];
@@ -32,7 +31,7 @@ export function PlotCard({
           <div className="skeleton" />
         ) : (
           <Plot
-            data={figure.data as PlotProps["data"]}
+            data={figure.data as PlotParams["data"]}
             layout={{
               ...(figure.layout ?? {}),
               autosize: true,
