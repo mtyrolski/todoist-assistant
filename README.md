@@ -16,26 +16,29 @@
 </table>
 
 ## Table of Contents
-- [Library Design Overview](#library-design-overview)
-- [How It Works](#how-it-works)
-- [Demo Video](#demo-video)
-- [Installation](#installation)
-  - [Recommended Setup Environment](#recommended-setup-environment)
-  - [Setup Instructions (Linux / Ubuntu / Debian)](#setup-instructions-linux--ubuntu--debian)
-- [Makefile Usage (recommended)](#makefile-usage-recommended)
-- [Manual Usage](#manual-usage)
-  - [Updating Activity Database](#updating-activity-database)
-  - [Automations Manual Launch](#automations-manual-launch)
-  - [Agentic Chat (local)](#agentic-chat-local)
-  - [Background Observer](#background-observer)
-  - [Dashboard Usage](#dashboard-usage)
-  - [Library Integration](#library-integration)
-  - [Custom Automations](#custom-automations)
-- [Gmail Tasks Automation (experimental)](#gmail-tasks-automation-experimental)
-- [Configuration](#configuration)
-  - [Aligning Archive Projects](#aligning-archive-projects)
-- [Contributing](#contributing)
-- [License](#license)
+- [Todoist Assistant](#todoist-assistant)
+  - [Table of Contents](#table-of-contents)
+  - [Library Design Overview](#library-design-overview)
+  - [How It Works](#how-it-works)
+    - [Screenshots](#screenshots)
+  - [Installation](#installation)
+    - [Recommended Setup Environment](#recommended-setup-environment)
+    - [Setup Instructions (Linux / Ubuntu / Debian)](#setup-instructions-linux--ubuntu--debian)
+  - [Makefile Usage (recommended)](#makefile-usage-recommended)
+  - [Manual Usage](#manual-usage)
+    - [Updating Activity Database](#updating-activity-database)
+    - [Automations Manual Launch](#automations-manual-launch)
+    - [Agentic Chat (local)](#agentic-chat-local)
+    - [Background Observer](#background-observer)
+    - [Dashboard Usage](#dashboard-usage)
+      - [New web dashboard (recommended)](#new-web-dashboard-recommended)
+    - [Library Integration](#library-integration)
+    - [Custom Automations](#custom-automations)
+  - [Gmail Tasks Automation *(experimental)*](#gmail-tasks-automation-experimental)
+  - [Configuration](#configuration)
+    - [Aligning Archive Projects](#aligning-archive-projects)
+  - [Contributing](#contributing)
+  - [License](#license)
 
 ## Library Design Overview
 
@@ -46,12 +49,51 @@ just the dashboard, or just the automations without rewriting the data layer.
 
 ```mermaid
 flowchart LR
-    API["Todoist API"] --> Cache["Local cache: joblib"]
-    Cache --> DB["Database + DataFrame layer"]
-    DB --> Dash["Dashboards (FastAPI + Next.js / Streamlit)"]
-    DB --> Auto["Automations (templates, activity refresh)"]
-    Cache --> Agent["Agentic chat (local LLM + safe Python REPL)"]
+    subgraph Sources
+        direction TB
+        API["Todoist API"]
+        Gmail["Gmail API"]
+    end
+
+    subgraph Core["Core Pipeline"]
+        direction TB
+        Observer["Observer (run_observer)"]
+        Cache["Local cache: joblib"]
+        DB["Database + DataFrame layer"]
+        Auto["Automations"]
+    end
+
+    subgraph Outputs["Dashboards and Agents"]
+        direction TB
+        Dash["Dashboards (FastAPI + Next.js / Streamlit)"]
+        Agent["Agentic chat (local LLM + safe Python REPL)"]
+    end
+
+    API --> Cache
+    Cache --> DB
+    DB --> Dash
+    DB --> Auto
+    Cache --> Agent
+    Observer --> Cache
+    Observer --> Auto
     Auto --> API
+    Gmail --> Auto
+
+    classDef source fill:#FFE082,stroke:#FFB300,color:#5D4037;
+    classDef observer fill:#FFCC80,stroke:#F57C00,color:#4E342E;
+    classDef cache fill:#C8E6C9,stroke:#2E7D32,color:#1B5E20;
+    classDef db fill:#B3E5FC,stroke:#0277BD,color:#01579B;
+    classDef automation fill:#FFCCBC,stroke:#E64A19,color:#BF360C;
+    classDef output fill:#B2DFDB,stroke:#00796B,color:#004D40;
+    classDef agent fill:#F8BBD0,stroke:#C2185B,color:#880E4F;
+
+    class API,Gmail source;
+    class Observer observer;
+    class Cache cache;
+    class DB db;
+    class Auto automation;
+    class Dash output;
+    class Agent agent;
 ```
 
 At a glance, the Database layer wraps the Todoist API, hydrates in-memory caches, and standardizes project/task/activity
@@ -69,14 +111,12 @@ layer is optional and runs fully local, using cached events with a restricted Py
 - **Dashboard stack:** FastAPI (`todoist.web.api`) refreshes data on a 60s TTL and serves Plotly payloads to the Next.js UI. `make run_demo` enables anonymized project/label names for sharing.
 - **Agentic chat:** `todoist.agent` runs a LangGraph pipeline (instruction selection -> planning -> tool execution) with a safe, read-only Python REPL that blocks imports and filesystem writes. It only reads cached `events` and `events_df`.
 
+### Screenshots
 <div style="text-align: center;">
-  <img src="img/home_header.png" alt="home_1" width="900"/>
-  <img src="img/home_suffix.png" alt="home_2" width="900"/>
+  <img src="img/header.png" alt="header" width="900"/>
+  <img src="img/header2.png" alt="header2" width="900"/>
+  <img src="img/control.png" alt="control" width="900"/>
 </div>
-
-## Demo Video
-
-[![Watch the demo on YouTube](https://img.youtube.com/vi/e_-EOyAq6mU/hqdefault.jpg)](https://www.youtube.com/watch?v=e_-EOyAq6mU)
 
 ## Installation
 ### Recommended Setup Environment
