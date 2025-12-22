@@ -1,16 +1,15 @@
 
+from contextlib import suppress
 from importlib import metadata
 from pathlib import Path
 
 
 def get_version() -> str:
-    try:
+    with suppress(metadata.PackageNotFoundError):
         return metadata.version("todoist-assistant")
-    except metadata.PackageNotFoundError:
-        pass
 
     # Fallback to reading the local pyproject when running from a repo checkout.
-    try:
+    with suppress(Exception):
         import tomllib  # py311+
 
         repo_root = Path(__file__).resolve().parents[1]
@@ -20,7 +19,5 @@ def get_version() -> str:
             version = data.get("project", {}).get("version")
             if isinstance(version, str) and version:
                 return version
-    except Exception:
-        pass
 
     return "0.0.0"

@@ -7,6 +7,7 @@ style and use `pydantic` for strict structured output parsing.
 
 
 from collections import defaultdict
+from contextlib import suppress
 from dataclasses import dataclass
 from collections.abc import Callable
 import json
@@ -246,26 +247,21 @@ def _extract_json_object(text: str) -> str | None:
 
 
 def _try_parse_structured_output(raw: str, schema: type[T]) -> T | None:
-    try:
+    with suppress(ValidationError):
         return schema.model_validate_json(raw)
-    except ValidationError:
-        pass
 
     cleaned = _strip_markdown_code_fence(raw)
     if cleaned != raw:
-        try:
+        with suppress(ValidationError):
             return schema.model_validate_json(cleaned)
-        except ValidationError:
-            pass
 
     extracted = _extract_json_object(cleaned)
     if extracted is None:
         return None
 
-    try:
+    with suppress(ValidationError):
         return schema.model_validate_json(extracted)
-    except ValidationError:
-        return None
+    return None
 
 
 def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:

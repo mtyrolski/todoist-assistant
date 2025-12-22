@@ -1,3 +1,4 @@
+from contextlib import suppress
 from datetime import datetime
 from functools import partial
 from typing import Any
@@ -35,10 +36,8 @@ def try_parse_date(date: str) -> datetime | None:
     parsing_formats = ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%fZ']
 
     for fmt in parsing_formats:
-        try:
+        with suppress(ValueError):
             return datetime.strptime(date, fmt)
-        except ValueError:
-            pass
     logger.error(f"Could not parse date {date} with any of the formats {parsing_formats}")
     return None
 

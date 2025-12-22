@@ -416,8 +416,8 @@ def _compute_insights(
                 day = str(day_counts.index[0])
                 cnt = int(day_counts.iloc[0])
                 insights.append({"title": "Busiest day", "value": day, "detail": f"{cnt} events (last week)"})
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Skipping busiest day insight: {}", exc)
 
     # 4) Added vs completed (throughput).
     try:
@@ -431,8 +431,8 @@ def _compute_insights(
                 "detail": f"Completion/added ratio: {ratio}" if ratio is not None else "No added tasks (last week)",
             }
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Skipping added vs completed insight: {}", exc)
 
     # 5) Peak hour (all events) in the completed week.
     try:
@@ -449,8 +449,8 @@ def _compute_insights(
                         "detail": "Most events (selected range)",
                     }
                 )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Skipping peak hour insight: {}", exc)
 
     return insights[:4]
 
