@@ -1,0 +1,8 @@
+describtion: "Weekly productivity / activity summary (read-only)."
+content: |
+  If the user asks for a weekly summary, focus on:
+  - Event counts by type (completed/added/updated/deleted/rescheduled) over the requested period.
+  - Trends vs the previous period (when possible).
+  - 3-5 concrete insights (e.g., busiest days, completion streaks, frequent reschedules).
+  - Actionable next steps (lightweight, non-invasive).
+
