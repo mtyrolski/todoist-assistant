@@ -62,7 +62,7 @@ def chat(
     dtype: str = typer.Option("auto", envvar="TODOIST_AGENT_DTYPE", help="auto/float16/bfloat16/float32"),
     temperature: float = typer.Option(0.2, envvar="TODOIST_AGENT_TEMPERATURE"),
     top_p: float = typer.Option(0.95, envvar="TODOIST_AGENT_TOP_P"),
-    max_new_tokens: int = typer.Option(800, envvar="TODOIST_AGENT_MAX_NEW_TOKENS"),
+    max_new_tokens: int = typer.Option(256, envvar="TODOIST_AGENT_MAX_NEW_TOKENS"),
     max_tool_loops: int = typer.Option(8, envvar="TODOIST_AGENT_MAX_TOOL_LOOPS"),
 ):
     """Chat with the local agent (read-only analysis of local caches)."""

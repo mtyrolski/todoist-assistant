@@ -45,7 +45,7 @@ class LocalChatConfig:
     dtype: DType = "auto"
     temperature: float = 0.2
     top_p: float = 0.95
-    max_new_tokens: int = 800
+    max_new_tokens: int = 256
     suppress_hf_warnings: bool = True
 
 
@@ -101,10 +101,21 @@ class TransformersMistral3ChatModel:
         return self._generate_text(prompt)
 
     def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
-        prompt_messages = list(messages) + [{
-            "role": "system",
-            "content": _schema_instructions(schema),
-        }]
+        schema_instruction = _schema_instructions(schema)
+        system_parts: list[str] = []
+        prompt_messages: list[dict[str, str]] = []
+        for msg in messages:
+            if (msg.get("role") or "").lower() == "system":
+                content = (msg.get("content") or "").strip()
+                if content:
+                    system_parts.append(content)
+            else:
+                prompt_messages.append(msg)
+
+        system_parts.append(schema_instruction)
+        system_text = "\n".join(system_parts).strip()
+        if system_text:
+            prompt_messages = [{"role": "system", "content": system_text}, *prompt_messages]
         logger.info(
             "LLM structured_chat schema={} messages:\n{}",
             schema.__name__,
@@ -112,52 +123,81 @@ class TransformersMistral3ChatModel:
         )
         prompt = _render_mistral_instruct_prompt(prompt_messages, self._tokenizer)
         logger.debug("Rendered prompt ({} chars)", len(prompt))
-        raw = self._generate_text(prompt)
+        raw = self._generate_text(
+            prompt,
+            do_sample=False,
+            max_new_tokens=self._max_new_tokens_for_schema(schema),
+        )
         logger.debug("Raw model output:\n{}", raw)
-        try:
-            return schema.model_validate_json(raw)
-        except ValidationError:
-            pass
-
-        cleaned = _strip_markdown_code_fence(raw)
-        if cleaned != raw:
-            logger.debug("Stripped markdown code-fence; trying JSON parse again.")
-            try:
-                return schema.model_validate_json(cleaned)
-            except ValidationError:
-                pass
-
-        extracted = _extract_json_object(cleaned)
-        if extracted is not None:
-            logger.debug("Extracted JSON object substring; trying JSON parse again.")
-            try:
-                return schema.model_validate_json(extracted)
-            except ValidationError as exc:
-                raise ValueError(f"Invalid structured output for {schema.__name__}: {raw}") from exc
+        parsed = _try_parse_structured_output(raw, schema)
+        if parsed is not None:
+            return parsed
 
         raise ValueError(f"Invalid structured output for {schema.__name__}: {raw}")
 
-    def _generate_text(self, prompt: str) -> str:
+    def _max_new_tokens_for_schema(self, schema: type[BaseModel]) -> int:
+        name = schema.__name__
+        if name == "InstructionSelection":
+            return min(self.config.max_new_tokens, 64)
+        if name == "PlannerDecision":
+            return min(self.config.max_new_tokens, 256)
+        return self.config.max_new_tokens
+
+    def _generate_text(
+        self,
+        prompt: str,
+        *,
+        do_sample: bool | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        max_new_tokens: int | None = None,
+    ) -> str:
         inputs = self._tokenizer(prompt, return_tensors="pt")
         inputs.pop("token_type_ids", None)
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
         input_len = int(inputs["input_ids"].shape[-1])
 
+        resolved_do_sample = (self.config.temperature > 0) if do_sample is None else do_sample
+        resolved_temperature = self.config.temperature if temperature is None else temperature
+        resolved_top_p = self.config.top_p if top_p is None else top_p
+        resolved_max_new_tokens = self.config.max_new_tokens if max_new_tokens is None else max_new_tokens
+
+        generate_kwargs: dict[str, Any] = {
+            **inputs,
+            "do_sample": resolved_do_sample,
+            "max_new_tokens": resolved_max_new_tokens,
+            "pad_token_id": _resolve_pad_token_id(self._tokenizer),
+        }
+        if resolved_do_sample:
+            generate_kwargs["temperature"] = resolved_temperature
+            generate_kwargs["top_p"] = resolved_top_p
+
         with torch.inference_mode():
-            generated = self._model.generate(
-                **inputs,
-                do_sample=self.config.temperature > 0,
-                temperature=self.config.temperature,
-                top_p=self.config.top_p,
-                max_new_tokens=self.config.max_new_tokens,
-                pad_token_id=_resolve_pad_token_id(self._tokenizer),
-            )
+            generated = self._model.generate(**generate_kwargs)
 
         new_tokens = generated[0][input_len:]
         return self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
 def _schema_instructions(schema: type[BaseModel]) -> str:
+    name = schema.__name__
+    if name == "InstructionSelection":
+        return "JSON only: {\"selected_ids\": [\"...\"]}. Use [] if none."
+    if name == "PlannerDecision":
+        return (
+            "JSON only with keys: plan, action, tool_code, final_answer.\n"
+            "action: \"tool\" or \"final\".\n"
+            "If action=tool -> tool_code required, final_answer null.\n"
+            "If action=final -> final_answer required, tool_code null.\n"
+            "plan can be empty."
+        )
+
+    field_names = list(schema.model_fields)
+    if len(field_names) == 1:
+        field_name = field_names[0]
+        extra = " tool_code should be Python only (no markdown)." if field_name == "tool_code" else ""
+        return f"JSON only with key: {field_name}. Use null if unknown.{extra}"
+
     schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
     return (
         "Return ONLY valid JSON (no markdown, no code fences, no extra keys) matching this schema:\n"
@@ -192,11 +232,39 @@ def _strip_markdown_code_fence(text: str) -> str:
 
 def _extract_json_object(text: str) -> str | None:
     stripped = (text or "").strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(stripped):
+        if char != "{":
+            continue
+        try:
+            _, end = decoder.raw_decode(stripped[idx:])
+        except json.JSONDecodeError:
+            continue
+        return stripped[idx: idx + end].strip()
+    return None
+
+
+def _try_parse_structured_output(raw: str, schema: type[T]) -> T | None:
+    try:
+        return schema.model_validate_json(raw)
+    except ValidationError:
+        pass
+
+    cleaned = _strip_markdown_code_fence(raw)
+    if cleaned != raw:
+        try:
+            return schema.model_validate_json(cleaned)
+        except ValidationError:
+            pass
+
+    extracted = _extract_json_object(cleaned)
+    if extracted is None:
         return None
-    return stripped[start : end + 1].strip()
+
+    try:
+        return schema.model_validate_json(extracted)
+    except ValidationError:
+        return None
 
 
 def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:

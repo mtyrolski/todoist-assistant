@@ -11,6 +11,5 @@ def test_python_repl_allows_context_and_expressions():
 
 def test_python_repl_blocks_imports_and_writes():
     tool = SafePythonReplTool({})
-    assert "unsafe code rejected" in tool.run("import os")
-    assert "unsafe code rejected" in tool.run("open('x.txt', 'w').write('nope')")
-
+    assert "ERROR: blocked" in tool.run("import os")
+    assert "ERROR: blocked" in tool.run("open('x.txt', 'w').write('nope')")

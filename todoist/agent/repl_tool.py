@@ -53,27 +53,36 @@ _BANNED_SUBSTRINGS = (
 
 def _is_code_safe(code: str) -> tuple[bool, str]:
     lowered = code.lower()
-    for token in _BANNED_SUBSTRINGS:
-        if token in lowered:
-            return False, f"Blocked token detected: {token!r}"
+    blocked_token = next((token for token in _BANNED_SUBSTRINGS if token in lowered), None)
+    if blocked_token is not None:
+        return False, f"Blocked token detected: {blocked_token!r}"
 
     try:
         tree = ast.parse(code, mode="exec")
-    except SyntaxError as e:
-        return False, f"SyntaxError: {e}"
+    except SyntaxError as exc:
+        return False, f"SyntaxError: {exc}"
 
     banned_nodes = (ast.Import, ast.ImportFrom, ast.With, ast.Try, ast.Raise, ast.Lambda, ast.ClassDef, ast.FunctionDef)
+    reason: str | None = None
     for node in ast.walk(tree):
         if isinstance(node, banned_nodes):
-            return False, f"Blocked syntax: {node.__class__.__name__}"
+            reason = f"Blocked syntax: {node.__class__.__name__}"
+            break
         if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-            return False, "Blocked attribute access"
+            reason = "Blocked attribute access"
+            break
         if isinstance(node, ast.Name) and node.id.startswith("__"):
-            return False, "Blocked name access"
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"open", "eval", "exec", "compile", "__import__"}:
-            return False, f"Blocked call: {node.func.id}"
+            reason = "Blocked name access"
+            break
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"open", "eval", "exec", "compile", "__import__"}
+        ):
+            reason = f"Blocked call: {node.func.id}"
+            break
 
-    return True, ""
+    return (False, reason) if reason else (True, "")
 
 
 _SAFE_BUILTINS: dict[str, Any] = {
@@ -122,7 +131,10 @@ class SafePythonReplTool:
 
         ok, reason = _is_code_safe(code)
         if not ok:
-            return f"ERROR: unsafe code rejected ({reason})"
+            if reason.startswith("SyntaxError:"):
+                return f"ERROR: {reason}"
+            label = reason or "blocked"
+            return f"ERROR: blocked ({label})"
 
         stdout = io.StringIO()
         try:
@@ -135,13 +147,25 @@ class SafePythonReplTool:
                 # Remove last expression from body for exec portion.
                 exec_body = ast.Module(body=tree.body[:-1], type_ignores=[])
                 with _read_only_sandbox(), contextlib.redirect_stdout(stdout):
-                    exec(compile(exec_body, "<python_repl>", "exec"), self._globals, self._locals)
-                    value = eval(compile(expr, "<python_repl>", "eval"), self._globals, self._locals)
+                    exec(  # pylint: disable=exec-used
+                        compile(exec_body, "<python_repl>", "exec"),
+                        self._globals,
+                        self._locals,
+                    )
+                    value = eval(  # pylint: disable=eval-used
+                        compile(expr, "<python_repl>", "eval"),
+                        self._globals,
+                        self._locals,
+                    )
                     if value is not None:
                         print(repr(value))
             else:
                 with _read_only_sandbox(), contextlib.redirect_stdout(stdout):
-                    exec(compile(tree, "<python_repl>", "exec"), self._globals, self._locals)
+                    exec(  # pylint: disable=exec-used
+                        compile(tree, "<python_repl>", "exec"),
+                        self._globals,
+                        self._locals,
+                    )
 
         except Exception as e:
             return f"ERROR: {e.__class__.__name__}: {e}"
@@ -156,7 +180,7 @@ def _read_only_sandbox():
     def _blocked(*_args: Any, **_kwargs: Any):  # noqa: ANN401
         raise PermissionError("Read-only tool: operation blocked")
 
-    def _safe_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any):  # noqa: ANN401
+    def _safe_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any):  # noqa: ANN401  pylint: disable=keyword-arg-before-vararg
         write_flags = ("w", "a", "+", "x")
         if any(flag in mode for flag in write_flags):
             raise PermissionError("Read-only tool: open() for writing is blocked")

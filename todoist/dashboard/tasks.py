@@ -29,4 +29,3 @@ def process_rescheduled_tasks(df_activity: pd.DataFrame, active_tasks: list[Task
     )
     logger.debug(f"Found {len(filtered_tasks)} rescheduled tasks")
     return filtered_tasks
-

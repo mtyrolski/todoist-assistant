@@ -25,4 +25,3 @@ def get_version() -> str:
         pass
 
     return "0.0.0"
-
