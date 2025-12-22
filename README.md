@@ -18,9 +18,9 @@
 ## Table of Contents
 - [Todoist Assistant](#todoist-assistant)
   - [Table of Contents](#table-of-contents)
-  - [Library Design Overview](#library-design-overview)
   - [How It Works](#how-it-works)
     - [Screenshots](#screenshots)
+  - [Library Design Overview](#library-design-overview)
   - [Installation](#installation)
     - [Recommended Setup Environment](#recommended-setup-environment)
     - [Setup Instructions (Linux / Ubuntu / Debian)](#setup-instructions-linux--ubuntu--debian)
@@ -39,6 +39,23 @@
     - [Aligning Archive Projects](#aligning-archive-projects)
   - [Contributing](#contributing)
   - [License](#license)
+
+## How It Works
+
+- **Local cache (joblib):** `todoist.utils.Cache` persists `activity.joblib` plus automation/integration metadata and Gmail processed IDs. Most analytics read from these files after the initial sync, so repeated runs stay fast and reproducible.
+- **Database layer:** `todoist.database.Database` composes Activity/Projects/Tasks/Labels mixins on top of `TodoistAPIClient`. It keeps in-memory caches for projects/tasks and uses retry logic for API calls.
+- **Activity ingestion:** `fetch_activity_adaptively` walks backward in time windows until it hits empty windows, merging into the cached event set. This avoids re-downloading years of activity on every run.
+- **DataFrame pipeline:** `todoist.database.dataframe.load_activity_data` converts cached events to pandas, joins project metadata, and applies `personal/*.py` mappings (`link_adjustements`) so archived root projects roll up correctly.
+- **Automations + observer:** Automations are instantiated via Hydra from `configs/automations.yaml`. `todoist.run_observer` polls recent activity every 30s, refreshes the cache, resets DB caches, and triggers short automations (templates, multipliers, etc.).
+- **Dashboard stack:** FastAPI (`todoist.web.api`) refreshes data on a 60s TTL and serves Plotly payloads to the Next.js UI. `make run_demo` enables anonymized project/label names for sharing.
+- **Agentic chat:** `todoist.agent` runs a LangGraph pipeline (instruction selection -> planning -> tool execution) with a safe, read-only Python REPL that blocks imports and filesystem writes. It only reads cached `events` and `events_df`.
+
+### Screenshots
+<div style="text-align: center;">
+  <img src="img/header.png" alt="header" width="900"/>
+  <img src="img/header2.png" alt="header2" width="900"/>
+  <img src="img/control.png" alt="control" width="900"/>
+</div>
 
 ## Library Design Overview
 
@@ -101,22 +118,7 @@ models. The DataFrame pipeline turns cached activity into a pandas timeline that
 are config-driven classes that either extend tasks (templates) or refresh activity data on a schedule. The agentic chat
 layer is optional and runs fully local, using cached events with a restricted Python REPL for analysis.
 
-## How It Works
 
-- **Local cache (joblib):** `todoist.utils.Cache` persists `activity.joblib` plus automation/integration metadata and Gmail processed IDs. Most analytics read from these files after the initial sync, so repeated runs stay fast and reproducible.
-- **Database layer:** `todoist.database.Database` composes Activity/Projects/Tasks/Labels mixins on top of `TodoistAPIClient`. It keeps in-memory caches for projects/tasks and uses retry logic for API calls.
-- **Activity ingestion:** `fetch_activity_adaptively` walks backward in time windows until it hits empty windows, merging into the cached event set. This avoids re-downloading years of activity on every run.
-- **DataFrame pipeline:** `todoist.database.dataframe.load_activity_data` converts cached events to pandas, joins project metadata, and applies `personal/*.py` mappings (`link_adjustements`) so archived root projects roll up correctly.
-- **Automations + observer:** Automations are instantiated via Hydra from `configs/automations.yaml`. `todoist.run_observer` polls recent activity every 30s, refreshes the cache, resets DB caches, and triggers short automations (templates, multipliers, etc.).
-- **Dashboard stack:** FastAPI (`todoist.web.api`) refreshes data on a 60s TTL and serves Plotly payloads to the Next.js UI. `make run_demo` enables anonymized project/label names for sharing.
-- **Agentic chat:** `todoist.agent` runs a LangGraph pipeline (instruction selection -> planning -> tool execution) with a safe, read-only Python REPL that blocks imports and filesystem writes. It only reads cached `events` and `events_df`.
-
-### Screenshots
-<div style="text-align: center;">
-  <img src="img/header.png" alt="header" width="900"/>
-  <img src="img/header2.png" alt="header2" width="900"/>
-  <img src="img/control.png" alt="control" width="900"/>
-</div>
 
 ## Installation
 ### Recommended Setup Environment
