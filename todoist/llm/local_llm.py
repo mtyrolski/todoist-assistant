@@ -5,7 +5,6 @@ This wrapper keeps dependencies explicit and avoids mutating tokenizer internals
 style and use `pydantic` for strict structured output parsing.
 """
 
-from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -30,6 +29,8 @@ from transformers import (
 )
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from transformers.utils import logging as hf_logging
+
+from .types import MessageRole, PromptToken
 
 
 DEFAULT_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
@@ -105,7 +106,7 @@ class TransformersMistral3ChatModel:
         system_parts: list[str] = []
         prompt_messages: list[dict[str, str]] = []
         for msg in messages:
-            if (msg.get("role") or "").lower() == "system":
+            if (msg.get("role") or "").lower() == MessageRole.SYSTEM:
                 content = (msg.get("content") or "").strip()
                 if content:
                     system_parts.append(content)
@@ -115,7 +116,7 @@ class TransformersMistral3ChatModel:
         system_parts.append(schema_instruction)
         system_text = "\n".join(system_parts).strip()
         if system_text:
-            prompt_messages = [{"role": "system", "content": system_text}, *prompt_messages]
+            prompt_messages = [{"role": MessageRole.SYSTEM, "content": system_text}, *prompt_messages]
         logger.info(
             "LLM structured_chat schema={} messages:\n{}",
             schema.__name__,
@@ -550,16 +551,16 @@ def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenize
         content = (msg.get("content") or "").strip()
         if not content:
             continue
-        if role == "system":
+        if role == MessageRole.SYSTEM:
             system_parts.append(content)
             continue
-        if role == "user":
+        if role == MessageRole.USER:
             if current_user is not None:
                 turns.append((current_user, current_assistant))
             current_user = content
             current_assistant = None
             continue
-        if role == "assistant":
+        if role == MessageRole.ASSISTANT:
             current_assistant = content
             continue
 
@@ -571,8 +572,8 @@ def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenize
     if turns[-1][1] is not None:
         raise ValueError("Last user message must be unanswered (append user message before generating)")
 
-    bos = tokenizer.bos_token or "<s>"
-    eos = tokenizer.eos_token or "</s>"
+    bos = tokenizer.bos_token or PromptToken.BOS_FALLBACK
+    eos = tokenizer.eos_token or PromptToken.EOS_FALLBACK
     system_prefix = "\n\n".join(system_parts).strip()
     if system_prefix:
         system_prefix += "\n\n"
@@ -580,7 +581,7 @@ def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenize
     parts: list[str] = []
     for i, (user_text, assistant_text) in enumerate(turns):
         prefix = system_prefix if i == 0 else ""
-        inst = f"{bos}[INST] {prefix}{user_text} [/INST]"
+        inst = f"{bos}{PromptToken.INST_OPEN} {prefix}{user_text} {PromptToken.INST_CLOSE}"
         if assistant_text is None:
             parts.append(inst)
         else:

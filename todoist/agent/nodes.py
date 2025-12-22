@@ -1,6 +1,5 @@
 """LangGraph nodes and schemas for the local Todoist agent."""
 
-from __future__ import annotations
 
 from dataclasses import dataclass
 import json
@@ -14,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from todoist.agent.constants import NodeName, PlannerAction
 from todoist.agent.prefabs import load_instruction_prefabs
 from todoist.agent.utils import build_planner_messages, last_user_text
+from todoist.llm.types import MessageRole
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -180,11 +180,11 @@ class AgentNodes:
         available = [{"id": p.prefab_id, "description": p.description} for p in prefabs]
         selector_messages = [
             {
-                "role": "system",
+                "role": MessageRole.SYSTEM,
                 "content": "Pick prefab ids that help answer the query; otherwise use an empty list.",
             },
             {
-                "role": "user",
+                "role": MessageRole.USER,
                 "content": json.dumps({"query": query, "available_prefabs": available}, ensure_ascii=False),
             },
         ]
@@ -259,8 +259,11 @@ class AgentNodes:
         messages = list(state.get("messages") or [])
         if not messages:
             raise ValueError("executor requires state.messages")
-        messages.append({"role": "assistant", "content": f"Calling python_repl with code:\n```python\n{code}\n```"})
-        messages.append({"role": "user", "content": f"python_repl output:\n{output}"})
+        messages.append({
+            "role": MessageRole.ASSISTANT,
+            "content": f"Calling python_repl with code:\n```python\n{code}\n```",
+        })
+        messages.append({"role": MessageRole.USER, "content": f"python_repl output:\n{output}"})
         return {
             "messages": messages,
             "pending_tool_code": None,
@@ -274,7 +277,7 @@ class AgentNodes:
         messages = list(state.get("messages") or [])
         if not messages:
             raise ValueError("output requires state.messages")
-        messages.append({"role": "assistant", "content": final_answer})
+        messages.append({"role": MessageRole.ASSISTANT, "content": final_answer})
         return {"messages": messages}
 
     def route_after_planner(self, state: AgentState) -> str:

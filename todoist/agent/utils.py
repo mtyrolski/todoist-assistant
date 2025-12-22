@@ -1,15 +1,15 @@
 """Small helpers for the agent graph."""
 
-from __future__ import annotations
 
 from collections.abc import Sequence
 
 from todoist.agent.constants import PLANNER_PROMPT, SYSTEM_PROMPT, TOOL_PROMPT
+from todoist.llm.types import MessageRole
 
 
 def last_user_text(messages: Sequence[dict[str, str]]) -> str:
     for msg in reversed(messages):
-        if msg.get("role") == "user":
+        if msg.get("role") == MessageRole.USER:
             content = msg.get("content")
             return content if isinstance(content, str) else ""
     return ""
@@ -27,5 +27,5 @@ def build_planner_messages(
     system_parts.append(PLANNER_PROMPT)
     system_prompt = "\n".join(part for part in system_parts if part).strip()
 
-    filtered = [msg for msg in messages if msg.get("role") != "system"]
-    return [{"role": "system", "content": system_prompt}, *filtered]
+    filtered = [msg for msg in messages if msg.get("role") != MessageRole.SYSTEM]
+    return [{"role": MessageRole.SYSTEM, "content": system_prompt}, *filtered]

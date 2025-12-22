@@ -3,12 +3,12 @@ from unittest.mock import patch
 import torch
 from pydantic import BaseModel
 
-from todoist.agent.local_llm import LocalChatConfig, TransformersMistral3ChatModel
+from todoist.llm import LocalChatConfig, MessageRole, PromptToken, TransformersMistral3ChatModel
 
 
 class FakeTokenizer:
-    bos_token = "<s>"
-    eos_token = "</s>"
+    bos_token = PromptToken.BOS_FALLBACK
+    eos_token = PromptToken.EOS_FALLBACK
     pad_token = None
     pad_token_id = 0
 
@@ -67,10 +67,10 @@ class DummySchema(BaseModel):
 
 def test_local_llm_initializes_and_generates():
     cfg = LocalChatConfig(model_id="fake/model", max_new_tokens=4)
-    with patch("todoist.agent.local_llm.AutoTokenizer", new=FakeTokenizer), \
-         patch("todoist.agent.local_llm.AutoConfig.from_pretrained", new=lambda *_a, **_k: FakeConfig()), \
-         patch("todoist.agent.local_llm.Mistral3ForConditionalGeneration", new=FakeModel):
+    with patch("todoist.llm.local_llm.AutoTokenizer", new=FakeTokenizer), \
+         patch("todoist.llm.local_llm.AutoConfig.from_pretrained", new=lambda *_a, **_k: FakeConfig()), \
+         patch("todoist.llm.local_llm.Mistral3ForConditionalGeneration", new=FakeModel):
         llm = TransformersMistral3ChatModel(cfg)
-        assert llm.chat([{"role": "user", "content": "hi"}]) == "OK"
-        parsed = llm.structured_chat([{"role": "user", "content": "hi"}], DummySchema)
+        assert llm.chat([{"role": MessageRole.USER, "content": "hi"}]) == "OK"
+        parsed = llm.structured_chat([{"role": MessageRole.USER, "content": "hi"}], DummySchema)
         assert parsed.value == "ok"

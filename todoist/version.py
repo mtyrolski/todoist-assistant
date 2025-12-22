@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from importlib import metadata
 from pathlib import Path

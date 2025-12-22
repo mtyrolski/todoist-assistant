@@ -11,7 +11,7 @@ from loguru import logger
 
 from todoist.agent.context import load_local_agent_context
 from todoist.agent.graph import AgentState, build_agent_graph
-from todoist.agent.local_llm import DType, Device, LocalChatConfig, TransformersMistral3ChatModel
+from todoist.llm import DType, Device, LocalChatConfig, MessageRole, TransformersMistral3ChatModel
 from todoist.agent.repl_tool import SafePythonReplTool
 
 
@@ -100,7 +100,7 @@ def chat(
             if not user_text:
                 continue
             logger.info("User message: {}", user_text)
-            state["messages"] = list(state.get("messages") or []) + [{"role": "user", "content": user_text}]
+            state["messages"] = list(state.get("messages") or []) + [{"role": MessageRole.USER, "content": user_text}]
             state = cast(AgentState, graph.invoke(state))
             payload = {
                 "final_answer": state.get("final_answer"),
