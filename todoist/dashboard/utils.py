@@ -1,77 +1,12 @@
+
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, cast
 
 import pandas as pd
-import streamlit as st
-from todoist.database.dataframe import load_activity_data
+
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
-from todoist.database.base import Database
 from todoist.types import Project
-from functools import partial
-from loguru import logger
-from todoist.database.demo import anonymize_project_names
-from todoist.database.demo import anonymize_label_names
-
-
-@st.cache_data
-def load_activity_data_cached(_dbio: Database, demo_mode: bool) -> tuple[pd.DataFrame, list[Project]]:
-    """
-    Loads and processes the activity data from joblib file and database mappings.
-    """
-    logger.debug("Loading activity data...")
-    df = load_activity_data(_dbio)
-    logger.debug(f"Loaded {len(df)} activity records")
-    active_projects: list[Project] = _dbio.fetch_projects()
-    logger.debug(f"Found {len(active_projects)} active projects")
-    if demo_mode and not _dbio.is_anonymized:
-        logger.info("Anonymizing data...")
-        project_ori2anonym = anonymize_project_names(df)
-        label_ori2anonym = anonymize_label_names(active_projects)
-        _dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
-    return (df, active_projects)
-
-
-@st.cache_resource
-def get_database() -> Database:
-    """
-    Returns a Database instance and pulls the latest data.
-    """
-    dbio = Database('.env')
-    dbio.pull()
-    return dbio
-
-
-def sidebar_date_range(df_activity: pd.DataFrame) -> tuple:
-    """
-    Creates the date range slider in the sidebar.
-    """
-    oldest_date = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.min())).to_pydatetime())
-    newest_date = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.max())).to_pydatetime())
-    default_range = (newest_date - timedelta(weeks=12), newest_date)
-
-    return cast(
-        tuple,
-        st.sidebar.slider(
-            label='Date range',
-            min_value=oldest_date,
-            max_value=newest_date,
-            step=timedelta(weeks=2),
-            value=default_range,
-        ),
-    )
-
-
-def sidebar_granularity() -> str:
-    """
-    Creates a granularity selection in the sidebar.
-    """
-    return st.sidebar.selectbox("Select granularity",
-                                options=["W", "ME", "3ME"],
-                                format_func=lambda x: {
-                                    "W": "Week",
-                                    "ME": "Month",
-                                    "3ME": "Three Months"
-                                }[x])
 
 
 def extract_metrics(df_activity: pd.DataFrame, granularity: str) -> tuple[list[tuple[str, str, str, bool]], str, str]:

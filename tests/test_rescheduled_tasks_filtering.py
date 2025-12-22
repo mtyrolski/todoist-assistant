@@ -8,7 +8,7 @@ import pytest
 import pandas as pd
 
 from todoist.types import Task, TaskEntry
-from todoist.dashboard.subpages.tasks import process_rescheduled_tasks
+from todoist.dashboard.tasks import process_rescheduled_tasks
 
 
 @pytest.fixture

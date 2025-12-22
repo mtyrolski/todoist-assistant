@@ -19,6 +19,10 @@ todoist/scripts/*.log
 # Screenshots added temporarily
 *.png
 
+# Local LLM models
+models/
+*.gguf
+
 # Build / packaging artifacts
 build/
 dist/
