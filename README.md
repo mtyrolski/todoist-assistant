@@ -17,6 +17,7 @@
 
 ## Table of Contents
 - [Library Design Overview](#library-design-overview)
+- [How It Works](#how-it-works)
 - [Demo Video](#demo-video)
 - [Installation](#installation)
   - [Recommended Setup Environment](#recommended-setup-environment)
@@ -24,103 +25,49 @@
 - [Makefile Usage (recommended)](#makefile-usage-recommended)
 - [Manual Usage](#manual-usage)
   - [Updating Activity Database](#updating-activity-database)
-  - [Automatons Manual launch](#automatons-manual-launch)
+  - [Automations Manual Launch](#automations-manual-launch)
   - [Agentic Chat (local)](#agentic-chat-local)
-  - [Dashboard Usage](#dashboard-usage)
   - [Background Observer](#background-observer)
+  - [Dashboard Usage](#dashboard-usage)
+  - [Library Integration](#library-integration)
+  - [Custom Automations](#custom-automations)
+- [Gmail Tasks Automation (experimental)](#gmail-tasks-automation-experimental)
+- [Configuration](#configuration)
+  - [Aligning Archive Projects](#aligning-archive-projects)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Library Design Overview
 
 
-Todoist Assistant is organized as a local-first analytics pipeline: data ingestion from the Todoist API, local caching, analysis/automation, and visualization. Below is a high-level diagram and explanation of the system's architecture and key ideas.
+Todoist Assistant is organized as a local-first analytics pipeline. The core idea is to sync Todoist data into local caches
+once, then run repeatable analysis, automations, and dashboards on top. The stack is modular so you can use just the library,
+just the dashboard, or just the automations without rewriting the data layer.
 
 ```mermaid
-flowchart TD
-    A["Core Modules"] --> B["Automation Layer"]
-    A --> C["Database Layer"]
-    A --> D["Visualization Layer"]
-    A --> N["Agentic Chat Layer"]
-    
-    B --> E["Templates"]
-    B --> F["API Integrations"]
-    B --> G["Custom Automation Scripts"]
-    
-    C --> H["Tasks"]
-    C --> I["Projects"]
-    C --> J["Activity"]
-    
-    D --> K["Project Trends"]
-    D --> L["Control Panel"]
-    D --> M["Tasks Plots"]
-
-    N --> O["Local LLM Adapter"]
-    N --> P["Structured Output"]
-    N --> Q["Python REPL Tool"]
-    N --> C
-    
-    subgraph TodoistAssistant["Todoist Assistant"]
-        style TodoistAssistant fill:#2d333b,stroke:#8b949e,stroke-width:2px,color:#e6edf3
-        A
-    end
-    
-    subgraph DatabaseLayer["Database Layer"]
-        style DatabaseLayer fill:#1f2937,stroke:#4b5563,stroke-width:2px,color:#e6edf3
-        C
-        H
-        I
-        J
-    end
-    
-    subgraph VisualizationLayer["Visualization Layer"]
-        style VisualizationLayer fill:#1e3a5f,stroke:#4878bc,stroke-width:2px,color:#e6edf3
-        D
-        K
-        L
-        M
-    end
-    
-    subgraph AutomationLayer["Automation Layer"]
-        style AutomationLayer fill:#301934,stroke:#7c3aed,stroke-width:2px,color:#e6edf3
-        B
-        E
-        F
-        G
-    end
-
-    subgraph AgentLayer["Agentic Chat Layer"]
-        style AgentLayer fill:#1f3a33,stroke:#10b981,stroke-width:2px,color:#e6edf3
-        N
-        O
-        P
-        Q
-    end
-    
-    TodoistAssistant --> DatabaseLayer
-    TodoistAssistant --> VisualizationLayer
-    TodoistAssistant --> AutomationLayer
-    TodoistAssistant --> AgentLayer
-    
-    classDef darkNode fill:#374151,stroke:#6b7280,color:#e6edf3;
-    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q darkNode;
+flowchart LR
+    API["Todoist API"] --> Cache["Local cache: joblib"]
+    Cache --> DB["Database + DataFrame layer"]
+    DB --> Dash["Dashboards (FastAPI + Next.js / Streamlit)"]
+    DB --> Auto["Automations (templates, activity refresh)"]
+    Cache --> Agent["Agentic chat (local LLM + safe Python REPL)"]
+    Auto --> API
 ```
 
-- **Separation of Concerns:**  
-  Modules are decoupled (ingestion, storage, analysis, visualization) to keep workflows reproducible and extensible.
+At a glance, the Database layer wraps the Todoist API, hydrates in-memory caches, and standardizes project/task/activity
+models. The DataFrame pipeline turns cached activity into a pandas timeline that powers plots and dashboards. Automations
+are config-driven classes that either extend tasks (templates) or refresh activity data on a schedule. The agentic chat
+layer is optional and runs fully local, using cached events with a restricted Python REPL for analysis.
 
-- **Core Modules:**    
-  - **Database Module:**  
-    Acts as the intermediary between the Todoist API and your app. It’s subdivided into:
-    - *Projects:* Manage active/archived projects.
-    - *Tasks:* Add, delete, or template-insert tasks.
-    - *Activity:* Gathers and aggregates Todoist events such as task additions, deletions, and completions.
-  - **Dashboard & Plots:**  
-    Uses a local FastAPI backend + Next.js frontend to render interactive dashboards. The Plots module transforms raw data into engaging visualizations that showcase productivity trends.
-  - **Automations:**
-    Deterministic triggers and actions for template expansion, activity refresh, and label-driven workflows.
-  - **Integrations** *(experimental)*   
-    Integrations open the door to connect with external services like Twitter or Gmail. The Gmail Tasks automation can automatically create Todoist tasks from actionable emails.
-  - **Agentic Chat (local)**
-    Read-only analysis over the cached activity log using a local LLM, structured outputs, and a restricted Python REPL for calculations. Supports plain-language queries, time-window filtering, and lightweight trend summaries.
+## How It Works
+
+- **Local cache (joblib):** `todoist.utils.Cache` persists `activity.joblib` plus automation/integration metadata and Gmail processed IDs. Most analytics read from these files after the initial sync, so repeated runs stay fast and reproducible.
+- **Database layer:** `todoist.database.Database` composes Activity/Projects/Tasks/Labels mixins on top of `TodoistAPIClient`. It keeps in-memory caches for projects/tasks and uses retry logic for API calls.
+- **Activity ingestion:** `fetch_activity_adaptively` walks backward in time windows until it hits empty windows, merging into the cached event set. This avoids re-downloading years of activity on every run.
+- **DataFrame pipeline:** `todoist.database.dataframe.load_activity_data` converts cached events to pandas, joins project metadata, and applies `personal/*.py` mappings (`link_adjustements`) so archived root projects roll up correctly.
+- **Automations + observer:** Automations are instantiated via Hydra from `configs/automations.yaml`. `todoist.run_observer` polls recent activity every 30s, refreshes the cache, resets DB caches, and triggers short automations (templates, multipliers, etc.).
+- **Dashboard stack:** FastAPI (`todoist.web.api`) refreshes data on a 60s TTL and serves Plotly payloads to the Next.js UI. `make run_demo` enables anonymized project/label names for sharing.
+- **Agentic chat:** `todoist.agent` runs a LangGraph pipeline (instruction selection -> planning -> tool execution) with a safe, read-only Python REPL that blocks imports and filesystem writes. It only reads cached `events` and `events_df`.
 
 <div style="text-align: center;">
   <img src="img/home_header.png" alt="home_1" width="900"/>
@@ -209,12 +156,12 @@ The following [Makefile](Makefile) commands are available:
 
 Fetch and update your Todoist activity data:
 ```bash
-python3 -m todoist activity --nweeks N_WEEKS
+python3 -m todoist.activity --nweeks N_WEEKS
 ```
 
-### Automatons Manual launch
+### Automations Manual Launch
 
-Launch all automations defined in `configs/automations.yaml`.
+Launch all automations defined in `configs/automations.yaml` (long-running automations are skipped).
 ```
 python3 -m todoist.automations.run --config-dir configs --config-name automations
 ```
@@ -222,6 +169,7 @@ python3 -m todoist.automations.run --config-dir configs --config-name automation
 ### Agentic Chat (local)
 
 Read-only analysis over cached activity using a local LLM, structured outputs, and a restricted Python REPL.
+The tool loads cached `activity.joblib` into `events` and `events_df` and blocks file or network access.
 
 ```bash
 make chat_agent
@@ -232,15 +180,15 @@ Manual invocation:
 PYTHONPATH=. uv run python -m todoist.agent.chat --model-id "mistralai/Ministral-3-3B-Instruct-2512"
 ```
 
-Env vars: `TODOIST_AGENT_MODEL_ID`, `TODOIST_AGENT_MAX_NEW_TOKENS`.
+Env vars: `TODOIST_AGENT_MODEL_ID`, `TODOIST_AGENT_CACHE_PATH`, `TODOIST_AGENT_INSTRUCTIONS_DIR`, `TODOIST_AGENT_DEVICE`, `TODOIST_AGENT_DTYPE`, `TODOIST_AGENT_TEMPERATURE`, `TODOIST_AGENT_TOP_P`, `TODOIST_AGENT_MAX_NEW_TOKENS`, `TODOIST_AGENT_MAX_TOOL_LOOPS`.
 
 ### Background Observer
 
 Keep the short automations running continuously against fresh activity data:
 ```
-python3 -m todoist.automations.run_observer --config-dir configs --config-name automations
+python3 -m todoist.run_observer --config-dir configs --config-name automations
 ```
-This entrypoint pulls the latest week of activity, refreshes the cache, and runs non-activity automations.
+This entrypoint polls recent activity every 30s, refreshes the cache, and runs non-activity automations.
 
 ### Dashboard Usage
 
@@ -293,9 +241,11 @@ dbio.insert_task(content='Buy milk', project_id=projects[0].id) # Insert a new t
 ```
 See source files to full capabilities:
 - [todoist/database/base.py](todoist/database/base.py)
-- [todoist/database/db_activity.py](todoist/database/base.py)
-- [todoist/database/db_projects.py](todoist/database/base.py)
-- [todoist/database/db_tasks.py](todoist/database/base.py)
+- [todoist/database/dataframe.py](todoist/database/dataframe.py)
+- [todoist/database/db_activity.py](todoist/database/db_activity.py)
+- [todoist/database/db_labels.py](todoist/database/db_labels.py)
+- [todoist/database/db_projects.py](todoist/database/db_projects.py)
+- [todoist/database/db_tasks.py](todoist/database/db_tasks.py)
 
 
 ### Custom Automations
@@ -318,7 +268,7 @@ automations:
 ```
 The template loader applies defaults (priority 1, `due_date_days_difference=0`) and wraps entries into `TaskTemplate`.
 
-- `Template` expands tasks labeled `@template-call` (see [todoist/automations/template.py](todoist/automations/template.py)).
+- `Template` expands tasks labeled `template-<name>` (for example `template-call`; see [todoist/automations/template.py](todoist/automations/template.py)).
 - `Activity` fetches events for a time range (see [todoist/automations/activity.py](todoist/automations/activity.py)).
 - Other automations live in [todoist/automations](todoist/automations).
 
@@ -336,14 +286,14 @@ The Gmail Tasks automation creates Todoist tasks from actionable emails (experim
 ### Aligning Archive Projects
 
 
-Map archived projects to active ones for accurate stats. The Todoist API does not link archived projects to their active parents, so reports can fragment without this mapping.
+Map archived projects to active ones for accurate stats. The Todoist API does not link archived projects to their active parents, so reports can fragment without this mapping. Mappings live in `personal/*.py` (by default `personal/archived_root_projects.py`) and must define `link_adjustements` (note the spelling).
 
 ```python
-link_adjustments = {
-    'Old Project 0': 'Current active root project',
-    'Old Project 1 ⚔️': 'Current active root project',
-    'Old Project 2': 'Another active project 🔥⚔️🔥',
-    'Old Project 3': 'An old master archive project'
+link_adjustements = {
+    "Old Project 0": "Current active root project",
+    "Old Project 1": "Current active root project",
+    "Old Project 2": "Another active project",
+    "Old Project 3": "An old master archive project",
 }
 ```
 
