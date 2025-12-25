@@ -64,6 +64,7 @@ export function ProgressSteps({ progress }: { progress: DashboardProgress | null
           <p className="progressTitle">{FALLBACK_TITLE}</p>
           <p className="progressStage">{stageLabel}</p>
           {detail ? <p className="progressDetail">{detail}</p> : null}
+          {progress.error ? <p className="progressError">{progress.error}</p> : null}
         </div>
         <p className="progressMeta">
           Step {Math.min(stepIndex + 1, totalSteps)} of {totalSteps}
