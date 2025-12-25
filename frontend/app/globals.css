@@ -111,6 +111,13 @@ body {
   color: var(--muted);
 }
 
+.progressError {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--danger);
+  font-weight: 500;
+}
+
 .progressMeta {
   margin: 0;
   font-size: 12px;
