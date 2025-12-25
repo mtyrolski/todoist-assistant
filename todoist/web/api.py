@@ -161,6 +161,7 @@ _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -183,6 +184,16 @@ _JOBS: dict[str, _AdminJob] = {}
 def _env_demo_mode() -> bool:
     value = os.getenv("TODOIST_DASHBOARD_DEMO", "").strip().lower()
     return value in {"1", "true", "yes", "on"}
+
+
+def _run_async_in_main_loop(coro):
+    """Run an async coroutine in the main event loop from a worker thread."""
+    if _main_loop is not None:
+        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+        return future.result()
+    else:
+        # Fallback to creating a new event loop if main loop is not set
+        return asyncio.run(coro)
 
 
 async def _progress_snapshot() -> dict[str, Any]:
@@ -229,7 +240,7 @@ async def _finish_progress(error: str | None = None) -> None:
 def _refresh_state_sync(*, demo_mode: bool) -> None:
     error: str | None = None
     try:
-        asyncio.run(_set_progress(
+        _run_async_in_main_loop(_set_progress(
             "Querying project data",
             step=1,
             total_steps=_PROGRESS_TOTAL_STEPS,
@@ -238,7 +249,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         dbio = Database(".env")
         dbio.pull()
 
-        asyncio.run(_set_progress(
+        _run_async_in_main_loop(_set_progress(
             "Building project hierarchy",
             step=2,
             total_steps=_PROGRESS_TOTAL_STEPS,
@@ -246,7 +257,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         ))
         df_activity = load_activity_data(dbio)
 
-        asyncio.run(_set_progress(
+        _run_async_in_main_loop(_set_progress(
             "Preparing dashboard data",
             step=3,
             total_steps=_PROGRESS_TOTAL_STEPS,
@@ -276,10 +287,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        asyncio.run(_finish_progress(error))
+        _run_async_in_main_loop(_finish_progress(error))
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
+    global _main_loop
     now = time.time()
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
     if (
@@ -300,6 +312,8 @@ async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None
             and (now - _state.last_refresh_s) < _STATE_TTL_S
         ):
             return
+        # Store the main event loop for worker threads to use
+        _main_loop = asyncio.get_running_loop()
         await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
 
 
