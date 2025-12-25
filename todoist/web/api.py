@@ -273,8 +273,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.demo_mode = demo_mode
         _finish_progress()
     except Exception as exc:  # pragma: no cover - defensive
-        error = f"{type(exc).__name__}: {exc}"
-        _finish_progress(error)
+        _finish_progress(f"{type(exc).__name__}: {exc}")
         raise
 
 
