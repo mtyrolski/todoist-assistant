@@ -238,6 +238,9 @@ async def _finish_progress(error: str | None = None) -> None:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
+    # Reset progress state to clear any stale information from previous failed refreshes
+    _finish_progress(error=None)
+    
     error: str | None = None
     try:
         _run_async_in_main_loop(_set_progress(
