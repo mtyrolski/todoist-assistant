@@ -186,7 +186,7 @@ def _env_demo_mode() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
-def _run_async_in_main_loop(coro):
+def _run_async_in_main_loop(coro: Any) -> Any:
     """Run an async coroutine in the main event loop from a worker thread."""
     if _main_loop is not None:
         future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
