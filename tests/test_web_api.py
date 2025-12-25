@@ -185,3 +185,113 @@ def test_openapi_includes_app_version() -> None:
     payload = res.json()
     assert payload["info"]["version"] == web_api.app.version
     assert payload["info"]["version"] != "0.0.0"
+
+
+def test_dashboard_progress_inactive_state() -> None:
+    """Test progress endpoint returns correct structure when inactive."""
+    # Reset progress state to inactive
+    web_api._progress_state.active = False
+    web_api._progress_state.stage = None
+    web_api._progress_state.step = 0
+    web_api._progress_state.total_steps = 0
+    web_api._progress_state.started_at = None
+    web_api._progress_state.updated_at = "2025-01-01T00:00:00"
+    web_api._progress_state.detail = None
+    web_api._progress_state.error = None
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/progress")
+    assert res.status_code == 200
+    payload = res.json()
+
+    # Verify structure
+    assert "active" in payload
+    assert "stage" in payload
+    assert "step" in payload
+    assert "totalSteps" in payload
+    assert "startedAt" in payload
+    assert "updatedAt" in payload
+    assert "detail" in payload
+    assert "error" in payload
+
+    # Verify inactive state
+    assert payload["active"] is False
+    assert payload["stage"] is None
+    assert payload["step"] == 0
+    assert payload["totalSteps"] == 0
+    assert payload["startedAt"] is None
+    assert payload["error"] is None
+
+
+def test_dashboard_progress_active_state() -> None:
+    """Test progress endpoint returns correct structure when active."""
+    # Set progress state to active
+    web_api._progress_state.active = True
+    web_api._progress_state.stage = "Loading data"
+    web_api._progress_state.step = 2
+    web_api._progress_state.total_steps = 5
+    web_api._progress_state.started_at = "2025-01-01T10:00:00"
+    web_api._progress_state.updated_at = "2025-01-01T10:00:30"
+    web_api._progress_state.detail = "Fetching projects"
+    web_api._progress_state.error = None
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/progress")
+    assert res.status_code == 200
+    payload = res.json()
+
+    # Verify active state with all fields populated
+    assert payload["active"] is True
+    assert payload["stage"] == "Loading data"
+    assert payload["step"] == 2
+    assert payload["totalSteps"] == 5
+    assert payload["startedAt"] == "2025-01-01T10:00:00"
+    assert payload["updatedAt"] == "2025-01-01T10:00:30"
+    assert payload["detail"] == "Fetching projects"
+    assert payload["error"] is None
+
+
+def test_dashboard_progress_with_error() -> None:
+    """Test progress endpoint returns error state correctly."""
+    # Set progress state with error
+    web_api._progress_state.active = False
+    web_api._progress_state.stage = None
+    web_api._progress_state.step = 0
+    web_api._progress_state.total_steps = 0
+    web_api._progress_state.started_at = None
+    web_api._progress_state.updated_at = "2025-01-01T10:05:00"
+    web_api._progress_state.detail = None
+    web_api._progress_state.error = "Failed to connect to API"
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/progress")
+    assert res.status_code == 200
+    payload = res.json()
+
+    # Verify error is captured
+    assert payload["active"] is False
+    assert payload["error"] == "Failed to connect to API"
+    assert payload["updatedAt"] == "2025-01-01T10:05:00"
+
+
+def test_dashboard_progress_without_error() -> None:
+    """Test progress endpoint handles state without error correctly."""
+    # Set progress state without error
+    web_api._progress_state.active = True
+    web_api._progress_state.stage = "Processing"
+    web_api._progress_state.step = 1
+    web_api._progress_state.total_steps = 3
+    web_api._progress_state.started_at = "2025-01-01T12:00:00"
+    web_api._progress_state.updated_at = "2025-01-01T12:00:15"
+    web_api._progress_state.detail = None
+    web_api._progress_state.error = None
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/progress")
+    assert res.status_code == 200
+    payload = res.json()
+
+    # Verify no error
+    assert payload["active"] is True
+    assert payload["error"] is None
+    assert payload["stage"] == "Processing"
