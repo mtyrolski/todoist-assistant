@@ -51,7 +51,7 @@ export function ProgressSteps({ progress }: { progress: DashboardProgress | null
   if (!progress?.active) return null;
 
   const stepIndex = resolveStepIndex(progress);
-  const totalSteps = STEPS.length || progress.totalSteps || 1;
+  const totalSteps = STEPS.length;
   const ratio = Math.min(1, (stepIndex + 1) / totalSteps);
   const activeStep = STEPS[stepIndex];
   const stageLabel = progress.stage ?? activeStep?.label ?? "Working";
