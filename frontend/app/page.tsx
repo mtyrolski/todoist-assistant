@@ -39,6 +39,7 @@ type DashboardHome = {
 type DashboardStatus = {
   services: ServiceStatus[];
   apiCache: { lastRefresh: string | null };
+  activityCache: { path: string; mtime: string | null; size: number | null } | null;
   now: string;
 };
 
@@ -60,6 +61,7 @@ export default function Page() {
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [statusRefreshNonce, setStatusRefreshNonce] = useState(0);
+  const [syncClock, setSyncClock] = useState(() => Date.now());
 
   useEffect(() => {
     const fetchHealth = async () => {
@@ -140,6 +142,35 @@ export default function Page() {
     return () => controller.abort();
   }, [statusRefreshNonce]);
 
+  useEffect(() => {
+    const interval = setInterval(() => setSyncClock(Date.now()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const syncLabel = useMemo(() => {
+    if (!status) return "Sync status unavailable";
+    const activityCache = status.activityCache;
+    if (!activityCache) return "Activity cache missing";
+    const lastRefresh = activityCache.mtime;
+    if (!lastRefresh) return "Sync time unknown";
+    const lastMs = Date.parse(lastRefresh);
+    if (Number.isNaN(lastMs)) return "Sync unknown";
+    const diffMs = Math.max(0, syncClock - lastMs);
+    if (diffMs < 60_000) return "Synced just now";
+    const minutes = Math.floor(diffMs / 60_000);
+    if (minutes < 60) return `Synced ${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `Synced ${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `Synced ${days}d ago`;
+  }, [status, syncClock]);
+
+  const syncTitle = useMemo(() => {
+    if (!status) return undefined;
+    if (!status.activityCache) return "activity.joblib missing";
+    return status.activityCache.mtime ?? "sync time unavailable";
+  }, [status]);
+
   const periodLabel = useMemo(() => {
     if (!dashboard) return null;
     return `${dashboard.range.beg} → ${dashboard.range.end}`;
@@ -165,6 +196,9 @@ export default function Page() {
           <div className="status-row">
             <span className={`pill ${health?.status === "ok" ? "pill-good" : "pill-warn"}`}>
               {loadingHealth ? "Checking API…" : health?.status === "ok" ? "API online" : "API offline"}
+            </span>
+            <span className="pill pill-neutral" title={syncTitle}>
+              {syncLabel}
             </span>
             {periodLabel && <span className="pill">{periodLabel}</span>}
             {dashboardError && <span className="pill pill-warn">{dashboardError}</span>}

@@ -141,7 +141,6 @@ class _DashboardState:
 
 
 _state = _DashboardState()
-_STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
@@ -170,8 +169,14 @@ def _env_demo_mode() -> bool:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
-    dbio = Database(".env")
-    dbio.pull()
+    dbio = _state.db
+    if dbio is None or (_state.demo_mode and not demo_mode):
+        dbio = Database(".env")
+        dbio.pull()
+    else:
+        dbio.reset()
+        if demo_mode:
+            dbio.is_anonymized = False
     df_activity = load_activity_data(dbio)
     active_projects = dbio.fetch_projects(include_tasks=True)
 
@@ -196,43 +201,33 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
-    now = time.time()
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-    if (
-        not refresh
-        and _state.db is not None
-        and _state.demo_mode == desired_demo
-        and (now - _state.last_refresh_s) < _STATE_TTL_S
-    ):
+    if not refresh and _state.db is not None and _state.demo_mode == desired_demo:
         return
 
     async with _STATE_LOCK:
-        now = time.time()
         desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-        if (
-            not refresh
-            and _state.db is not None
-            and _state.demo_mode == desired_demo
-            and (now - _state.last_refresh_s) < _STATE_TTL_S
-        ):
+        if not refresh and _state.db is not None and _state.demo_mode == desired_demo:
             return
         await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
 
 
+def _stat_file(path: str) -> dict[str, Any] | None:
+    if not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+        size = os.path.getsize(path)
+        return {"path": path, "mtime": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"), "size": size}
+    except OSError:
+        return {"path": path, "mtime": None, "size": None}
+
+
 def _service_statuses() -> list[dict[str, Any]]:
-    def stat_file(path: str) -> dict[str, Any] | None:
-        if not os.path.exists(path):
-            return None
-        try:
-            mtime = os.path.getmtime(path)
-            size = os.path.getsize(path)
-            return {"path": path, "mtime": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"), "size": size}
-        except OSError:
-            return {"path": path, "mtime": None, "size": None}
 
     api_key_set = bool(os.getenv("API_KEY"))
-    cache_activity = stat_file("activity.joblib")
-    automation_log = stat_file("automation.log")
+    cache_activity = _stat_file("activity.joblib")
+    automation_log = _stat_file("automation.log")
 
     observer_recent = False
     if automation_log and automation_log.get("mtime"):
@@ -264,6 +259,7 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
             if _state.last_refresh_s
             else None
         },
+        "activityCache": _stat_file("activity.joblib"),
         "now": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -470,7 +466,7 @@ async def dashboard_home(
     - `weeks` controls the date range used for time-series plots (default ~12 weeks).
     - `beg`/`end` (YYYY-MM-DD) override `weeks` when provided.
     - `granularity` controls periodic aggregation where applicable.
-    - `refresh=true` forces a Todoist API pull + activity reload (otherwise cached briefly).
+    - `refresh=true` forces a Todoist API pull + activity reload (otherwise cached state is reused).
     """
     await _ensure_state(refresh=refresh)
 
