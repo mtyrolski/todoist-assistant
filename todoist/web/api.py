@@ -227,6 +227,9 @@ def _finish_progress(error: str | None = None) -> None:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
+    # Reset progress state to clear any stale information from previous failed refreshes
+    _finish_progress(error=None)
+    
     error: str | None = None
     try:
         _set_progress(
