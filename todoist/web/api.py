@@ -12,7 +12,7 @@ import io
 import json
 import os
 from pathlib import Path
-from threading import Lock
+
 import time
 
 import pandas as pd
@@ -159,7 +159,7 @@ _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
-_PROGRESS_LOCK = Lock()
+_PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -185,8 +185,8 @@ def _env_demo_mode() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
-def _progress_snapshot() -> dict[str, Any]:
-    with _PROGRESS_LOCK:
+async def _progress_snapshot() -> dict[str, Any]:
+    async with _PROGRESS_LOCK:
         return {
             "active": _progress_state.active,
             "stage": _progress_state.stage,
@@ -199,9 +199,9 @@ def _progress_snapshot() -> dict[str, Any]:
         }
 
 
-def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None = None) -> None:
+async def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None = None) -> None:
     now = _now_iso()
-    with _PROGRESS_LOCK:
+    async with _PROGRESS_LOCK:
         if not _progress_state.active:
             _progress_state.started_at = now
             _progress_state.error = None
@@ -213,9 +213,9 @@ def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None
         _progress_state.updated_at = now
 
 
-def _finish_progress(error: str | None = None) -> None:
+async def _finish_progress(error: str | None = None) -> None:
     now = _now_iso()
-    with _PROGRESS_LOCK:
+    async with _PROGRESS_LOCK:
         _progress_state.active = False
         _progress_state.stage = None
         _progress_state.step = 0
@@ -229,29 +229,29 @@ def _finish_progress(error: str | None = None) -> None:
 def _refresh_state_sync(*, demo_mode: bool) -> None:
     error: str | None = None
     try:
-        _set_progress(
+        asyncio.run(_set_progress(
             "Querying project data",
             step=1,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Fetching projects and tasks",
-        )
+        ))
         dbio = Database(".env")
         dbio.pull()
 
-        _set_progress(
+        asyncio.run(_set_progress(
             "Building project hierarchy",
             step=2,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Resolving roots across active and archived projects",
-        )
+        ))
         df_activity = load_activity_data(dbio)
 
-        _set_progress(
+        asyncio.run(_set_progress(
             "Preparing dashboard data",
             step=3,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Loading metadata and caches",
-        )
+        ))
         active_projects = dbio.fetch_projects(include_tasks=True)
 
         if demo_mode and not dbio.is_anonymized:
@@ -276,7 +276,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        _finish_progress(error)
+        asyncio.run(_finish_progress(error))
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
@@ -347,7 +347,7 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
 async def dashboard_progress() -> dict[str, Any]:
     """Return current data refresh progress for the dashboard."""
 
-    return _progress_snapshot()
+    return await _progress_snapshot()
 
 
 def _parse_yyyy_mm_dd(value: str) -> datetime:
