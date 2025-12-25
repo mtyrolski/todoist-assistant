@@ -227,7 +227,6 @@ def _finish_progress(error: str | None = None) -> None:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
-    error: str | None = None
     try:
         _set_progress(
             "Querying project data",
@@ -272,11 +271,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.last_refresh_s = time.time()
         _state.home_payload_cache = {}
         _state.demo_mode = demo_mode
+        _finish_progress()
     except Exception as exc:  # pragma: no cover - defensive
         error = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
         _finish_progress(error)
+        raise
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
