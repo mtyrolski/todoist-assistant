@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { PlotCard, type PlotlyFigure } from "./components/PlotCard";
 import { StatCard } from "./components/StatCard";
 import { LoadingBar } from "./components/LoadingBar";
+import { ProgressSteps, type DashboardProgress } from "./components/ProgressSteps";
 import { LeaderboardCard, type LeaderboardItem } from "./components/LeaderboardCard";
 import { ServiceMonitor, type ServiceStatus } from "./components/ServiceMonitor";
 import { InsightCard, type InsightItem } from "./components/InsightCard";
@@ -58,6 +59,7 @@ export default function Page() {
   const lastRefreshNonce = useRef<number>(0);
   const [dashboard, setDashboard] = useState<DashboardHome | null>(null);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [progress, setProgress] = useState<DashboardProgress | null>(null);
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [statusRefreshNonce, setStatusRefreshNonce] = useState(0);
@@ -118,6 +120,54 @@ export default function Page() {
     load();
     return () => controller.abort();
   }, [granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce]);
+
+  const shouldPollProgress = loadingDashboard || (!dashboard && !dashboardError);
+
+  useEffect(() => {
+    if (!shouldPollProgress) {
+      setProgress(null);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+
+    const loadProgress = async () => {
+      try {
+        const res = await fetch("/api/dashboard/progress", { signal: controller.signal });
+        if (!res.ok) return;
+        const payload = (await res.json()) as DashboardProgress;
+        if (!active) return;
+        setProgress(payload);
+      } catch (e) {
+        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
+          return;
+        }
+      }
+    };
+
+    loadProgress();
+    const interval = setInterval(loadProgress, 700);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [shouldPollProgress]);
+
+  const progressDisplay = useMemo(() => {
+    if (progress?.active) return progress;
+    if (!shouldPollProgress) return null;
+    return {
+      active: true,
+      stage: null,
+      step: 1,
+      totalSteps: 3,
+      startedAt: null,
+      updatedAt: null,
+      detail: "Connecting to the API and preparing the dashboard...",
+      error: null
+    } satisfies DashboardProgress;
+  }, [progress, shouldPollProgress]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -292,6 +342,8 @@ export default function Page() {
           {dashboard?.refreshedAt && <p className="muted tiny">Updated {dashboard.refreshedAt}</p>}
         </div>
       </header>
+
+      <ProgressSteps progress={progressDisplay} />
 
       <section className="insightsRow">
         {(dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null)).map((it, idx) =>
