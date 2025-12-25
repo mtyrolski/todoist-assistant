@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 from uuid import uuid4
+import contextlib
+import io
 import json
 import os
-import time
-import io
-import contextlib
 from pathlib import Path
+from threading import Lock
+import time
 
 import pandas as pd
 import plotly.io as pio
@@ -140,11 +141,26 @@ class _DashboardState:
         self.demo_mode: bool = False
 
 
+@dataclass
+class _ProgressState:
+    active: bool = False
+    stage: str | None = None
+    step: int = 0
+    total_steps: int = 0
+    started_at: str | None = None
+    updated_at: str | None = None
+    detail: str | None = None
+    error: str | None = None
+
+
 _state = _DashboardState()
+_progress_state = _ProgressState()
 _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
+_PROGRESS_LOCK = Lock()
+_PROGRESS_TOTAL_STEPS = 3
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -169,30 +185,98 @@ def _env_demo_mode() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _progress_snapshot() -> dict[str, Any]:
+    with _PROGRESS_LOCK:
+        return {
+            "active": _progress_state.active,
+            "stage": _progress_state.stage,
+            "step": _progress_state.step,
+            "totalSteps": _progress_state.total_steps,
+            "startedAt": _progress_state.started_at,
+            "updatedAt": _progress_state.updated_at,
+            "detail": _progress_state.detail,
+            "error": _progress_state.error,
+        }
+
+
+def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None = None) -> None:
+    now = _now_iso()
+    with _PROGRESS_LOCK:
+        if not _progress_state.active:
+            _progress_state.started_at = now
+            _progress_state.error = None
+        _progress_state.active = True
+        _progress_state.stage = stage
+        _progress_state.step = step
+        _progress_state.total_steps = total_steps
+        _progress_state.detail = detail
+        _progress_state.updated_at = now
+
+
+def _finish_progress(error: str | None = None) -> None:
+    now = _now_iso()
+    with _PROGRESS_LOCK:
+        _progress_state.active = False
+        _progress_state.stage = None
+        _progress_state.step = 0
+        _progress_state.total_steps = 0
+        _progress_state.detail = None
+        _progress_state.started_at = None
+        _progress_state.updated_at = now
+        _progress_state.error = error
+
+
 def _refresh_state_sync(*, demo_mode: bool) -> None:
-    dbio = Database(".env")
-    dbio.pull()
-    df_activity = load_activity_data(dbio)
-    active_projects = dbio.fetch_projects(include_tasks=True)
+    error: str | None = None
+    try:
+        _set_progress(
+            "Querying project data",
+            step=1,
+            total_steps=_PROGRESS_TOTAL_STEPS,
+            detail="Fetching projects and tasks",
+        )
+        dbio = Database(".env")
+        dbio.pull()
 
-    if demo_mode and not dbio.is_anonymized:
-        from todoist.database.demo import anonymize_label_names, anonymize_project_names
+        _set_progress(
+            "Building project hierarchy",
+            step=2,
+            total_steps=_PROGRESS_TOTAL_STEPS,
+            detail="Resolving roots across active and archived projects",
+        )
+        df_activity = load_activity_data(dbio)
 
-        project_ori2anonym = anonymize_project_names(df_activity)
-        label_ori2anonym = anonymize_label_names(active_projects)
-        dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+        _set_progress(
+            "Preparing dashboard data",
+            step=3,
+            total_steps=_PROGRESS_TOTAL_STEPS,
+            detail="Loading metadata and caches",
+        )
+        active_projects = dbio.fetch_projects(include_tasks=True)
 
-    project_colors = dbio.fetch_mapping_project_name_to_color()
-    label_colors = dbio.fetch_label_colors()
+        if demo_mode and not dbio.is_anonymized:
+            from todoist.database.demo import anonymize_label_names, anonymize_project_names
 
-    _state.db = dbio
-    _state.df_activity = df_activity
-    _state.active_projects = active_projects
-    _state.project_colors = project_colors
-    _state.label_colors = label_colors
-    _state.last_refresh_s = time.time()
-    _state.home_payload_cache = {}
-    _state.demo_mode = demo_mode
+            project_ori2anonym = anonymize_project_names(df_activity)
+            label_ori2anonym = anonymize_label_names(active_projects)
+            dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+
+        project_colors = dbio.fetch_mapping_project_name_to_color()
+        label_colors = dbio.fetch_label_colors()
+
+        _state.db = dbio
+        _state.df_activity = df_activity
+        _state.active_projects = active_projects
+        _state.project_colors = project_colors
+        _state.label_colors = label_colors
+        _state.last_refresh_s = time.time()
+        _state.home_payload_cache = {}
+        _state.demo_mode = demo_mode
+    except Exception as exc:  # pragma: no cover - defensive
+        error = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        _finish_progress(error)
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
@@ -266,6 +350,13 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
         },
         "now": datetime.now().isoformat(timespec="seconds"),
     }
+
+
+@app.get("/api/dashboard/progress", tags=["dashboard"])
+async def dashboard_progress() -> dict[str, Any]:
+    """Return current data refresh progress for the dashboard."""
+
+    return _progress_snapshot()
 
 
 def _parse_yyyy_mm_dd(value: str) -> datetime:

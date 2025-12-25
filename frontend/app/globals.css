@@ -60,6 +60,154 @@ body {
   }
 }
 
+.progressCard {
+  margin: 14px 0 24px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(106, 227, 255, 0.2);
+  background: linear-gradient(135deg, rgba(106, 227, 255, 0.14), rgba(140, 123, 255, 0.08), rgba(255, 139, 87, 0.08));
+  box-shadow: var(--glow);
+  position: relative;
+  overflow: hidden;
+}
+
+.progressCard::after {
+  content: "";
+  position: absolute;
+  top: -40%;
+  right: -10%;
+  width: 240px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(106, 227, 255, 0.25), transparent 70%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.progressTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.progressStage {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #d7f6ff;
+}
+
+.progressDetail {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.progressMeta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.progressTrack {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6ae3ff, #8c7bff, #ff8b57);
+  box-shadow: 0 0 18px rgba(106, 227, 255, 0.45);
+  transition: width 0.35s ease;
+}
+
+.progressSweep {
+  position: absolute;
+  inset: -60% auto -60% 0;
+  width: 20%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: progressSweep 1.4s linear infinite;
+  pointer-events: none;
+}
+
+.progressSteps {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.progressStep {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.progressDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 5px;
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+.progressLabel {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(232, 236, 242, 0.75);
+}
+
+.progressHint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.progressStep-active .progressDot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(106, 227, 255, 0.25), 0 0 12px rgba(106, 227, 255, 0.45);
+}
+
+.progressStep-active .progressLabel {
+  color: #d7f6ff;
+}
+
+.progressStep-done .progressDot {
+  background: var(--ok);
+  box-shadow: 0 0 0 4px rgba(97, 244, 179, 0.2);
+}
+
+.progressStep-done .progressLabel {
+  color: #b6f4dc;
+}
+
+@keyframes progressSweep {
+  0% {
+    transform: translateX(-40%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
 .page {
   max-width: 1200px;
   margin: 0 auto;
