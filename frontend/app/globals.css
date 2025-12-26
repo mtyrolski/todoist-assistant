@@ -12,6 +12,10 @@
   --glow: 0 20px 60px rgba(0, 0, 0, 0.55);
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 *,
 *::before,
 *::after {
@@ -254,6 +258,53 @@ h1 {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.jumpNav {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  max-width: 100%;
+}
+
+.jumpLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jumpLink {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(106, 227, 255, 0.3);
+  background: rgba(106, 227, 255, 0.08);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.jumpLink:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 227, 255, 0.55);
+  background: rgba(106, 227, 255, 0.16);
+}
+
+.jumpLink:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.jumpTarget {
+  scroll-margin-top: 24px;
 }
 
 .pill {

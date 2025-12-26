@@ -232,6 +232,15 @@ export default function Page() {
   const rootBoard = lastWeek?.rootProjects?.items ?? null;
   const metricsCurrentPeriod = dashboard?.metrics.currentPeriod ?? "";
   const metricsPreviousPeriod = dashboard?.metrics.previousPeriod ?? "";
+  const jumpTargets = [
+    { id: "insights", label: "Insights" },
+    { id: "labels-lifespans", label: "Labels + Lifespans" },
+    { id: "stats", label: "Stats" },
+    { id: "badges", label: "Badges" },
+    { id: "completed-tasks", label: "Completions" },
+    { id: "events", label: "Events" },
+    { id: "ops", label: "Activity & Ops" },
+  ];
 
   return (
     <div className="page">
@@ -343,9 +352,18 @@ export default function Page() {
         </div>
       </header>
 
-      <ProgressSteps progress={progressDisplay} />
+      <nav className="jumpNav" aria-label="Jump to sections">
+        <span className="muted tiny">Jump to</span>
+        <div className="jumpLinks">
+          {jumpTargets.map((target) => (
+            <a key={target.id} className="jumpLink" href={`#${target.id}`}>
+              {target.label}
+            </a>
+          ))}
+        </div>
+      </nav>
 
-      <section className="insightsRow">
+      <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
         {(dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null)).map((it, idx) =>
           it ? <InsightCard key={`${it.title}-${idx}`} item={it} /> : <div key={idx} className="stat skeleton" />
         )}
@@ -356,12 +374,12 @@ export default function Page() {
         ) : null}
       </section>
 
-      <section className="grid2">
+      <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
         <PlotCard title="Most Popular Labels" figure={figures.mostPopularLabels} height={420} />
         <PlotCard title="Task Lifespans: Time to Completion" figure={figures.taskLifespans} height={420} />
       </section>
 
-      <section className="statsRow">
+      <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
         {(dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null)).map((m, idx) =>
           m ? (
             <StatCard
@@ -379,14 +397,14 @@ export default function Page() {
         )}
       </section>
 
-      <section className="badges">
+      <section id="badges" className="badges jumpTarget" aria-label="Priority badges">
         <span className="badge badge-p1">P1 {dashboard?.badges.p1 ?? "—"}</span>
         <span className="badge badge-p2">P2 {dashboard?.badges.p2 ?? "—"}</span>
         <span className="badge badge-p3">P3 {dashboard?.badges.p3 ?? "—"}</span>
         <span className="badge badge-p4">P4 {dashboard?.badges.p4 ?? "—"}</span>
       </section>
 
-      <section className="stack">
+      <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
         <PlotCard
           title="Periodically Completed Tasks Per Project"
           figure={figures.completedTasksPeriodically}
@@ -399,12 +417,12 @@ export default function Page() {
         />
       </section>
 
-      <section className="stack">
+      <section id="events" className="stack jumpTarget" aria-label="Event trends">
         <PlotCard title="Heatmap of Events by Day and Hour" figure={figures.heatmapEventsByDayHour} height={520} />
         <PlotCard title="Events Over Time" figure={figures.eventsOverTime} height={520} />
       </section>
 
-      <section className="grid2">
+      <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">
         <section className="card">
           <header className="cardHeader">
             <h2>Activity Spotlight</h2>
@@ -428,7 +446,7 @@ export default function Page() {
           </div>
         </section>
 
-          <section className="stack">
+        <section className="stack">
           <AdminPanel
             onAfterMutation={() => {
               setRefreshNonce((x) => x + 1);
