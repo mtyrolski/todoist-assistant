@@ -352,6 +352,8 @@ export default function Page() {
         </div>
       </header>
 
+      <ProgressSteps progress={progressDisplay} />
+
       <nav className="jumpNav" aria-label="Jump to sections">
         <span className="muted tiny">Jump to</span>
         <div className="jumpLinks">
