@@ -12,7 +12,7 @@ import io
 import json
 import os
 from pathlib import Path
-from threading import Lock
+
 import time
 
 import pandas as pd
@@ -159,8 +159,9 @@ _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
-_PROGRESS_LOCK = Lock()
+_PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -185,8 +186,18 @@ def _env_demo_mode() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
-def _progress_snapshot() -> dict[str, Any]:
-    with _PROGRESS_LOCK:
+def _run_async_in_main_loop(coro: Any) -> Any:
+    """Run an async coroutine in the main event loop from a worker thread."""
+    if _main_loop is not None:
+        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+        return future.result()
+    else:
+        # Fallback to creating a new event loop if main loop is not set
+        return asyncio.run(coro)
+
+
+async def _progress_snapshot() -> dict[str, Any]:
+    async with _PROGRESS_LOCK:
         return {
             "active": _progress_state.active,
             "stage": _progress_state.stage,
@@ -199,9 +210,9 @@ def _progress_snapshot() -> dict[str, Any]:
         }
 
 
-def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None = None) -> None:
+async def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None = None) -> None:
     now = _now_iso()
-    with _PROGRESS_LOCK:
+    async with _PROGRESS_LOCK:
         if not _progress_state.active:
             _progress_state.started_at = now
             _progress_state.error = None
@@ -213,9 +224,9 @@ def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None
         _progress_state.updated_at = now
 
 
-def _finish_progress(error: str | None = None) -> None:
+async def _finish_progress(error: str | None = None) -> None:
     now = _now_iso()
-    with _PROGRESS_LOCK:
+    async with _PROGRESS_LOCK:
         _progress_state.active = False
         _progress_state.stage = None
         _progress_state.step = 0
@@ -227,30 +238,34 @@ def _finish_progress(error: str | None = None) -> None:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
+    # Reset progress state to clear any stale information from previous failed refreshes
+    _finish_progress(error=None)
+    
+    error: str | None = None
     try:
-        _set_progress(
+        _run_async_in_main_loop(_set_progress(
             "Querying project data",
             step=1,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Fetching projects and tasks",
-        )
+        ))
         dbio = Database(".env")
         dbio.pull()
 
-        _set_progress(
+        _run_async_in_main_loop(_set_progress(
             "Building project hierarchy",
             step=2,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Resolving roots across active and archived projects",
-        )
+        ))
         df_activity = load_activity_data(dbio)
 
-        _set_progress(
+        _run_async_in_main_loop(_set_progress(
             "Preparing dashboard data",
             step=3,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Loading metadata and caches",
-        )
+        ))
         active_projects = dbio.fetch_projects(include_tasks=True)
 
         if demo_mode and not dbio.is_anonymized:
@@ -275,9 +290,12 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
     except Exception as exc:  # pragma: no cover - defensive
         _finish_progress(f"{type(exc).__name__}: {exc}")
         raise
+    finally:
+        _run_async_in_main_loop(_finish_progress(error))
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
+    global _main_loop
     now = time.time()
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
     if (
@@ -298,6 +316,8 @@ async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None
             and (now - _state.last_refresh_s) < _STATE_TTL_S
         ):
             return
+        # Store the main event loop for worker threads to use
+        _main_loop = asyncio.get_running_loop()
         await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
 
 
@@ -354,7 +374,7 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
 async def dashboard_progress() -> dict[str, Any]:
     """Return current data refresh progress for the dashboard."""
 
-    return _progress_snapshot()
+    return await _progress_snapshot()
 
 
 def _parse_yyyy_mm_dd(value: str) -> datetime:
