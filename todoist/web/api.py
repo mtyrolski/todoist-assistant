@@ -368,6 +368,37 @@ async def dashboard_progress() -> dict[str, Any]:
     return await _progress_snapshot()
 
 
+def _llm_breakdown_snapshot() -> dict[str, Any]:
+    payload = Cache().llm_breakdown_progress.load()
+    if not isinstance(payload, dict):
+        payload = {}
+
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    recent = results[-3:] if results else []
+
+    return {
+        "active": bool(payload.get("active")),
+        "status": payload.get("status") or "idle",
+        "runId": payload.get("run_id"),
+        "startedAt": payload.get("started_at"),
+        "updatedAt": payload.get("updated_at"),
+        "tasksTotal": int(payload.get("tasks_total") or 0),
+        "tasksCompleted": int(payload.get("tasks_completed") or 0),
+        "tasksFailed": int(payload.get("tasks_failed") or 0),
+        "tasksPending": int(payload.get("tasks_pending") or 0),
+        "current": payload.get("current"),
+        "error": payload.get("error"),
+        "recent": recent,
+    }
+
+
+@app.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
+async def dashboard_llm_breakdown() -> dict[str, Any]:
+    """Return LLM breakdown queue progress."""
+
+    return _llm_breakdown_snapshot()
+
+
 def _parse_yyyy_mm_dd(value: str) -> datetime:
     try:
         return datetime.strptime(value, "%Y-%m-%d")
