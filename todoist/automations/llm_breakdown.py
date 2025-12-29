@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any
+from enum import StrEnum
+from typing import Any, TypeAlias
 from uuid import uuid4
 
 from loguru import logger
@@ -46,6 +49,37 @@ BASE_SYSTEM_PROMPT = (
 )
 
 
+class ProgressKey(StrEnum):
+    ACTIVE = "active"
+    STATUS = "status"
+    RUN_ID = "run_id"
+    STARTED_AT = "started_at"
+    UPDATED_AT = "updated_at"
+    TASKS_TOTAL = "tasks_total"
+    TASKS_COMPLETED = "tasks_completed"
+    TASKS_FAILED = "tasks_failed"
+    TASKS_PENDING = "tasks_pending"
+    CURRENT = "current"
+    ERROR = "error"
+    PROCESSED_IDS = "processed_ids"
+
+
+class ProgressStatus(StrEnum):
+    IDLE = "idle"
+    RUNNING = "running"
+    FAILED = "failed"
+    COMPLETED = "completed"
+
+
+class CurrentKey(StrEnum):
+    TASK_ID = "task_id"
+    CONTENT = "content"
+    LABEL = "label"
+    DEPTH = "depth"
+
+
+
+
 def _normalize_text(value: object) -> str | None:
     if value is None:
         return None
@@ -56,16 +90,20 @@ def _normalize_text(value: object) -> str | None:
     return str(value)
 
 
-def _normalize_children(value: object) -> list[object]:
+def _normalize_children(value: object) -> list[NormalizedChild]:
     if value is None:
         return []
     if isinstance(value, list):
-        normalized: list[object] = []
+        normalized: list[NormalizedChild] = []
         for item in value:
             if isinstance(item, str):
                 normalized.append({"content": item})
-            else:
+            elif isinstance(item, BreakdownNode):
                 normalized.append(item)
+            elif isinstance(item, dict):
+                normalized.append(item)
+            else:
+                normalized.append({"content": _normalize_text(item)})
         return normalized
     return []
 
@@ -94,7 +132,7 @@ class BreakdownNode(BaseModel):
 
     @field_validator("children", mode="before")
     @classmethod
-    def _normalize_children(cls, value: object) -> list["BreakdownNode"]:
+    def _normalize_children(cls, value: object) -> list[NormalizedChild]:
         return _normalize_children(value)
 
 
@@ -103,11 +141,13 @@ class TaskBreakdown(BaseModel):
 
     @field_validator("children", mode="before")
     @classmethod
-    def _normalize_children(cls, value: object) -> list[BreakdownNode]:
+    def _normalize_children(cls, value: object) -> list[NormalizedChild]:
         return _normalize_children(value)
 
 
 BreakdownNode.model_rebuild()
+
+NormalizedChild: TypeAlias = dict[str, Any] | BreakdownNode
 
 
 def _build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:
@@ -338,7 +378,7 @@ class LLMBreakdown(Automation):
         processed_ids: set[str] = set()
         previous_progress = self._progress_load()
         if not self.remove_label_after_processing:
-            raw_processed = previous_progress.get("processed_ids")
+            raw_processed = previous_progress.get(ProgressKey.PROCESSED_IDS.value)
             if isinstance(raw_processed, list):
                 processed_ids = {str(task_id) for task_id in raw_processed if isinstance(task_id, str)}
 
@@ -365,20 +405,20 @@ class LLMBreakdown(Automation):
         if not candidates:
             if self.track_progress:
                 idle_progress = {
-                    "active": False,
-                    "status": "idle",
-                    "run_id": None,
-                    "started_at": None,
-                    "updated_at": now,
-                    "tasks_total": 0,
-                    "tasks_completed": 0,
-                    "tasks_failed": 0,
-                    "tasks_pending": 0,
-                    "current": None,
-                    "error": None,
+                    ProgressKey.ACTIVE.value: False,
+                    ProgressKey.STATUS.value: ProgressStatus.IDLE.value,
+                    ProgressKey.RUN_ID.value: None,
+                    ProgressKey.STARTED_AT.value: None,
+                    ProgressKey.UPDATED_AT.value: now,
+                    ProgressKey.TASKS_TOTAL.value: 0,
+                    ProgressKey.TASKS_COMPLETED.value: 0,
+                    ProgressKey.TASKS_FAILED.value: 0,
+                    ProgressKey.TASKS_PENDING.value: 0,
+                    ProgressKey.CURRENT.value: None,
+                    ProgressKey.ERROR.value: None,
                 }
                 if not self.remove_label_after_processing:
-                    idle_progress["processed_ids"] = list(processed_ids)
+                    idle_progress[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
                 self._progress_save(idle_progress)
             logger.info("No LLM breakdown tasks queued.")
             return
@@ -389,20 +429,20 @@ class LLMBreakdown(Automation):
         run_id = str(uuid4())
 
         progress = {
-            "active": True,
-            "status": "running",
-            "run_id": run_id,
-            "started_at": now,
-            "updated_at": now,
-            "tasks_total": tasks_total,
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-            "tasks_pending": tasks_pending,
-            "current": None,
-            "error": None,
+            ProgressKey.ACTIVE.value: True,
+            ProgressKey.STATUS.value: ProgressStatus.RUNNING.value,
+            ProgressKey.RUN_ID.value: run_id,
+            ProgressKey.STARTED_AT.value: now,
+            ProgressKey.UPDATED_AT.value: now,
+            ProgressKey.TASKS_TOTAL.value: tasks_total,
+            ProgressKey.TASKS_COMPLETED.value: 0,
+            ProgressKey.TASKS_FAILED.value: 0,
+            ProgressKey.TASKS_PENDING.value: tasks_pending,
+            ProgressKey.CURRENT.value: None,
+            ProgressKey.ERROR.value: None,
         }
         if not self.remove_label_after_processing:
-            progress["processed_ids"] = list(processed_ids)
+            progress[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
         self._progress_save(progress)
 
         try:
@@ -411,10 +451,10 @@ class LLMBreakdown(Automation):
             logger.error("Failed to initialize LLM: {}", exc)
             progress.update(
                 {
-                    "active": False,
-                    "status": "failed",
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "updated_at": self._now_iso(),
+                    ProgressKey.ACTIVE.value: False,
+                    ProgressKey.STATUS.value: ProgressStatus.FAILED.value,
+                    ProgressKey.ERROR.value: f"{type(exc).__name__}: {exc}",
+                    ProgressKey.UPDATED_AT.value: self._now_iso(),
                 }
             )
             self._progress_save(progress)
@@ -429,13 +469,13 @@ class LLMBreakdown(Automation):
             variant_key = item["variant"]
             depth = item["depth"]
 
-            progress["current"] = {
-                "task_id": task.id,
-                "content": task.task_entry.content,
-                "label": label,
-                "depth": depth,
+            progress[ProgressKey.CURRENT.value] = {
+                CurrentKey.TASK_ID.value: task.id,
+                CurrentKey.CONTENT.value: task.task_entry.content,
+                CurrentKey.LABEL.value: label,
+                CurrentKey.DEPTH.value: depth,
             }
-            progress["updated_at"] = self._now_iso()
+            progress[ProgressKey.UPDATED_AT.value] = self._now_iso()
             self._progress_save(progress)
 
             variant_cfg = self.variants.get(variant_key, {})
@@ -478,16 +518,16 @@ class LLMBreakdown(Automation):
                 processed_ids.add(task.id)
                 progress.update(
                     {
-                        "tasks_completed": completed,
-                        "tasks_failed": failed,
-                        "tasks_pending": tasks_total - (completed + failed),
-                        "tasks_total": tasks_total,
-                        "current": None,
-                        "updated_at": self._now_iso(),
+                        ProgressKey.TASKS_COMPLETED.value: completed,
+                        ProgressKey.TASKS_FAILED.value: failed,
+                        ProgressKey.TASKS_PENDING.value: tasks_total - (completed + failed),
+                        ProgressKey.TASKS_TOTAL.value: tasks_total,
+                        ProgressKey.CURRENT.value: None,
+                        ProgressKey.UPDATED_AT.value: self._now_iso(),
                     }
                 )
                 if not self.remove_label_after_processing:
-                    progress["processed_ids"] = list(processed_ids)
+                    progress[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
                 self._progress_save(progress)
                 continue
 
@@ -521,16 +561,16 @@ class LLMBreakdown(Automation):
             pending = tasks_total - (completed + failed)
             progress.update(
                 {
-                    "tasks_completed": completed,
-                    "tasks_failed": failed,
-                    "tasks_pending": pending,
-                    "tasks_total": tasks_total,
-                    "current": None,
-                    "updated_at": self._now_iso(),
+                    ProgressKey.TASKS_COMPLETED.value: completed,
+                    ProgressKey.TASKS_FAILED.value: failed,
+                    ProgressKey.TASKS_PENDING.value: pending,
+                    ProgressKey.TASKS_TOTAL.value: tasks_total,
+                    ProgressKey.CURRENT.value: None,
+                    ProgressKey.UPDATED_AT.value: self._now_iso(),
                 }
             )
             if not self.remove_label_after_processing:
-                progress["processed_ids"] = list(processed_ids)
+                progress[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
             self._progress_save(progress)
 
             logger.info(
@@ -545,16 +585,18 @@ class LLMBreakdown(Automation):
         pending = tasks_total - (completed + failed)
         progress.update(
             {
-                "active": pending > 0,
-                "status": "running" if pending > 0 else "completed",
-                "tasks_completed": completed,
-                "tasks_failed": failed,
-                "tasks_pending": pending,
-                "tasks_total": tasks_total,
-                "current": None,
-                "updated_at": self._now_iso(),
+                ProgressKey.ACTIVE.value: pending > 0,
+                ProgressKey.STATUS.value: ProgressStatus.RUNNING.value
+                if pending > 0
+                else ProgressStatus.COMPLETED.value,
+                ProgressKey.TASKS_COMPLETED.value: completed,
+                ProgressKey.TASKS_FAILED.value: failed,
+                ProgressKey.TASKS_PENDING.value: pending,
+                ProgressKey.TASKS_TOTAL.value: tasks_total,
+                ProgressKey.CURRENT.value: None,
+                ProgressKey.UPDATED_AT.value: self._now_iso(),
             }
         )
         if not self.remove_label_after_processing:
-            progress["processed_ids"] = list(processed_ids)
+            progress[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
         self._progress_save(progress)
