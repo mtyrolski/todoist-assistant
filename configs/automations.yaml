@@ -76,7 +76,7 @@ automations:
   - ${template}
   - ${activity}
   - ${multiply}
-  # - ${llm_breakdown}
+  - ${llm_breakdown}
   # - ${gmail_tasks}
 
 hydra:

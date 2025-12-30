@@ -41,11 +41,13 @@ BASE_SYSTEM_PROMPT = (
     "You are a task decomposition assistant for Todoist. "
     "Create a hierarchy of actionable subtasks. "
     "Use short imperative phrases with no numbering or markdown. "
-    "Do not repeat the root task as a child. "
+    "Do not repeat the current task as a child. "
     "Limit depth to {max_depth} levels and at most {max_children} children per task. "
     "Each child should be an object with `content` and an `expand` boolean that says whether "
     "the child should be further decomposed in a later pass. "
-    "Prefer returning only immediate children; avoid nested children unless necessary."
+    "Prefer returning only immediate children; avoid nested children unless necessary. "
+    "The current task is provided in `task` with `content` (title) and `description`. "
+    "If provided, `ancestors` lists parent tasks from root to direct parent; use them for context only."
 )
 
 
@@ -153,11 +155,29 @@ NormalizedChild: TypeAlias = dict[str, Any] | BreakdownNode
 def _build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:
     children_by_parent: dict[str, list[Task]] = {}
     for task in tasks:
-        parent_id = task.task_entry.parent_id or task.task_entry.v2_parent_id
+        parent_id = _get_parent_id(task)
         if parent_id is None:
             continue
         children_by_parent.setdefault(parent_id, []).append(task)
     return children_by_parent
+
+
+def _get_parent_id(task: Task) -> str | None:
+    parent_id = task.task_entry.parent_id or task.task_entry.v2_parent_id
+    if parent_id is None:
+        return None
+    return str(parent_id)
+
+
+def _build_task_lookup(tasks: Iterable[Task]) -> dict[str, Task]:
+    lookup: dict[str, Task] = {}
+    for task in tasks:
+        lookup[str(task.id)] = task
+        v2_id = task.task_entry.v2_id
+        if v2_id is not None:
+            v2_id_str = str(v2_id)
+            lookup.setdefault(v2_id_str, task)
+    return lookup
 
 
 def _find_llm_label(labels: Iterable[str], prefix_lower: str) -> str | None:
@@ -182,6 +202,29 @@ def _normalize_priority(value: int | None) -> int:
     except (TypeError, ValueError):
         return 1
     return max(1, min(4, parsed))
+
+
+def _build_ancestor_context(task: Task, tasks_by_id: Mapping[str, Task]) -> list[dict[str, str | None]]:
+    ancestors: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+    parent_id = _get_parent_id(task)
+    while parent_id:
+        if parent_id in seen:
+            logger.warning("Detected cycle in task ancestry for task {}", task.id)
+            break
+        seen.add(parent_id)
+        parent = tasks_by_id.get(parent_id)
+        if parent is None:
+            break
+        ancestors.append(
+            {
+                "content": parent.task_entry.content,
+                "description": parent.task_entry.description,
+            }
+        )
+        parent_id = _get_parent_id(parent)
+    ancestors.reverse()
+    return ancestors
 
 
 class LLMBreakdown(Automation):
@@ -373,6 +416,7 @@ class LLMBreakdown(Automation):
         logger.debug("Found {} tasks in total", len(all_tasks))
 
         children_by_parent = _build_children_by_parent(all_tasks)
+        tasks_by_id = _build_task_lookup(all_tasks)
         now = self._now_iso()
 
         processed_ids: set[str] = set()
@@ -494,11 +538,13 @@ class LLMBreakdown(Automation):
                 instruction=instruction,
             )
 
+            ancestor_context = _build_ancestor_context(task, tasks_by_id)
             payload = {
                 "task": {
                     "content": task.task_entry.content,
                     "description": task.task_entry.description,
                 },
+                "ancestors": ancestor_context,
                 "variant": variant_key,
                 "constraints": {
                     "max_depth": max_depth,
