@@ -6,6 +6,8 @@ style and use `pydantic` for strict structured output parsing.
 """
 
 
+# === LOCAL LLM MODEL =========================================================
+
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass

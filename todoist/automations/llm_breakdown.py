@@ -13,10 +13,20 @@ from pydantic import BaseModel, Field, field_validator
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.llm import LocalChatConfig, TransformersMistral3ChatModel
+from todoist.llm.llm_utils import (
+    _build_ancestor_context,
+    _get_parent_id,
+    _merge_description_with_context,
+    _render_ancestor_context,
+    _sanitize_text,
+    _task_from_api_payload,
+)
 from todoist.llm.types import MessageRole
 from todoist.types import Task
 from todoist.utils import Cache
 
+
+# === LLM BREAKDOWN AUTOMATION ================================================
 
 DEFAULT_VARIANTS: dict[str, dict[str, Any]] = {
     "breakdown": {
@@ -47,7 +57,8 @@ BASE_SYSTEM_PROMPT = (
     "the child should be further decomposed in a later pass. "
     "Prefer returning only immediate children; avoid nested children unless necessary. "
     "The current task is provided in `task` with `content` (title) and `description`. "
-    "If provided, `ancestors` lists parent tasks from root to direct parent; use them for context only."
+    "If provided, `ancestors` lists parent tasks from root to direct parent; use them for context only. "
+    "When `ancestor_context` is present, it summarizes the parents; use it to make subtasks specific."
 )
 
 
@@ -161,14 +172,6 @@ def _build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:
         children_by_parent.setdefault(parent_id, []).append(task)
     return children_by_parent
 
-
-def _get_parent_id(task: Task) -> str | None:
-    parent_id = task.task_entry.parent_id or task.task_entry.v2_parent_id
-    if parent_id is None:
-        return None
-    return str(parent_id)
-
-
 def _build_task_lookup(tasks: Iterable[Task]) -> dict[str, Task]:
     lookup: dict[str, Task] = {}
     for task in tasks:
@@ -186,14 +189,6 @@ def _find_llm_label(labels: Iterable[str], prefix_lower: str) -> str | None:
             return label
     return None
 
-
-def _sanitize_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text if text else None
-
-
 def _normalize_priority(value: int | None) -> int:
     if value is None:
         return 1
@@ -202,29 +197,6 @@ def _normalize_priority(value: int | None) -> int:
     except (TypeError, ValueError):
         return 1
     return max(1, min(4, parsed))
-
-
-def _build_ancestor_context(task: Task, tasks_by_id: Mapping[str, Task]) -> list[dict[str, str | None]]:
-    ancestors: list[dict[str, str | None]] = []
-    seen: set[str] = set()
-    parent_id = _get_parent_id(task)
-    while parent_id:
-        if parent_id in seen:
-            logger.warning("Detected cycle in task ancestry for task {}", task.id)
-            break
-        seen.add(parent_id)
-        parent = tasks_by_id.get(parent_id)
-        if parent is None:
-            break
-        ancestors.append(
-            {
-                "content": parent.task_entry.content,
-                "description": parent.task_entry.description,
-            }
-        )
-        parent_id = _get_parent_id(parent)
-    ancestors.reverse()
-    return ancestors
 
 
 class LLMBreakdown(Automation):
@@ -417,7 +389,30 @@ class LLMBreakdown(Automation):
 
         children_by_parent = _build_children_by_parent(all_tasks)
         tasks_by_id = _build_task_lookup(all_tasks)
+        fetched_tasks: dict[str, Task] = {}
         now = self._now_iso()
+
+        def fetch_task(task_id: str, refresh: bool = False) -> Task | None:
+            cached = tasks_by_id.get(task_id) or fetched_tasks.get(task_id)
+            if cached is not None and not refresh:
+                return cached
+            try:
+                payload = db.fetch_task_by_id(task_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to fetch task {} for context: {}", task_id, exc)
+                return cached
+            task_obj = _task_from_api_payload(payload)
+            if task_obj is None:
+                return cached
+            task_id_str = str(task_obj.id)
+            fetched_tasks[task_id_str] = task_obj
+            tasks_by_id[task_id_str] = task_obj
+            v2_id = task_obj.task_entry.v2_id
+            if v2_id is not None:
+                v2_id_str = str(v2_id)
+                fetched_tasks.setdefault(v2_id_str, task_obj)
+                tasks_by_id.setdefault(v2_id_str, task_obj)
+            return task_obj
 
         processed_ids: set[str] = set()
         previous_progress = self._progress_load()
@@ -538,11 +533,16 @@ class LLMBreakdown(Automation):
                 instruction=instruction,
             )
 
-            ancestor_context = _build_ancestor_context(task, tasks_by_id)
+            ancestor_context = _build_ancestor_context(task, tasks_by_id, fetch_task)
+            ancestor_summary = _render_ancestor_context(ancestor_context)
+            task_description = _merge_description_with_context(
+                task.task_entry.description,
+                ancestor_summary,
+            )
             payload = {
                 "task": {
                     "content": task.task_entry.content,
-                    "description": task.task_entry.description,
+                    "description": task_description,
                 },
                 "ancestors": ancestor_context,
                 "variant": variant_key,
@@ -551,6 +551,8 @@ class LLMBreakdown(Automation):
                     "max_children": max_children,
                 },
             }
+            if ancestor_summary:
+                payload["ancestor_context"] = ancestor_summary
             messages = [
                 {"role": MessageRole.SYSTEM, "content": system_prompt},
                 {"role": MessageRole.USER, "content": json.dumps(payload, ensure_ascii=False)},
