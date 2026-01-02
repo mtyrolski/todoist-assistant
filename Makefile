@@ -62,7 +62,7 @@ run_demo: ensure_frontend_deps
 	'
 
 run_observer:
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.run_observer --config-dir configs --config-name automations
+	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
 
 clear_local_env:
 	rm -f activity.joblib
