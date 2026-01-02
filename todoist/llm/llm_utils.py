@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
 from loguru import logger
@@ -18,6 +18,8 @@ TaskFetcher: TypeAlias = Callable[[str, bool], Task | None]
 class _AncestorTaskEntry:
     content: str
     description: str
+    project_id: str = ""
+    labels: list[str] = field(default_factory=list)
     parent_id: str | None = None
     v2_parent_id: str | None = None
     v2_id: str | None = None
@@ -45,12 +47,19 @@ def _task_from_api_payload(payload: Mapping[str, Any] | None) -> Task | None:
         return None
     content = _sanitize_text(payload.get("content")) or ""
     description = _sanitize_text(payload.get("description")) or ""
+    project_id = _sanitize_text(payload.get("project_id")) or ""
+    labels_raw = payload.get("labels")
+    labels: list[str] = []
+    if isinstance(labels_raw, list):
+        labels = [str(label) for label in labels_raw if label is not None]
     parent_id = payload.get("parent_id")
     v2_parent_id = payload.get("v2_parent_id")
     v2_id = payload.get("v2_id")
     entry = _AncestorTaskEntry(
         content=content,
         description=description,
+        project_id=project_id,
+        labels=labels,
         parent_id=str(parent_id) if parent_id is not None else None,
         v2_parent_id=str(v2_parent_id) if v2_parent_id is not None else None,
         v2_id=str(v2_id) if v2_id is not None else None,

@@ -310,9 +310,9 @@ automations:
 ```
 The template loader applies defaults (priority 1, `due_date_days_difference=0`) and wraps entries into `TaskTemplate`.
 
-- `Template` expands tasks labeled `template-<name>` (for example `template-call`; see [todoist/automations/template.py](todoist/automations/template.py)).
-- `LLMBreakdown` expands tasks labeled `llm-<variant>` into hierarchical subtasks using the local LLM (variants configured in [configs/automations.yaml](configs/automations.yaml); implementation in [todoist/automations/llm_breakdown.py](todoist/automations/llm_breakdown.py)).
-- `Activity` fetches events for a time range (see [todoist/automations/activity.py](todoist/automations/activity.py)).
+- `Template` expands tasks labeled `template-<name>` (for example `template-call`; see [todoist/automations/template/automation.py](todoist/automations/template/automation.py)).
+- `LLMBreakdown` expands tasks labeled `llm-<variant>` into hierarchical subtasks using the local LLM (variants configured in [configs/automations.yaml](configs/automations.yaml); implementation in [todoist/automations/llm_breakdown/automation.py](todoist/automations/llm_breakdown/automation.py)).
+- `Activity` fetches events for a time range (see [todoist/automations/activity/automation.py](todoist/automations/activity/automation.py)).
 - Other automations live in [todoist/automations](todoist/automations).
 
 ## Gmail Tasks Automation *(experimental)*

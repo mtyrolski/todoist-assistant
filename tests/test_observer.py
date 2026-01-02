@@ -115,7 +115,7 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
         def __init__(self):
             self.activity = _BrokenStorage()
 
-    monkeypatch.setattr("todoist.automations.observer.Cache", _FakeCache)
+    monkeypatch.setattr("todoist.automations.observer.automation.Cache", _FakeCache)
 
     events = [_event("99", "added")]
     db = _StubDb()

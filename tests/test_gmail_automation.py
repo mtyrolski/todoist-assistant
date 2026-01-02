@@ -118,8 +118,8 @@ def test_get_existing_task_contents():
     assert result == expected
 
 
-@patch('todoist.automations.gmail_tasks.build')
-@patch('todoist.automations.gmail_tasks.Credentials')
+@patch('todoist.automations.gmail_tasks.automation.build')
+@patch('todoist.automations.gmail_tasks.automation.Credentials')
 @patch('os.path.exists')
 def test_authenticate_gmail_existing_token(mock_exists, mock_credentials, mock_build):
     """Test Gmail authentication with existing valid token."""
