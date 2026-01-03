@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 __all__ = [
     "Credentials",
     "GmailTasksAutomation",
@@ -6,6 +8,15 @@ __all__ = [
     "build",
 ]
 
+if TYPE_CHECKING:
+    from .automation import (
+        Credentials,
+        GmailTasksAutomation,
+        GMAIL_CREDENTIALS_FILE,
+        GMAIL_TOKEN_FILE,
+        build,
+    )
+
 
 def __getattr__(name: str):
     if name in __all__:
@@ -13,3 +24,7 @@ def __getattr__(name: str):
 
         return getattr(_automation, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals().keys()) | set(__all__))

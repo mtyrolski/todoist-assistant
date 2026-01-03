@@ -204,6 +204,13 @@ def run_breakdown(automation: Any, db: Database) -> None:
             logger.error("LLM breakdown failed for task {}: {}", task.id, exc)
             failed += 1
             processed_ids.add(task.id)
+            append_progress_result(
+                progress,
+                task=task,
+                status="failed",
+                error=str(exc),
+                depth=depth,
+            )
             pending = tasks_total - (completed + failed)
             set_progress_counts(
                 progress,
@@ -255,6 +262,13 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 automation._update_root_labels(db, task, label)
             completed += 1
 
+        append_progress_result(
+            progress,
+            task=task,
+            status="completed",
+            created_count=created_count,
+            depth=depth,
+        )
         processed_ids.add(task.id)
         if source == "queue":
             processed_queue_ids.add(task.id)
@@ -461,6 +475,7 @@ def build_idle_progress(*, now: str, processed_ids: set[str], track_processed: b
         ProgressKey.TASKS_PENDING.value: 0,
         ProgressKey.CURRENT.value: None,
         ProgressKey.ERROR.value: None,
+        ProgressKey.RESULTS.value: [],
     }
     if track_processed:
         payload[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
@@ -488,10 +503,41 @@ def build_running_progress(
         ProgressKey.TASKS_PENDING.value: tasks_pending,
         ProgressKey.CURRENT.value: None,
         ProgressKey.ERROR.value: None,
+        ProgressKey.RESULTS.value: [],
     }
     if track_processed:
         payload[ProgressKey.PROCESSED_IDS.value] = list(processed_ids)
     return payload
+
+
+def append_progress_result(
+    progress: dict[str, Any],
+    *,
+    task: Task,
+    status: str,
+    created_count: int | None = None,
+    error: str | None = None,
+    depth: int | None = None,
+    limit: int = 10,
+) -> None:
+    results = progress.get(ProgressKey.RESULTS.value)
+    if not isinstance(results, list):
+        results = []
+        progress[ProgressKey.RESULTS.value] = results
+    entry: dict[str, Any] = {
+        "task_id": task.id,
+        "content": task.task_entry.content,
+        "status": status,
+    }
+    if created_count is not None:
+        entry["created_count"] = created_count
+    if error:
+        entry["error"] = error
+    if depth is not None:
+        entry["depth"] = depth
+    results.append(entry)
+    if len(results) > limit:
+        del results[:-limit]
 
 
 def set_progress_counts(

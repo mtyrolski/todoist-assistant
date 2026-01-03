@@ -1095,6 +1095,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         max_seconds: float,
         axis_unit_seconds: float,
     ) -> tuple[list[float], list[str]]:
+        import math
+
         candidates = [
             (1, "1s"),
             (10, "10s"),
@@ -1109,18 +1111,25 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             (28 * 24 * 60 * 60, "4w"),
             (12 * 7 * 24 * 60 * 60, "12w"),
         ]
+        max_ticks = 9
         lower = min_seconds / 2.0
         upper = max_seconds * 1.5
         selected = [(sec, label) for sec, label in candidates if lower <= sec <= upper]
         if not selected:
             selected = [(sec, label) for sec, label in candidates if sec <= upper]
+            if selected:
+                selected = selected[-max_ticks:]
         if not selected:
-            selected = [candidates[0]]
-        if len(selected) > 9:
+            target = max(min_seconds, 1e-6)
+            selected = [min(candidates, key=lambda item: abs(math.log10(item[0]) - math.log10(target)))]
+        if len(selected) > max_ticks:
+            step = max(1, math.ceil((len(selected) - 1) / (max_ticks - 1)))
             trimmed = [selected[0]]
-            trimmed.extend(selected[1:-1:2])
+            trimmed.extend(selected[1:-1:step])
             trimmed.append(selected[-1])
             selected = trimmed
+            if len(selected) > max_ticks:
+                selected = selected[:max_ticks - 1] + [selected[-1]]
         tickvals = [sec / axis_unit_seconds for sec, _ in selected]
         ticktext = [label for _, label in selected]
         return tickvals, ticktext

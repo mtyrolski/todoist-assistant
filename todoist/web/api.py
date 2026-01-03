@@ -36,6 +36,7 @@ from todoist.plots import (
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.base import Automation
+from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.utils import Cache, load_config
 from todoist.version import get_version
 
@@ -373,7 +374,8 @@ def _llm_breakdown_snapshot() -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
 
-    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    results = payload.get(ProgressKey.RESULTS.value)
+    results = results if isinstance(results, list) else []
     recent = results[-3:] if results else []
 
     return {

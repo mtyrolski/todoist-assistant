@@ -1,4 +1,9 @@
+from typing import TYPE_CHECKING
+
 __all__ = ["Activity", "quick_summarize"]
+
+if TYPE_CHECKING:
+    from .automation import Activity, quick_summarize
 
 
 def __getattr__(name: str):
@@ -7,3 +12,7 @@ def __getattr__(name: str):
 
         return getattr(_automation, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals().keys()) | set(__all__))

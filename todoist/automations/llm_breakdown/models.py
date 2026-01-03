@@ -123,6 +123,7 @@ class ProgressKey(StrEnum):
     CURRENT = "current"
     ERROR = "error"
     PROCESSED_IDS = "processed_ids"
+    RESULTS = "results"
 
 
 class ProgressStatus(StrEnum):
