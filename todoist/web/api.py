@@ -938,7 +938,7 @@ async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     # Validate conversation_id format (should be a valid UUID)
     try:
         UUID(conversation_id)
-    except (ValueError, AttributeError):
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid conversation ID format")
 
     async with _LLM_CHAT_STORAGE_LOCK:
