@@ -1159,6 +1159,13 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     axis_unit_seconds = 86400.0
     unit_label = "days"
+    max_duration = float(durations.max())
+    if max_duration < 3600:
+        title_unit = "min"
+    elif max_duration < 86400:
+        title_unit = "hr"
+    else:
+        title_unit = "days"
     durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
@@ -1200,7 +1207,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(barmode="overlay", bargap=0.15)
 
     title_text = "Task Lifespans: Time to Completion"
-    x_title = "Time to Completion"
+    x_title = f"Time to Completion ({title_unit})"
     tickvals, ticktext = _build_time_ticks(
         min_seconds=float(durations.min()),
         max_seconds=float(durations.max()),
