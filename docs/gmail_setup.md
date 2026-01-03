@@ -90,7 +90,7 @@ You can adjust how often the automation runs by modifying the `frequency_in_minu
 
 ### Task Keywords
 
-The automation identifies actionable emails based on keywords. You can modify the keywords by editing the `TASK_KEYWORDS` list in `todoist/automations/gmail_tasks.py`:
+The automation identifies actionable emails based on keywords. You can modify the keywords by editing the `TASK_KEYWORDS` list in `todoist/automations/gmail_tasks/automation.py`:
 
 ```python
 TASK_KEYWORDS = [

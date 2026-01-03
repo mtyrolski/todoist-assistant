@@ -6,6 +6,8 @@ style and use `pydantic` for strict structured output parsing.
 """
 
 
+# === LOCAL LLM MODEL =========================================================
+
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
@@ -232,11 +234,11 @@ def _strip_markdown_code_fence(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _extract_json_object(text: str) -> str | None:
+def _extract_json_payload(text: str) -> str | None:
     stripped = (text or "").strip()
     decoder = json.JSONDecoder()
     for idx, char in enumerate(stripped):
-        if char != "{":
+        if char not in "{[":
             continue
         try:
             _, end = decoder.raw_decode(stripped[idx:])
@@ -255,7 +257,7 @@ def _try_parse_structured_output(raw: str, schema: type[T]) -> T | None:
         with suppress(ValidationError):
             return schema.model_validate_json(cleaned)
 
-    extracted = _extract_json_object(cleaned)
+    extracted = _extract_json_payload(cleaned)
     if extracted is None:
         return None
 
@@ -371,11 +373,7 @@ def _apply_fp8_weight_scales_inplace(
     if not hasattr(model, "named_parameters"):
         return
 
-    float8_dtypes = [
-        getattr(torch, name)
-        for name in ("float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz")
-        if hasattr(torch, name)
-    ]
+    float8_dtypes = _float8_dtypes()
 
     candidate_params: list[tuple[str, torch.nn.Parameter]] = []
     for name, param in model.named_parameters():
@@ -495,11 +493,7 @@ def _candidate_scale_keys(param_name: str) -> list[str]:
 
 
 def _upcast_float8_inplace(model: Any, *, target_dtype: torch.dtype) -> None:
-    float8_dtypes = [
-        getattr(torch, name)
-        for name in ("float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz")
-        if hasattr(torch, name)
-    ]
+    float8_dtypes = _float8_dtypes()
     if not float8_dtypes:
         return
 
@@ -516,15 +510,19 @@ def _upcast_float8_inplace(model: Any, *, target_dtype: torch.dtype) -> None:
         logger.info("Upcasted {} float8 tensors to {}", converted, target_dtype)
 
 
-def _float8_target_dtype(model: Any, *, preferred: torch.dtype | None) -> torch.dtype:
-    if preferred is not None:
-        return preferred
-
-    float8_dtypes = [
+def _float8_dtypes() -> list[torch.dtype]:
+    return [
         getattr(torch, name)
         for name in ("float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz")
         if hasattr(torch, name)
     ]
+
+
+def _float8_target_dtype(model: Any, *, preferred: torch.dtype | None) -> torch.dtype:
+    if preferred is not None:
+        return preferred
+
+    float8_dtypes = _float8_dtypes()
 
     for param in model.parameters():
         if param.dtype not in float8_dtypes:

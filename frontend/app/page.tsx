@@ -9,6 +9,7 @@ import { LeaderboardCard, type LeaderboardItem } from "./components/LeaderboardC
 import { ServiceMonitor, type ServiceStatus } from "./components/ServiceMonitor";
 import { InsightCard, type InsightItem } from "./components/InsightCard";
 import { AdminPanel } from "./components/AdminPanel";
+import { LlmBreakdownStatus, type LlmBreakdownProgress } from "./components/LlmBreakdownStatus";
 
 type Health = { status: string } | null;
 
@@ -63,6 +64,9 @@ export default function Page() {
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [statusRefreshNonce, setStatusRefreshNonce] = useState(0);
+  const [llmProgress, setLlmProgress] = useState<LlmBreakdownProgress | null>(null);
+  const [loadingLlmProgress, setLoadingLlmProgress] = useState(false);
+  const [llmRefreshNonce, setLlmRefreshNonce] = useState(0);
   const [syncClock, setSyncClock] = useState(() => Date.now());
 
   useEffect(() => {
@@ -196,6 +200,37 @@ export default function Page() {
     const interval = setInterval(() => setSyncClock(Date.now()), 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    const load = async () => {
+      try {
+        setLoadingLlmProgress(true);
+        const res = await fetch("/api/dashboard/llm_breakdown", { signal: controller.signal });
+        if (!res.ok) throw new Error("llm-progress");
+        const payload = (await res.json()) as LlmBreakdownProgress;
+        if (!active) return;
+        setLlmProgress(payload);
+      } catch (e) {
+        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
+          return;
+        }
+        setLlmProgress(null);
+      } finally {
+        if (active) setLoadingLlmProgress(false);
+      }
+    };
+
+    load();
+    const interval = setInterval(load, 2000);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [llmRefreshNonce]);
 
   const syncLabel = useMemo(() => {
     if (!status) return "Sync status unavailable";
@@ -454,6 +489,12 @@ export default function Page() {
               setRefreshNonce((x) => x + 1);
               setStatusRefreshNonce((x) => x + 1);
             }}
+          />
+
+          <LlmBreakdownStatus
+            progress={llmProgress}
+            loading={loadingLlmProgress}
+            onRefresh={() => setLlmRefreshNonce((x) => x + 1)}
           />
 
           <ServiceMonitor services={status?.services ?? null} onRefresh={() => setStatusRefreshNonce((x) => x + 1)} />

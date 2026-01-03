@@ -1030,7 +1030,14 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     import numpy as np
     from scipy import stats
 
-    def _apply_common_layout(fig: go.Figure, *, title_text: str, x_title: str) -> go.Figure:
+    def _apply_common_layout(
+        fig: go.Figure,
+        *,
+        title_text: str,
+        x_title: str,
+        tickvals: list[float] | None = None,
+        ticktext: list[str] | None = None,
+    ) -> go.Figure:
         fig.update_layout(
             autosize=True,
             template="plotly_dark",
@@ -1056,14 +1063,19 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             ),
         )
 
-        fig.update_xaxes(
-            title={"text": x_title, "font": {"size": 14, "color": "#ffffff"}},
-            type="log",
-            showgrid=False,
-            gridcolor=_DASHBOARD_GRID_COLOR,
-            tickfont={"size": 12, "color": "#e6e6e6"},
-            zeroline=False,
-        )
+        xaxis_options: dict[str, object] = {
+            "title": {"text": x_title, "font": {"size": 14, "color": "#ffffff"}},
+            "type": "log",
+            "showgrid": False,
+            "gridcolor": _DASHBOARD_GRID_COLOR,
+            "tickfont": {"size": 12, "color": "#e6e6e6"},
+            "zeroline": False,
+        }
+        if tickvals and ticktext:
+            xaxis_options["tickmode"] = "array"
+            xaxis_options["tickvals"] = tickvals
+            xaxis_options["ticktext"] = ticktext
+        fig.update_xaxes(**xaxis_options)
         fig.update_yaxes(
             title={"text": "Frequency", "font": {"size": 14, "color": "#ffffff"}},
             showgrid=False,
@@ -1076,6 +1088,51 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     def _empty_figure(message: str) -> go.Figure:
         fig = go.Figure()
         return _apply_common_layout(fig, title_text=f"Task Lifespans ({message})", x_title="Time to Completion")
+
+    def _build_time_ticks(
+        *,
+        min_seconds: float,
+        max_seconds: float,
+        axis_unit_seconds: float,
+    ) -> tuple[list[float], list[str]]:
+        import math
+
+        candidates = [
+            (1, "1s"),
+            (10, "10s"),
+            (60, "1m"),
+            (10 * 60, "10m"),
+            (60 * 60, "1h"),
+            (3 * 60 * 60, "3h"),
+            (12 * 60 * 60, "12h"),
+            (24 * 60 * 60, "1d"),
+            (3 * 24 * 60 * 60, "3d"),
+            (7 * 24 * 60 * 60, "1w"),
+            (28 * 24 * 60 * 60, "4w"),
+            (12 * 7 * 24 * 60 * 60, "12w"),
+        ]
+        max_ticks = 9
+        lower = min_seconds / 2.0
+        upper = max_seconds * 1.5
+        selected = [(sec, label) for sec, label in candidates if lower <= sec <= upper]
+        if not selected:
+            selected = [(sec, label) for sec, label in candidates if sec <= upper]
+            if selected:
+                selected = selected[-max_ticks:]
+        if not selected:
+            target = max(min_seconds, 1e-6)
+            selected = [min(candidates, key=lambda item: abs(math.log10(item[0]) - math.log10(target)))]
+        if len(selected) > max_ticks:
+            step = max(1, math.ceil((len(selected) - 1) / (max_ticks - 1)))
+            trimmed = [selected[0]]
+            trimmed.extend(selected[1:-1:step])
+            trimmed.append(selected[-1])
+            selected = trimmed
+            if len(selected) > max_ticks:
+                selected = selected[:max_ticks - 1] + [selected[-1]]
+        tickvals = [sec / axis_unit_seconds for sec, _ in selected]
+        ticktext = [label for _, label in selected]
+        return tickvals, ticktext
 
     if "type" not in df.columns:
         logger.error("DataFrame missing required 'type' column")
@@ -1109,15 +1166,16 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         logger.info("All computed durations are non-positive; nothing to plot")
         return _empty_figure("No valid durations")
 
-    max_duration = durations.max()
+    axis_unit_seconds = 86400.0
+    unit_label = "days"
+    max_duration = float(durations.max())
     if max_duration < 3600:
-        divisor, unit_label = 60.0, "min"
+        title_unit = "min"
     elif max_duration < 86400:
-        divisor, unit_label = 3600.0, "hr"
+        title_unit = "hr"
     else:
-        divisor, unit_label = 86400.0, "days"
-
-    durations_converted = durations / divisor
+        title_unit = "days"
+    durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
 
@@ -1139,7 +1197,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                     mode="lines",
                     line=dict(color="#1ABC9C", width=3),
                     name="Smoothed frequency",
-                    hovertemplate="Duration: %{x:.2f} " + unit_label + "<br>Frequency: %{y:.2f}<extra></extra>",
+                    hovertemplate="Duration: %{x:.4g} " + unit_label + "<br>Frequency: %{y:.2f}<extra></extra>",
                 )
             )
         else:
@@ -1158,6 +1216,17 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(barmode="overlay", bargap=0.15)
 
     title_text = "Task Lifespans: Time to Completion"
-    x_title = f"Time to Completion ({unit_label})"
+    x_title = f"Time to Completion ({title_unit})"
+    tickvals, ticktext = _build_time_ticks(
+        min_seconds=float(durations.min()),
+        max_seconds=float(durations.max()),
+        axis_unit_seconds=axis_unit_seconds,
+    )
 
-    return _apply_common_layout(fig, title_text=title_text, x_title=x_title)
+    return _apply_common_layout(
+        fig,
+        title_text=title_text,
+        x_title=x_title,
+        tickvals=tickvals,
+        ticktext=ticktext,
+    )

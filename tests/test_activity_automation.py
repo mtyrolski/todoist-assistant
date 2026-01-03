@@ -72,7 +72,7 @@ def test_activity_tick_persists_cache_and_summarizes(tmp_path, monkeypatch):
     def _fake_summary(*, events: set[Event], new_events: set[Event]):
         summary_calls.append((events, new_events))
 
-    monkeypatch.setattr("todoist.automations.activity.quick_summarize", _fake_summary)
+    monkeypatch.setattr("todoist.automations.activity.automation.quick_summarize", _fake_summary)
 
     class _FakeDb:
         def __init__(self, events_to_return: list[Event]):

@@ -43,10 +43,40 @@ template:
     msg: ${communication.msg}
     call: ${communication.call}
 
+llm_breakdown:
+  _target_: todoist.automations.llm_breakdown.LLMBreakdown
+  frequency_in_minutes: 0.1
+  label_prefix: "llm-"
+  default_variant: "breakdown"
+  max_depth: 3
+  max_children: 6
+  max_total_tasks: 60
+  allow_existing_children: false
+  remove_label_after_processing: true
+  propagate_labels: true
+  max_tasks_per_tick: 1
+  max_queue_depth: 1
+  auto_queue_children: true
+  variants:
+    breakdown:
+      instruction: "Balanced breakdown with 4-6 top-level tasks."
+      queue_depth: 1
+    breakdown-lite:
+      instruction: "Keep it short and light."
+      max_depth: 2
+      max_children: 4
+      queue_depth: 1
+    breakdown-deep:
+      instruction: "Provide more detail and intermediate steps."
+      max_depth: 2
+      max_children: 6
+      queue_depth: 2
+
 automations:
   - ${template}
   - ${activity}
   - ${multiply}
+  - ${llm_breakdown}
   # - ${gmail_tasks}
 
 hydra:

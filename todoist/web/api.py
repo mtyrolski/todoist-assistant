@@ -36,6 +36,7 @@ from todoist.plots import (
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.base import Automation
+from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.utils import Cache, load_config
 from todoist.version import get_version
 
@@ -366,6 +367,38 @@ async def dashboard_progress() -> dict[str, Any]:
     """Return current data refresh progress for the dashboard."""
 
     return await _progress_snapshot()
+
+
+def _llm_breakdown_snapshot() -> dict[str, Any]:
+    payload = Cache().llm_breakdown_progress.load()
+    if not isinstance(payload, dict):
+        payload = {}
+
+    results = payload.get(ProgressKey.RESULTS.value)
+    results = results if isinstance(results, list) else []
+    recent = results[-3:] if results else []
+
+    return {
+        "active": bool(payload.get("active")),
+        "status": payload.get("status") or "idle",
+        "runId": payload.get("run_id"),
+        "startedAt": payload.get("started_at"),
+        "updatedAt": payload.get("updated_at"),
+        "tasksTotal": int(payload.get("tasks_total") or 0),
+        "tasksCompleted": int(payload.get("tasks_completed") or 0),
+        "tasksFailed": int(payload.get("tasks_failed") or 0),
+        "tasksPending": int(payload.get("tasks_pending") or 0),
+        "current": payload.get("current"),
+        "error": payload.get("error"),
+        "recent": recent,
+    }
+
+
+@app.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
+async def dashboard_llm_breakdown() -> dict[str, Any]:
+    """Return LLM breakdown queue progress."""
+
+    return _llm_breakdown_snapshot()
 
 
 def _parse_yyyy_mm_dd(value: str) -> datetime:
