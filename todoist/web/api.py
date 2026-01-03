@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 import contextlib
 import io
 import json
@@ -937,7 +937,6 @@ async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     
     # Validate conversation_id format (should be a valid UUID)
     try:
-        from uuid import UUID
         UUID(conversation_id)
     except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid conversation ID format")
