@@ -621,7 +621,8 @@ def _build_chat_messages(conversation: dict[str, Any], user_content: str) -> lis
     for msg in conversation.get("messages") or []:
         role = msg.get("role")
         content = msg.get("content")
-        if role in _CHAT_ROLES and content:
+        # Skip system messages from history to avoid conflicts with the prepended system prompt
+        if role in _CHAT_ROLES and content and role != MessageRole.SYSTEM.value:
             messages.append({"role": role, "content": str(content)})
     messages.append({"role": MessageRole.USER.value, "content": user_content})
     return messages
@@ -758,6 +759,21 @@ async def _run_llm_chat_queue() -> None:
                     messages = _build_chat_messages(conversation, next_item["content"])
                     response = await asyncio.to_thread(model.chat, messages)
                     response_text = _sanitize_text(response) or ""
+                    
+                    # Only save messages if we got a non-empty response
+                    if not response_text:
+                        # Mark as failed if response is empty
+                        async with _LLM_CHAT_STORAGE_LOCK:
+                            queue = _load_llm_chat_queue()
+                            for item in queue:
+                                if item.get("id") == next_item["id"]:
+                                    item["status"] = "failed"
+                                    item["finished_at"] = _now_iso()
+                                    item["error"] = "Empty response from model"
+                                    break
+                            _save_llm_chat_queue(queue)
+                        continue
+                    
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
@@ -888,8 +904,7 @@ async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) ->
             }
             conversations.append(conversation)
 
-        if conversation is not None:
-            conversation["updated_at"] = now
+        conversation["updated_at"] = now
 
         queue = _load_llm_chat_queue()
         item = {
@@ -907,7 +922,7 @@ async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) ->
         _save_llm_chat_queue(queue)
         _save_llm_chat_conversations(conversations)
 
-    if enabled:
+    if enabled or loading:
         await _maybe_start_llm_chat_worker()
     return {
         "queued": True,
@@ -919,6 +934,13 @@ async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) ->
 @app.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
 async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     """Fetch a conversation transcript."""
+    
+    # Validate conversation_id format (should be a valid UUID)
+    try:
+        from uuid import UUID
+        UUID(conversation_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid conversation ID format")
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
