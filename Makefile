@@ -4,10 +4,10 @@ FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
 
 init_local_env: # syncs history, fetches activity
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env --config-dir configs --config-name automations
+	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
 
 update_env: # updates history, fetches activity, do templates
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env --config-dir configs --config-name automations
+	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations
 
 install_app: # installs frontend dependencies
 	npm --prefix $(FRONTEND_DIR) install
@@ -68,7 +68,7 @@ clear_local_env:
 	rm -f activity.joblib
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env --config-dir configs --config-name automations && \
+	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
 	make run_dashboard
 
 test: ## Run unit tests with pytest

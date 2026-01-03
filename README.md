@@ -205,7 +205,7 @@ python3 -m todoist.activity --nweeks N_WEEKS
 
 Launch all automations defined in `configs/automations.yaml` (long-running automations are skipped).
 ```
-python3 -m todoist.automations.run --config-dir configs --config-name automations
+python3 -m todoist.automations.run.automation --config-dir configs --config-name automations
 ```
 
 ### Agentic Chat (local)
