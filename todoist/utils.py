@@ -80,6 +80,8 @@ class Cache:
         self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)
         self.llm_breakdown_progress = LocalStorage(join(self.path, 'llm_breakdown_progress.joblib'), dict)
         self.llm_breakdown_queue = LocalStorage(join(self.path, 'llm_breakdown_queue.joblib'), dict)
+        self.llm_chat_queue = LocalStorage(join(self.path, 'llm_chat_queue.joblib'), list)
+        self.llm_chat_conversations = LocalStorage(join(self.path, 'llm_chat_conversations.joblib'), list)
 
 
 class Anonymizable(ABC):

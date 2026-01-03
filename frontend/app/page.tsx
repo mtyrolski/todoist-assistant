@@ -10,8 +10,9 @@ import { ServiceMonitor, type ServiceStatus } from "./components/ServiceMonitor"
 import { InsightCard, type InsightItem } from "./components/InsightCard";
 import { AdminPanel } from "./components/AdminPanel";
 import { LlmBreakdownStatus, type LlmBreakdownProgress } from "./components/LlmBreakdownStatus";
+import { LlmChatPanel } from "./components/LlmChatPanel";
 
-type Health = { status: string } | null;
+type Health = { status: string; version?: string } | null;
 
 type Granularity = "W" | "ME" | "3ME";
 
@@ -274,6 +275,7 @@ export default function Page() {
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
     { id: "events", label: "Events" },
+    { id: "llm-chat", label: "LLM Chat" },
     { id: "ops", label: "Activity & Ops" },
   ];
 
@@ -291,6 +293,7 @@ export default function Page() {
             <span className={`pill ${health?.status === "ok" ? "pill-good" : "pill-warn"}`}>
               {loadingHealth ? "Checking API…" : health?.status === "ok" ? "API online" : "API offline"}
             </span>
+            {health?.version ? <span className="pill pill-neutral">v{health.version}</span> : null}
             <span className="pill pill-neutral" title={syncTitle}>
               {syncLabel}
             </span>
@@ -457,6 +460,10 @@ export default function Page() {
       <section id="events" className="stack jumpTarget" aria-label="Event trends">
         <PlotCard title="Heatmap of Events by Day and Hour" figure={figures.heatmapEventsByDayHour} height={520} />
         <PlotCard title="Events Over Time" figure={figures.eventsOverTime} height={520} />
+      </section>
+
+      <section id="llm-chat" className="stack jumpTarget" aria-label="LLM chat">
+        <LlmChatPanel />
       </section>
 
       <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">

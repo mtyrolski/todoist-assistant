@@ -25,8 +25,11 @@ SYSTEM_PROMPT = (
 
 TOOL_PROMPT = (
     f"Tool: {PYTHON_TOOL_NAME}. Use only when needed. Python only; no imports, files, or network. "
-    "Use events, events_df (datetime index; cols: event_type,title,object_type,object_id,parent_project_id,"
-    "parent_item_id,extra_data), pd, np."
+    "Activity data: events (tuple[Event]) and events_df. Event fields: id, date (datetime), event_type "
+    "(added/updated/completed/deleted), name, event_entry{object_type,object_id,event_type,event_date,"
+    "parent_project_id,parent_item_id,initiator_id,extra_data}. "
+    "events_df index=datetime; columns: event_type,title,object_type,object_id,parent_project_id,parent_item_id,"
+    "extra_data. Also available: pd, np."
 )
 
 PLANNER_PROMPT = (
