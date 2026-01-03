@@ -58,9 +58,9 @@ function formatTimestamp(value?: string | null): string {
   return value.replace("T", " ");
 }
 
-function queueTone(status: string): "ok" | "warn" | "neutral" {
+function queueTone(status: string): "ok" | "warn" | "neutral" | "beta" {
   if (status === "failed") return "warn";
-  if (status === "running") return "ok";
+  if (status === "running") return "beta";
   if (status === "done") return "ok";
   return "neutral";
 }
@@ -308,17 +308,25 @@ export function LlmChatPanel() {
             {loadingConversation ? (
               <div className="skeleton" style={{ minHeight: 160 }} />
             ) : conversation?.messages?.length ? (
-              conversation.messages.map((msg, idx) => (
-                <div key={`${msg.role}-${idx}`} className={`chatBubble chatBubble-${msg.role}`}>
-                  <div className="chatBubbleMeta">
-                    <span>{msg.role}</span>
-                    <span>{formatTimestamp(msg.createdAt)}</span>
+              conversation.messages.map((msg, idx) => {
+                const content = msg.content ?? "";
+                const isToolMessage = content.includes("python_repl") || content.includes("```");
+                return (
+                  <div key={`${msg.role}-${idx}`} className={`chatBubble chatBubble-${msg.role}`}>
+                    <div className="chatBubbleMeta">
+                      <span>{msg.role}</span>
+                      <span>{formatTimestamp(msg.createdAt)}</span>
+                    </div>
+                    {isToolMessage ? (
+                      <pre className="codeBlock">{content}</pre>
+                    ) : (
+                      <p className="tiny" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                        {content}
+                      </p>
+                    )}
                   </div>
-                  <p className="tiny" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                    {msg.content}
-                  </p>
-                </div>
-              ))
+                );
+              })
             ) : (
               <p className="muted tiny">No messages yet. Queue a prompt to begin.</p>
             )}

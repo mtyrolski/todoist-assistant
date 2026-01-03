@@ -16,6 +16,7 @@ from pathlib import Path
 import time
 
 import pandas as pd
+import numpy as np
 import plotly.io as pio
 import plotly.graph_objects as go
 import hydra
@@ -199,6 +200,8 @@ _LLM_CHAT_MODEL_LOCK = asyncio.Lock()
 _LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
 _LLM_CHAT_WORKER_LOCK = asyncio.Lock()
 _LLM_CHAT_WORKER_RUNNING = False
+_LLM_CHAT_AGENT = None
+_LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
 
 def _env_demo_mode() -> bool:
@@ -602,6 +605,7 @@ async def _load_llm_chat_model_task() -> None:
         model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model
+        await asyncio.to_thread(_build_llm_chat_agent_sync, model)
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Failed to load LLM chat model: {}", exc)
     finally:
@@ -621,6 +625,41 @@ def _build_chat_messages(conversation: dict[str, Any], user_content: str) -> lis
             messages.append({"role": role, "content": str(content)})
     messages.append({"role": MessageRole.USER.value, "content": user_content})
     return messages
+
+
+def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
+    global _LLM_CHAT_AGENT
+    try:
+        from todoist.agent.context import load_local_agent_context
+        from todoist.agent.graph import build_agent_graph
+        from todoist.agent.repl_tool import SafePythonReplTool
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("LLM chat agent unavailable: {}", exc)
+        return
+
+    cache_path = os.getenv("TODOIST_AGENT_CACHE_PATH", str(_REPO_ROOT))
+    prefabs_dir = os.getenv("TODOIST_AGENT_INSTRUCTIONS_DIR", str(_REPO_ROOT / "configs/agent_instructions"))
+    max_tool_loops_env = os.getenv("TODOIST_AGENT_MAX_TOOL_LOOPS", "8").strip()
+    try:
+        max_tool_loops = max(1, int(max_tool_loops_env))
+    except ValueError:
+        max_tool_loops = 8
+
+    local_ctx = load_local_agent_context(cache_path)
+    tool_ctx = {
+        "events": local_ctx.events,
+        "events_df": local_ctx.events_df.copy(),
+        "pd": pd,
+        "np": np,
+    }
+    python_tool = SafePythonReplTool(tool_ctx)
+    agent = build_agent_graph(
+        llm=model,
+        python_repl=python_tool,
+        prefabs_dir=prefabs_dir,
+        max_tool_loops=max_tool_loops,
+    )
+    _LLM_CHAT_AGENT = agent
 
 
 async def _maybe_start_llm_chat_worker() -> None:
@@ -669,9 +708,88 @@ async def _run_llm_chat_queue() -> None:
                     _save_llm_chat_queue(queue)
                 continue
 
-            messages = _build_chat_messages(conversation, next_item["content"])
+            async with _LLM_CHAT_AGENT_LOCK:
+                agent = _LLM_CHAT_AGENT
+
             try:
-                response = await asyncio.to_thread(model.chat, messages)
+                if agent is not None:
+                    base_messages = [
+                        {"role": msg.get("role"), "content": msg.get("content")}
+                        for msg in (conversation.get("messages") or [])
+                        if msg.get("role") and msg.get("content")
+                    ]
+                    state = {"messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]}
+                    result = await asyncio.to_thread(agent.invoke, state)
+                    messages = result.get("messages") if isinstance(result, dict) else None
+                    if not isinstance(messages, list):
+                        raise ValueError("Agent returned invalid messages")
+                    new_messages = messages[len(base_messages):] if len(messages) >= len(base_messages) else messages
+                    now = _now_iso()
+                    async with _LLM_CHAT_STORAGE_LOCK:
+                        queue = _load_llm_chat_queue()
+                        for item in queue:
+                            if item.get("id") == next_item["id"]:
+                                item["status"] = "done"
+                                item["finished_at"] = now
+                                item["error"] = None
+                                break
+                        _save_llm_chat_queue(queue)
+
+                        conversations = _load_llm_chat_conversations()
+                        for item in conversations:
+                            if item.get("id") == next_item["conversation_id"]:
+                                item.setdefault("messages", [])
+                                for msg in new_messages:
+                                    role = str(msg.get("role") or "")
+                                    content = _sanitize_text(msg.get("content"))
+                                    if not role or not content:
+                                        continue
+                                    item["messages"].append(
+                                        {
+                                            "role": role,
+                                            "content": content,
+                                            "created_at": now,
+                                        }
+                                    )
+                                item["updated_at"] = now
+                                break
+                        _save_llm_chat_conversations(conversations)
+                else:
+                    messages = _build_chat_messages(conversation, next_item["content"])
+                    response = await asyncio.to_thread(model.chat, messages)
+                    response_text = _sanitize_text(response) or ""
+                    now = _now_iso()
+                    async with _LLM_CHAT_STORAGE_LOCK:
+                        queue = _load_llm_chat_queue()
+                        for item in queue:
+                            if item.get("id") == next_item["id"]:
+                                item["status"] = "done"
+                                item["finished_at"] = now
+                                item["error"] = None
+                                break
+                        _save_llm_chat_queue(queue)
+
+                        conversations = _load_llm_chat_conversations()
+                        for item in conversations:
+                            if item.get("id") == next_item["conversation_id"]:
+                                item.setdefault("messages", [])
+                                item["messages"].append(
+                                    {
+                                        "role": MessageRole.USER.value,
+                                        "content": next_item["content"],
+                                        "created_at": now,
+                                    }
+                                )
+                                item["messages"].append(
+                                    {
+                                        "role": MessageRole.ASSISTANT.value,
+                                        "content": response_text,
+                                        "created_at": now,
+                                    }
+                                )
+                                item["updated_at"] = now
+                                break
+                        _save_llm_chat_conversations(conversations)
             except Exception as exc:  # pragma: no cover - defensive
                 async with _LLM_CHAT_STORAGE_LOCK:
                     queue = _load_llm_chat_queue()
@@ -683,40 +801,6 @@ async def _run_llm_chat_queue() -> None:
                             break
                     _save_llm_chat_queue(queue)
                 continue
-
-            response_text = _sanitize_text(response) or ""
-            now = _now_iso()
-            async with _LLM_CHAT_STORAGE_LOCK:
-                queue = _load_llm_chat_queue()
-                for item in queue:
-                    if item.get("id") == next_item["id"]:
-                        item["status"] = "done"
-                        item["finished_at"] = now
-                        item["error"] = None
-                        break
-                _save_llm_chat_queue(queue)
-
-                conversations = _load_llm_chat_conversations()
-                for item in conversations:
-                    if item.get("id") == next_item["conversation_id"]:
-                        item.setdefault("messages", [])
-                        item["messages"].append(
-                            {
-                                "role": MessageRole.USER.value,
-                                "content": next_item["content"],
-                                "created_at": now,
-                            }
-                        )
-                        item["messages"].append(
-                            {
-                                "role": MessageRole.ASSISTANT.value,
-                                "content": response_text,
-                                "created_at": now,
-                            }
-                        )
-                        item["updated_at"] = now
-                        break
-                _save_llm_chat_conversations(conversations)
     finally:
         async with _LLM_CHAT_WORKER_LOCK:
             _LLM_CHAT_WORKER_RUNNING = False

@@ -698,6 +698,10 @@ h1 {
   margin-bottom: 6px;
 }
 
+.chatBubble .codeBlock {
+  margin: 0;
+}
+
 .chatPending {
   display: grid;
   gap: 8px;
@@ -885,6 +889,10 @@ h1 {
 
 .dot-neutral {
   background: rgba(255, 255, 255, 0.35);
+}
+
+.dot-beta {
+  background: #ffb86c;
 }
 
 .leaderboard {
