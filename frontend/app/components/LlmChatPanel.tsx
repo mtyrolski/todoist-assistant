@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type ChatQueueItem = {
   id: string;
@@ -51,7 +51,7 @@ type ChatStatus = {
   conversations: ChatConversationSummary[];
 };
 
-const POLL_MS = 2000;
+const POLL_MS = 5000;
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
@@ -87,7 +87,7 @@ export function LlmChatPanel() {
   const didAutoSelect = useRef(false);
   const [lastConversationId, setLastConversationId] = useState<string | null>(null);
 
-  const refreshStatus = async (silent = false) => {
+  const refreshStatus = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoadingStatus(true);
       setStatusError(null);
@@ -103,9 +103,9 @@ export function LlmChatPanel() {
     } finally {
       if (!silent) setLoadingStatus(false);
     }
-  };
+  }, []);
 
-  const loadConversation = async (conversationId: string) => {
+  const loadConversation = useCallback(async (conversationId: string) => {
     try {
       setActionError(null);
       setLoadingConversation(true);
@@ -122,13 +122,13 @@ export function LlmChatPanel() {
     } finally {
       setLoadingConversation(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshStatus();
     const interval = setInterval(() => refreshStatus(true), POLL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshStatus]);
 
   useEffect(() => {
     if (didAutoSelect.current) return;
@@ -165,7 +165,7 @@ export function LlmChatPanel() {
     if (!selectedConversationId || !selectedSummary) return;
     if (conversation?.id === selectedConversationId && conversation?.updatedAt === selectedSummary.updatedAt) return;
     loadConversation(selectedConversationId);
-  }, [selectedConversationId, selectedSummary?.updatedAt]);
+  }, [selectedConversationId, selectedSummary?.updatedAt, loadConversation, conversation?.id, conversation?.updatedAt]);
 
   useEffect(() => {
     if (selectedConversationId) {
