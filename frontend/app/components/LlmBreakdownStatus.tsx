@@ -1,5 +1,7 @@
 "use client";
 
+import { InfoTip } from "./InfoTip";
+
 type LlmBreakdownResult = {
   task_id?: string;
   content?: string;
@@ -23,6 +25,12 @@ export type LlmBreakdownProgress = {
   error?: string | null;
   recent?: LlmBreakdownResult[];
 };
+
+const BREAKDOWN_HELP = `**LLM Breakdown Queue**
+Tracks background breakdown jobs for the assistant.
+
+- Shows current task, totals, and recent results.
+- Refresh pulls the latest queue state.`;
 
 function statusBadge(progress: LlmBreakdownProgress | null): { label: string; tone: "ok" | "warn" | "neutral" } {
   if (!progress) return { label: "Unknown", tone: "neutral" };
@@ -58,7 +66,10 @@ export function LlmBreakdownStatus({
   return (
     <section className="card">
       <header className="cardHeader">
-        <h2>LLM Breakdown Queue</h2>
+        <div className="cardTitleRow">
+          <h2>LLM Breakdown Queue</h2>
+          <InfoTip label="About LLM breakdown queue" content={BREAKDOWN_HELP} />
+        </div>
         <button className="button buttonSmall" type="button" onClick={onRefresh} disabled={loading}>
           {loading ? "Loading…" : "Refresh"}
         </button>

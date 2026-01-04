@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { InfoTip } from "./InfoTip";
+import { Markdown } from "./Markdown";
 
 type ChatQueueItem = {
   id: string;
@@ -52,6 +54,13 @@ type ChatStatus = {
 };
 
 const POLL_MS = 5000;
+const CHAT_HELP = `**LLM Chat**
+Local model for quick analysis and summaries.
+
+- Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
+- Enable loads the model on demand.
+- Prompts are queued and processed in order.
+- Conversations are stored locally on this machine.`;
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
@@ -243,10 +252,12 @@ export function LlmChatPanel() {
         <div className="chatHeader">
           <div className="chatHeaderTitle">
             <h2>LLM Chat</h2>
+            <InfoTip label="About LLM chat" content={CHAT_HELP} />
             <span className="pill pill-beta">Beta</span>
           </div>
           <p className="muted tiny">
-            Local agentic chat model (beta). Load on demand, queue prompts, and review past conversations.
+            Local agentic chat model (beta). Load on demand, queue prompts, and review past conversations. For the
+            full local agent experience, use <code>make chat_agent</code>.
           </p>
         </div>
         <div className="rowActions">
@@ -310,20 +321,16 @@ export function LlmChatPanel() {
             ) : conversation?.messages?.length ? (
               conversation.messages.map((msg, idx) => {
                 const content = msg.content ?? "";
-                const isToolMessage = content.includes("python_repl") || content.includes("```");
+                const isToolMessage = msg.role === "tool" || content.includes("python_repl");
+                const displayContent =
+                  isToolMessage && !content.includes("```") ? `\`\`\`\n${content}\n\`\`\`` : content;
                 return (
                   <div key={`${msg.role}-${idx}`} className={`chatBubble chatBubble-${msg.role}`}>
                     <div className="chatBubbleMeta">
                       <span>{msg.role}</span>
                       <span>{formatTimestamp(msg.createdAt)}</span>
                     </div>
-                    {isToolMessage ? (
-                      <pre className="codeBlock">{content}</pre>
-                    ) : (
-                      <p className="tiny" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                        {content}
-                      </p>
-                    )}
+                    <Markdown content={displayContent} className="markdown markdownChat" />
                   </div>
                 );
               })

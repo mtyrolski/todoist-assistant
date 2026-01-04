@@ -426,6 +426,12 @@ h1 {
   padding: 2px 2px 10px;
 }
 
+.cardTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .cardHeader h2 {
   margin: 0;
   font-size: 16px;
@@ -495,6 +501,25 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.statTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.sectionHeader h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
 .statValue {
@@ -594,12 +619,83 @@ h1 {
   gap: 8px;
 }
 
+.infoTipWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.infoTip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: help;
+  padding: 0;
+  appearance: none;
+}
+
+.infoTip:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.infoTipPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  opacity: 0;
+  pointer-events: none;
+  width: min(320px, 70vw);
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(106, 227, 255, 0.25);
+  background: rgba(10, 14, 20, 0.96);
+  box-shadow: var(--glow);
+  z-index: 30;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.infoTipWrap-start .infoTipPanel {
+  left: 0;
+  transform: translateY(6px);
+}
+
+.infoTipWrap-end .infoTipPanel {
+  left: auto;
+  right: 0;
+  transform: translateY(6px);
+}
+
+.infoTipWrap:hover .infoTipPanel,
+.infoTipWrap:focus-within .infoTipPanel {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.infoTipWrap-start:hover .infoTipPanel,
+.infoTipWrap-start:focus-within .infoTipPanel,
+.infoTipWrap-end:hover .infoTipPanel,
+.infoTipWrap-end:focus-within .infoTipPanel {
+  transform: translateY(0);
+}
+
 .rowDetails {
   grid-column: 1 / -1;
   margin-top: 10px;
 }
 
-.codeBlock {
+.codeBlock,
+.markdown pre {
   margin: 10px 0 0;
   padding: 12px 12px;
   border-radius: 14px;
@@ -610,6 +706,66 @@ h1 {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.markdown {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.markdown > * {
+  margin: 0;
+}
+
+.markdown > * + * {
+  margin-top: 8px;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 18px;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.markdown li {
+  margin: 0;
+}
+
+.markdown a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(106, 227, 255, 0.4);
+}
+
+.markdown a:hover {
+  color: #ffffff;
+}
+
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9em;
+  padding: 1px 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.markdown pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.markdownChat {
+  font-size: 12px;
+}
+
+.markdownTooltip {
+  font-size: 12px;
+  color: rgba(232, 236, 242, 0.92);
 }
 
 .cardInner {
@@ -698,7 +854,8 @@ h1 {
   margin-bottom: 6px;
 }
 
-.chatBubble .codeBlock {
+.chatBubble .codeBlock,
+.chatBubble .markdown pre {
   margin: 0;
 }
 
