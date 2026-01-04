@@ -189,6 +189,7 @@ _JOBS: dict[str, _AdminJob] = {}
 _CHAT_QUEUE_STATUSES = {"queued", "running", "done", "failed"}
 _CHAT_ROLES = {MessageRole.SYSTEM.value, MessageRole.USER.value, MessageRole.ASSISTANT.value}
 _CHAT_QUEUE_LIMIT = 200
+_LLM_CHAT_TIMEOUT_S = 60 * 60
 _CHAT_SYSTEM_PROMPT = (
     "You are a helpful assistant for planning and summarizing Todoist work. "
     "Be concise and ask clarifying questions when needed."
@@ -569,6 +570,34 @@ def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> bool:
+    changed = False
+    cutoff = now_dt - timedelta(seconds=_LLM_CHAT_TIMEOUT_S)
+    now_iso = now_dt.isoformat(timespec="seconds")
+    for item in queue:
+        if item.get("status") != "running":
+            continue
+        started_at = item.get("started_at") or item.get("created_at")
+        started_dt = _parse_iso_timestamp(started_at)
+        if started_dt is None:
+            continue
+        if started_dt <= cutoff:
+            item["status"] = "failed"
+            item["finished_at"] = now_iso
+            item["error"] = "Timed out after 1h"
+            changed = True
+    return changed
+
+
 def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(queue) <= _CHAT_QUEUE_LIMIT:
         return queue
@@ -685,6 +714,8 @@ async def _run_llm_chat_queue() -> None:
 
             async with _LLM_CHAT_STORAGE_LOCK:
                 queue = _load_llm_chat_queue()
+                if _expire_llm_chat_queue(queue, datetime.now()):
+                    _save_llm_chat_queue(queue)
                 next_item = next((item for item in queue if item.get("status") == "queued"), None)
                 if next_item is None:
                     return
@@ -728,12 +759,12 @@ async def _run_llm_chat_queue() -> None:
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
-                        for item in queue:
-                            if item.get("id") == next_item["id"]:
-                                item["status"] = "done"
-                                item["finished_at"] = now
-                                item["error"] = None
-                                break
+                        queue_item = next((item for item in queue if item.get("id") == next_item["id"]), None)
+                        if queue_item is None or queue_item.get("status") != "running":
+                            continue
+                        queue_item["status"] = "done"
+                        queue_item["finished_at"] = now
+                        queue_item["error"] = None
                         _save_llm_chat_queue(queue)
 
                         conversations = _load_llm_chat_conversations()
@@ -765,24 +796,23 @@ async def _run_llm_chat_queue() -> None:
                         # Mark as failed if response is empty
                         async with _LLM_CHAT_STORAGE_LOCK:
                             queue = _load_llm_chat_queue()
-                            for item in queue:
-                                if item.get("id") == next_item["id"]:
-                                    item["status"] = "failed"
-                                    item["finished_at"] = _now_iso()
-                                    item["error"] = "Empty response from model"
-                                    break
-                            _save_llm_chat_queue(queue)
+                            queue_item = next((item for item in queue if item.get("id") == next_item["id"]), None)
+                            if queue_item is not None and queue_item.get("status") == "running":
+                                queue_item["status"] = "failed"
+                                queue_item["finished_at"] = _now_iso()
+                                queue_item["error"] = "Empty response from model"
+                                _save_llm_chat_queue(queue)
                         continue
                     
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
-                        for item in queue:
-                            if item.get("id") == next_item["id"]:
-                                item["status"] = "done"
-                                item["finished_at"] = now
-                                item["error"] = None
-                                break
+                        queue_item = next((item for item in queue if item.get("id") == next_item["id"]), None)
+                        if queue_item is None or queue_item.get("status") != "running":
+                            continue
+                        queue_item["status"] = "done"
+                        queue_item["finished_at"] = now
+                        queue_item["error"] = None
                         _save_llm_chat_queue(queue)
 
                         conversations = _load_llm_chat_conversations()
@@ -811,6 +841,8 @@ async def _run_llm_chat_queue() -> None:
                     queue = _load_llm_chat_queue()
                     for item in queue:
                         if item.get("id") == next_item["id"]:
+                            if item.get("status") != "running":
+                                break
                             item["status"] = "failed"
                             item["finished_at"] = _now_iso()
                             item["error"] = f"{type(exc).__name__}: {exc}"
@@ -826,6 +858,8 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
     enabled, loading = await _llm_chat_model_status()
     async with _LLM_CHAT_STORAGE_LOCK:
         queue = _load_llm_chat_queue()
+        if _expire_llm_chat_queue(queue, datetime.now()):
+            _save_llm_chat_queue(queue)
         conversations = _load_llm_chat_conversations()
 
     counts = {status: 0 for status in _CHAT_QUEUE_STATUSES}
