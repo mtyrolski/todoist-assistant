@@ -1,10 +1,18 @@
 "use client";
 
+import { InfoTip } from "./InfoTip";
+
 export type ServiceStatus = {
   name: string;
   status: "ok" | "warn" | "neutral";
   detail: unknown;
 };
+
+const SERVICE_HELP = `**Service Monitor**
+Health checks for local services and caches.
+
+- Status shows whether a service is healthy.
+- Detail contains the latest check output.`;
 
 function statusLabel(status: ServiceStatus["status"]): string {
   if (status === "ok") return "Healthy";
@@ -22,7 +30,10 @@ export function ServiceMonitor({
   return (
     <section className="card">
       <header className="cardHeader">
-        <h2>Service Monitor</h2>
+        <div className="cardTitleRow">
+          <h2>Service Monitor</h2>
+          <InfoTip label="About service monitor" content={SERVICE_HELP} />
+        </div>
         <button className="button buttonSmall" onClick={onRefresh} type="button">
           Refresh
         </button>
@@ -46,4 +57,3 @@ export function ServiceMonitor({
     </section>
   );
 }
-

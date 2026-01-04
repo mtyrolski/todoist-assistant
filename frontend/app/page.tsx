@@ -11,6 +11,7 @@ import { InsightCard, type InsightItem } from "./components/InsightCard";
 import { AdminPanel } from "./components/AdminPanel";
 import { LlmBreakdownStatus, type LlmBreakdownProgress } from "./components/LlmBreakdownStatus";
 import { LlmChatPanel } from "./components/LlmChatPanel";
+import { InfoTip } from "./components/InfoTip";
 
 type Health = { status: string; version?: string } | null;
 
@@ -45,6 +46,74 @@ type DashboardStatus = {
   activityCache: { path: string; mtime: string | null; size: number | null } | null;
   now: string;
 };
+
+const METRIC_HELP: Record<string, string> = {
+  Events: `**Events**
+Total task activity (added, completed, rescheduled) in the selected period.
+
+- Delta compares against the previous period of equal length.`,
+  "Completed Tasks": `**Completed tasks**
+Total completed tasks in the selected period.
+
+- Delta compares against the previous period of equal length.`,
+  "Added Tasks": `**Added tasks**
+Total tasks added in the selected period.
+
+- Delta compares against the previous period of equal length.`,
+  "Rescheduled Tasks": `**Rescheduled tasks**
+Total tasks rescheduled in the selected period.
+
+- Lower is better, so the delta is inverted.`,
+};
+
+const DEFAULT_METRIC_HELP = `**Metric**
+Value for the selected period.
+
+- Delta compares against the previous period of equal length.`;
+
+const INSIGHT_HELP: Record<string, string> = {
+  "Most active project": `**Most active project**
+Project with the highest number of completed tasks in the last full week.`,
+  "Most rescheduled project": `**Most rescheduled project**
+Project with the most reschedules in the last full week. High values can indicate churn.`,
+  "Busiest day": `**Busiest day**
+Day of the week with the most events in the selected range.`,
+  "Added vs completed": `**Added vs completed**
+Compares added and completed tasks in the last week.
+
+- Ratio shows throughput (completed / added).`,
+  "Peak hour": `**Peak hour**
+Hour of day with the most events in the selected range.`,
+};
+
+const DEFAULT_INSIGHT_HELP = `**Insight**
+Quick highlight computed from recent activity.`;
+
+const PLOT_HELP = {
+  mostPopularLabels: `**Most Popular Labels**
+Ranks labels by completed tasks in the selected range.`,
+  taskLifespans: `**Task Lifespans**
+Distribution of time between task creation and completion.`,
+  completedTasksPeriodically: `**Periodically Completed Tasks**
+Completed tasks per project for each period in the selected range.`,
+  cumsumCompletedTasksPeriodically: `**Cumulative Completed Tasks**
+Running total of completions per project across the range.`,
+  heatmapEventsByDayHour: `**Event Heatmap**
+Activity intensity by day of week and hour. Darker means more events.`,
+  eventsOverTime: `**Events Over Time**
+Timeline of activity events across the selected range.`,
+};
+
+const BADGES_HELP = `**Priority badges**
+Snapshot of current tasks by priority.
+
+- P1 is highest urgency, P4 is lowest.`;
+
+const SPOTLIGHT_HELP = `**Activity spotlight**
+Top projects by completed tasks in the most recent finished week.
+
+- Subprojects includes nested projects.
+- Root projects are top-level only.`;
 
 export default function Page() {
   const [health, setHealth] = useState<Health>(null);
@@ -405,7 +474,15 @@ export default function Page() {
 
       <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
         {(dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null)).map((it, idx) =>
-          it ? <InsightCard key={`${it.title}-${idx}`} item={it} /> : <div key={idx} className="stat skeleton" />
+          it ? (
+            <InsightCard
+              key={`${it.title}-${idx}`}
+              item={it}
+              help={INSIGHT_HELP[it.title] ?? DEFAULT_INSIGHT_HELP}
+            />
+          ) : (
+            <div key={idx} className="stat skeleton" />
+          )
         )}
         {dashboard?.insights?.label ? (
           <p className="muted tiny" style={{ gridColumn: "1 / -1", marginTop: "-6px" }}>
@@ -415,8 +492,18 @@ export default function Page() {
       </section>
 
       <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
-        <PlotCard title="Most Popular Labels" figure={figures.mostPopularLabels} height={420} />
-        <PlotCard title="Task Lifespans: Time to Completion" figure={figures.taskLifespans} height={420} />
+        <PlotCard
+          title="Most Popular Labels"
+          figure={figures.mostPopularLabels}
+          height={420}
+          help={PLOT_HELP.mostPopularLabels}
+        />
+        <PlotCard
+          title="Task Lifespans: Time to Completion"
+          figure={figures.taskLifespans}
+          height={420}
+          help={PLOT_HELP.taskLifespans}
+        />
       </section>
 
       <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
@@ -430,6 +517,7 @@ export default function Page() {
               inverseDelta={m.inverseDelta}
               currentPeriod={metricsCurrentPeriod}
               previousPeriod={metricsPreviousPeriod}
+              help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
             />
           ) : (
             <div key={idx} className="stat skeleton" />
@@ -437,11 +525,17 @@ export default function Page() {
         )}
       </section>
 
-      <section id="badges" className="badges jumpTarget" aria-label="Priority badges">
-        <span className="badge badge-p1">P1 {dashboard?.badges.p1 ?? "—"}</span>
-        <span className="badge badge-p2">P2 {dashboard?.badges.p2 ?? "—"}</span>
-        <span className="badge badge-p3">P3 {dashboard?.badges.p3 ?? "—"}</span>
-        <span className="badge badge-p4">P4 {dashboard?.badges.p4 ?? "—"}</span>
+      <section id="badges" className="jumpTarget" aria-label="Priority badges">
+        <div className="sectionHeader">
+          <h2>Priority badges</h2>
+          <InfoTip label="About priority badges" content={BADGES_HELP} />
+        </div>
+        <div className="badges">
+          <span className="badge badge-p1">P1 {dashboard?.badges.p1 ?? "—"}</span>
+          <span className="badge badge-p2">P2 {dashboard?.badges.p2 ?? "—"}</span>
+          <span className="badge badge-p3">P3 {dashboard?.badges.p3 ?? "—"}</span>
+          <span className="badge badge-p4">P4 {dashboard?.badges.p4 ?? "—"}</span>
+        </div>
       </section>
 
       <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
@@ -449,17 +543,29 @@ export default function Page() {
           title="Periodically Completed Tasks Per Project"
           figure={figures.completedTasksPeriodically}
           height={520}
+          help={PLOT_HELP.completedTasksPeriodically}
         />
         <PlotCard
           title="Cumulative Periodically Completed Tasks Per Project"
           figure={figures.cumsumCompletedTasksPeriodically}
           height={520}
+          help={PLOT_HELP.cumsumCompletedTasksPeriodically}
         />
       </section>
 
       <section id="events" className="stack jumpTarget" aria-label="Event trends">
-        <PlotCard title="Heatmap of Events by Day and Hour" figure={figures.heatmapEventsByDayHour} height={520} />
-        <PlotCard title="Events Over Time" figure={figures.eventsOverTime} height={520} />
+        <PlotCard
+          title="Heatmap of Events by Day and Hour"
+          figure={figures.heatmapEventsByDayHour}
+          height={520}
+          help={PLOT_HELP.heatmapEventsByDayHour}
+        />
+        <PlotCard
+          title="Events Over Time"
+          figure={figures.eventsOverTime}
+          height={520}
+          help={PLOT_HELP.eventsOverTime}
+        />
       </section>
 
       <section id="llm-chat" className="stack jumpTarget" aria-label="LLM chat">
@@ -469,7 +575,10 @@ export default function Page() {
       <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">
         <section className="card">
           <header className="cardHeader">
-            <h2>Activity Spotlight</h2>
+            <div className="cardTitleRow">
+              <h2>Activity Spotlight</h2>
+              <InfoTip label="About activity spotlight" content={SPOTLIGHT_HELP} />
+            </div>
           </header>
           <div className="muted tiny" style={{ padding: "0 2px 10px" }}>
             Most active projects by completed tasks ({lastWeek?.label ?? "—"}).

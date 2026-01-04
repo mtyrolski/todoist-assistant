@@ -1,5 +1,7 @@
 "use client";
 
+import { InfoTip } from "./InfoTip";
+
 function formatDelta(deltaPercent: number | null): string {
   if (deltaPercent === null) return "N/A";
   const sign = deltaPercent > 0 ? "+" : "";
@@ -12,7 +14,8 @@ export function StatCard({
   deltaPercent,
   inverseDelta,
   currentPeriod,
-  previousPeriod
+  previousPeriod,
+  help
 }: {
   name: string;
   value: number;
@@ -20,6 +23,7 @@ export function StatCard({
   inverseDelta: boolean;
   currentPeriod: string;
   previousPeriod: string;
+  help?: string;
 }) {
   const isUp = (deltaPercent ?? 0) > 0;
   const isDown = (deltaPercent ?? 0) < 0;
@@ -38,7 +42,10 @@ export function StatCard({
   return (
     <section className="stat">
       <div className="statTop">
-        <p className="muted">{name}</p>
+        <div className="statTitleRow">
+          <p className="muted">{name}</p>
+          {help ? <InfoTip label={`About ${name}`} content={help} /> : null}
+        </div>
         <span className={`pill pill-${deltaTone}`}>{formatDelta(deltaPercent)}</span>
       </div>
       <p className="statValue">{value.toLocaleString()}</p>

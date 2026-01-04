@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { InfoTip } from "./InfoTip";
+import { Markdown } from "./Markdown";
 
 type ChatQueueItem = {
   id: string;
@@ -52,6 +54,12 @@ type ChatStatus = {
 };
 
 const POLL_MS = 5000;
+const CHAT_HELP = `**LLM Chat**
+Local model for quick analysis and summaries.
+
+- Enable loads the model on demand.
+- Prompts are queued and processed in order.
+- Conversations are stored locally on this machine.`;
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
@@ -243,6 +251,7 @@ export function LlmChatPanel() {
         <div className="chatHeader">
           <div className="chatHeaderTitle">
             <h2>LLM Chat</h2>
+            <InfoTip label="About LLM chat" content={CHAT_HELP} />
             <span className="pill pill-beta">Beta</span>
           </div>
           <p className="muted tiny">
@@ -310,20 +319,13 @@ export function LlmChatPanel() {
             ) : conversation?.messages?.length ? (
               conversation.messages.map((msg, idx) => {
                 const content = msg.content ?? "";
-                const isToolMessage = content.includes("python_repl") || content.includes("```");
                 return (
                   <div key={`${msg.role}-${idx}`} className={`chatBubble chatBubble-${msg.role}`}>
                     <div className="chatBubbleMeta">
                       <span>{msg.role}</span>
                       <span>{formatTimestamp(msg.createdAt)}</span>
                     </div>
-                    {isToolMessage ? (
-                      <pre className="codeBlock">{content}</pre>
-                    ) : (
-                      <p className="tiny" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                        {content}
-                      </p>
-                    )}
+                    <Markdown content={content} className="markdown markdownChat" />
                   </div>
                 );
               })

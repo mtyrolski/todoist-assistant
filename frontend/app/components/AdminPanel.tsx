@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { InfoTip } from "./InfoTip";
 
 type Tab = "automations" | "logs" | "adjustments";
 
@@ -57,6 +58,12 @@ type AdminJob = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const ADMIN_HELP = `**Dashboard Admin**
+Manage automations, logs, and project mappings.
+
+- Automations follow the same cooldown rules as the observer.
+- Logs read from local files for quick debugging.
+- Adjustments map archived projects to active roots.`;
 
 function formatLaunchMeta(a: AutomationInfo): string {
   const last = a.lastLaunch ? `last: ${a.lastLaunch}` : "never run";
@@ -279,7 +286,10 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   return (
     <section className="card">
       <header className="cardHeader">
-        <h2>Dashboard Admin</h2>
+        <div className="cardTitleRow">
+          <h2>Dashboard Admin</h2>
+          <InfoTip label="About dashboard admin" content={ADMIN_HELP} />
+        </div>
         <div className="segmented">
           <button className={`seg ${tab === "automations" ? "segActive" : ""}`} onClick={() => setTab("automations")} type="button">
             Automations
