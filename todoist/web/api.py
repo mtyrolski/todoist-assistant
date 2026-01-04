@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 import contextlib
 import io
 import json
@@ -16,6 +16,7 @@ from pathlib import Path
 import time
 
 import pandas as pd
+import numpy as np
 import plotly.io as pio
 import plotly.graph_objects as go
 import hydra
@@ -36,7 +37,10 @@ from todoist.plots import (
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.base import Automation
+from todoist.automations.llm_breakdown.config import coerce_model_config
 from todoist.automations.llm_breakdown.models import ProgressKey
+from todoist.llm import MessageRole, TransformersMistral3ChatModel
+from todoist.llm.llm_utils import _sanitize_text
 from todoist.utils import Cache, load_config
 from todoist.version import get_version
 
@@ -57,7 +61,7 @@ app.add_middleware(
 async def healthcheck() -> dict[str, str]:
     """Simple readiness endpoint for the dashboard stack."""
 
-    return {"status": "ok"}
+    return {"status": "ok", "version": get_version()}
 
 
 Granularity = Literal["W", "ME", "3ME"]
@@ -180,6 +184,24 @@ class _AdminJob:
 
 
 _JOBS: dict[str, _AdminJob] = {}
+
+# === LLM CHAT QUEUE =========================================================
+_CHAT_QUEUE_STATUSES = {"queued", "running", "done", "failed"}
+_CHAT_ROLES = {MessageRole.SYSTEM.value, MessageRole.USER.value, MessageRole.ASSISTANT.value}
+_CHAT_QUEUE_LIMIT = 200
+_CHAT_SYSTEM_PROMPT = (
+    "You are a helpful assistant for planning and summarizing Todoist work. "
+    "Be concise and ask clarifying questions when needed."
+)
+
+_LLM_CHAT_MODEL: TransformersMistral3ChatModel | None = None
+_LLM_CHAT_MODEL_LOADING = False
+_LLM_CHAT_MODEL_LOCK = asyncio.Lock()
+_LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
+_LLM_CHAT_WORKER_LOCK = asyncio.Lock()
+_LLM_CHAT_WORKER_RUNNING = False
+_LLM_CHAT_AGENT = None
+_LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
 
 def _env_demo_mode() -> bool:
@@ -399,6 +421,545 @@ async def dashboard_llm_breakdown() -> dict[str, Any]:
     """Return LLM breakdown queue progress."""
 
     return _llm_breakdown_snapshot()
+
+
+def _normalize_chat_message(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    role = str(raw.get("role") or "").strip().lower()
+    if role not in _CHAT_ROLES:
+        return None
+    content = _sanitize_text(raw.get("content"))
+    if not content:
+        return None
+    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
+    return {"role": role, "content": content, "created_at": created_at}
+
+
+def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    conv_id = str(raw.get("id") or "").strip()
+    if not conv_id:
+        return None
+    title = _sanitize_text(raw.get("title")) or "Untitled chat"
+    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
+    updated_at = str(raw.get("updated_at") or raw.get("updatedAt") or created_at or "")
+    messages_raw = raw.get("messages")
+    messages: list[dict[str, Any]] = []
+    if isinstance(messages_raw, list):
+        for msg in messages_raw:
+            normalized = _normalize_chat_message(msg)
+            if normalized:
+                messages.append(normalized)
+    return {
+        "id": conv_id,
+        "title": title,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "messages": messages,
+    }
+
+
+def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    item_id = str(raw.get("id") or "").strip()
+    conversation_id = str(raw.get("conversation_id") or raw.get("conversationId") or "").strip()
+    content = _sanitize_text(raw.get("content"))
+    if not item_id or not conversation_id or not content:
+        return None
+    status = str(raw.get("status") or "queued").strip().lower()
+    if status not in _CHAT_QUEUE_STATUSES:
+        status = "queued"
+    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
+    return {
+        "id": item_id,
+        "conversation_id": conversation_id,
+        "content": content,
+        "status": status,
+        "created_at": created_at,
+        "started_at": raw.get("started_at") or raw.get("startedAt"),
+        "finished_at": raw.get("finished_at") or raw.get("finishedAt"),
+        "error": raw.get("error"),
+    }
+
+
+def _load_llm_chat_conversations() -> list[dict[str, Any]]:
+    try:
+        payload = Cache().llm_chat_conversations.load()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to load LLM chat conversations: {}", exc)
+        return []
+    if not isinstance(payload, list):
+        return []
+    conversations: list[dict[str, Any]] = []
+    for raw in payload:
+        normalized = _normalize_chat_conversation(raw)
+        if normalized:
+            conversations.append(normalized)
+    return conversations
+
+
+def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
+    try:
+        Cache().llm_chat_conversations.save(conversations)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to save LLM chat conversations: {}", exc)
+
+
+def _load_llm_chat_queue() -> list[dict[str, Any]]:
+    try:
+        payload = Cache().llm_chat_queue.load()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to load LLM chat queue: {}", exc)
+        return []
+    if not isinstance(payload, list):
+        return []
+    queue_items: list[dict[str, Any]] = []
+    for raw in payload:
+        normalized = _normalize_chat_queue_item(raw)
+        if normalized:
+            queue_items.append(normalized)
+    return queue_items
+
+
+def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
+    try:
+        Cache().llm_chat_queue.save(items)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to save LLM chat queue: {}", exc)
+
+
+def _truncate_text(value: str, limit: int = 120) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
+    messages = conv.get("messages") or []
+    last_message = None
+    if messages:
+        last_message = messages[-1].get("content")
+        if isinstance(last_message, str):
+            last_message = _truncate_text(last_message, 140)
+        else:
+            last_message = None
+    return {
+        "id": conv.get("id"),
+        "title": conv.get("title"),
+        "createdAt": conv.get("created_at"),
+        "updatedAt": conv.get("updated_at"),
+        "messageCount": len(messages),
+        "lastMessage": last_message,
+    }
+
+
+def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "conversationId": item.get("conversation_id"),
+        "content": _truncate_text(item.get("content") or "", 160),
+        "status": item.get("status"),
+        "createdAt": item.get("created_at"),
+        "startedAt": item.get("started_at"),
+        "finishedAt": item.get("finished_at"),
+        "error": item.get("error"),
+    }
+
+
+def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(queue) <= _CHAT_QUEUE_LIMIT:
+        return queue
+    to_drop = len(queue) - _CHAT_QUEUE_LIMIT
+    if to_drop <= 0:
+        return queue
+    trimmed: list[dict[str, Any]] = []
+    for item in queue:
+        if to_drop and item.get("status") in {"done", "failed"}:
+            to_drop -= 1
+            continue
+        trimmed.append(item)
+    return trimmed
+
+
+async def _llm_chat_model_status() -> tuple[bool, bool]:
+    async with _LLM_CHAT_MODEL_LOCK:
+        return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
+
+
+async def _start_llm_chat_model_load() -> None:
+    global _LLM_CHAT_MODEL_LOADING
+    async with _LLM_CHAT_MODEL_LOCK:
+        if _LLM_CHAT_MODEL is not None or _LLM_CHAT_MODEL_LOADING:
+            return
+        _LLM_CHAT_MODEL_LOADING = True
+    asyncio.create_task(_load_llm_chat_model_task())
+
+
+async def _load_llm_chat_model_task() -> None:
+    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
+    try:
+        config = coerce_model_config(None)
+        model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
+        async with _LLM_CHAT_MODEL_LOCK:
+            _LLM_CHAT_MODEL = model
+        await asyncio.to_thread(_build_llm_chat_agent_sync, model)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to load LLM chat model: {}", exc)
+    finally:
+        async with _LLM_CHAT_MODEL_LOCK:
+            _LLM_CHAT_MODEL_LOADING = False
+    await _maybe_start_llm_chat_worker()
+
+
+def _build_chat_messages(conversation: dict[str, Any], user_content: str) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    if _CHAT_SYSTEM_PROMPT:
+        messages.append({"role": MessageRole.SYSTEM.value, "content": _CHAT_SYSTEM_PROMPT})
+    for msg in conversation.get("messages") or []:
+        role = msg.get("role")
+        content = msg.get("content")
+        # Skip system messages from history to avoid conflicts with the prepended system prompt
+        if role in _CHAT_ROLES and content and role != MessageRole.SYSTEM.value:
+            messages.append({"role": role, "content": str(content)})
+    messages.append({"role": MessageRole.USER.value, "content": user_content})
+    return messages
+
+
+def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
+    global _LLM_CHAT_AGENT
+    try:
+        from todoist.agent.context import load_local_agent_context
+        from todoist.agent.graph import build_agent_graph
+        from todoist.agent.repl_tool import SafePythonReplTool
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("LLM chat agent unavailable: {}", exc)
+        return
+
+    cache_path = os.getenv("TODOIST_AGENT_CACHE_PATH", str(_REPO_ROOT))
+    prefabs_dir = os.getenv("TODOIST_AGENT_INSTRUCTIONS_DIR", str(_REPO_ROOT / "configs/agent_instructions"))
+    max_tool_loops_env = os.getenv("TODOIST_AGENT_MAX_TOOL_LOOPS", "8").strip()
+    try:
+        max_tool_loops = max(1, int(max_tool_loops_env))
+    except ValueError:
+        max_tool_loops = 8
+
+    local_ctx = load_local_agent_context(cache_path)
+    tool_ctx = {
+        "events": local_ctx.events,
+        "events_df": local_ctx.events_df.copy(),
+        "pd": pd,
+        "np": np,
+    }
+    python_tool = SafePythonReplTool(tool_ctx)
+    agent = build_agent_graph(
+        llm=model,
+        python_repl=python_tool,
+        prefabs_dir=prefabs_dir,
+        max_tool_loops=max_tool_loops,
+    )
+    _LLM_CHAT_AGENT = agent
+
+
+async def _maybe_start_llm_chat_worker() -> None:
+    global _LLM_CHAT_WORKER_RUNNING
+    async with _LLM_CHAT_WORKER_LOCK:
+        if _LLM_CHAT_WORKER_RUNNING:
+            return
+        if _LLM_CHAT_MODEL is None:
+            return
+        _LLM_CHAT_WORKER_RUNNING = True
+    asyncio.create_task(_run_llm_chat_queue())
+
+
+async def _run_llm_chat_queue() -> None:
+    global _LLM_CHAT_WORKER_RUNNING
+    try:
+        while True:
+            async with _LLM_CHAT_MODEL_LOCK:
+                model = _LLM_CHAT_MODEL
+            if model is None:
+                return
+
+            async with _LLM_CHAT_STORAGE_LOCK:
+                queue = _load_llm_chat_queue()
+                next_item = next((item for item in queue if item.get("status") == "queued"), None)
+                if next_item is None:
+                    return
+                next_item["status"] = "running"
+                next_item["started_at"] = _now_iso()
+                _save_llm_chat_queue(queue)
+                conversations = _load_llm_chat_conversations()
+                conversation = next(
+                    (item for item in conversations if item.get("id") == next_item["conversation_id"]),
+                    None,
+                )
+
+            if conversation is None:
+                async with _LLM_CHAT_STORAGE_LOCK:
+                    queue = _load_llm_chat_queue()
+                    for item in queue:
+                        if item.get("id") == next_item["id"]:
+                            item["status"] = "failed"
+                            item["finished_at"] = _now_iso()
+                            item["error"] = "Conversation not found"
+                            break
+                    _save_llm_chat_queue(queue)
+                continue
+
+            async with _LLM_CHAT_AGENT_LOCK:
+                agent = _LLM_CHAT_AGENT
+
+            try:
+                if agent is not None:
+                    base_messages = [
+                        {"role": msg.get("role"), "content": msg.get("content")}
+                        for msg in (conversation.get("messages") or [])
+                        if msg.get("role") and msg.get("content")
+                    ]
+                    state = {"messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]}
+                    result = await asyncio.to_thread(agent.invoke, state)
+                    messages = result.get("messages") if isinstance(result, dict) else None
+                    if not isinstance(messages, list):
+                        raise ValueError("Agent returned invalid messages")
+                    new_messages = messages[len(base_messages):] if len(messages) >= len(base_messages) else messages
+                    now = _now_iso()
+                    async with _LLM_CHAT_STORAGE_LOCK:
+                        queue = _load_llm_chat_queue()
+                        for item in queue:
+                            if item.get("id") == next_item["id"]:
+                                item["status"] = "done"
+                                item["finished_at"] = now
+                                item["error"] = None
+                                break
+                        _save_llm_chat_queue(queue)
+
+                        conversations = _load_llm_chat_conversations()
+                        for item in conversations:
+                            if item.get("id") == next_item["conversation_id"]:
+                                item.setdefault("messages", [])
+                                for msg in new_messages:
+                                    role = str(msg.get("role") or "")
+                                    content = _sanitize_text(msg.get("content"))
+                                    if not role or not content:
+                                        continue
+                                    item["messages"].append(
+                                        {
+                                            "role": role,
+                                            "content": content,
+                                            "created_at": now,
+                                        }
+                                    )
+                                item["updated_at"] = now
+                                break
+                        _save_llm_chat_conversations(conversations)
+                else:
+                    messages = _build_chat_messages(conversation, next_item["content"])
+                    response = await asyncio.to_thread(model.chat, messages)
+                    response_text = _sanitize_text(response) or ""
+                    
+                    # Only save messages if we got a non-empty response
+                    if not response_text:
+                        # Mark as failed if response is empty
+                        async with _LLM_CHAT_STORAGE_LOCK:
+                            queue = _load_llm_chat_queue()
+                            for item in queue:
+                                if item.get("id") == next_item["id"]:
+                                    item["status"] = "failed"
+                                    item["finished_at"] = _now_iso()
+                                    item["error"] = "Empty response from model"
+                                    break
+                            _save_llm_chat_queue(queue)
+                        continue
+                    
+                    now = _now_iso()
+                    async with _LLM_CHAT_STORAGE_LOCK:
+                        queue = _load_llm_chat_queue()
+                        for item in queue:
+                            if item.get("id") == next_item["id"]:
+                                item["status"] = "done"
+                                item["finished_at"] = now
+                                item["error"] = None
+                                break
+                        _save_llm_chat_queue(queue)
+
+                        conversations = _load_llm_chat_conversations()
+                        for item in conversations:
+                            if item.get("id") == next_item["conversation_id"]:
+                                item.setdefault("messages", [])
+                                item["messages"].append(
+                                    {
+                                        "role": MessageRole.USER.value,
+                                        "content": next_item["content"],
+                                        "created_at": now,
+                                    }
+                                )
+                                item["messages"].append(
+                                    {
+                                        "role": MessageRole.ASSISTANT.value,
+                                        "content": response_text,
+                                        "created_at": now,
+                                    }
+                                )
+                                item["updated_at"] = now
+                                break
+                        _save_llm_chat_conversations(conversations)
+            except Exception as exc:  # pragma: no cover - defensive
+                async with _LLM_CHAT_STORAGE_LOCK:
+                    queue = _load_llm_chat_queue()
+                    for item in queue:
+                        if item.get("id") == next_item["id"]:
+                            item["status"] = "failed"
+                            item["finished_at"] = _now_iso()
+                            item["error"] = f"{type(exc).__name__}: {exc}"
+                            break
+                    _save_llm_chat_queue(queue)
+                continue
+    finally:
+        async with _LLM_CHAT_WORKER_LOCK:
+            _LLM_CHAT_WORKER_RUNNING = False
+
+
+async def _llm_chat_snapshot() -> dict[str, Any]:
+    enabled, loading = await _llm_chat_model_status()
+    async with _LLM_CHAT_STORAGE_LOCK:
+        queue = _load_llm_chat_queue()
+        conversations = _load_llm_chat_conversations()
+
+    counts = {status: 0 for status in _CHAT_QUEUE_STATUSES}
+    for item in queue:
+        status = item.get("status")
+        if status in counts:
+            counts[status] += 1
+
+    items = list(reversed(queue))[:12]
+    summaries = [_conversation_summary(conv) for conv in conversations]
+    summaries.sort(key=lambda item: item.get("updatedAt") or "", reverse=True)
+    current = next((item for item in queue if item.get("status") == "running"), None)
+    return {
+        "enabled": enabled,
+        "loading": loading,
+        "queue": {
+            "total": len(queue),
+            "queued": counts["queued"],
+            "running": counts["running"],
+            "done": counts["done"],
+            "failed": counts["failed"],
+            "items": [_queue_item_payload(item) for item in items],
+            "current": _queue_item_payload(current) if current else None,
+        },
+        "conversations": summaries,
+    }
+
+
+@app.get("/api/dashboard/llm_chat", tags=["dashboard"])
+async def dashboard_llm_chat() -> dict[str, Any]:
+    """Return LLM chat queue status and conversation summaries."""
+
+    return await _llm_chat_snapshot()
+
+
+@app.post("/api/llm_chat/enable", tags=["llm"])
+async def llm_chat_enable() -> dict[str, Any]:
+    """Start loading the local LLM model used for chat."""
+
+    await _start_llm_chat_model_load()
+    enabled, loading = await _llm_chat_model_status()
+    return {"enabled": enabled, "loading": loading}
+
+
+@app.post("/api/llm_chat/send", tags=["llm"])
+async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    """Queue a chat prompt for the local LLM."""
+
+    message = _sanitize_text(payload.get("message"))
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    enabled, loading = await _llm_chat_model_status()
+    if not (enabled or loading):
+        raise HTTPException(status_code=409, detail="Model not loaded. Click Enable in the dashboard first.")
+
+    conversation_id = _sanitize_text(payload.get("conversationId") or payload.get("conversation_id"))
+    now = _now_iso()
+
+    async with _LLM_CHAT_STORAGE_LOCK:
+        conversations = _load_llm_chat_conversations()
+        conversation = None
+        if conversation_id:
+            conversation = next((item for item in conversations if item.get("id") == conversation_id), None)
+            if conversation is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+        else:
+            conversation_id = str(uuid4())
+            title = _truncate_text(message, 80)
+            conversation = {
+                "id": conversation_id,
+                "title": title,
+                "created_at": now,
+                "updated_at": now,
+                "messages": [],
+            }
+            conversations.append(conversation)
+
+        conversation["updated_at"] = now
+
+        queue = _load_llm_chat_queue()
+        item = {
+            "id": str(uuid4()),
+            "conversation_id": conversation_id,
+            "content": message,
+            "status": "queued",
+            "created_at": now,
+            "started_at": None,
+            "finished_at": None,
+            "error": None,
+        }
+        queue.append(item)
+        queue = _prune_queue(queue)
+        _save_llm_chat_queue(queue)
+        _save_llm_chat_conversations(conversations)
+
+    if enabled or loading:
+        await _maybe_start_llm_chat_worker()
+    return {
+        "queued": True,
+        "item": _queue_item_payload(item),
+        "conversationId": conversation_id,
+    }
+
+
+@app.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
+async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
+    """Fetch a conversation transcript."""
+    
+    # Validate conversation_id format (should be a valid UUID)
+    try:
+        UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+
+    async with _LLM_CHAT_STORAGE_LOCK:
+        conversations = _load_llm_chat_conversations()
+    conversation = next((item for item in conversations if item.get("id") == conversation_id), None)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {
+        "id": conversation.get("id"),
+        "title": conversation.get("title"),
+        "createdAt": conversation.get("created_at"),
+        "updatedAt": conversation.get("updated_at"),
+        "messages": [
+            {
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "createdAt": msg.get("created_at"),
+            }
+            for msg in conversation.get("messages") or []
+        ],
+    }
 
 
 def _parse_yyyy_mm_dd(value: str) -> datetime:

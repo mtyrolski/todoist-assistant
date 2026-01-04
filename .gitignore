@@ -1,7 +1,10 @@
 .env
 *.pyc
 *.joblib
+*.pickle
+*.jl
 *.html
+scripts/
 storage
 frontend/node_modules/
 frontend/.next/
