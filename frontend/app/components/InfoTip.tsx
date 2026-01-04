@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, type KeyboardEvent } from "react";
 import { Markdown } from "./Markdown";
 
 export function InfoTip({
@@ -13,18 +13,26 @@ export function InfoTip({
   align?: "center" | "start" | "end";
 }) {
   const id = useId();
-  const alignClass = align === "center" ? "" : ` infoTip-${align}`;
+  const alignClass = align === "center" ? "" : ` infoTipWrap-${align}`;
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Escape") {
+      event.currentTarget.blur();
+    }
+  };
   return (
-    <button
-      type="button"
-      className={`infoTip${alignClass}`}
-      aria-label={label}
-      aria-describedby={id}
-    >
-      <span aria-hidden>?</span>
+    <span className={`infoTipWrap${alignClass}`}>
+      <button
+        type="button"
+        className="infoTip"
+        aria-label={label}
+        aria-describedby={id}
+        onKeyDown={handleKeyDown}
+      >
+        <span aria-hidden>?</span>
+      </button>
       <span id={id} role="tooltip" className="infoTipPanel">
         <Markdown content={content} className="markdown markdownTooltip" />
       </span>
-    </button>
+    </span>
   );
 }

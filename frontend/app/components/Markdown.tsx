@@ -7,7 +7,7 @@ import type { Components } from "react-markdown";
 
 const components: Components = {
   a: ({ href, children, ...props }) => (
-    <a href={href ?? ""} target="_blank" rel="noreferrer" {...props}>
+    <a href={href ?? ""} target="_blank" rel="noreferrer noopener" {...props}>
       {children}
     </a>
   )

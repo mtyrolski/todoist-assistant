@@ -507,7 +507,6 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
 }
 
 .sectionHeader {
@@ -620,8 +619,13 @@ h1 {
   gap: 8px;
 }
 
-.infoTip {
+.infoTipWrap {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.infoTip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -660,28 +664,28 @@ h1 {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.infoTip-start .infoTipPanel {
+.infoTipWrap-start .infoTipPanel {
   left: 0;
   transform: translateY(6px);
 }
 
-.infoTip-end .infoTipPanel {
+.infoTipWrap-end .infoTipPanel {
   left: auto;
   right: 0;
   transform: translateY(6px);
 }
 
-.infoTip:hover .infoTipPanel,
-.infoTip:focus-visible .infoTipPanel {
+.infoTipWrap:hover .infoTipPanel,
+.infoTipWrap:focus-within .infoTipPanel {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
   pointer-events: auto;
 }
 
-.infoTip-start:hover .infoTipPanel,
-.infoTip-start:focus-visible .infoTipPanel,
-.infoTip-end:hover .infoTipPanel,
-.infoTip-end:focus-visible .infoTipPanel {
+.infoTipWrap-start:hover .infoTipPanel,
+.infoTipWrap-start:focus-within .infoTipPanel,
+.infoTipWrap-end:hover .infoTipPanel,
+.infoTipWrap-end:focus-within .infoTipPanel {
   transform: translateY(0);
 }
 

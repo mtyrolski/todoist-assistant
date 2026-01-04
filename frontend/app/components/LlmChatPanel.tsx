@@ -321,13 +321,16 @@ export function LlmChatPanel() {
             ) : conversation?.messages?.length ? (
               conversation.messages.map((msg, idx) => {
                 const content = msg.content ?? "";
+                const isToolMessage = msg.role === "tool" || content.includes("python_repl");
+                const displayContent =
+                  isToolMessage && !content.includes("```") ? `\`\`\`\n${content}\n\`\`\`` : content;
                 return (
                   <div key={`${msg.role}-${idx}`} className={`chatBubble chatBubble-${msg.role}`}>
                     <div className="chatBubbleMeta">
                       <span>{msg.role}</span>
                       <span>{formatTimestamp(msg.createdAt)}</span>
                     </div>
-                    <Markdown content={content} className="markdown markdownChat" />
+                    <Markdown content={displayContent} className="markdown markdownChat" />
                   </div>
                 );
               })
