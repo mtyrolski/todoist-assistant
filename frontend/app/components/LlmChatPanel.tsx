@@ -57,6 +57,7 @@ const POLL_MS = 5000;
 const CHAT_HELP = `**LLM Chat**
 Local model for quick analysis and summaries.
 
+- Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
 - Enable loads the model on demand.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
@@ -255,7 +256,8 @@ export function LlmChatPanel() {
             <span className="pill pill-beta">Beta</span>
           </div>
           <p className="muted tiny">
-            Local agentic chat model (beta). Load on demand, queue prompts, and review past conversations.
+            Local agentic chat model (beta). Load on demand, queue prompts, and review past conversations. For the
+            full local agent experience, use <code>make chat_agent</code>.
           </p>
         </div>
         <div className="rowActions">
