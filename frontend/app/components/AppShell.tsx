@@ -9,7 +9,6 @@ const NAV_GROUPS = [
     title: "Core",
     items: [
       { href: "/", label: "Overview", hint: "Summary and highlights" },
-      { href: "/analytics", label: "Analytics", hint: "Plots and trends" },
       { href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Local chat (beta)" }
     ]
   },

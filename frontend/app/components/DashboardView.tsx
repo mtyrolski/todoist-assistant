@@ -10,7 +10,6 @@ import { ServiceMonitor } from "./ServiceMonitor";
 import { InsightCard } from "./InsightCard";
 import { AdminPanel } from "./AdminPanel";
 import { LlmBreakdownStatus } from "./LlmBreakdownStatus";
-import { LlmChatPanel } from "./LlmChatPanel";
 import { InfoTip } from "./InfoTip";
 import {
   BADGES_HELP,
@@ -70,7 +69,6 @@ export function DashboardView() {
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
     { id: "events", label: "Events" },
-    { id: "llm-chat", label: "LLM Chat" },
     { id: "ops", label: "Activity & Ops" }
   ];
 
@@ -286,10 +284,6 @@ export function DashboardView() {
           height={520}
           help={PLOT_HELP.eventsOverTime}
         />
-      </section>
-
-      <section id="llm-chat" className="stack jumpTarget" aria-label="LLM chat">
-        <LlmChatPanel />
       </section>
 
       <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">

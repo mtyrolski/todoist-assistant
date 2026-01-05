@@ -2061,7 +2061,8 @@ async def admin_update_template(
         raise HTTPException(status_code=404, detail="Template not found")
 
     normalized = _normalize_template_node(template)
-    _save_yaml_config(path, OmegaConf.create(normalized))
+    async with _ADMIN_LOCK:
+        _save_yaml_config(path, OmegaConf.create(normalized))
     return {"saved": True, "category": safe_category, "name": safe_name}
 
 
