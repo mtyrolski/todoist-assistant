@@ -45,6 +45,7 @@ export function PlotCard({
               paper_bgcolor: "rgba(0,0,0,0)",
               plot_bgcolor: "rgba(0,0,0,0)",
               font: { color: "#e8ecf2" },
+              template: "plotly_dark",
               margin: { l: 48, r: 18, t: 56, b: 46 }
             }}
             config={{

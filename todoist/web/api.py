@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +12,7 @@ import contextlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 
 import time
@@ -21,7 +23,7 @@ import plotly.io as pio
 import plotly.graph_objects as go
 import hydra
 from loguru import logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
@@ -37,8 +39,9 @@ from todoist.plots import (
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.base import Automation
-from todoist.automations.llm_breakdown.config import coerce_model_config
+from todoist.automations.llm_breakdown.config import BASE_SYSTEM_PROMPT, coerce_model_config
 from todoist.automations.llm_breakdown.models import ProgressKey
+from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.utils import Cache, load_config
@@ -169,6 +172,11 @@ _PROGRESS_TOTAL_STEPS = 3
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_CONFIG_DIR = _REPO_ROOT / "configs"
+_AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
+_TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
+_TEMPLATES_DIR = _CONFIG_DIR / "templates"
+_IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
 @dataclass
@@ -1629,6 +1637,93 @@ def _save_mapping_file(filename: str, mappings: dict[str, str]) -> None:
     target.write_text(_generate_adjustment_file_content(mappings), encoding="utf-8")
 
 
+def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
+    if not path.exists():
+        if required:
+            raise HTTPException(status_code=404, detail=f"Missing config file: {path.name}")
+        return OmegaConf.create({})
+    try:
+        loaded = OmegaConf.load(path)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"Failed to read {path.name}: {exc}") from exc
+    if loaded is None:
+        return OmegaConf.create({})
+    return loaded
+
+
+def _save_yaml_config(path: Path, config: DictConfig) -> None:
+    try:
+        OmegaConf.save(config, path, resolve=False)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"Failed to write {path.name}: {exc}") from exc
+
+
+def _ensure_identifier(value: str, *, label: str) -> str:
+    cleaned = value.strip().lower()
+    if not cleaned or not _IDENTIFIER_RE.match(cleaned):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} must match /^[a-z][a-z0-9_-]*$/",
+        )
+    return cleaned
+
+
+def _template_path(category: str, name: str) -> Path:
+    safe_category = _ensure_identifier(category, label="category")
+    safe_name = _ensure_identifier(name, label="template name")
+    return _TEMPLATES_DIR / safe_category / f"{safe_name}.yaml"
+
+
+def _template_defaults_key(category: str, name: str) -> str:
+    return f"templates/{category}@{category}.{name}"
+
+
+def _load_defaults_list(config: DictConfig) -> list[Any]:
+    defaults = config.get("defaults")
+    if defaults is None:
+        return []
+    data = OmegaConf.to_container(defaults, resolve=False)
+    return data if isinstance(data, list) else []
+
+
+def _normalize_template_node(raw: Mapping[str, Any]) -> dict[str, Any]:
+    content = str(raw.get("content", "")).strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Template content is required")
+    payload: dict[str, Any] = {"content": content}
+    description = raw.get("description")
+    if description not in (None, ""):
+        payload["description"] = str(description)
+    due_delta = raw.get("due_date_days_difference")
+    if due_delta is None:
+        due_delta = raw.get("dueDateDaysDifference")
+    if due_delta not in (None, ""):
+        try:
+            payload["due_date_days_difference"] = int(due_delta)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="due_date_days_difference must be an integer") from exc
+    children = raw.get("children") or []
+    if children:
+        if not isinstance(children, list):
+            raise HTTPException(status_code=400, detail="children must be a list")
+        payload["children"] = [_normalize_template_node(child) for child in children]
+    return payload
+
+
+def _template_to_camel(raw: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "content": raw.get("content", ""),
+    }
+    if raw.get("description") not in (None, ""):
+        payload["description"] = raw.get("description")
+    if raw.get("due_date_days_difference") not in (None, ""):
+        payload["dueDateDaysDifference"] = raw.get("due_date_days_difference")
+    children = raw.get("children") or []
+    if isinstance(children, list) and children:
+        payload["children"] = [_template_to_camel(child) for child in children if isinstance(child, Mapping)]
+    return payload
+
+
 @app.get("/api/admin/project_adjustments", tags=["admin"])
 async def admin_project_adjustments(file: str | None = None, refresh: bool = False) -> dict[str, Any]:
     """Return mapping files, current mapping content, and project lists for building adjustments."""
@@ -1674,3 +1769,331 @@ async def admin_save_project_adjustments(
         if refresh:
             await _ensure_state(refresh=True)
     return {"saved": True, "file": file, "count": len(mappings)}
+
+
+def _llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
+    raw = config.get("llm_breakdown") if hasattr(config, "get") else None
+    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
+    if not isinstance(data, dict):
+        data = {}
+
+    variants_raw = data.get("variants") or {}
+    variants: dict[str, Any] = {}
+    if isinstance(variants_raw, Mapping):
+        for key, value in variants_raw.items():
+            if not isinstance(value, Mapping):
+                continue
+            variants[str(key)] = {
+                "instruction": value.get("instruction", ""),
+                "maxDepth": value.get("max_depth"),
+                "maxChildren": value.get("max_children"),
+                "queueDepth": value.get("queue_depth"),
+            }
+
+    return {
+        "labelPrefix": data.get("label_prefix", "llm-"),
+        "defaultVariant": data.get("default_variant", "breakdown"),
+        "maxDepth": data.get("max_depth", 3),
+        "maxChildren": data.get("max_children", 6),
+        "maxTotalTasks": data.get("max_total_tasks", 60),
+        "maxQueueDepth": data.get("max_queue_depth", 1),
+        "autoQueueChildren": data.get("auto_queue_children", True),
+        "variants": variants,
+    }
+
+
+@app.get("/api/admin/llm_breakdown/settings", tags=["admin"])
+async def admin_llm_breakdown_settings() -> dict[str, Any]:
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    return {
+        "settings": _llm_breakdown_settings_payload(config),
+        "basePrompt": BASE_SYSTEM_PROMPT,
+    }
+
+
+@app.put("/api/admin/llm_breakdown/settings", tags=["admin"])
+async def admin_update_llm_breakdown_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    lb_config = config.get("llm_breakdown") or {}
+
+    def _coerce_int(value: Any, field: str) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
+
+    updates: dict[str, Any] = {}
+    if "labelPrefix" in payload:
+        updates["label_prefix"] = str(payload["labelPrefix"]).strip()
+    if "defaultVariant" in payload:
+        updates["default_variant"] = str(payload["defaultVariant"]).strip()
+    if "maxDepth" in payload:
+        updates["max_depth"] = _coerce_int(payload["maxDepth"], "maxDepth")
+    if "maxChildren" in payload:
+        updates["max_children"] = _coerce_int(payload["maxChildren"], "maxChildren")
+    if "maxTotalTasks" in payload:
+        updates["max_total_tasks"] = _coerce_int(payload["maxTotalTasks"], "maxTotalTasks")
+    if "maxQueueDepth" in payload:
+        updates["max_queue_depth"] = _coerce_int(payload["maxQueueDepth"], "maxQueueDepth")
+    if "autoQueueChildren" in payload:
+        updates["auto_queue_children"] = bool(payload["autoQueueChildren"])
+
+    if "variants" in payload:
+        variants_raw = payload.get("variants")
+        if not isinstance(variants_raw, Mapping):
+            raise HTTPException(status_code=400, detail="variants must be an object")
+        variants: dict[str, Any] = {}
+        for key, value in variants_raw.items():
+            if not isinstance(value, Mapping):
+                raise HTTPException(status_code=400, detail=f"Variant {key} must be an object")
+            instruction = str(value.get("instruction", "")).strip()
+            variant_payload: dict[str, Any] = {"instruction": instruction}
+            if "maxDepth" in value and value.get("maxDepth") not in (None, ""):
+                variant_payload["max_depth"] = _coerce_int(value.get("maxDepth"), "maxDepth")
+            if "maxChildren" in value and value.get("maxChildren") not in (None, ""):
+                variant_payload["max_children"] = _coerce_int(value.get("maxChildren"), "maxChildren")
+            if "queueDepth" in value and value.get("queueDepth") not in (None, ""):
+                variant_payload["queue_depth"] = _coerce_int(value.get("queueDepth"), "queueDepth")
+            variants[str(key).strip()] = variant_payload
+        updates["variants"] = variants
+
+    if isinstance(lb_config, DictConfig):
+        for key, value in updates.items():
+            lb_config[key] = value
+    elif isinstance(lb_config, dict):
+        lb_config.update(updates)
+    else:
+        lb_config = updates
+
+    if "variants" in updates or "default_variant" in updates:
+        snapshot = OmegaConf.to_container(lb_config, resolve=False) if isinstance(lb_config, DictConfig) else lb_config
+        default_variant = updates.get("default_variant") or (
+            snapshot.get("default_variant") if isinstance(snapshot, Mapping) else None
+        )
+        variants = updates.get("variants") or (snapshot.get("variants") if isinstance(snapshot, Mapping) else None)
+        if default_variant and isinstance(variants, Mapping) and default_variant not in variants:
+            raise HTTPException(status_code=400, detail="defaultVariant must exist in variants")
+
+    config["llm_breakdown"] = lb_config
+    async with _ADMIN_LOCK:
+        _save_yaml_config(_AUTOMATIONS_PATH, config)
+
+    return {
+        "saved": True,
+        "settings": _llm_breakdown_settings_payload(config),
+        "basePrompt": BASE_SYSTEM_PROMPT,
+    }
+
+
+def _multiplication_settings_payload(config: DictConfig) -> dict[str, Any]:
+    raw = config.get("multiply") if hasattr(config, "get") else None
+    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
+    if not isinstance(data, dict):
+        data = {}
+
+    defaults = MultiplyConfig()
+    config_data = data.get("config") if isinstance(data.get("config"), Mapping) else {}
+    if not isinstance(config_data, Mapping):
+        config_data = {}
+
+    return {
+        "flatLeafTemplate": config_data.get("flat_leaf_template", defaults.flat_leaf_template),
+        "deepLeafTemplate": config_data.get("deep_leaf_template", defaults.deep_leaf_template),
+        "flatLabelRegex": config_data.get("flat_label_regex", defaults.flat_label_regex),
+        "deepLabelRegex": config_data.get("deep_label_regex", defaults.deep_label_regex),
+    }
+
+
+@app.get("/api/admin/multiplication", tags=["admin"])
+async def admin_multiplication_settings() -> dict[str, Any]:
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    return {"settings": _multiplication_settings_payload(config)}
+
+
+@app.put("/api/admin/multiplication", tags=["admin"])
+async def admin_update_multiplication_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    flat_template = str(payload.get("flatLeafTemplate", "")).strip()
+    deep_template = str(payload.get("deepLeafTemplate", "")).strip()
+    if not flat_template or not deep_template:
+        raise HTTPException(status_code=400, detail="flatLeafTemplate and deepLeafTemplate are required")
+
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    multiply_cfg = config.get("multiply") or {}
+    existing = OmegaConf.to_container(multiply_cfg, resolve=False) if multiply_cfg else {}
+    if not isinstance(existing, dict):
+        existing = {}
+    config_data = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    if not isinstance(config_data, Mapping):
+        config_data = {}
+    config_data = dict(config_data)
+    config_data["flat_leaf_template"] = flat_template
+    config_data["deep_leaf_template"] = deep_template
+
+    existing["config"] = config_data
+    config["multiply"] = existing
+
+    async with _ADMIN_LOCK:
+        _save_yaml_config(_AUTOMATIONS_PATH, config)
+
+    return {"saved": True, "settings": _multiplication_settings_payload(config)}
+
+
+def _template_summary(path: Path) -> dict[str, Any]:
+    cfg = _read_yaml_config(path)
+    data = OmegaConf.to_container(cfg, resolve=False)
+    if not isinstance(data, dict):
+        data = {}
+    category = path.parent.name
+    name = path.stem
+    children = data.get("children") if isinstance(data.get("children"), list) else []
+    return {
+        "category": category,
+        "name": name,
+        "title": data.get("content", name),
+        "description": data.get("description"),
+        "path": str(path.relative_to(_REPO_ROOT)),
+        "label": f"template-{name}",
+        "childrenCount": len(children),
+    }
+
+
+@app.get("/api/admin/templates", tags=["admin"])
+async def admin_templates() -> dict[str, Any]:
+    if not _TEMPLATES_DIR.exists():
+        return {"templates": [], "categories": []}
+    templates: list[dict[str, Any]] = []
+    categories: set[str] = set()
+    for category_dir in sorted(_TEMPLATES_DIR.iterdir()):
+        if not category_dir.is_dir():
+            continue
+        categories.add(category_dir.name)
+        for file in sorted(category_dir.glob("*.yaml")):
+            templates.append(_template_summary(file))
+    return {"templates": templates, "categories": sorted(categories)}
+
+
+@app.get("/api/admin/templates/{category}/{name}", tags=["admin"])
+async def admin_template_detail(category: str, name: str) -> dict[str, Any]:
+    safe_category = _ensure_identifier(category, label="category")
+    safe_name = _ensure_identifier(name, label="template name")
+    path = _template_path(safe_category, safe_name)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+    cfg = _read_yaml_config(path)
+    data = OmegaConf.to_container(cfg, resolve=False)
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "category": safe_category,
+        "name": safe_name,
+        "label": f"template-{safe_name}",
+        "template": _template_to_camel(data),
+    }
+
+
+@app.post("/api/admin/templates", tags=["admin"])
+async def admin_create_template(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    category = _ensure_identifier(str(payload.get("category", "")), label="category")
+    name = _ensure_identifier(str(payload.get("name", "")), label="template name")
+    template = payload.get("template")
+    if not isinstance(template, Mapping):
+        raise HTTPException(status_code=400, detail="template must be an object")
+
+    path = _template_path(category, name)
+    if path.exists():
+        raise HTTPException(status_code=409, detail="Template already exists")
+
+    normalized = _normalize_template_node(template)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _save_yaml_config(path, OmegaConf.create(normalized))
+
+    templates_cfg = _read_yaml_config(_TEMPLATES_REGISTRY_PATH)
+    defaults = _load_defaults_list(templates_cfg)
+    entry_key = _template_defaults_key(category, name)
+    if not any(isinstance(item, Mapping) and entry_key in item for item in defaults):
+        defaults.append({entry_key: name})
+        templates_cfg["defaults"] = defaults
+
+    automations_cfg = _read_yaml_config(_AUTOMATIONS_PATH)
+    template_cfg = automations_cfg.get("template") or {}
+    task_templates = OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False) if template_cfg else {}
+    if not isinstance(task_templates, dict):
+        task_templates = {}
+    task_templates[name] = f"${{{category}.{name}}}"
+    template_cfg["task_templates"] = task_templates
+    automations_cfg["template"] = template_cfg
+    async with _ADMIN_LOCK:
+        _save_yaml_config(_TEMPLATES_REGISTRY_PATH, templates_cfg)
+        _save_yaml_config(_AUTOMATIONS_PATH, automations_cfg)
+
+    return {"created": True, "category": category, "name": name}
+
+
+@app.put("/api/admin/templates/{category}/{name}", tags=["admin"])
+async def admin_update_template(
+    category: str,
+    name: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    safe_category = _ensure_identifier(category, label="category")
+    safe_name = _ensure_identifier(name, label="template name")
+    template = payload.get("template")
+    if not isinstance(template, Mapping):
+        raise HTTPException(status_code=400, detail="template must be an object")
+
+    path = _template_path(safe_category, safe_name)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    normalized = _normalize_template_node(template)
+    async with _ADMIN_LOCK:
+        _save_yaml_config(path, OmegaConf.create(normalized))
+    return {"saved": True, "category": safe_category, "name": safe_name}
+
+
+@app.delete("/api/admin/templates/{category}/{name}", tags=["admin"])
+async def admin_delete_template(category: str, name: str) -> dict[str, Any]:
+    safe_category = _ensure_identifier(category, label="category")
+    safe_name = _ensure_identifier(name, label="template name")
+    path = _template_path(safe_category, safe_name)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    path.unlink()
+
+    templates_cfg = _read_yaml_config(_TEMPLATES_REGISTRY_PATH)
+    defaults = _load_defaults_list(templates_cfg)
+    entry_key = _template_defaults_key(safe_category, safe_name)
+    defaults = [
+        item for item in defaults
+        if not (isinstance(item, Mapping) and entry_key in item)
+    ]
+    templates_cfg["defaults"] = defaults
+
+    automations_cfg = _read_yaml_config(_AUTOMATIONS_PATH)
+    template_cfg = automations_cfg.get("template") or {}
+    task_templates = OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False) if template_cfg else {}
+    if isinstance(task_templates, dict) and safe_name in task_templates:
+        del task_templates[safe_name]
+    template_cfg["task_templates"] = task_templates
+    automations_cfg["template"] = template_cfg
+    async with _ADMIN_LOCK:
+        _save_yaml_config(_TEMPLATES_REGISTRY_PATH, templates_cfg)
+        _save_yaml_config(_AUTOMATIONS_PATH, automations_cfg)
+
+    return {"deleted": True, "category": safe_category, "name": safe_name}

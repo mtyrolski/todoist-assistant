@@ -1,7 +1,10 @@
 import argparse
 import re
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any, Iterable, Sequence
+
+from omegaconf import DictConfig
 
 from loguru import logger
 
@@ -217,11 +220,18 @@ class Multiply(Automation):
     def __init__(
         self,
         frequency_in_minutes: float = 0.1,
-        config: MultiplyConfig | None = None,
+        config: MultiplyConfig | Mapping[str, Any] | None = None,
     ):
         super().__init__("Multiply", frequency_in_minutes)
 
-        self.config = config or MultiplyConfig()
+        if config is None:
+            self.config = MultiplyConfig()
+        elif isinstance(config, MultiplyConfig):
+            self.config = config
+        elif isinstance(config, (Mapping, DictConfig)):
+            self.config = MultiplyConfig(**dict(config))
+        else:
+            raise TypeError("config must be MultiplyConfig or Mapping[str, Any]")
 
         self._flat_label_pattern = _compile(self.config.flat_label_regex)
         self._deep_label_pattern = _compile(self.config.deep_label_regex)

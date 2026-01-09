@@ -74,8 +74,8 @@ function queueTone(status: string): "ok" | "warn" | "neutral" | "beta" {
   return "neutral";
 }
 
-function modelLabel(enabled: boolean, loading: boolean): { label: string; tone: "ok" | "warn" | "neutral" } {
-  if (enabled) return { label: "Model loaded", tone: "ok" };
+function modelLabel(enabled: boolean, loading: boolean): { label: string; tone: "good" | "warn" | "neutral" } {
+  if (enabled) return { label: "Model loaded", tone: "good" };
   if (loading) return { label: "Loading model", tone: "neutral" };
   return { label: "Model offline", tone: "warn" };
 }
