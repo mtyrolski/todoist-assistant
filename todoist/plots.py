@@ -1108,7 +1108,9 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             (24 * 60 * 60, "1d"),
             (3 * 24 * 60 * 60, "3d"),
             (7 * 24 * 60 * 60, "1w"),
+            (3 * 7 * 24 * 60 * 60, "3w"),
             (28 * 24 * 60 * 60, "4w"),
+            (6 * 7 * 24 * 60 * 60, "6w"),
             (12 * 7 * 24 * 60 * 60, "12w"),
         ]
         max_ticks = 9
@@ -1133,6 +1135,44 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         tickvals = [sec / axis_unit_seconds for sec, _ in selected]
         ticktext = [label for _, label in selected]
         return tickvals, ticktext
+
+    def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+        hex_color = hex_color.lstrip("#")
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    def _slice_density(
+        x_values: np.ndarray,
+        densities: np.ndarray,
+        *,
+        low: float | None = None,
+        high: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        if low is None and high is None:
+            return None
+        if low is None:
+            mask = x_values <= high
+        elif high is None:
+            mask = x_values >= low
+        else:
+            mask = (x_values >= low) & (x_values <= high)
+        if not mask.any():
+            return None
+        x_segment = x_values[mask]
+        y_segment = densities[mask]
+        if low is not None and x_segment[0] > low:
+            y_low = np.interp(low, x_values, densities)
+            x_segment = np.concatenate(([low], x_segment))
+            y_segment = np.concatenate(([y_low], y_segment))
+        if high is not None and x_segment[-1] < high:
+            y_high = np.interp(high, x_values, densities)
+            x_segment = np.concatenate((x_segment, [high]))
+            y_segment = np.concatenate((y_segment, [y_high]))
+        if x_segment.size < 2:
+            return None
+        return x_segment, y_segment
 
     if "type" not in df.columns:
         logger.error("DataFrame missing required 'type' column")
@@ -1178,6 +1218,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
+    percentile_low = float(np.percentile(durations_converted, 10))
+    percentile_high = float(np.percentile(durations_converted, 90))
 
     fig = go.Figure()
 
@@ -1190,6 +1232,34 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         integral = float(np.trapezoid(densities, x_values))
         if np.isfinite(integral) and integral > 0:
             densities = densities * (total_count / integral)
+            x_min = float(x_values.min())
+            x_max = float(x_values.max())
+            highlight_low = float(np.clip(percentile_low, x_min, x_max))
+            highlight_high = float(np.clip(percentile_high, x_min, x_max))
+            highlight_specs = [
+                ("Fastest 10%", None, highlight_low, "#00E5FF"),
+                ("Slowest 10%", highlight_high, None, "#FF4F9A"),
+            ]
+            for name, low, high, color in highlight_specs:
+                segment = _slice_density(x_values, densities, low=low, high=high)
+                if segment is None:
+                    continue
+                x_segment, y_segment = segment
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_segment,
+                        y=y_segment,
+                        mode="lines",
+                        line=dict(color=color, width=2),
+                        fill="tozeroy",
+                        fillcolor=_hex_to_rgba(color, 0.28),
+                        name=name,
+                        hovertemplate=(
+                            f"{name}<br>Duration: %{{x:.4g}} {unit_label}<br>"
+                            "Frequency: %{y:.2f}<extra></extra>"
+                        ),
+                    )
+                )
             fig.add_trace(
                 go.Scatter(
                     x=x_values,
