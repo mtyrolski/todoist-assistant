@@ -39,8 +39,8 @@
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="APPSTARTMENUDIR" On="uninstall" />
         <RegistryValue
-          Root="HKLM"
-          Key="Software\\TodoistAssistant"
+          Root="HKCU"
+          Key="Software\TodoistAssistant"
           Name="installed"
           Type="integer"
           Value="1"
@@ -60,8 +60,8 @@
           Target="[INSTALLFOLDER]todoist-assistant.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
-          Root="HKLM"
-          Key="Software\\TodoistAssistant"
+          Root="HKCU"
+          Key="Software\TodoistAssistant"
           Name="desktop_shortcut"
           Type="integer"
           Value="1"
@@ -79,7 +79,7 @@
         <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
         <RegistryValue
           Root="HKLM"
-          Key="Software\\TodoistAssistant"
+          Key="Software\TodoistAssistant"
           Name="appdata"
           Type="string"
           Value="[APPDATADIR]"
@@ -96,7 +96,7 @@
         </CreateFolder>
         <RegistryValue
           Root="HKLM"
-          Key="Software\\TodoistAssistant"
+          Key="Software\TodoistAssistant"
           Name="logs"
           Type="string"
           Value="[LOGSDIR]"
@@ -110,7 +110,7 @@
       <Component Id="TelemetryOptIn" Guid="*">
         <RegistryValue
           Root="HKLM"
-          Key="Software\\TodoistAssistant"
+          Key="Software\TodoistAssistant"
           Name="telemetry_opt_in"
           Type="integer"
           Value="[WIXUI_EXITDIALOGOPTIONALCHECKBOX]"
