@@ -71,7 +71,11 @@ jobs:
       - name: Install dependencies
         shell: powershell
         run: |
-          uv sync --locked --group build || uv sync --group build
+          uv sync --locked --group build
+          if ($LASTEXITCODE -ne 0) {
+            uv sync --group build
+            if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
+          }
 
       - name: Build MSI
         shell: powershell
