@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
 
 
@@ -12,6 +14,9 @@ def _collect(module_name):
     return datas, binaries, hiddenimports
 
 
+ROOT = Path(__file__).resolve().parents[2]
+ENTRYPOINT = ROOT / "todoist" / "launcher.py"
+
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matplotlib")
 
@@ -23,8 +28,8 @@ block_cipher = None
 
 
 a = Analysis(
-    ["todoist/launcher.py"],
-    pathex=["."],
+    [str(ENTRYPOINT)],
+    pathex=[str(ROOT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
