@@ -292,7 +292,7 @@ def _build_msi(
             "CONFIGDIR",
             "-var",
             "var.ConfigSource",
-            "-ag",
+            "-gg",
             "-srd",
             "-sfrag",
             "-out",
