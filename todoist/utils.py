@@ -6,7 +6,7 @@ from lzma import LZMAError
 from os import getenv
 from os.path import exists, join
 from pickle import HIGHEST_PROTOCOL, UnpicklingError
-from typing import Any, Callable, KeysView, Type, TypeVar, cast
+from typing import Any, Callable, Generic, KeysView, Type, TypeVar, cast
 from zlib import error as ZlibError
 
 from hydra import compose, initialize, initialize_config_dir
@@ -15,7 +15,7 @@ from joblib import dump, load
 from loguru import logger
 from omegaconf import DictConfig
 
-T = TypeVar('T', set, dict)
+T = TypeVar('T')
 LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
                             OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
 
@@ -50,7 +50,7 @@ class LocalStorageError(Exception):
         logger.error(f"LocalStorageError: {message}")
 
 
-class LocalStorage:
+class LocalStorage(Generic[T]):
     def __init__(self, path: str, resource_class: Callable[[], T]) -> None:
         self.path = path
         self.resource_class = resource_class

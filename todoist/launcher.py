@@ -94,7 +94,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _start_frontend(install_dir: Path, host: str, port: int) -> subprocess.Popen[str]:
+def _start_frontend(install_dir: Path, host: str, port: int) -> subprocess.Popen[bytes]:
     frontend_dir = install_dir / "frontend"
     node_exe = install_dir / "node" / ("node.exe" if os.name == "nt" else "node")
     if os.name != "nt" and not node_exe.exists():
@@ -130,16 +130,18 @@ def main() -> int:
     try:
         telemetry.bootstrap_config(config_dir)
     except Exception:
+        # Telemetry is best-effort; avoid blocking launch.
         pass
 
     try:
         telemetry.maybe_send_install_success(config_dir, data_dir)
     except Exception:
+        # Telemetry is best-effort; avoid blocking launch.
         pass
 
     os.chdir(data_dir)
 
-    frontend_proc: subprocess.Popen[str] | None = None
+    frontend_proc: subprocess.Popen[bytes] | None = None
     try:
         if not args.no_frontend:
             frontend_proc = _start_frontend(install_dir, args.frontend_host, args.frontend_port)
@@ -161,6 +163,7 @@ def main() -> int:
         try:
             telemetry.maybe_send_install_failure(config_dir, data_dir)
         except Exception:
+            # Telemetry is best-effort; avoid masking the original error.
             pass
         raise
     finally:

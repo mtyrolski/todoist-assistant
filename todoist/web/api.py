@@ -189,7 +189,11 @@ _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
-_API_KEY_PLACEHOLDER = "put your api here"
+_API_KEY_PLACEHOLDERS = {
+    "put your api here",
+    "put your api key here",
+    "your todoist api key",
+}
 
 
 def _resolve_env_path() -> Path:
@@ -208,7 +212,7 @@ def _normalize_api_key(raw: str | None) -> str:
     value = str(raw).strip().strip("'\"")
     if not value:
         return ""
-    if value.strip().lower() == _API_KEY_PLACEHOLDER:
+    if value.strip().lower() in _API_KEY_PLACEHOLDERS:
         return ""
     return value
 
@@ -327,8 +331,8 @@ async def _finish_progress(error: str | None = None) -> None:
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
     # Reset progress state to clear any stale information from previous failed refreshes
-    _finish_progress(error=None)
-    
+    _run_async_in_main_loop(_finish_progress(error=None))
+
     error: str | None = None
     try:
         _run_async_in_main_loop(_set_progress(
@@ -362,6 +366,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             project_ori2anonym = anonymize_project_names(df_activity)
             label_ori2anonym = anonymize_label_names(active_projects)
             dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+
+        if demo_mode:
+            from todoist.database.demo import anonymize_activity_dates
+
+            df_activity = anonymize_activity_dates(df_activity)
 
         project_colors = dbio.fetch_mapping_project_name_to_color()
         label_colors = dbio.fetch_label_colors()
@@ -826,7 +835,9 @@ async def _run_llm_chat_queue() -> None:
                         for msg in (conversation.get("messages") or [])
                         if msg.get("role") and msg.get("content")
                     ]
-                    state = {"messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]}
+                    state: Any = {
+                        "messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]
+                    }
                     result = await asyncio.to_thread(agent.invoke, state)
                     messages = result.get("messages") if isinstance(result, dict) else None
                     if not isinstance(messages, list):
@@ -1632,7 +1643,7 @@ def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _build_observer(db: Database) -> AutomationObserver:
-    config = load_config("automations", str((_REPO_ROOT / "configs").resolve()))
+    config = load_config("automations", str(_CONFIG_DIR.resolve()))
     activity_automation: Activity = hydra.utils.instantiate(cast(DictConfig, config).activity)
     automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
     short_automations = [auto for auto in automations if not isinstance(auto, Activity)]
@@ -1840,7 +1851,7 @@ def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
         raise HTTPException(status_code=500, detail=f"Failed to read {path.name}: {exc}") from exc
     if loaded is None:
         return OmegaConf.create({})
-    return loaded
+    return cast(DictConfig, loaded)
 
 
 def _save_yaml_config(path: Path, config: DictConfig) -> None:
@@ -2067,8 +2078,8 @@ async def admin_update_llm_breakdown_settings(
         default_variant = updates.get("default_variant") or (
             snapshot.get("default_variant") if isinstance(snapshot, Mapping) else None
         )
-        variants = updates.get("variants") or (snapshot.get("variants") if isinstance(snapshot, Mapping) else None)
-        if default_variant and isinstance(variants, Mapping) and default_variant not in variants:
+        variants_value = updates.get("variants") or (snapshot.get("variants") if isinstance(snapshot, Mapping) else None)
+        if default_variant and isinstance(variants_value, Mapping) and default_variant not in variants_value:
             raise HTTPException(status_code=400, detail="defaultVariant must exist in variants")
 
     config["llm_breakdown"] = lb_config
@@ -2147,7 +2158,8 @@ def _template_summary(path: Path) -> dict[str, Any]:
         data = {}
     category = path.parent.name
     name = path.stem
-    children = data.get("children") if isinstance(data.get("children"), list) else []
+    raw_children = data.get("children")
+    children: list[Any] = raw_children if isinstance(raw_children, list) else []
     return {
         "category": category,
         "name": name,
@@ -2185,11 +2197,12 @@ async def admin_template_detail(category: str, name: str) -> dict[str, Any]:
     data = OmegaConf.to_container(cfg, resolve=False)
     if not isinstance(data, dict):
         data = {}
+    template_payload = cast(Mapping[str, Any], data)
     return {
         "category": safe_category,
         "name": safe_name,
         "label": f"template-{safe_name}",
-        "template": _template_to_camel(data),
+        "template": _template_to_camel(template_payload),
     }
 
 

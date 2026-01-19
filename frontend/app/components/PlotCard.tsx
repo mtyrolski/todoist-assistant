@@ -39,8 +39,7 @@ export function PlotCard({
           <Plot
             data={figure.data as PlotParams["data"]}
             layout={(() => {
-              const baseLayout = { ...(figure.layout ?? {}) } as Record<string, unknown>;
-              if ("title" in baseLayout) delete baseLayout.title;
+              const { title: _title, ...baseLayout } = figure.layout ?? {};
               return {
                 ...baseLayout,
                 autosize: true,

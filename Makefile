@@ -72,10 +72,10 @@ update_and_run: # updates history, fetches activity, do templates, and runs the 
 	make run_dashboard
 
 test: ## Run unit tests with pytest
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run pytest -v --tb=short tests/
+	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
 
 typecheck: ## Run pyright type checks
-	PYTHONPATH=. uv run pyright --warnings
+	PYTHONPATH=. uv run python3 -m pyright --warnings
 
 lint: ## Run pylint
 	PYTHONPATH=. uv run pylint -j 0 todoist tests

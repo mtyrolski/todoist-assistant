@@ -35,7 +35,10 @@ def read_formula_version(path: Path) -> str | None:
     if not path.exists():
         return None
     text = path.read_text(encoding="utf-8")
-    match = re.search(r"todoist-assistant-v([0-9]+\\.[0-9]+\\.[0-9]+)", text)
+    match = re.search(r'^\s*version\s+"([0-9]+\.[0-9]+\.[0-9]+)"', text, re.MULTILINE)
+    if match:
+        return match.group(1)
+    match = re.search(r"todoist-assistant-v([0-9]+\.[0-9]+\.[0-9]+)", text)
     if match:
         return match.group(1)
     return None

@@ -1073,7 +1073,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             ),
         )
 
-        xaxis_options: dict[str, object] = {
+        xaxis_options: dict[str, Any] = {
             "title": {"text": x_title, "font": {"size": 14, "color": "#ffffff"}},
             "type": "log",
             "showgrid": False,
@@ -1257,19 +1257,15 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     if max_duration < 60:
         axis_unit_seconds = 1.0
         unit_label = "sec"
-        title_unit = "sec"
     elif max_duration < 3600:
         axis_unit_seconds = 60.0
         unit_label = "min"
-        title_unit = "min"
     elif max_duration < 86400:
         axis_unit_seconds = 3600.0
         unit_label = "hr"
-        title_unit = "hr"
     else:
         axis_unit_seconds = 86400.0
         unit_label = "days"
-        title_unit = "days"
     durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
@@ -1305,7 +1301,6 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             x_min = float(x_values.min())
             x_max = float(x_values.max())
             y_max = float(densities.max()) if densities.size else 0.0
-            y_offset = 0.12 * y_max if y_max > 0 else 0.0
             highlight_low = float(np.clip(highlight_low, x_min, x_max))
             highlight_high = float(np.clip(highlight_high, x_min, x_max))
             highlight_specs = [

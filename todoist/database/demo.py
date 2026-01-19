@@ -1,6 +1,8 @@
 # Script for making data anonymous for demo purposes.
-import pandas as pd
+import hashlib
 import random
+
+import pandas as pd
 
 from todoist.types import Project
 
@@ -104,3 +106,55 @@ def anonymize_project_names(df_activity: pd.DataFrame) -> dict[str, str]:
     )
 
     return anonymized_projects
+
+
+def anonymize_activity_dates(df_activity: pd.DataFrame, *, seed: str = "todoist-demo") -> pd.DataFrame:
+    """
+    Anonymize event timestamps by shifting each task's timeline to a stable random target.
+    This preserves per-task durations while removing real-world temporal trends.
+    """
+    if df_activity.empty or not isinstance(df_activity.index, pd.DatetimeIndex):
+        return df_activity
+
+    task_col = "task_id" if "task_id" in df_activity.columns else "parent_item_id" if "parent_item_id" in df_activity.columns else None
+    if task_col is None or "id" not in df_activity.columns:
+        return df_activity
+
+    global_min = df_activity.index.min()
+    global_max = df_activity.index.max()
+    if pd.isna(global_min) or pd.isna(global_max) or global_min == global_max:
+        return df_activity
+
+    task_key = df_activity[task_col].where(df_activity[task_col].notna(), df_activity["id"]).astype(str)
+    df = df_activity.copy()
+
+    def _stable_fraction(value: str) -> float:
+        digest = hashlib.sha256(f"{seed}:{value}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big") / 2**64
+
+    offsets: dict[str, pd.Timedelta] = {}
+    for key, group in df.groupby(task_key, sort=False):
+        if group.empty:
+            continue
+        anchor = group.index.max()
+        if "type" in group.columns:
+            completed = group[group["type"] == "completed"]
+            if not completed.empty:
+                anchor = completed.index.max()
+        task_min = group.index.min()
+        task_max = group.index.max()
+        pre_span = (anchor - task_min).total_seconds()
+        post_span = (task_max - anchor).total_seconds()
+        available_start = global_min + pd.Timedelta(seconds=pre_span)
+        available_end = global_max - pd.Timedelta(seconds=post_span)
+        if available_end <= available_start:
+            offsets[key] = pd.Timedelta(0)
+            continue
+        fraction = _stable_fraction(key)
+        target = available_start + (available_end - available_start) * fraction
+        offsets[key] = target - anchor
+
+    offset_series = task_key.map(offsets).fillna(pd.Timedelta(0))
+    df.index = df.index + pd.to_timedelta(offset_series)
+    df.sort_index(inplace=True)
+    return df

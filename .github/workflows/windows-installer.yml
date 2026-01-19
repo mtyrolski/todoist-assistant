@@ -87,7 +87,7 @@ jobs:
           $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn" -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "msiexec install failed with code $($install.ExitCode)" }
 
-          $exe = "C:\\Program Files\\TodoistAssistant\\todoist-assistant.exe"
+          $exe = "C:\Program Files\TodoistAssistant\todoist-assistant.exe"
           if (-not (Test-Path $exe)) { throw "Installed executable not found at $exe" }
 
           & $exe --help | Out-Null
