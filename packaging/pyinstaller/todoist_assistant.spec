@@ -2,12 +2,22 @@
 
 from PyInstaller.utils.hooks import collect_all
 
-plotly = collect_all("plotly")
-matplotlib = collect_all("matplotlib")
 
-binaries = plotly.binaries + matplotlib.binaries
-datas = plotly.datas + matplotlib.datas
-hiddenimports = plotly.hiddenimports + matplotlib.hiddenimports
+def _collect(module_name):
+    collected = collect_all(module_name)
+    if isinstance(collected, tuple):
+        datas, binaries, hiddenimports = collected
+    else:
+        datas, binaries, hiddenimports = collected.datas, collected.binaries, collected.hiddenimports
+    return datas, binaries, hiddenimports
+
+
+plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
+matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matplotlib")
+
+binaries = plotly_binaries + matplotlib_binaries
+datas = plotly_datas + matplotlib_datas
+hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
 
 block_cipher = None
 
