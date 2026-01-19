@@ -1221,7 +1221,6 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             pairs.append((value, label))
         pairs.sort(key=lambda item: item[0])
         return [value for value, _ in pairs], [label for _, label in pairs]
-
     if "type" not in df.columns:
         logger.error("DataFrame missing required 'type' column")
         return _empty_figure("Invalid data structure")
