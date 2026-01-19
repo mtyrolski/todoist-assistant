@@ -146,6 +146,39 @@ def _resolve_wix_tools() -> dict[str, str]:
     }
 
 
+def _python_has_module(python_path: Path, module: str) -> bool:
+    if not python_path.exists():
+        return False
+    probe = (
+        "import importlib.util, sys;"
+        f"sys.exit(0 if importlib.util.find_spec('{module}') else 1)"
+    )
+    try:
+        result = subprocess.run([str(python_path), "-c", probe], capture_output=True)
+    except FileNotFoundError:
+        return False
+    return result.returncode == 0
+
+
+def _resolve_pyinstaller_python(repo_root: Path) -> str:
+    candidates: list[Path] = []
+    venv = os.getenv("VIRTUAL_ENV")
+    if venv:
+        candidates.append(Path(venv) / "Scripts" / "python.exe")
+    candidates.append(repo_root / ".venv" / "Scripts" / "python.exe")
+    candidates.append(Path(sys.executable))
+
+    for candidate in candidates:
+        if _python_has_module(candidate, "PyInstaller"):
+            return str(candidate)
+
+    raise RuntimeError(
+        "PyInstaller is not available in the active environment. "
+        "Run `uv sync --group build` and invoke the build with `uv run python -m scripts.build_windows` "
+        "(or ensure the uv venv is active)."
+    )
+
+
 def _build_dashboard(frontend_dir: Path, *, npm_path: str) -> None:
     if not frontend_dir.exists():
         raise RuntimeError(f"Dashboard directory not found: {frontend_dir}")
@@ -362,10 +395,11 @@ def main() -> int:
     pyinstaller_dist.mkdir(parents=True, exist_ok=True)
     pyinstaller_work.mkdir(parents=True, exist_ok=True)
 
-    print("Running PyInstaller...")
+    pyinstaller_python = _resolve_pyinstaller_python(repo_root)
+    print(f"Running PyInstaller with {pyinstaller_python}...")
     _run(
         [
-            sys.executable,
+            pyinstaller_python,
             "-m",
             "PyInstaller",
             "--noconfirm",
