@@ -77,6 +77,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
           }
 
+      - name: Ensure python3 shim for uv run
+        shell: powershell
+        run: |
+          $venv = ".venv\\Scripts"
+          $python = Join-Path $venv "python.exe"
+          $python3 = Join-Path $venv "python3.exe"
+          if ((Test-Path $python) -and (-not (Test-Path $python3))) {
+            Copy-Item $python $python3
+          }
+
       - name: Build MSI
         shell: powershell
         run: |
