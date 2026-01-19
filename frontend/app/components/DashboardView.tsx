@@ -10,6 +10,7 @@ import { ServiceMonitor } from "./ServiceMonitor";
 import { InsightCard } from "./InsightCard";
 import { AdminPanel } from "./AdminPanel";
 import { LlmBreakdownStatus } from "./LlmBreakdownStatus";
+import { ObserverControl } from "./ObserverControl";
 import { InfoTip } from "./InfoTip";
 import {
   BADGES_HELP,
@@ -325,6 +326,13 @@ export function DashboardView() {
             progress={llmProgress}
             loading={loadingLlmProgress}
             onRefresh={refreshLlmProgress}
+          />
+
+          <ObserverControl
+            onAfterMutation={() => {
+              refresh();
+              refreshStatus();
+            }}
           />
 
           <ServiceMonitor services={status?.services ?? null} onRefresh={refreshStatus} />

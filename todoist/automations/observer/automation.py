@@ -39,7 +39,11 @@ class AutomationObserver:
         try:
             while True:
                 start = dt.datetime.now()
-                self._run_once()
+                if not self._is_enabled():
+                    logger.debug("Observer disabled; skipping tick.")
+                    time.sleep(self._poll_interval_seconds)
+                    continue
+                self.run_once()
                 end = dt.datetime.now()
                 elapsed = (end - start).total_seconds()
                 logger.debug(f"Observer iteration finished in {elapsed:.2f}s")
@@ -47,11 +51,11 @@ class AutomationObserver:
         except KeyboardInterrupt:
             logger.info("Observer interrupted by user. Exiting.")
 
-    def _run_once(self) -> None:
+    def run_once(self) -> int:
         new_events = self._refresh_activity_cache()
         if not new_events:
             logger.debug("Observer tick: no new activity events returned.")
-            return
+            return 0
 
         # Refresh DB caches so automations work on up-to-date tasks/labels.
         self._db.reset()
@@ -62,6 +66,11 @@ class AutomationObserver:
         for automation in self._automations:
             logger.info(f"Observer triggering automation {automation}")
             automation.tick(self._db)
+        return len(new_events)
+
+    def _run_once(self) -> None:
+        # Backwards-compatible wrapper for tests/internals expecting the old name.
+        _ = self.run_once()
 
     def _refresh_activity_cache(self) -> set:
         events, stats = self._activity.fetch_recent_events(self._db, max_pages=RECENT_ACTIVITY_PAGES)
@@ -85,3 +94,12 @@ class AutomationObserver:
         Cache().activity.save(cached_events)
         logger.debug(f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}")
         return new_events
+
+    def _is_enabled(self) -> bool:
+        try:
+            payload = Cache().observer_state.load()
+        except LocalStorageError:
+            return True
+        if not isinstance(payload, dict):
+            return True
+        return bool(payload.get("enabled", True))

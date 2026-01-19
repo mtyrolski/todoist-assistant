@@ -38,13 +38,15 @@ from todoist.plots import (
     plot_task_lifespans,
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
+from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
+from todoist.automations.observer import AutomationObserver
 from todoist.automations.llm_breakdown.config import BASE_SYSTEM_PROMPT, coerce_model_config
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
-from todoist.utils import Cache, load_config
+from todoist.utils import Cache, LocalStorageError, load_config
 from todoist.version import get_version
 
 # FastAPI application powering the new web dashboard.
@@ -357,6 +359,8 @@ def _service_statuses() -> list[dict[str, Any]]:
     api_key_set = bool(os.getenv("API_KEY"))
     cache_activity = _stat_file("activity.joblib")
     automation_log = _stat_file("automation.log")
+    observer_state = _load_observer_state()
+    observer_enabled = bool(observer_state.get("enabled", True))
 
     observer_recent = False
     if automation_log and automation_log.get("mtime"):
@@ -366,11 +370,21 @@ def _service_statuses() -> list[dict[str, Any]]:
         except ValueError:
             observer_recent = False
 
+    if not observer_enabled:
+        observer_status = "warn"
+        observer_detail = "disabled"
+    elif observer_recent:
+        observer_status = "ok"
+        observer_detail = "recent activity"
+    else:
+        observer_status = "neutral"
+        observer_detail = "not detected"
+
     return [
         {"name": "Todoist token", "status": "ok" if api_key_set else "warn", "detail": "API_KEY set" if api_key_set else "API_KEY missing"},
         {"name": "Activity cache", "status": "ok" if cache_activity else "warn", "detail": cache_activity or "activity.joblib missing"},
         {"name": "Automation log", "status": "ok" if automation_log else "warn", "detail": automation_log or "automation.log missing"},
-        {"name": "Observer", "status": "ok" if observer_recent else "neutral", "detail": "recent activity" if observer_recent else "not detected"},
+        {"name": "Observer", "status": observer_status, "detail": observer_detail},
     ]
 
 
@@ -1502,6 +1516,94 @@ async def admin_run_all_automations_async() -> dict[str, Any]:
     await _save_job(job)
     asyncio.create_task(_run_all_automations_job(job_id=job.id))
     return {"jobId": job.id, "status": job.status}
+
+
+def _load_observer_state() -> dict[str, Any]:
+    try:
+        payload = Cache().observer_state.load()
+    except LocalStorageError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return payload
+
+
+def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
+    enabled = bool(payload.get("enabled", True))
+    return {
+        "enabled": enabled,
+        "updatedAt": payload.get("updatedAt"),
+        "lastRunAt": payload.get("lastRunAt"),
+        "lastDurationSeconds": payload.get("lastDurationSeconds"),
+        "lastEvents": payload.get("lastEvents"),
+        "lastStatus": payload.get("lastStatus"),
+        "lastError": payload.get("lastError"),
+    }
+
+
+def _build_observer(db: Database) -> AutomationObserver:
+    config = load_config("automations", str((_REPO_ROOT / "configs").resolve()))
+    activity_automation: Activity = hydra.utils.instantiate(cast(DictConfig, config).activity)
+    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
+    short_automations = [auto for auto in automations if not isinstance(auto, Activity)]
+    return AutomationObserver(db=db, automations=short_automations, activity=activity_automation)
+
+
+@app.get("/api/admin/observer", tags=["admin"])
+async def admin_observer_state() -> dict[str, Any]:
+    return _serialize_observer_state(_load_observer_state())
+
+
+@app.post("/api/admin/observer", tags=["admin"])
+async def admin_set_observer(enabled: bool = Body(..., embed=True)) -> dict[str, Any]:
+    async with _ADMIN_LOCK:
+        state = _load_observer_state()
+        state["enabled"] = bool(enabled)
+        state["updatedAt"] = _now_iso()
+        Cache().observer_state.save(state)
+    return _serialize_observer_state(state)
+
+
+@app.post("/api/admin/observer/run", tags=["admin"])
+async def admin_run_observer(force: bool = False) -> dict[str, Any]:
+    async with _ADMIN_LOCK:
+        state = _load_observer_state()
+        enabled = bool(state.get("enabled", True))
+        if not enabled and not force:
+            raise HTTPException(status_code=409, detail="Observer is disabled")
+
+        started_at = datetime.now()
+        dbio = Database(".env")
+        try:
+            dbio.pull()
+            observer = _build_observer(dbio)
+            new_events = await asyncio.to_thread(observer.run_once)
+            status = "ran" if new_events > 0 else "idle"
+            state.update(
+                {
+                    "lastStatus": status,
+                    "lastEvents": int(new_events),
+                    "lastError": None,
+                }
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            state.update(
+                {
+                    "lastStatus": "failed",
+                    "lastEvents": None,
+                    "lastError": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            raise HTTPException(status_code=500, detail=state["lastError"]) from exc
+        finally:
+            dbio.reset()
+            finished_at = datetime.now()
+            state["lastRunAt"] = finished_at.isoformat(timespec="seconds")
+            state["lastDurationSeconds"] = round((finished_at - started_at).total_seconds(), 3)
+            state["updatedAt"] = _now_iso()
+            Cache().observer_state.save(state)
+
+    return {"state": _serialize_observer_state(state)}
 
 
 def _log_files() -> list[dict[str, Any]]:
