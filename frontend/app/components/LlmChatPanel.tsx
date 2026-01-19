@@ -269,7 +269,7 @@ export function LlmChatPanel() {
           >
             {enabled ? "Model ready" : loading || enabling ? "Loading..." : "Enable"}
           </button>
-          <button className="button buttonSmall" type="button" onClick={refreshStatus} disabled={loadingStatus}>
+          <button className="button buttonSmall" type="button" onClick={() => refreshStatus()} disabled={loadingStatus}>
             {loadingStatus ? "Refreshing..." : "Refresh"}
           </button>
         </div>
