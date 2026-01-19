@@ -2,8 +2,6 @@ import asyncio
 from collections.abc import Mapping
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-# NOTE: This file is intentionally lightweight (dashboard API).
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast

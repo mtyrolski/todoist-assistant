@@ -128,12 +128,14 @@ def _find_wix_tool(tool: str) -> str:
     )
 
 
-def _require_command(name: str, hint: str | None = None) -> None:
-    if shutil.which(name) is None:
-        message = f"Required command not found: {name}"
-        if hint:
-            message = f"{message}. {hint}"
-        raise RuntimeError(message)
+def _require_command(name: str, hint: str | None = None) -> str:
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    message = f"Required command not found: {name}"
+    if hint:
+        message = f"{message}. {hint}"
+    raise RuntimeError(message)
 
 
 def _resolve_wix_tools() -> dict[str, str]:
@@ -144,15 +146,15 @@ def _resolve_wix_tools() -> dict[str, str]:
     }
 
 
-def _build_dashboard(frontend_dir: Path) -> None:
+def _build_dashboard(frontend_dir: Path, *, npm_path: str) -> None:
     if not frontend_dir.exists():
         raise RuntimeError(f"Dashboard directory not found: {frontend_dir}")
 
     env = os.environ.copy()
     env["NEXT_TELEMETRY_DISABLED"] = "1"
 
-    _run(["npm", "ci"], cwd=frontend_dir, env=env)
-    _run(["npm", "run", "build"], cwd=frontend_dir, env=env)
+    _run([npm_path, "ci"], cwd=frontend_dir, env=env)
+    _run([npm_path, "run", "build"], cwd=frontend_dir, env=env)
 
 
 def _stage_dashboard(frontend_dir: Path, app_root: Path) -> None:
@@ -345,10 +347,9 @@ def main() -> int:
 
     if include_dashboard:
         _require_command("node", "Install Node.js 20+ (includes npm).")
-        _require_command("npm", "Install Node.js 20+ (includes npm).")
-    if include_dashboard:
+        npm_path = _require_command("npm", "Install Node.js 20+ (includes npm).")
         print("Building dashboard...")
-        _build_dashboard(repo_root / "frontend")
+        _build_dashboard(repo_root / "frontend", npm_path=npm_path)
     elif not args.no_dashboard:
         print("Dashboard directory not found; skipping frontend packaging.")
 
