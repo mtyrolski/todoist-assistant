@@ -75,6 +75,7 @@ class Cache:
     def __init__(self, path: str = './'):
         self.path = path
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
+        self.observer_state = LocalStorage(join(self.path, 'observer_state.joblib'), dict)
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
         self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)

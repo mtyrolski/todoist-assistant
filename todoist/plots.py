@@ -1037,6 +1037,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         x_title: str,
         tickvals: list[float] | None = None,
         ticktext: list[str] | None = None,
+        x_range: list[float] | None = None,
     ) -> go.Figure:
         fig.update_layout(
             autosize=True,
@@ -1049,13 +1050,13 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             },
             plot_bgcolor="#111318",
             paper_bgcolor="#111318",
-            margin=dict(l=80, r=60, t=80, b=60),
+            margin=dict(l=80, r=60, t=100, b=60),
             font=dict(color="#ffffff", size=12, family="Arial, sans-serif"),
             legend=dict(
                 x=0.98,
-                y=0.98,
+                y=1.06,
                 xanchor="right",
-                yanchor="top",
+                yanchor="bottom",
                 bgcolor="rgba(17, 19, 24, 0.8)",
                 bordercolor="rgba(255,255,255,0.3)",
                 borderwidth=1,
@@ -1075,6 +1076,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             xaxis_options["tickmode"] = "array"
             xaxis_options["tickvals"] = tickvals
             xaxis_options["ticktext"] = ticktext
+        if x_range:
+            xaxis_options["range"] = x_range
         fig.update_xaxes(**xaxis_options)
         fig.update_yaxes(
             title={"text": "Frequency", "font": {"size": 14, "color": "#ffffff"}},
@@ -1206,27 +1209,48 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         logger.info("All computed durations are non-positive; nothing to plot")
         return _empty_figure("No valid durations")
 
-    axis_unit_seconds = 86400.0
-    unit_label = "days"
     max_duration = float(durations.max())
-    if max_duration < 3600:
+    if max_duration < 60:
+        axis_unit_seconds = 1.0
+        unit_label = "sec"
+        title_unit = "sec"
+    elif max_duration < 3600:
+        axis_unit_seconds = 60.0
+        unit_label = "min"
         title_unit = "min"
     elif max_duration < 86400:
+        axis_unit_seconds = 3600.0
+        unit_label = "hr"
         title_unit = "hr"
     else:
+        axis_unit_seconds = 86400.0
+        unit_label = "days"
         title_unit = "days"
     durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
-    percentile_low = float(np.percentile(durations_converted, 10))
-    percentile_high = float(np.percentile(durations_converted, 90))
+    percentile_low = float(np.percentile(durations_converted, 15))
+    percentile_high = float(np.percentile(durations_converted, 85))
+    if total_count >= 20:
+        plot_min = float(np.percentile(durations_converted, 1))
+        plot_max = float(np.percentile(durations_converted, 99))
+    else:
+        plot_min = float(durations_converted.min())
+        plot_max = float(durations_converted.max())
+    if not np.isfinite(plot_min) or plot_min <= 0:
+        plot_min = float(durations_converted.min())
+    if not np.isfinite(plot_max) or plot_max <= plot_min:
+        plot_max = float(durations_converted.max())
+    min_log = float(np.log10(plot_min))
+    max_log = float(np.log10(plot_max))
+    pad = max(0.15, 0.1 * (max_log - min_log))
 
     fig = go.Figure()
 
     # Optional KDE overlay when data variability allows it
     if total_count >= 2 and not np.isclose(log_durations.var(), 0.0):
         kde = stats.gaussian_kde(log_durations, bw_method="scott")
-        log_bounds = np.linspace(np.floor(log_durations.min()), np.ceil(log_durations.max()), 512)
+        log_bounds = np.linspace(min_log - pad, max_log + pad, 512)
         x_values = np.power(10.0, log_bounds)
         densities = kde(log_bounds)
         integral = float(np.trapezoid(densities, x_values))
@@ -1234,12 +1258,33 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             densities = densities * (total_count / integral)
             x_min = float(x_values.min())
             x_max = float(x_values.max())
+            y_max = float(densities.max()) if densities.size else 0.0
+            y_offset = 0.12 * y_max if y_max > 0 else 0.0
             highlight_low = float(np.clip(percentile_low, x_min, x_max))
             highlight_high = float(np.clip(percentile_high, x_min, x_max))
             highlight_specs = [
-                ("Fastest 10%", None, highlight_low, "#00E5FF"),
-                ("Slowest 10%", highlight_high, None, "#FF4F9A"),
+                ("Fastest 15%", None, highlight_low, "#00E5FF"),
+                ("Slowest 15%", highlight_high, None, "#FF4F9A"),
             ]
+            annotation_specs = {
+                "Fastest 15%": {
+                    "text": "<b>15%</b><br>Fastest",
+                    "font": dict(color="#E9FBFF", size=14, family="Arial, sans-serif"),
+                    "bgcolor": _hex_to_rgba("#00E5FF", 0.18),
+                    "bordercolor": _hex_to_rgba("#00E5FF", 0.9),
+                    "xanchor": "left",
+                    "xshift": 18,
+                },
+                "Slowest 15%": {
+                    "text": "<b>15%</b><br>Slowest",
+                    "font": dict(color="#FFE6F2", size=14, family="Arial, sans-serif"),
+                    "bgcolor": _hex_to_rgba("#FF4F9A", 0.18),
+                    "bordercolor": _hex_to_rgba("#FF4F9A", 0.9),
+                    "xanchor": "right",
+                    "xshift": -18,
+                },
+            }
+            annotations: list[dict[str, object]] = []
             for name, low, high, color in highlight_specs:
                 segment = _slice_density(x_values, densities, low=low, high=high)
                 if segment is None:
@@ -1250,9 +1295,20 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                         x=x_segment,
                         y=y_segment,
                         mode="lines",
-                        line=dict(color=color, width=2),
+                        line=dict(color=_hex_to_rgba(color, 0.55), width=6),
+                        name=f"{name} outline",
+                        showlegend=False,
+                        hoverinfo="skip",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_segment,
+                        y=y_segment,
+                        mode="lines",
+                        line=dict(color=color, width=3),
                         fill="tozeroy",
-                        fillcolor=_hex_to_rgba(color, 0.28),
+                        fillcolor=_hex_to_rgba(color, 0.38),
                         name=name,
                         hovertemplate=(
                             f"{name}<br>Duration: %{{x:.4g}} {unit_label}<br>"
@@ -1260,6 +1316,46 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                         ),
                     )
                 )
+                if y_max > 0 and name in annotation_specs:
+                    boundary_x = highlight_low if name == "Fastest 15%" else highlight_high
+                    if not np.isfinite(boundary_x):
+                        continue
+                    y_anchor = float(np.interp(boundary_x, x_values, densities))
+                    spec = annotation_specs[name]
+                    annotations.append(
+                        {
+                            "x": boundary_x,
+                            "y": min(y_anchor + y_offset, y_max * 0.95),
+                            "text": spec["text"],
+                            "showarrow": False,
+                            "xanchor": spec["xanchor"],
+                            "yanchor": "bottom",
+                            "xshift": spec["xshift"],
+                            "font": spec["font"],
+                            "bgcolor": spec["bgcolor"],
+                            "bordercolor": spec["bordercolor"],
+                            "borderwidth": 1,
+                        }
+                    )
+            boundary_specs = [
+                (highlight_low, "#00E5FF"),
+                (highlight_high, "#FF4F9A"),
+            ]
+            for x_value, color in boundary_specs:
+                if not np.isfinite(x_value):
+                    continue
+                fig.add_shape(
+                    type="line",
+                    x0=x_value,
+                    x1=x_value,
+                    y0=0,
+                    y1=1,
+                    xref="x",
+                    yref="paper",
+                    line=dict(color=_hex_to_rgba(color, 0.85), width=2, dash="dash"),
+                )
+            for annotation in annotations:
+                fig.add_annotation(**annotation)
             fig.add_trace(
                 go.Scatter(
                     x=x_values,
@@ -1288,8 +1384,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     title_text = "Task Lifespans: Time to Completion"
     x_title = f"Time to Completion ({title_unit})"
     tickvals, ticktext = _build_time_ticks(
-        min_seconds=float(durations.min()),
-        max_seconds=float(durations.max()),
+        min_seconds=float(max(durations.min(), plot_min * axis_unit_seconds)),
+        max_seconds=float(min(durations.max(), plot_max * axis_unit_seconds)),
         axis_unit_seconds=axis_unit_seconds,
     )
 
@@ -1299,4 +1395,5 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         x_title=x_title,
         tickvals=tickvals,
         ticktext=ticktext,
+        x_range=[min_log - pad, max_log + pad] if total_count >= 2 else None,
     )
