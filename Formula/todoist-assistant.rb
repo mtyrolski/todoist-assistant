@@ -3,7 +3,7 @@ class TodoistAssistant < Formula
 
   desc "Local-first Todoist automation and analytics assistant"
   homepage "https://github.com/mtyrolski/todoist-assistant"
-  version "0.2.3"
+  version "0.2.4"
   url "https://github.com/mtyrolski/todoist-assistant/archive/refs/tags/todoist-assistant-v#{version}.tar.gz"
   sha256 "5142411bd2a00444ea40b692d3ebffa09e425c0506d1634182b2a1438aeb1773"
   license "MIT"

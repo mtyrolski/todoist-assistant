@@ -104,6 +104,10 @@ def _find_wix_tool(tool: str) -> str:
     if wix_root:
         candidates.append(Path(wix_root) / "bin")
 
+    for base in (Path(r"C:\\Program Files (x86)"), Path(r"C:\\Program Files")):
+        for wix_dir in sorted(base.glob("WiX Toolset v3.*")):
+            candidates.append(wix_dir / "bin")
+
     for base in (
         Path(r"C:\\Program Files (x86)\\WiX Toolset v3.11\\bin"),
         Path(r"C:\\Program Files\\WiX Toolset v3.11\\bin"),

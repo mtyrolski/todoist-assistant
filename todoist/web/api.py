@@ -194,6 +194,7 @@ _API_KEY_PLACEHOLDERS = {
     "put your api key here",
     "your todoist api key",
 }
+_API_KEY_MIN_LENGTH = 20
 
 
 def _resolve_env_path() -> Path:
@@ -215,6 +216,12 @@ def _normalize_api_key(raw: str | None) -> str:
     if value.strip().lower() in _API_KEY_PLACEHOLDERS:
         return ""
     return value
+
+
+def _looks_like_api_key(value: str) -> bool:
+    if len(value) < _API_KEY_MIN_LENGTH:
+        return False
+    return not any(char.isspace() for char in value)
 
 
 def _resolve_api_key() -> str:
@@ -1433,6 +1440,11 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
     token = _normalize_api_key(payload.get("token"))
     if not token:
         raise HTTPException(status_code=400, detail="API token is required.")
+    if not _looks_like_api_key(token):
+        raise HTTPException(
+            status_code=400,
+            detail="API token looks invalid. Use the Todoist API token (no spaces, at least 20 characters).",
+        )
     env_path = _resolve_env_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), "API_KEY", token)
