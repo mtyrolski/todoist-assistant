@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
+      </Directory>
+      <Directory Id="ProgramDataFolder">
+        <Directory Id="APPDATADIR" Name="TodoistAssistant">
+          <Directory Id="CONFIGDIR" Name="config" />
+          <Directory Id="LOGSDIR" Name="logs" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="APPSTARTMENUDIR" Name="Todoist Assistant" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="TodoistAssistantComponents">
+      <ComponentRef Id="AppShortcuts" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="AppDataPermissions" />
+      <ComponentRef Id="LogsFolder" />
+      <ComponentRef Id="TelemetryOptIn" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="APPSTARTMENUDIR">
+      <Component Id="AppShortcuts" Guid="*">
+        <Shortcut
+          Id="StartMenuShortcut"
+          Name="Todoist Assistant"
+          Description="Launch Todoist Assistant"
+          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          WorkingDirectory="APPDATADIR" />
+        <RemoveFolder Id="RemoveStartMenuDir" Directory="APPSTARTMENUDIR" On="uninstall" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="installed"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
+        <Shortcut
+          Id="DesktopShortcut"
+          Name="Todoist Assistant"
+          Description="Launch Todoist Assistant"
+          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          WorkingDirectory="APPDATADIR" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="desktop_shortcut"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="APPDATADIR">
+      <Component Id="AppDataPermissions" Guid="*">
+        <CreateFolder>
+          <util:PermissionEx User="Users" GenericAll="yes" />
+        </CreateFolder>
+        <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="appdata"
+          Type="string"
+          Value="[APPDATADIR]"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="LOGSDIR">
+      <Component Id="LogsFolder" Guid="*">
+        <CreateFolder>
+          <util:PermissionEx User="Users" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="logs"
+          Type="string"
+          Value="[LOGSDIR]"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="TelemetryOptIn" Guid="*">
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="telemetry_opt_in"
+          Type="integer"
+          Value="[WIXUI_EXITDIALOGOPTIONALCHECKBOX]"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

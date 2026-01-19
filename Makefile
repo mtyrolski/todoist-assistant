@@ -1,4 +1,4 @@
-.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent
+.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -91,3 +91,15 @@ TODOIST_AGENT_ARGS ?=
 chat_agent: ## Chat with local agent (Transformers; read-only)
 	@echo "Starting agent with TODOIST_AGENT_MODEL_ID=$(TODOIST_AGENT_MODEL_ID)"
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python -m todoist.agent.chat --model-id "$(TODOIST_AGENT_MODEL_ID)" $(TODOIST_AGENT_ARGS) --device "$(TODOIST_AGENT_DEVICE)"
+
+build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
+	uv run python3 -m scripts.build_windows
+
+build_macos_pkg: ## Build macOS pkg installer (requires macOS + pkgbuild/productbuild)
+	./scripts/build_macos_pkg.sh
+
+build_macos_app: ## Build macOS app bundle (requires macOS + PyInstaller)
+	./scripts/build_macos_app.sh
+
+build_macos_dmg: ## Build macOS DMG from the app bundle
+	./scripts/build_macos_dmg.sh

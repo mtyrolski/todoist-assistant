@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Todoist Assistant"
+    Language="1033"
+    Version="$(var.ProductVersion)"
+    Manufacturer="Todoist Assistant"
+    UpgradeCode="E7F91D5E-1B5F-4A6D-81C6-2AE4D8022C1A">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
+    <MediaTemplate />
+
+    <Feature Id="MainFeature" Title="Todoist Assistant" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="ConfigFiles" />
+      <ComponentGroupRef Id="TodoistAssistantComponents" />
+    </Feature>
+  </Product>
+</Wix>

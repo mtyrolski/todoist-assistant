@@ -29,6 +29,10 @@ jobs:
         run: |
           uv sync --locked || uv sync
 
+      - name: Check versions
+        run: |
+          uv run python3 -m scripts.check_versions
+
       - name: Run tests
         env:
           PYTHONPATH: .
@@ -36,3 +40,81 @@ jobs:
         run: |
           make test
 
+  windows-installer:
+    name: Windows installer smoke test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install WiX Toolset
+        shell: powershell
+        run: |
+          choco install wixtoolset --version=3.11.2 -y
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          uv sync --locked --group build || uv sync --group build
+
+      - name: Build MSI
+        shell: powershell
+        run: |
+          uv run python3 -m scripts.build_windows
+
+      - name: Resolve MSI path
+        shell: powershell
+        run: |
+          $msi = Get-ChildItem dist\\windows\\todoist-assistant-*.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msi) { throw \"MSI not found in dist/windows\" }
+          \"TODOIST_MSI_PATH=$($msi.FullName)\" | Out-File -FilePath $env:GITHUB_ENV -Append
+          \"TODOIST_EXPECT_DASHBOARD=1\" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Validate MSI contents
+        shell: powershell
+        run: |
+          uv run python3 -m pytest tests\\windows\\test_windows_installer.py
+
+      - name: Install and run smoke test
+        shell: powershell
+        run: |
+          $msiPath = $env:TODOIST_MSI_PATH
+          if (-not $msiPath) { throw \"TODOIST_MSI_PATH not set\" }
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.OpenDatabase($msiPath, 0)
+          $view = $db.OpenView(\"SELECT Value FROM Property WHERE Property='ProductCode'\")
+          $view.Execute()
+          $record = $view.Fetch()
+          $productCode = $record.StringData(1)
+          if (-not $productCode) { throw \"Failed to read ProductCode from MSI\" }
+
+          $install = Start-Process msiexec -ArgumentList \"/i `\"$msiPath`\" /qn\" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw \"msiexec install failed with code $($install.ExitCode)\" }
+
+          $exe = \"C:\\\\Program Files\\\\TodoistAssistant\\\\todoist-assistant.exe\"
+          if (-not (Test-Path $exe)) { throw \"Installed executable not found at $exe\" }
+
+          & $exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw \"Executable --help failed with code $LASTEXITCODE\" }
+
+          $uninstall = Start-Process msiexec -ArgumentList \"/x $productCode /qn\" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw \"msiexec uninstall failed with code $($uninstall.ExitCode)\" }
+
+          Start-Sleep -Seconds 2
+          if (Test-Path $exe) { throw \"Executable still present after uninstall\" }

@@ -1,0 +1,99 @@
+name: macOS Installer
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - '*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-installers:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          uv sync --locked --group build || uv sync --group build
+
+      - name: Version consistency check
+        run: |
+          uv run python3 -m scripts.check_versions
+
+      - name: Resolve version
+        run: |
+          echo "TODOIST_VERSION=$(uv run python3 -m scripts.get_version)" >> "$GITHUB_ENV"
+
+      - name: Build release tarball
+        run: |
+          mkdir -p dist/macos
+          tarball="dist/macos/todoist-assistant-${TODOIST_VERSION}.tar.gz"
+          git archive --format=tar.gz -o "$tarball" HEAD
+
+      - name: Build macOS pkg
+        run: |
+          ./scripts/build_macos_pkg.sh
+
+      - name: Build macOS app
+        run: |
+          ./scripts/build_macos_app.sh
+
+      - name: Build macOS dmg
+        run: |
+          ./scripts/build_macos_dmg.sh --force
+
+      - name: Run macOS install tests
+        env:
+          TODOIST_PKG_PATH: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}.pkg
+          TODOIST_BREW_FORMULA: Formula/todoist-assistant.rb
+        run: |
+          uv run python3 -m pytest tests/macos/test_macos_installers.py
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-assistant-macos
+          path: |
+            dist/macos/todoist-assistant-*.pkg
+            dist/macos/todoist-assistant-*.dmg
+            dist/macos/todoist-assistant-*.tar.gz
+
+      - name: Attach artifacts to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/macos/todoist-assistant-*.pkg
+            dist/macos/todoist-assistant-*.dmg
+            dist/macos/todoist-assistant-*.tar.gz

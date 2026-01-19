@@ -404,6 +404,13 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     # Day names for better readability
     day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
+    nonzero_counts = heatmap_data.stack()
+    nonzero_counts = nonzero_counts[nonzero_counts > 0]
+    if nonzero_counts.empty:
+        zmax = 1.0
+    else:
+        zmax = max(1.0, float(nonzero_counts.quantile(0.95)))
+
     # Create custom hover text with more information
     total_events = heatmap_data.sum().sum()
     hover_text = []
@@ -439,6 +446,8 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
         z=heatmap_data.values,
         x=all_hours,
         y=day_names,
+        zmin=0,
+        zmax=zmax,
         colorscale=[
             [0.0, '#0d1b2a'],      # Dark blue for low activity
             [0.1, '#1b263b'],      # Slightly lighter blue
@@ -1050,7 +1059,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             },
             plot_bgcolor="#111318",
             paper_bgcolor="#111318",
-            margin=dict(l=80, r=60, t=100, b=60),
+            margin=dict(l=80, r=60, t=100, b=86),
             font=dict(color="#ffffff", size=12, family="Arial, sans-serif"),
             legend=dict(
                 x=0.98,
@@ -1177,6 +1186,42 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             return None
         return x_segment, y_segment
 
+    def _format_duration_compact(seconds: float) -> str:
+        total = int(round(max(0.0, seconds)))
+        units = [
+            ("w", 7 * 24 * 60 * 60),
+            ("d", 24 * 60 * 60),
+            ("h", 60 * 60),
+            ("m", 60),
+            ("s", 1),
+        ]
+        parts: list[str] = []
+        for suffix, unit_seconds in units:
+            if total >= unit_seconds or (suffix == "s" and not parts):
+                value = total // unit_seconds
+                total = total % unit_seconds
+                parts.append(f"{value}{suffix}")
+            if len(parts) == 2:
+                break
+        return "".join(parts)
+
+    def _merge_ticks(
+        tickvals: list[float],
+        ticktext: list[str],
+        highlights: list[tuple[float, str]],
+    ) -> tuple[list[float], list[str]]:
+        import math
+
+        pairs = list(zip(tickvals, ticktext))
+        for value, label in highlights:
+            if not np.isfinite(value) or value <= 0:
+                continue
+            if any(abs(math.log10(value) - math.log10(v)) < 0.03 for v in tickvals if v > 0):
+                continue
+            pairs.append((value, label))
+        pairs.sort(key=lambda item: item[0])
+        return [value for value, _ in pairs], [label for _, label in pairs]
+
     if "type" not in df.columns:
         logger.error("DataFrame missing required 'type' column")
         return _empty_figure("Invalid data structure")
@@ -1244,6 +1289,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     min_log = float(np.log10(plot_min))
     max_log = float(np.log10(plot_max))
     pad = max(0.15, 0.1 * (max_log - min_log))
+    highlight_low = float(np.clip(percentile_low, plot_min, plot_max))
+    highlight_high = float(np.clip(percentile_high, plot_min, plot_max))
 
     fig = go.Figure()
 
@@ -1260,31 +1307,12 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             x_max = float(x_values.max())
             y_max = float(densities.max()) if densities.size else 0.0
             y_offset = 0.12 * y_max if y_max > 0 else 0.0
-            highlight_low = float(np.clip(percentile_low, x_min, x_max))
-            highlight_high = float(np.clip(percentile_high, x_min, x_max))
+            highlight_low = float(np.clip(highlight_low, x_min, x_max))
+            highlight_high = float(np.clip(highlight_high, x_min, x_max))
             highlight_specs = [
                 ("Fastest 15%", None, highlight_low, "#00E5FF"),
                 ("Slowest 15%", highlight_high, None, "#FF4F9A"),
             ]
-            annotation_specs = {
-                "Fastest 15%": {
-                    "text": "<b>15%</b><br>Fastest",
-                    "font": dict(color="#E9FBFF", size=14, family="Arial, sans-serif"),
-                    "bgcolor": _hex_to_rgba("#00E5FF", 0.18),
-                    "bordercolor": _hex_to_rgba("#00E5FF", 0.9),
-                    "xanchor": "left",
-                    "xshift": 18,
-                },
-                "Slowest 15%": {
-                    "text": "<b>15%</b><br>Slowest",
-                    "font": dict(color="#FFE6F2", size=14, family="Arial, sans-serif"),
-                    "bgcolor": _hex_to_rgba("#FF4F9A", 0.18),
-                    "bordercolor": _hex_to_rgba("#FF4F9A", 0.9),
-                    "xanchor": "right",
-                    "xshift": -18,
-                },
-            }
-            annotations: list[dict[str, object]] = []
             for name, low, high, color in highlight_specs:
                 segment = _slice_density(x_values, densities, low=low, high=high)
                 if segment is None:
@@ -1316,27 +1344,6 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                         ),
                     )
                 )
-                if y_max > 0 and name in annotation_specs:
-                    boundary_x = highlight_low if name == "Fastest 15%" else highlight_high
-                    if not np.isfinite(boundary_x):
-                        continue
-                    y_anchor = float(np.interp(boundary_x, x_values, densities))
-                    spec = annotation_specs[name]
-                    annotations.append(
-                        {
-                            "x": boundary_x,
-                            "y": min(y_anchor + y_offset, y_max * 0.95),
-                            "text": spec["text"],
-                            "showarrow": False,
-                            "xanchor": spec["xanchor"],
-                            "yanchor": "bottom",
-                            "xshift": spec["xshift"],
-                            "font": spec["font"],
-                            "bgcolor": spec["bgcolor"],
-                            "bordercolor": spec["bordercolor"],
-                            "borderwidth": 1,
-                        }
-                    )
             boundary_specs = [
                 (highlight_low, "#00E5FF"),
                 (highlight_high, "#FF4F9A"),
@@ -1354,8 +1361,6 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                     yref="paper",
                     line=dict(color=_hex_to_rgba(color, 0.85), width=2, dash="dash"),
                 )
-            for annotation in annotations:
-                fig.add_annotation(**annotation)
             fig.add_trace(
                 go.Scatter(
                     x=x_values,
@@ -1382,11 +1387,19 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(barmode="overlay", bargap=0.15)
 
     title_text = "Task Lifespans: Time to Completion"
-    x_title = f"Time to Completion ({title_unit})"
+    x_title = ""
     tickvals, ticktext = _build_time_ticks(
         min_seconds=float(max(durations.min(), plot_min * axis_unit_seconds)),
         max_seconds=float(min(durations.max(), plot_max * axis_unit_seconds)),
         axis_unit_seconds=axis_unit_seconds,
+    )
+    tickvals, ticktext = _merge_ticks(
+        tickvals,
+        ticktext,
+        [
+            (highlight_low, f"15%<br>{_format_duration_compact(highlight_low * axis_unit_seconds)}"),
+            (highlight_high, f"85%<br>{_format_duration_compact(highlight_high * axis_unit_seconds)}"),
+        ],
     )
 
     return _apply_common_layout(

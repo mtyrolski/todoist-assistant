@@ -47,6 +47,7 @@ from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.utils import Cache, LocalStorageError, load_config
+from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
 
 # FastAPI application powering the new web dashboard.
@@ -174,11 +175,64 @@ _PROGRESS_TOTAL_STEPS = 3
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_CONFIG_DIR = _REPO_ROOT / "configs"
+
+
+def _resolve_config_dir() -> Path:
+    override = os.getenv("TODOIST_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT / "configs"
+
+
+_CONFIG_DIR = _resolve_config_dir()
 _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+_API_KEY_PLACEHOLDER = "put your api here"
+
+
+def _resolve_env_path() -> Path:
+    cache_dir = os.getenv("TODOIST_CACHE_DIR")
+    if cache_dir:
+        return Path(cache_dir).expanduser().resolve() / ".env"
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    return _REPO_ROOT / ".env"
+
+
+def _normalize_api_key(raw: str | None) -> str:
+    if not raw:
+        return ""
+    value = str(raw).strip().strip("'\"")
+    if not value:
+        return ""
+    if value.strip().lower() == _API_KEY_PLACEHOLDER:
+        return ""
+    return value
+
+
+def _resolve_api_key() -> str:
+    env_value = _normalize_api_key(os.getenv("API_KEY"))
+    if env_value:
+        return env_value
+    env_path = _resolve_env_path()
+    if env_path.exists():
+        data = dotenv_values(env_path)
+        file_value = _normalize_api_key(data.get("API_KEY"))
+        if file_value:
+            os.environ["API_KEY"] = file_value
+            return file_value
+    return ""
+
+
+def _mask_api_key(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "••••"
+    return f"••••{value[-4:]}"
 
 
 @dataclass
@@ -356,7 +410,7 @@ def _stat_file(path: str) -> dict[str, Any] | None:
 
 def _service_statuses() -> list[dict[str, Any]]:
 
-    api_key_set = bool(os.getenv("API_KEY"))
+    api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file("activity.joblib")
     automation_log = _stat_file("automation.log")
     observer_state = _load_observer_state()
@@ -1350,6 +1404,42 @@ async def admin_automations() -> dict[str, Any]:
 
     automations = _load_automations()
     return {"automations": [_automation_launch_metadata(a) for a in automations]}
+
+
+@app.get("/api/admin/api_token", tags=["admin"])
+async def admin_api_token_status() -> dict[str, Any]:
+    token = _resolve_api_key()
+    env_path = _resolve_env_path()
+    return {
+        "configured": bool(token),
+        "masked": _mask_api_key(token),
+        "envPath": str(env_path),
+    }
+
+
+@app.post("/api/admin/api_token", tags=["admin"])
+async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    token = _normalize_api_key(payload.get("token"))
+    if not token:
+        raise HTTPException(status_code=400, detail="API token is required.")
+    env_path = _resolve_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    set_key(str(env_path), "API_KEY", token)
+    os.environ["API_KEY"] = token
+    return {
+        "configured": True,
+        "masked": _mask_api_key(token),
+        "envPath": str(env_path),
+    }
+
+
+@app.delete("/api/admin/api_token", tags=["admin"])
+async def admin_clear_api_token() -> dict[str, Any]:
+    env_path = _resolve_env_path()
+    if env_path.exists():
+        unset_key(str(env_path), "API_KEY")
+    os.environ.pop("API_KEY", None)
+    return {"configured": False, "masked": "", "envPath": str(env_path)}
 
 
 def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:

@@ -72,7 +72,9 @@ class LocalStorage:
 
 
 class Cache:
-    def __init__(self, path: str = './'):
+    def __init__(self, path: str | None = None):
+        if path is None:
+            path = os.getenv("TODOIST_CACHE_DIR", "./")
         self.path = path
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
         self.observer_state = LocalStorage(join(self.path, 'observer_state.joblib'), dict)
