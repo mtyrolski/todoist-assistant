@@ -14,7 +14,11 @@ def _collect(module_name):
     return datas, binaries, hiddenimports
 
 
-ROOT = Path(__file__).resolve().parents[2]
+_spec_file = globals().get("__file__")
+if _spec_file:
+    ROOT = Path(_spec_file).resolve().parents[2]
+else:
+    ROOT = Path.cwd().resolve()
 ENTRYPOINT = ROOT / "todoist" / "launcher.py"
 
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
