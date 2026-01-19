@@ -95,6 +95,18 @@ def _download_node(dist_root: Path, node_version: str, *, target_dir: Path) -> N
     shutil.copytree(extract_dir, target_dir)
 
 
+def _stage_node_runtime(app_root: Path, node_version: str) -> None:
+    node_target = app_root / "node"
+    node_exe = shutil.which("node")
+    if node_exe:
+        dest_name = "node.exe" if os.name == "nt" else "node"
+        print(f"Bundling Node runtime from {node_exe}")
+        _copy_file(Path(node_exe), node_target / dest_name)
+        return
+
+    _download_node(Path(app_root).parent, node_version, target_dir=node_target)
+
+
 def _find_wix_tool(tool: str) -> str:
     candidates: list[Path] = []
     wix_bin = os.getenv("WIX_BIN")
@@ -242,7 +254,7 @@ def _stage_assets(repo_root: Path, app_root: Path, config_stage: Path, *, includ
     if include_dashboard:
         frontend_dir = repo_root / "frontend"
         _stage_dashboard(frontend_dir, app_root)
-        _download_node(Path(app_root).parent, node_version, target_dir=app_root / "node")
+        _stage_node_runtime(app_root, node_version)
 
 
 def _build_msi(
@@ -379,8 +391,8 @@ def main() -> int:
     wix_tools = _resolve_wix_tools()
 
     if include_dashboard:
-        _require_command("node", "Install Node.js 20+ (includes npm).")
-        npm_path = _require_command("npm", "Install Node.js 20+ (includes npm).")
+        _require_command("node", "Install Node.js 20+ (includes npm), or pass --no-dashboard.")
+        npm_path = _require_command("npm", "Install Node.js 20+ (includes npm), or pass --no-dashboard.")
         print("Building dashboard...")
         _build_dashboard(repo_root / "frontend", npm_path=npm_path)
     elif not args.no_dashboard:

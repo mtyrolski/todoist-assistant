@@ -248,6 +248,8 @@ Build command (from repo root):
 
 ```powershell
 uv sync --group build
+# Windows only: ensure uv can resolve python3 in the venv
+if (-not (Test-Path .venv\Scripts\python3.exe)) { Copy-Item .venv\Scripts\python.exe .venv\Scripts\python3.exe }
 uv run python3 -m scripts.build_windows
 ```
 

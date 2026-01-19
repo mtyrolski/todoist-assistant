@@ -118,8 +118,9 @@ jobs:
           $productCode = $record.StringData(1)
           if (-not $productCode) { throw "Failed to read ProductCode from MSI" }
 
-          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn" -Wait -PassThru
-          if ($install.ExitCode -ne 0) { throw "msiexec install failed with code $($install.ExitCode)" }
+          $allowed = @(0, 3010, 1641)
+          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait -PassThru
+          if ($allowed -notcontains $install.ExitCode) { throw "msiexec install failed with code $($install.ExitCode)" }
 
           $exe = "C:\Program Files\TodoistAssistant\todoist-assistant.exe"
           if (-not (Test-Path $exe)) { throw "Installed executable not found at $exe" }
@@ -127,8 +128,8 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
-          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn" -Wait -PassThru
-          if ($uninstall.ExitCode -ne 0) { throw "msiexec uninstall failed with code $($uninstall.ExitCode)" }
+          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart" -Wait -PassThru
+          if ($allowed -notcontains $uninstall.ExitCode) { throw "msiexec uninstall failed with code $($uninstall.ExitCode)" }
 
           Start-Sleep -Seconds 2
           if (Test-Path $exe) { throw "Executable still present after uninstall" }

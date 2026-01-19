@@ -6,6 +6,8 @@ import tempfile
 
 import pytest
 
+_ALLOWED_MSIEXEC_CODES = {0, 3010, 1641}
+
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only installer test")
 def test_windows_msi_contents() -> None:
@@ -20,6 +22,7 @@ def test_windows_msi_contents() -> None:
             "/a",
             str(msi_path),
             "/qn",
+            "/norestart",
             f"TARGETDIR={temp_dir}",
         ])
 
@@ -30,7 +33,7 @@ def test_windows_msi_contents() -> None:
         _find_required(extracted_root, ".env.template")
         _find_required(extracted_root, "automations.yaml")
 
-        has_python = (app_root / "base_library.zip").exists() or any(app_root.glob("*.pyd")) or any(app_root.glob("python*.dll"))
+        has_python = _has_python_runtime(app_root)
         assert has_python, "Expected bundled Python runtime artifacts in installer payload"
 
         if expected_dashboard:
@@ -57,7 +60,7 @@ def _resolve_msi_path(repo_root: Path) -> Path:
 
 def _run_msiexec(cmd: list[str]) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
+    if result.returncode not in _ALLOWED_MSIEXEC_CODES:
         details = result.stdout.strip() or result.stderr.strip()
         raise AssertionError(f"msiexec failed ({result.returncode}): {details}")
 
@@ -67,3 +70,15 @@ def _find_required(root: Path, filename: str) -> Path:
     if not matches:
         raise AssertionError(f"Required file missing from MSI payload: {filename}")
     return matches[0]
+
+
+def _has_python_runtime(app_root: Path) -> bool:
+    candidates = [app_root, app_root / "_internal"]
+    for root in candidates:
+        if (root / "base_library.zip").exists():
+            return True
+        if any(root.glob("*.pyd")):
+            return True
+        if any(root.glob("python*.dll")):
+            return True
+    return False
