@@ -5,6 +5,8 @@
       <Directory Id="ProgramFilesFolder">
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
+      <Directory Id="ProgramMenuFolder" />
+      <Directory Id="CommonDesktopFolder" />
       <Directory Id="CommonAppDataFolder">
         <Directory Id="APPDATADIR" Name="TodoistAssistant">
           <Directory Id="CONFIGDIR" Name="config" />
