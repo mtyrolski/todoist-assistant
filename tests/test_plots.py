@@ -113,7 +113,7 @@ def test_plot_task_lifespans_with_valid_data(sample_task_events_df):
     # Check axis labels exist
     assert fig.layout.xaxis.title is not None
     assert fig.layout.yaxis.title is not None
-    assert 'Time to Completion' in fig.layout.xaxis.title.text
+    assert fig.layout.xaxis.title.text == ''
     assert 'Frequency' in fig.layout.yaxis.title.text
 
 
@@ -257,8 +257,10 @@ def test_plot_task_lifespans_time_unit_selection():
 
     fig = plot_task_lifespans(df_minutes)
     assert isinstance(fig, go.Figure)
-    # Should use minutes or hours
-    assert 'min' in fig.layout.xaxis.title.text or 'hr' in fig.layout.xaxis.title.text
+    # Should show minute or hour units in the tick labels
+    ticktext_minutes = fig.layout.xaxis.ticktext or []
+    joined_minutes = " ".join(str(item) for item in ticktext_minutes)
+    assert any(unit in joined_minutes for unit in ("m", "h"))
 
     # Test with longer durations (days)
     data_days = {
@@ -277,8 +279,10 @@ def test_plot_task_lifespans_time_unit_selection():
 
     fig = plot_task_lifespans(df_days)
     assert isinstance(fig, go.Figure)
-    # Should use days
-    assert 'days' in fig.layout.xaxis.title.text
+    # Should show day/week units in the tick labels
+    ticktext_days = fig.layout.xaxis.ticktext or []
+    joined_days = " ".join(str(item) for item in ticktext_days)
+    assert any(unit in joined_days for unit in ("d", "w"))
 
 
 def test_plot_task_lifespans_handles_missing_task_names():

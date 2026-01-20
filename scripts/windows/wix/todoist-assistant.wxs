@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product
+    Id="*"
+    Name="Todoist Assistant"
+    Language="1033"
+    Version="$(var.ProductVersion)"
+    Manufacturer="Todoist Assistant"
+    UpgradeCode="E7F91D5E-1B5F-4A6D-81C6-2AE4D8022C1A">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
+    <MediaTemplate />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="TodoistAssistant">
+          <Directory Id="FRONTENDDIR" Name="frontend" />
+          <Directory Id="NODEDIR" Name="node" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramDataFolder">
+        <Directory Id="APPDATADIR" Name="TodoistAssistant">
+          <Directory Id="CONFIGDIR" Name="config" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="APPSTARTMENUDIR" Name="Todoist Assistant" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <Feature Id="ProductFeature" Title="Todoist Assistant" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="FrontendFiles" />
+      <ComponentGroupRef Id="NodeFiles" />
+      <ComponentGroupRef Id="ConfigFiles" />
+      <ComponentRef Id="AppShortcuts" />
+      <ComponentRef Id="AppDataPermissions" />
+    </Feature>
+
+    <UIRef Id="WixUI_Minimal" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+  </Product>
+
+  <Fragment>
+    <DirectoryRef Id="APPSTARTMENUDIR">
+      <Component Id="AppShortcuts" Guid="*">
+        <Shortcut
+          Id="StartMenuShortcut"
+          Name="Todoist Assistant"
+          Description="Launch Todoist Assistant"
+          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          WorkingDirectory="APPDATADIR" />
+        <Shortcut
+          Id="DesktopShortcut"
+          Directory="DesktopFolder"
+          Name="Todoist Assistant"
+          Description="Launch Todoist Assistant"
+          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          WorkingDirectory="APPDATADIR" />
+        <RemoveFolder Id="RemoveStartMenuDir" Directory="APPSTARTMENUDIR" On="uninstall" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="installed"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="APPDATADIR">
+      <Component Id="AppDataPermissions" Guid="*">
+        <CreateFolder>
+          <util:PermissionEx User="Users" GenericAll="yes" />
+        </CreateFolder>
+        <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\\TodoistAssistant"
+          Name="appdata"
+          Type="string"
+          Value="[APPDATADIR]"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

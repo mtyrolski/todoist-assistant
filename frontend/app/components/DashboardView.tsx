@@ -12,6 +12,7 @@ import { AdminPanel } from "./AdminPanel";
 import { LlmBreakdownStatus } from "./LlmBreakdownStatus";
 import { ObserverControl } from "./ObserverControl";
 import { InfoTip } from "./InfoTip";
+import { StatusPills } from "./StatusPills";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -63,6 +64,8 @@ export function DashboardView() {
   const rootBoard = lastWeek?.rootProjects?.items ?? null;
   const metricsCurrentPeriod = dashboard?.metrics.currentPeriod ?? "";
   const metricsPreviousPeriod = dashboard?.metrics.previousPeriod ?? "";
+  const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
+  const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
     { id: "insights", label: "Insights" },
     { id: "labels-lifespans", label: "Labels + Lifespans" },
@@ -71,6 +74,60 @@ export function DashboardView() {
     { id: "completed-tasks", label: "Completions" },
     { id: "events", label: "Events" },
     { id: "ops", label: "Activity & Ops" }
+  ];
+  const insightItems = dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null);
+  const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
+  const labelPlots = [
+    {
+      title: "Most Popular Labels",
+      figure: figures.mostPopularLabels,
+      height: 420,
+      help: PLOT_HELP.mostPopularLabels
+    },
+    {
+      title: "Task Lifespans: Time to Completion",
+      figure: figures.taskLifespans,
+      height: 420,
+      help: PLOT_HELP.taskLifespans
+    }
+  ];
+  const completionPlots = [
+    {
+      title: "Periodically Completed Tasks Per Project",
+      figure: figures.completedTasksPeriodically,
+      height: 520,
+      help: PLOT_HELP.completedTasksPeriodically
+    },
+    {
+      title: "Cumulative Periodically Completed Tasks Per Project",
+      figure: figures.cumsumCompletedTasksPeriodically,
+      height: 520,
+      help: PLOT_HELP.cumsumCompletedTasksPeriodically
+    }
+  ];
+  const eventPlots = [
+    {
+      title: "Heatmap of Events by Day and Hour",
+      figure: figures.heatmapEventsByDayHour,
+      height: 520,
+      help: PLOT_HELP.heatmapEventsByDayHour
+    },
+    {
+      title: "Events Over Time",
+      figure: figures.eventsOverTime,
+      height: 520,
+      help: PLOT_HELP.eventsOverTime
+    }
+  ];
+  const onAfterMutation = () => {
+    refresh();
+    refreshStatus();
+  };
+  const badgeItems = [
+    { key: "p1", label: "P1", className: "badge badge-p1", value: dashboard?.badges.p1 },
+    { key: "p2", label: "P2", className: "badge badge-p2", value: dashboard?.badges.p2 },
+    { key: "p3", label: "P3", className: "badge badge-p3", value: dashboard?.badges.p3 },
+    { key: "p4", label: "P4", className: "badge badge-p4", value: dashboard?.badges.p4 }
   ];
 
   return (
@@ -81,18 +138,16 @@ export function DashboardView() {
           <p className="eyebrow">Todoist Assistant</p>
           <h1>Dashboard</h1>
           <p className="lede">A fast, local dashboard for your Todoist data and automations.</p>
-          <div className="status-row">
-            <span className={`pill ${health?.status === "ok" ? "pill-good" : "pill-warn"}`}>
-              {loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline"}
-            </span>
-            {health?.version ? <span className="pill pill-neutral">v{health.version}</span> : null}
-            <span className="pill pill-neutral" title={syncTitle}>
-              {syncLabel}
-            </span>
-            {periodLabel && <span className="pill">{periodLabel}</span>}
-            {dashboardError && <span className="pill pill-warn">{dashboardError}</span>}
-            {error && <span className="pill pill-warn">{error}</span>}
-          </div>
+          <StatusPills
+            items={[
+              { label: healthLabel, tone: healthTone },
+              { label: health?.version ? `v${health.version}` : "", tone: "neutral" },
+              { label: syncLabel, tone: "neutral", title: syncTitle },
+              { label: periodLabel ?? "" },
+              { label: dashboardError ?? "", tone: "warn" },
+              { label: error ?? "", tone: "warn" }
+            ]}
+          />
         </div>
         <div className="controls">
           <div className="control">
@@ -192,7 +247,7 @@ export function DashboardView() {
       </nav>
 
       <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
-        {(dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null)).map((it, idx) =>
+        {insightItems.map((it, idx) =>
           it ? (
             <InsightCard
               key={`${it.title}-${idx}`}
@@ -211,22 +266,13 @@ export function DashboardView() {
       </section>
 
       <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
-        <PlotCard
-          title="Most Popular Labels"
-          figure={figures.mostPopularLabels}
-          height={420}
-          help={PLOT_HELP.mostPopularLabels}
-        />
-        <PlotCard
-          title="Task Lifespans: Time to Completion"
-          figure={figures.taskLifespans}
-          height={420}
-          help={PLOT_HELP.taskLifespans}
-        />
+        {labelPlots.map((plot) => (
+          <PlotCard key={plot.title} {...plot} />
+        ))}
       </section>
 
       <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
-        {(dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null)).map((m, idx) =>
+        {metricItems.map((m, idx) =>
           m ? (
             <StatCard
               key={m.name}
@@ -250,41 +296,24 @@ export function DashboardView() {
           <InfoTip label="About priority badges" content={BADGES_HELP} />
         </div>
         <div className="badges">
-          <span className="badge badge-p1">P1 {dashboard?.badges.p1 ?? "-"}</span>
-          <span className="badge badge-p2">P2 {dashboard?.badges.p2 ?? "-"}</span>
-          <span className="badge badge-p3">P3 {dashboard?.badges.p3 ?? "-"}</span>
-          <span className="badge badge-p4">P4 {dashboard?.badges.p4 ?? "-"}</span>
+          {badgeItems.map((item) => (
+            <span key={item.key} className={item.className}>
+              {item.label} {item.value ?? "-"}
+            </span>
+          ))}
         </div>
       </section>
 
       <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
-        <PlotCard
-          title="Periodically Completed Tasks Per Project"
-          figure={figures.completedTasksPeriodically}
-          height={520}
-          help={PLOT_HELP.completedTasksPeriodically}
-        />
-        <PlotCard
-          title="Cumulative Periodically Completed Tasks Per Project"
-          figure={figures.cumsumCompletedTasksPeriodically}
-          height={520}
-          help={PLOT_HELP.cumsumCompletedTasksPeriodically}
-        />
+        {completionPlots.map((plot) => (
+          <PlotCard key={plot.title} {...plot} />
+        ))}
       </section>
 
       <section id="events" className="stack jumpTarget" aria-label="Event trends">
-        <PlotCard
-          title="Heatmap of Events by Day and Hour"
-          figure={figures.heatmapEventsByDayHour}
-          height={520}
-          help={PLOT_HELP.heatmapEventsByDayHour}
-        />
-        <PlotCard
-          title="Events Over Time"
-          figure={figures.eventsOverTime}
-          height={520}
-          help={PLOT_HELP.eventsOverTime}
-        />
+        {eventPlots.map((plot) => (
+          <PlotCard key={plot.title} {...plot} />
+        ))}
       </section>
 
       <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">
@@ -315,12 +344,7 @@ export function DashboardView() {
         </section>
 
         <section className="stack">
-          <AdminPanel
-            onAfterMutation={() => {
-              refresh();
-              refreshStatus();
-            }}
-          />
+          <AdminPanel onAfterMutation={onAfterMutation} />
 
           <LlmBreakdownStatus
             progress={llmProgress}
@@ -328,12 +352,7 @@ export function DashboardView() {
             onRefresh={refreshLlmProgress}
           />
 
-          <ObserverControl
-            onAfterMutation={() => {
-              refresh();
-              refreshStatus();
-            }}
-          />
+          <ObserverControl onAfterMutation={onAfterMutation} />
 
           <ServiceMonitor services={status?.services ?? null} onRefresh={refreshStatus} />
         </section>

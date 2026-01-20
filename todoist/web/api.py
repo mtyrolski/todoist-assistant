@@ -1,9 +1,9 @@
+# pylint: disable=global-statement,too-many-lines
+
 import asyncio
 from collections.abc import Mapping
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-# NOTE: This file is intentionally lightweight (dashboard API).
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
@@ -47,6 +47,7 @@ from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.utils import Cache, LocalStorageError, load_config
+from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
 
 # FastAPI application powering the new web dashboard.
@@ -174,11 +175,81 @@ _PROGRESS_TOTAL_STEPS = 3
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_CONFIG_DIR = _REPO_ROOT / "configs"
+
+
+def _resolve_config_dir() -> Path:
+    override = os.getenv("TODOIST_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT / "configs"
+
+
+_CONFIG_DIR = _resolve_config_dir()
 _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+_API_KEY_PLACEHOLDERS = {
+    "put your api here",
+    "put your api key here",
+    "your todoist api key",
+}
+_API_KEY_MIN_LENGTH = 20
+_API_KEY_HEX_RE = re.compile(r"^[a-fA-F0-9]{32,64}$")
+_API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
+
+
+def _resolve_env_path() -> Path:
+    cache_dir = os.getenv("TODOIST_CACHE_DIR")
+    if cache_dir:
+        return Path(cache_dir).expanduser().resolve() / ".env"
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    return _REPO_ROOT / ".env"
+
+
+def _normalize_api_key(raw: str | None) -> str:
+    if not raw:
+        return ""
+    value = str(raw).strip().strip("'\"")
+    if not value:
+        return ""
+    if value.strip().lower() in _API_KEY_PLACEHOLDERS:
+        return ""
+    return value
+
+
+def _looks_like_api_key(value: str) -> bool:
+    if len(value) < _API_KEY_MIN_LENGTH:
+        return False
+    if any(char.isspace() for char in value):
+        return False
+    if _API_KEY_HEX_RE.fullmatch(value):
+        return True
+    return _API_KEY_FALLBACK_RE.fullmatch(value) is not None
+
+
+def _resolve_api_key() -> str:
+    env_value = _normalize_api_key(os.getenv("API_KEY"))
+    if env_value:
+        return env_value
+    env_path = _resolve_env_path()
+    if env_path.exists():
+        data = dotenv_values(env_path)
+        file_value = _normalize_api_key(data.get("API_KEY"))
+        if file_value:
+            os.environ["API_KEY"] = file_value
+            return file_value
+    return ""
+
+
+def _mask_api_key(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "••••"
+    return f"••••{value[-4:]}"
 
 
 @dataclass
@@ -273,8 +344,8 @@ async def _finish_progress(error: str | None = None) -> None:
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
     # Reset progress state to clear any stale information from previous failed refreshes
-    _finish_progress(error=None)
-    
+    _run_async_in_main_loop(_finish_progress(error=None))
+
     error: str | None = None
     try:
         _run_async_in_main_loop(_set_progress(
@@ -309,6 +380,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             label_ori2anonym = anonymize_label_names(active_projects)
             dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
 
+        if demo_mode:
+            from todoist.database.demo import anonymize_activity_dates
+
+            df_activity = anonymize_activity_dates(df_activity)
+
         project_colors = dbio.fetch_mapping_project_name_to_color()
         label_colors = dbio.fetch_label_colors()
 
@@ -329,7 +405,6 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
     global _main_loop
-    now = time.time()
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
     if not refresh and _state.db is not None and _state.demo_mode == desired_demo:
         return
@@ -356,7 +431,7 @@ def _stat_file(path: str) -> dict[str, Any] | None:
 
 def _service_statuses() -> list[dict[str, Any]]:
 
-    api_key_set = bool(os.getenv("API_KEY"))
+    api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file("activity.joblib")
     automation_log = _stat_file("automation.log")
     observer_state = _load_observer_state()
@@ -772,7 +847,9 @@ async def _run_llm_chat_queue() -> None:
                         for msg in (conversation.get("messages") or [])
                         if msg.get("role") and msg.get("content")
                     ]
-                    state = {"messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]}
+                    state: Any = {
+                        "messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]
+                    }
                     result = await asyncio.to_thread(agent.invoke, state)
                     messages = result.get("messages") if isinstance(result, dict) else None
                     if not isinstance(messages, list):
@@ -812,7 +889,7 @@ async def _run_llm_chat_queue() -> None:
                     messages = _build_chat_messages(conversation, next_item["content"])
                     response = await asyncio.to_thread(model.chat, messages)
                     response_text = _sanitize_text(response) or ""
-                    
+
                     # Only save messages if we got a non-empty response
                     if not response_text:
                         # Mark as failed if response is empty
@@ -825,7 +902,7 @@ async def _run_llm_chat_queue() -> None:
                                 queue_item["error"] = "Empty response from model"
                                 _save_llm_chat_queue(queue)
                         continue
-                    
+
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
@@ -990,12 +1067,12 @@ async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) ->
 @app.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
 async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     """Fetch a conversation transcript."""
-    
+
     # Validate conversation_id format (should be a valid UUID)
     try:
         UUID(conversation_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID format") from exc
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
@@ -1352,6 +1429,47 @@ async def admin_automations() -> dict[str, Any]:
     return {"automations": [_automation_launch_metadata(a) for a in automations]}
 
 
+@app.get("/api/admin/api_token", tags=["admin"])
+async def admin_api_token_status() -> dict[str, Any]:
+    token = _resolve_api_key()
+    env_path = _resolve_env_path()
+    return {
+        "configured": bool(token),
+        "masked": _mask_api_key(token),
+        "envPath": str(env_path),
+    }
+
+
+@app.post("/api/admin/api_token", tags=["admin"])
+async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    token = _normalize_api_key(payload.get("token"))
+    if not token:
+        raise HTTPException(status_code=400, detail="API token is required.")
+    if not _looks_like_api_key(token):
+        raise HTTPException(
+            status_code=400,
+            detail="API token looks invalid. Use the Todoist API token (no spaces, at least 20 characters).",
+        )
+    env_path = _resolve_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    set_key(str(env_path), "API_KEY", token)
+    os.environ["API_KEY"] = token
+    return {
+        "configured": True,
+        "masked": _mask_api_key(token),
+        "envPath": str(env_path),
+    }
+
+
+@app.delete("/api/admin/api_token", tags=["admin"])
+async def admin_clear_api_token() -> dict[str, Any]:
+    env_path = _resolve_env_path()
+    if env_path.exists():
+        unset_key(str(env_path), "API_KEY")
+    os.environ.pop("API_KEY", None)
+    return {"configured": False, "masked": "", "envPath": str(env_path)}
+
+
 def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:
     output_stream = io.StringIO()
     started_at = datetime.now()
@@ -1542,7 +1660,7 @@ def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _build_observer(db: Database) -> AutomationObserver:
-    config = load_config("automations", str((_REPO_ROOT / "configs").resolve()))
+    config = load_config("automations", str(_CONFIG_DIR.resolve()))
     activity_automation: Activity = hydra.utils.instantiate(cast(DictConfig, config).activity)
     automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
     short_automations = [auto for auto in automations if not isinstance(auto, Activity)]
@@ -1750,7 +1868,7 @@ def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
         raise HTTPException(status_code=500, detail=f"Failed to read {path.name}: {exc}") from exc
     if loaded is None:
         return OmegaConf.create({})
-    return loaded
+    return cast(DictConfig, loaded)
 
 
 def _save_yaml_config(path: Path, config: DictConfig) -> None:
@@ -1977,8 +2095,8 @@ async def admin_update_llm_breakdown_settings(
         default_variant = updates.get("default_variant") or (
             snapshot.get("default_variant") if isinstance(snapshot, Mapping) else None
         )
-        variants = updates.get("variants") or (snapshot.get("variants") if isinstance(snapshot, Mapping) else None)
-        if default_variant and isinstance(variants, Mapping) and default_variant not in variants:
+        variants_value = updates.get("variants") or (snapshot.get("variants") if isinstance(snapshot, Mapping) else None)
+        if default_variant and isinstance(variants_value, Mapping) and default_variant not in variants_value:
             raise HTTPException(status_code=400, detail="defaultVariant must exist in variants")
 
     config["llm_breakdown"] = lb_config
@@ -2057,7 +2175,8 @@ def _template_summary(path: Path) -> dict[str, Any]:
         data = {}
     category = path.parent.name
     name = path.stem
-    children = data.get("children") if isinstance(data.get("children"), list) else []
+    raw_children = data.get("children")
+    children: list[Any] = raw_children if isinstance(raw_children, list) else []
     return {
         "category": category,
         "name": name,
@@ -2095,11 +2214,12 @@ async def admin_template_detail(category: str, name: str) -> dict[str, Any]:
     data = OmegaConf.to_container(cfg, resolve=False)
     if not isinstance(data, dict):
         data = {}
+    template_payload = cast(Mapping[str, Any], data)
     return {
         "category": safe_category,
         "name": safe_name,
         "label": f"template-{safe_name}",
-        "template": _template_to_camel(data),
+        "template": _template_to_camel(template_payload),
     }
 
 

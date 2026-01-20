@@ -1,0 +1,185 @@
+name: Windows Installer
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - '*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install WiX Toolset
+        shell: powershell
+        run: |
+          choco install wixtoolset -y --no-progress
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          uv sync --locked --group build
+          if ($LASTEXITCODE -ne 0) {
+            uv sync --group build
+            if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
+          }
+
+      - name: Ensure python3 shim for uv run
+        shell: powershell
+        run: |
+          $venv = ".venv\\Scripts"
+          $python = Join-Path $venv "python.exe"
+          $python3 = Join-Path $venv "python3.exe"
+          if ((Test-Path $python) -and (-not (Test-Path $python3))) {
+            Copy-Item $python $python3
+          }
+
+      - name: Build MSI
+        shell: powershell
+        run: |
+          uv run python3 -m scripts.build_windows
+
+      - name: Resolve MSI path
+        shell: powershell
+        run: |
+          $msi = Get-ChildItem dist\windows\todoist-assistant-*.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found in dist/windows" }
+          "TODOIST_MSI_PATH=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TODOIST_EXPECT_DASHBOARD=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run installer content tests
+        shell: powershell
+        run: |
+          uv run python3 -m pytest tests\windows\test_windows_installer.py
+
+      - name: Install and run smoke test
+        shell: powershell
+        run: |
+          $msiPath = $env:TODOIST_MSI_PATH
+          if (-not $msiPath) { throw "TODOIST_MSI_PATH not set" }
+          Write-Host "MSI path: $msiPath"
+          Write-Host "Runner temp: $env:RUNNER_TEMP"
+          Write-Host ("Runner user: {0}" -f (whoami))
+          $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+          Write-Host ("Is admin: {0}" -f $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator))
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $summary = $installer.SummaryInformation($msiPath, 0)
+          $template = $summary.Property(7)
+          $arch = if ($template -match "x64|AMD64") { "x64" } else { "x86" }
+          Write-Host "MSI template: $template"
+          Write-Host "Detected MSI arch: $arch"
+
+          $logPath = Join-Path $env:RUNNER_TEMP "todoist-assistant-msi-install.log"
+          if (Test-Path $logPath) { Remove-Item $logPath -Force }
+          Write-Host "MSI log: $logPath"
+
+          Get-Process todoist-assistant -ErrorAction SilentlyContinue | Stop-Process -Force
+          $programFilesX86 = ${env:ProgramFiles(x86)}
+          $programFiles64 = $env:ProgramFiles
+          $programFilesRoot = if ($arch -eq "x64" -and $programFiles64) { $programFiles64 } elseif ($programFilesX86) { $programFilesX86 } else { $programFiles64 }
+          $installDirs = @(
+            "C:\\TodoistAssistant",
+            "$programFilesRoot\\TodoistAssistant",
+            "C:\\Program Files\\TodoistAssistant",
+            "C:\\Program Files (x86)\\TodoistAssistant"
+          ) | Select-Object -Unique
+          $installDirs | Where-Object { Test-Path $_ } | ForEach-Object { Remove-Item -Recurse -Force $_ }
+          $dataDir = "C:\\ProgramData\\TodoistAssistant"
+          if (Test-Path $dataDir) { Remove-Item -Recurse -Force $dataDir }
+
+          $allowed = @(0, 3010, 1641)
+          $installDir = $installDirs[0]
+          Write-Host "Install dir: $installDir"
+          $installArgs = "/i `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" WIXUI_EXITDIALOGOPTIONALCHECKBOX=0 SKIP_TELEMETRY_REGISTRY=1 /l*v `"$logPath`""
+          Write-Host "msiexec install args: $installArgs"
+          $install = Start-Process msiexec -ArgumentList $installArgs -Wait -PassThru
+          if ($allowed -notcontains $install.ExitCode) {
+            if (Test-Path $logPath) {
+              $matches = Select-String -Path $logPath -Pattern "Error 1406|Return value 3" -Context 8,8
+              if ($matches) {
+                $matches | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext }
+              } else {
+                Get-Content $logPath -Tail 200
+              }
+            }
+            throw "msiexec install failed with code $($install.ExitCode)"
+          }
+
+          $exeCandidates = $installDirs | ForEach-Object { Join-Path $_ "todoist-assistant.exe" }
+          $exe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "Installed executable not found at any expected path." }
+
+          & $exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
+
+          $uninstallArgs = "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`""
+          Write-Host "msiexec uninstall args: $uninstallArgs"
+          $uninstall = Start-Process msiexec -ArgumentList $uninstallArgs -Wait -PassThru
+          if ($allowed -notcontains $uninstall.ExitCode) {
+            if (Test-Path $logPath) {
+              $matches = Select-String -Path $logPath -Pattern "Error 1406|Return value 3" -Context 8,8
+              if ($matches) {
+                $matches | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext }
+              } else {
+                Get-Content $logPath -Tail 200
+              }
+            }
+            throw "msiexec uninstall failed with code $($uninstall.ExitCode)"
+          }
+
+          Start-Sleep -Seconds 2
+          $remaining = $exeCandidates | Where-Object { Test-Path $_ }
+          if ($remaining) { throw "Executable still present after uninstall: $($remaining -join ', ')" }
+
+      - name: Upload MSI install log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-assistant-msi-install-log
+          path: ${{ runner.temp }}/todoist-assistant-msi-install.log
+          if-no-files-found: ignore
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-assistant-msi
+          path: dist/windows/todoist-assistant-*.msi
+
+      - name: Attach MSI to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/windows/todoist-assistant-*.msi

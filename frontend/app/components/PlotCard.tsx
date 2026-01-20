@@ -38,16 +38,19 @@ export function PlotCard({
         ) : (
           <Plot
             data={figure.data as PlotParams["data"]}
-            layout={{
-              ...(figure.layout ?? {}),
-              autosize: true,
-              height,
-              paper_bgcolor: "rgba(0,0,0,0)",
-              plot_bgcolor: "rgba(0,0,0,0)",
-              font: { color: "#e8ecf2" },
-              template: "plotly_dark",
-              margin: { l: 48, r: 18, t: 56, b: 46 }
-            }}
+            layout={(() => {
+              const { title: _title, ...baseLayout } = figure.layout ?? {};
+              return {
+                ...baseLayout,
+                autosize: true,
+                height,
+                paper_bgcolor: "rgba(0,0,0,0)",
+                plot_bgcolor: "rgba(0,0,0,0)",
+                font: { color: "#e8ecf2" },
+                template: "plotly_dark",
+                margin: { l: 48, r: 18, t: 56, b: 46 }
+              };
+            })()}
             config={{
               displayModeBar: false,
               responsive: true,

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { InfoTip } from "./InfoTip";
 
-type Tab = "automations" | "logs" | "adjustments";
+type Tab = "automations" | "logs" | "adjustments" | "settings";
 
 type AutomationInfo = {
   name: string;
@@ -63,7 +63,14 @@ Manage automations, logs, and project mappings.
 
 - Automations follow the same cooldown rules as the observer.
 - Logs read from local files for quick debugging.
-- Adjustments map archived projects to active roots.`;
+- Adjustments map archived projects to active roots.
+- Settings updates your local Todoist API token.`;
+
+type ApiTokenStatus = {
+  configured: boolean;
+  masked: string;
+  envPath: string;
+};
 
 function formatLaunchMeta(a: AutomationInfo): string {
   const last = a.lastLaunch ? `last: ${a.lastLaunch}` : "never run";
@@ -93,6 +100,13 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [selectedArchived, setSelectedArchived] = useState<string>("");
   const [selectedActive, setSelectedActive] = useState<string>("");
   const [savingAdjustments, setSavingAdjustments] = useState(false);
+
+  const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
+  const [tokenDraft, setTokenDraft] = useState<string>("");
+  const [tokenSaving, setTokenSaving] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [tokenNotice, setTokenNotice] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
 
   const mergedMappings = mappingDraft;
 
@@ -146,6 +160,21 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       }
     };
     loadAdjustments();
+  }, []);
+
+  const loadApiToken = async () => {
+    try {
+      const res = await fetch("/api/admin/api_token");
+      const payload = (await res.json()) as ApiTokenStatus;
+      if (!res.ok) throw new Error("api_token");
+      setTokenStatus(payload);
+    } catch {
+      setTokenStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    loadApiToken();
   }, []);
 
   const waitForJob = async (jobId: string): Promise<AdminJob> => {
@@ -277,6 +306,53 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     }
   };
 
+  const saveApiToken = async () => {
+    if (!tokenDraft.trim()) {
+      setTokenError("Paste your Todoist API token.");
+      return;
+    }
+    try {
+      setTokenSaving(true);
+      setTokenError(null);
+      setTokenNotice(null);
+      const res = await fetch("/api/admin/api_token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: tokenDraft.trim() })
+      });
+      const payload = (await res.json()) as ApiTokenStatus & { detail?: string };
+      if (!res.ok) {
+        throw new Error(payload.detail ?? "Failed to save token");
+      }
+      setTokenStatus(payload);
+      setTokenDraft("");
+      setTokenNotice("API token saved.");
+      onAfterMutation();
+    } catch (e) {
+      setTokenError(e instanceof Error ? e.message : "Failed to save token");
+    } finally {
+      setTokenSaving(false);
+    }
+  };
+
+  const clearApiToken = async () => {
+    try {
+      setTokenSaving(true);
+      setTokenError(null);
+      setTokenNotice(null);
+      const res = await fetch("/api/admin/api_token", { method: "DELETE" });
+      const payload = (await res.json()) as ApiTokenStatus;
+      if (!res.ok) throw new Error("clear_token");
+      setTokenStatus(payload);
+      setTokenNotice("API token removed.");
+      onAfterMutation();
+    } catch (e) {
+      setTokenError(e instanceof Error ? e.message : "Failed to clear token");
+    } finally {
+      setTokenSaving(false);
+    }
+  };
+
   const mappingRows = useMemo(() => {
     const entries = Object.entries(mergedMappings);
     entries.sort(([a], [b]) => a.localeCompare(b));
@@ -299,6 +375,9 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
           </button>
           <button className={`seg ${tab === "adjustments" ? "segActive" : ""}`} onClick={() => setTab("adjustments")} type="button">
             Project Adjustments
+          </button>
+          <button className={`seg ${tab === "settings" ? "segActive" : ""}`} onClick={() => setTab("settings")} type="button">
+            Settings
           </button>
         </div>
       </header>
@@ -563,6 +642,63 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
               </div>
             </>
           )}
+        </div>
+      ) : null}
+
+      {tab === "settings" ? (
+        <div className="stack">
+          <div className="card cardInner">
+            <header className="cardHeader">
+              <h3>Todoist API Token</h3>
+            </header>
+            <div className="stack">
+              <p className="muted tiny" style={{ margin: 0 }}>
+                Paste your Todoist API token to enable the dashboard. Find it in Todoist: Settings → Integrations → Developer.
+              </p>
+              <div className="adminRow">
+                <span className={`pill ${tokenStatus?.configured ? "pill-good" : "pill-warn"}`}>
+                  {tokenStatus?.configured ? `Configured (${tokenStatus.masked})` : "Missing token"}
+                </span>
+                {tokenStatus?.envPath ? (
+                  <span className="muted tiny" style={{ marginLeft: 8 }}>
+                    {tokenStatus.envPath}
+                  </span>
+                ) : null}
+              </div>
+              <div className="control">
+                <label className="muted tiny" htmlFor="api-token-input">
+                  API token
+                </label>
+                <input
+                  id="api-token-input"
+                  className="dateInput"
+                  type={showToken ? "text" : "password"}
+                  placeholder="Paste token here"
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                />
+              </div>
+              <div className="adminRow">
+                <div className="adminRowRight">
+                  <label className="muted tiny" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="checkbox" checked={showToken} onChange={(e) => setShowToken(e.target.checked)} />
+                    Show
+                  </label>
+                  <button className="button buttonSmall" type="button" onClick={saveApiToken} disabled={tokenSaving}>
+                    {tokenSaving ? "Saving…" : "Save token"}
+                  </button>
+                  <button className="button buttonSmall" type="button" onClick={clearApiToken} disabled={tokenSaving}>
+                    Clear token
+                  </button>
+                  <button className="button buttonSmall" type="button" onClick={loadApiToken} disabled={tokenSaving}>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              {tokenError ? <p className="pill pill-warn">{tokenError}</p> : null}
+              {tokenNotice ? <p className="pill">{tokenNotice}</p> : null}
+            </div>
+          </div>
         </div>
       ) : null}
     </section>

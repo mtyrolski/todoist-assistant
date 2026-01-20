@@ -1,6 +1,6 @@
 [project]
 name = "todoist-assistant"
-version = "0.2.3"
+version = "0.2.4"
 description = "Interactive Dashboard"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -47,3 +47,13 @@ dev = [
     "pylint>=3.0",
     "pyright>=1.1.0",
 ]
+build = [
+    "pyinstaller>=6.10.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["todoist", "todoist.*"]

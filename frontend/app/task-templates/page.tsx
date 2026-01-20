@@ -1,19 +1,16 @@
 "use client";
 
+import { PageHeader } from "../components/PageHeader";
 import { TaskTemplateManager } from "../components/TaskTemplateManager";
 
 export default function TaskTemplatesPage() {
   return (
     <>
-      <header className="pageHeader">
-        <div>
-          <p className="eyebrow">Task Templates</p>
-          <h1>Reusable Task Blueprints</h1>
-          <p className="lede">
-            Create, edit, and organize templates that expand into full task trees when you apply a template label.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="Task Templates"
+        title="Reusable Task Blueprints"
+        lede="Create, edit, and organize templates that expand into full task trees when you apply a template label."
+      />
       <TaskTemplateManager />
     </>
   );

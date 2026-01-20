@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 from loguru import logger
 
-from todoist.types import Task
+from todoist.types import Task, TaskEntry
 
 
 # === LLM UTILS ===============================================================
@@ -64,7 +62,7 @@ def _task_from_api_payload(payload: Mapping[str, Any] | None) -> Task | None:
         v2_parent_id=str(v2_parent_id) if v2_parent_id is not None else None,
         v2_id=str(v2_id) if v2_id is not None else None,
     )
-    return Task(id=str(task_id), task_entry=entry)
+    return Task(id=str(task_id), task_entry=cast(TaskEntry, entry))
 
 
 def _render_ancestor_context(ancestors: Iterable[Mapping[str, str | None]]) -> str | None:

@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
+from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Any, cast
 from uuid import uuid4
@@ -15,47 +14,80 @@ from todoist.types import Task
 from todoist.utils import Cache
 
 from .config import build_system_prompt, coerce_model_config, merge_variants, resolve_variant
-from .models import BreakdownNode, QueueContext, QueueItem
+from .models import BreakdownNode, InsertContext, QueueItem
 from .runner import run_breakdown
 
 
 # === LLM BREAKDOWN AUTOMATION ================================================
+
+
+@dataclass(frozen=True)
+class BreakdownSettings:
+    label_prefix: str = "llm-"
+    default_variant: str = "breakdown"
+    max_depth: int = 3
+    max_children: int = 6
+    max_total_tasks: int = 60
+    allow_existing_children: bool = False
+    remove_label_after_processing: bool = True
+    propagate_labels: bool = True
+    max_tasks_per_tick: int = 1
+    max_queue_depth: int = 1
+    auto_queue_children: bool = True
+    track_progress: bool = True
+
+
+def _coerce_settings(
+    settings: BreakdownSettings | Mapping[str, Any] | None,
+    overrides: Mapping[str, Any],
+) -> BreakdownSettings:
+    if isinstance(settings, BreakdownSettings) and not overrides:
+        return settings
+
+    payload: dict[str, Any] = {}
+    if settings is not None:
+        if isinstance(settings, BreakdownSettings):
+            payload = {field.name: getattr(settings, field.name) for field in fields(BreakdownSettings)}
+        else:
+            payload = dict(settings)
+    payload.update(overrides)
+
+    allowed = {field.name for field in fields(BreakdownSettings)}
+    unknown = set(payload) - allowed
+    if unknown:
+        unknown_list = ", ".join(sorted(unknown))
+        raise TypeError(f"Unexpected LLM breakdown settings: {unknown_list}")
+
+    return BreakdownSettings(**payload)
+
 
 class LLMBreakdown(Automation):
     def __init__(
         self,
         frequency_in_minutes: float = 0.1,
         *,
-        label_prefix: str = "llm-",
-        default_variant: str = "breakdown",
-        max_depth: int = 3,
-        max_children: int = 6,
-        max_total_tasks: int = 60,
-        allow_existing_children: bool = False,
-        remove_label_after_processing: bool = True,
-        propagate_labels: bool = True,
-        max_tasks_per_tick: int = 1,
-        max_queue_depth: int = 1,
-        auto_queue_children: bool = True,
-        track_progress: bool = True,
+        settings: BreakdownSettings | Mapping[str, Any] | None = None,
         variants: Mapping[str, Mapping[str, Any]] | None = None,
         model_config: LocalChatConfig | Mapping[str, Any] | None = None,
+        **overrides: Any,
     ):
         super().__init__("LLM Breakdown", frequency_in_minutes)
 
-        self.label_prefix = label_prefix
-        self.label_prefix_lower = label_prefix.lower()
-        self.default_variant = default_variant
-        self.max_depth = max_depth
-        self.max_children = max_children
-        self.max_total_tasks = max_total_tasks
-        self.allow_existing_children = allow_existing_children
-        self.remove_label_after_processing = remove_label_after_processing
-        self.propagate_labels = propagate_labels
-        self.max_tasks_per_tick = max(1, int(max_tasks_per_tick))
-        self.max_queue_depth = max(1, int(max_queue_depth))
-        self.auto_queue_children = auto_queue_children
-        self.track_progress = track_progress
+        settings_obj = _coerce_settings(settings, overrides)
+
+        self.label_prefix = settings_obj.label_prefix
+        self.label_prefix_lower = settings_obj.label_prefix.lower()
+        self.default_variant = settings_obj.default_variant
+        self.max_depth = settings_obj.max_depth
+        self.max_children = settings_obj.max_children
+        self.max_total_tasks = settings_obj.max_total_tasks
+        self.allow_existing_children = settings_obj.allow_existing_children
+        self.remove_label_after_processing = settings_obj.remove_label_after_processing
+        self.propagate_labels = settings_obj.propagate_labels
+        self.max_tasks_per_tick = max(1, int(settings_obj.max_tasks_per_tick))
+        self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
+        self.auto_queue_children = settings_obj.auto_queue_children
+        self.track_progress = settings_obj.track_progress
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
         self._llm: TransformersMistral3ChatModel | None = None
@@ -140,6 +172,33 @@ class LLMBreakdown(Automation):
     def _build_system_prompt(self, *, max_depth: int, max_children: int, instruction: str | None) -> str:
         return build_system_prompt(max_depth=max_depth, max_children=max_children, instruction=instruction)
 
+    def now_iso(self) -> str:
+        return self._now_iso()
+
+    def new_run_id(self) -> str:
+        return self._new_run_id()
+
+    def progress_save(self, payload: dict[str, Any]) -> None:
+        self._progress_save(payload)
+
+    def progress_load(self) -> dict[str, Any]:
+        return self._progress_load()
+
+    def queue_load(self) -> list[QueueItem]:
+        return self._queue_load()
+
+    def queue_save(self, items: list[QueueItem]) -> None:
+        self._queue_save(items)
+
+    def get_llm(self) -> TransformersMistral3ChatModel:
+        return self._get_llm()
+
+    def resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
+        return self._resolve_variant(label)
+
+    def build_system_prompt(self, *, max_depth: int, max_children: int, instruction: str | None) -> str:
+        return self._build_system_prompt(max_depth=max_depth, max_children=max_children, instruction=instruction)
+
     @staticmethod
     def _normalize_queue_depth(value: Any) -> int:
         try:
@@ -187,18 +246,13 @@ class LLMBreakdown(Automation):
         parent_id: str,
         nodes: list[BreakdownNode],
         depth: int,
-        max_depth: int,
-        max_children: int,
-        max_total_tasks: int,
-        labels: list[str] | None,
-        created: list[int],
-        queue_ctx: QueueContext | None = None,
+        context: InsertContext,
     ) -> None:
-        if depth > max_depth:
+        if depth > context.max_depth:
             return
-        for node in nodes[:max_children]:
-            if created[0] >= max_total_tasks:
-                logger.warning("Reached max_total_tasks={}; truncating tree", max_total_tasks)
+        for node in nodes[:context.max_children]:
+            if context.created[0] >= context.max_total_tasks:
+                logger.warning("Reached max_total_tasks={}; truncating tree", context.max_total_tasks)
                 return
             content = _sanitize_text(node.content)
             if not content:
@@ -211,28 +265,48 @@ class LLMBreakdown(Automation):
                 project_id=root_task.task_entry.project_id,
                 parent_id=parent_id,
                 priority=priority,
-                labels=labels,
+                labels=context.labels,
             )
             if "id" not in result:
                 logger.error("Failed to insert subtask '{}'", content)
                 continue
-            created[0] += 1
+            context.created[0] += 1
             child_id = str(result["id"])
-            if queue_ctx is not None and node.expand:
-                queue_ctx.enqueue(child_id)
+            if context.queue_ctx is not None and node.expand:
+                context.queue_ctx.enqueue(child_id)
             self._insert_children(
                 db,
                 root_task=root_task,
                 parent_id=child_id,
                 nodes=node.children,
                 depth=depth + 1,
-                max_depth=max_depth,
-                max_children=max_children,
-                max_total_tasks=max_total_tasks,
-                labels=labels,
-                created=created,
-                queue_ctx=queue_ctx,
+                context=context,
             )
+
+    def child_labels(self, task: Task) -> list[str] | None:
+        return self._child_labels(task)
+
+    def update_root_labels(self, db: Database, task: Task, label_to_remove: str) -> None:
+        self._update_root_labels(db, task, label_to_remove)
+
+    def insert_children(
+        self,
+        db: Database,
+        *,
+        root_task: Task,
+        parent_id: str,
+        nodes: list[BreakdownNode],
+        depth: int,
+        context: InsertContext,
+    ) -> None:
+        self._insert_children(
+            db,
+            root_task=root_task,
+            parent_id=parent_id,
+            nodes=nodes,
+            depth=depth,
+            context=context,
+        )
 
     def _tick(self, db: Database) -> None:
         run_breakdown(self, db)
