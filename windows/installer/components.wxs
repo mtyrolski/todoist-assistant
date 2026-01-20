@@ -5,8 +5,8 @@
       <Directory Id="ProgramFilesFolder">
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
-      <Directory Id="ProgramMenuFolder" />
-      <Directory Id="DesktopFolder" />
+      <Directory Id="CommonProgramsFolder" />
+      <Directory Id="CommonDesktopFolder" />
       <Directory Id="CommonAppDataFolder">
         <Directory Id="APPDATADIR" Name="TodoistAssistant">
           <Directory Id="CONFIGDIR" Name="config" />
@@ -17,7 +17,7 @@
   </Fragment>
 
   <Fragment>
-    <DirectoryRef Id="ProgramMenuFolder">
+    <DirectoryRef Id="CommonProgramsFolder">
       <Directory Id="AppStartMenuDir" Name="Todoist Assistant" />
     </DirectoryRef>
   </Fragment>
@@ -43,7 +43,7 @@
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
         <RegistryValue
-          Root="HKCU"
+          Root="HKLM"
           Key="Software\TodoistAssistant"
           Name="installed"
           Type="integer"
@@ -54,7 +54,7 @@
   </Fragment>
 
   <Fragment>
-    <DirectoryRef Id="DesktopFolder">
+    <DirectoryRef Id="CommonDesktopFolder">
       <Component Id="DesktopShortcut" Guid="*">
         <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
         <Shortcut
@@ -64,7 +64,7 @@
           Target="[INSTALLFOLDER]todoist-assistant.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
-          Root="HKCU"
+          Root="HKLM"
           Key="Software\TodoistAssistant"
           Name="desktop_shortcut"
           Type="integer"
@@ -78,7 +78,7 @@
     <DirectoryRef Id="APPDATADIR">
       <Component Id="AppDataPermissions" Guid="*">
         <CreateFolder>
-          <util:PermissionEx User="Users" GenericAll="yes" />
+          <util:PermissionEx WellKnownSid="BuiltinUsers" GenericAll="yes" />
         </CreateFolder>
         <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
         <RegistryValue
@@ -96,7 +96,7 @@
     <DirectoryRef Id="LOGSDIR">
       <Component Id="LogsFolder" Guid="*">
         <CreateFolder>
-          <util:PermissionEx User="Users" GenericAll="yes" />
+          <util:PermissionEx WellKnownSid="BuiltinUsers" GenericAll="yes" />
         </CreateFolder>
         <RegistryValue
           Root="HKLM"

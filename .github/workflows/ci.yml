@@ -117,30 +117,42 @@ jobs:
           $record = $view.Fetch()
           $productCode = $record.StringData(1)
           if (-not $productCode) { throw "Failed to read ProductCode from MSI" }
+          $summary = $installer.SummaryInformation($msiPath, 0)
+          $template = $summary.Property(7)
+          $arch = if ($template -match "x64|AMD64") { "x64" } else { "x86" }
 
           $logPath = Join-Path $env:RUNNER_TEMP "todoist-assistant-msi-install.log"
           if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
           Get-Process todoist-assistant -ErrorAction SilentlyContinue | Stop-Process -Force
+          $programFilesX86 = ${env:ProgramFiles(x86)}
+          $programFiles64 = $env:ProgramFiles
+          $programFilesRoot = if ($arch -eq "x64" -and $programFiles64) { $programFiles64 } elseif ($programFilesX86) { $programFilesX86 } else { $programFiles64 }
           $installDirs = @(
+            "$programFilesRoot\\TodoistAssistant",
             "C:\\Program Files\\TodoistAssistant",
             "C:\\Program Files (x86)\\TodoistAssistant"
-          )
+          ) | Select-Object -Unique
           $installDirs | Where-Object { Test-Path $_ } | ForEach-Object { Remove-Item -Recurse -Force $_ }
           $dataDir = "C:\\ProgramData\\TodoistAssistant"
           if (Test-Path $dataDir) { Remove-Item -Recurse -Force $dataDir }
 
           $allowed = @(0, 3010, 1641)
-          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart /l*v `"$logPath`"" -Wait -PassThru
+          $installDir = $installDirs[0]
+          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" /l*v `"$logPath`"" -Wait -PassThru
           if ($allowed -notcontains $install.ExitCode) {
-            if (Test-Path $logPath) { Get-Content $logPath -Tail 200 }
+            if (Test-Path $logPath) {
+              $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8
+              if ($matches) {
+                $matches | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext }
+              } else {
+                Get-Content $logPath -Tail 200
+              }
+            }
             throw "msiexec install failed with code $($install.ExitCode)"
           }
 
-          $exeCandidates = @(
-            "C:\\Program Files\\TodoistAssistant\\todoist-assistant.exe",
-            "C:\\Program Files (x86)\\TodoistAssistant\\todoist-assistant.exe"
-          )
+          $exeCandidates = $installDirs | ForEach-Object { Join-Path $_ "todoist-assistant.exe" }
           $exe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $exe) { throw "Installed executable not found at any expected path." }
 
@@ -149,7 +161,14 @@ jobs:
 
           $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart /l*v `"$logPath`"" -Wait -PassThru
           if ($allowed -notcontains $uninstall.ExitCode) {
-            if (Test-Path $logPath) { Get-Content $logPath -Tail 200 }
+            if (Test-Path $logPath) {
+              $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8
+              if ($matches) {
+                $matches | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext }
+              } else {
+                Get-Content $logPath -Tail 200
+              }
+            }
             throw "msiexec uninstall failed with code $($uninstall.ExitCode)"
           }
 
