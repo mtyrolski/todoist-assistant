@@ -74,7 +74,7 @@
     <DirectoryRef Id="APPDATADIR">
       <Component Id="AppDataPermissions" Guid="*" Win64="yes">
         <CreateFolder>
-          <util:PermissionEx WellKnownSid="BuiltinUsers" GenericAll="yes" />
+          <util:PermissionEx User="Users" Domain="BUILTIN" GenericAll="yes" />
         </CreateFolder>
         <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
         <RegistryValue
@@ -92,7 +92,7 @@
     <DirectoryRef Id="LOGSDIR">
       <Component Id="LogsFolder" Guid="*" Win64="yes">
         <CreateFolder>
-          <util:PermissionEx WellKnownSid="BuiltinUsers" GenericAll="yes" />
+          <util:PermissionEx User="Users" Domain="BUILTIN" GenericAll="yes" />
         </CreateFolder>
         <RegistryValue
           Root="HKLM"
