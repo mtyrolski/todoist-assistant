@@ -104,7 +104,7 @@ def _log_debug(message: str) -> None:
         print(f"[telemetry] {message}", file=sys.stderr)
 
 
-def send_event(event: str, *, config_dir: Path, data_dir: Path) -> bool:
+def send_event(event: str, *, config_dir: Path, _data_dir: Path) -> bool:
     if not is_enabled(config_dir):
         _log_debug("Telemetry disabled; skipping event.")
         return False
@@ -132,10 +132,10 @@ def maybe_send_install_success(config_dir: Path, data_dir: Path) -> None:
     sentinel = _sentinel_path(data_dir)
     if sentinel.exists():
         return
-    if send_event("install_success", config_dir=config_dir, data_dir=data_dir):
+    if send_event("install_success", config_dir=config_dir, _data_dir=data_dir):
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text("sent\n", encoding="utf-8")
 
 
 def maybe_send_install_failure(config_dir: Path, data_dir: Path) -> None:
-    send_event("install_failure", config_dir=config_dir, data_dir=data_dir)
+    send_event("install_failure", config_dir=config_dir, _data_dir=data_dir)

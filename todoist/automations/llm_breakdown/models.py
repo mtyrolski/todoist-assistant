@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias, Union, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 # === LLM BREAKDOWN MODELS ====================================================
 
 QueueItem: TypeAlias = dict[str, Any]
+NormalizedChild: TypeAlias = Union[dict[str, Any], "BreakdownNode"]
 
 
 @dataclass
@@ -37,6 +38,16 @@ class QueueContext:
         self.ids.add(task_id)
 
 
+@dataclass
+class InsertContext:
+    max_depth: int
+    max_children: int
+    max_total_tasks: int
+    labels: list[str] | None
+    created: list[int]
+    queue_ctx: QueueContext | None
+
+
 def _normalize_text(value: object) -> str | None:
     if value is None:
         return None
@@ -47,7 +58,7 @@ def _normalize_text(value: object) -> str | None:
     return str(value)
 
 
-def _normalize_children(value: object) -> list[dict[str, Any] | "BreakdownNode"]:
+def _normalize_children(value: object) -> list[NormalizedChild]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -89,7 +100,7 @@ class BreakdownNode(BaseModel):
 
     @field_validator("children", mode="before")
     @classmethod
-    def _normalize_children(cls, value: object) -> list[dict[str, Any] | "BreakdownNode"]:
+    def _normalize_children(cls, value: object) -> list[NormalizedChild]:
         return _normalize_children(value)
 
 
@@ -98,14 +109,11 @@ class TaskBreakdown(BaseModel):
 
     @field_validator("children", mode="before")
     @classmethod
-    def _normalize_children(cls, value: object) -> list[dict[str, Any] | "BreakdownNode"]:
+    def _normalize_children(cls, value: object) -> list[NormalizedChild]:
         return _normalize_children(value)
 
 
 BreakdownNode.model_rebuild()
-
-
-NormalizedChild: TypeAlias = dict[str, Any] | BreakdownNode
 
 
 class ProgressKey(StrEnum):

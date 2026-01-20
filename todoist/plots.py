@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+
 from datetime import datetime, timedelta
 from typing import Any, Final, cast
 
@@ -1300,7 +1302,6 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             densities = densities * (total_count / integral)
             x_min = float(x_values.min())
             x_max = float(x_values.max())
-            y_max = float(densities.max()) if densities.size else 0.0
             highlight_low = float(np.clip(highlight_low, x_min, x_max))
             highlight_high = float(np.clip(highlight_high, x_min, x_max))
             highlight_specs = [

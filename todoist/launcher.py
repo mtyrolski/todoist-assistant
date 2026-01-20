@@ -155,8 +155,6 @@ def main() -> int:
             port=args.api_port,
             log_level="info",
         )
-    except (KeyboardInterrupt, SystemExit):
-        raise
     except Exception:
         try:
             telemetry.maybe_send_install_failure(config_dir, data_dir)

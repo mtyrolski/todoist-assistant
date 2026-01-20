@@ -1,3 +1,5 @@
+# pylint: disable=global-statement,too-many-lines
+
 import asyncio
 from collections.abc import Mapping
 from fastapi import Body, FastAPI, HTTPException
@@ -403,7 +405,6 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
     global _main_loop
-    now = time.time()
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
     if not refresh and _state.db is not None and _state.demo_mode == desired_demo:
         return
@@ -888,7 +889,7 @@ async def _run_llm_chat_queue() -> None:
                     messages = _build_chat_messages(conversation, next_item["content"])
                     response = await asyncio.to_thread(model.chat, messages)
                     response_text = _sanitize_text(response) or ""
-                    
+
                     # Only save messages if we got a non-empty response
                     if not response_text:
                         # Mark as failed if response is empty
@@ -901,7 +902,7 @@ async def _run_llm_chat_queue() -> None:
                                 queue_item["error"] = "Empty response from model"
                                 _save_llm_chat_queue(queue)
                         continue
-                    
+
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
@@ -1066,12 +1067,12 @@ async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) ->
 @app.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
 async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     """Fetch a conversation transcript."""
-    
+
     # Validate conversation_id format (should be a valid UUID)
     try:
         UUID(conversation_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID format") from exc
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()

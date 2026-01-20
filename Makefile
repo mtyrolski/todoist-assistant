@@ -1,4 +1,4 @@
-.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
+.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate static_check check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -75,12 +75,16 @@ test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
 
 typecheck: ## Run pyright type checks
-	PYTHONPATH=. uv run python3 -m pyright --warnings
+	$(MAKE) static_check
 
 lint: ## Run pylint
 	PYTHONPATH=. uv run pylint -j 0 todoist tests
 
-validate: typecheck lint ## Run typecheck + lint
+static_check: ## Run pyright + pylint
+	PYTHONPATH=. uv run python3 -m pyright --warnings
+	$(MAKE) lint
+
+validate: static_check ## Run pyright + pylint
 
 check: validate test ## Run validate + tests
 

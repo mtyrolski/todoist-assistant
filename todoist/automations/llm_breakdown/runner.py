@@ -19,6 +19,7 @@ from todoist.types import Task
 
 from .models import (
     CurrentKey,
+    InsertContext,
     ProgressKey,
     ProgressStatus,
     QueueContext,
@@ -55,7 +56,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
     children_by_parent = build_children_by_parent(all_tasks)
     tasks_by_id = build_task_lookup(all_tasks)
     fetched_tasks: dict[str, Task] = {}
-    now = automation._now_iso()
+    now = automation.now_iso()
 
     def fetch_task(task_id: str, refresh: bool = False) -> Task | None:
         cached = tasks_by_id.get(task_id) or fetched_tasks.get(task_id)
@@ -81,13 +82,13 @@ def run_breakdown(automation: Any, db: Database) -> None:
 
     processed_ids: set[str] = set()
     track_processed = not automation.remove_label_after_processing
-    previous_progress = automation._progress_load()
+    previous_progress = automation.progress_load()
     if track_processed:
         raw_processed = previous_progress.get(ProgressKey.PROCESSED_IDS.value)
         if isinstance(raw_processed, list):
             processed_ids = {str(task_id) for task_id in raw_processed if isinstance(task_id, str)}
 
-    queue_items = automation._queue_load()
+    queue_items = automation.queue_load()
     queue_additions: list[QueueItem] = []
 
     selection = collect_candidates(
@@ -106,21 +107,21 @@ def run_breakdown(automation: Any, db: Database) -> None:
     if not candidates:
         if drop_queue_ids:
             remaining = [item for item in queue_items if item["task_id"] not in drop_queue_ids]
-            automation._queue_save(remaining)
+            automation.queue_save(remaining)
         if automation.track_progress:
             idle_progress = build_idle_progress(
                 now=now,
                 processed_ids=processed_ids,
                 track_processed=track_processed,
             )
-            automation._progress_save(idle_progress)
+            automation.progress_save(idle_progress)
         logger.info("No LLM breakdown tasks queued.")
         return
 
     tasks_to_process = candidates[:automation.max_tasks_per_tick]
     tasks_total = len(candidates)
     tasks_pending = tasks_total - len(tasks_to_process)
-    run_id = automation._new_run_id()
+    run_id = automation.new_run_id()
 
     progress = build_running_progress(
         now=now,
@@ -130,21 +131,21 @@ def run_breakdown(automation: Any, db: Database) -> None:
         processed_ids=processed_ids,
         track_processed=track_processed,
     )
-    automation._progress_save(progress)
+    automation.progress_save(progress)
 
     try:
-        llm = automation._get_llm()
+        llm = automation.get_llm()
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Failed to initialize LLM: {}", exc)
         mark_progress_failed(
             progress,
             error=f"{type(exc).__name__}: {exc}",
-            now=automation._now_iso(),
+            now=automation.now_iso(),
         )
-        automation._progress_save(progress)
+        automation.progress_save(progress)
         if drop_queue_ids:
             remaining = [item for item in queue_items if item["task_id"] not in drop_queue_ids]
-            automation._queue_save(remaining)
+            automation.queue_save(remaining)
         return
 
     completed = 0
@@ -164,12 +165,12 @@ def run_breakdown(automation: Any, db: Database) -> None:
             CurrentKey.LABEL.value: label,
             CurrentKey.DEPTH.value: depth,
         }
-        progress[ProgressKey.UPDATED_AT.value] = automation._now_iso()
-        automation._progress_save(progress)
+        progress[ProgressKey.UPDATED_AT.value] = automation.now_iso()
+        automation.progress_save(progress)
 
         variant_cfg = automation.variants.get(variant_key)
         if variant_cfg is None:
-            variant_key, variant_cfg = automation._resolve_variant(label)
+            variant_key, variant_cfg = automation.resolve_variant(label)
         variant_cfg = dict(variant_cfg)
         max_depth = int(variant_cfg.get("max_depth", automation.max_depth))
         max_children = int(variant_cfg.get("max_children", automation.max_children))
@@ -180,7 +181,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
             max_allowed = max(1, queue_depth_limit - depth + 1)
             max_depth = min(max_depth, max_allowed)
 
-        system_prompt = automation._build_system_prompt(
+        system_prompt = automation.build_system_prompt(
             max_depth=max_depth,
             max_children=max_children,
             instruction=instruction,
@@ -216,12 +217,12 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 failed=failed,
                 pending=pending,
                 total=tasks_total,
-                now=automation._now_iso(),
+                now=automation.now_iso(),
                 processed_ids=processed_ids,
                 track_processed=track_processed,
                 current=None,
             )
-            automation._progress_save(progress)
+            automation.progress_save(progress)
             continue
 
         nodes = breakdown.children
@@ -229,7 +230,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
         if not nodes:
             logger.info("LLM returned no subtasks for task {}", task.id)
             if automation.remove_label_after_processing and source == "label":
-                automation._update_root_labels(db, task, label)
+                automation.update_root_labels(db, task, label)
             completed += 1
         else:
             created = [0]
@@ -242,22 +243,24 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 variant=variant_key,
                 enabled=automation.auto_queue_children,
             )
-            automation._insert_children(
+            automation.insert_children(
                 db,
                 root_task=task,
                 parent_id=task.id,
                 nodes=nodes,
                 depth=1,
-                max_depth=max_depth,
-                max_children=max_children,
-                max_total_tasks=max_total_tasks,
-                labels=automation._child_labels(task),
-                created=created,
-                queue_ctx=queue_ctx if automation.auto_queue_children else None,
+                context=InsertContext(
+                    max_depth=max_depth,
+                    max_children=max_children,
+                    max_total_tasks=max_total_tasks,
+                    labels=automation.child_labels(task),
+                    created=created,
+                    queue_ctx=queue_ctx if automation.auto_queue_children else None,
+                ),
             )
             created_count = created[0]
             if automation.remove_label_after_processing and source == "label":
-                automation._update_root_labels(db, task, label)
+                automation.update_root_labels(db, task, label)
             completed += 1
 
         append_progress_result(
@@ -277,12 +280,12 @@ def run_breakdown(automation: Any, db: Database) -> None:
             failed=failed,
             pending=pending,
             total=tasks_total,
-            now=automation._now_iso(),
+            now=automation.now_iso(),
             processed_ids=processed_ids,
             track_processed=track_processed,
             current=None,
         )
-        automation._progress_save(progress)
+        automation.progress_save(progress)
 
         logger.info(
             "Expanded task {} with label '{}' (variant={}, created={}, pending={})",
@@ -300,7 +303,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
             if item["task_id"] not in drop_queue_ids and item["task_id"] not in processed_queue_ids
         ]
         queue_remaining.extend(queue_additions)
-        automation._queue_save(queue_remaining)
+        automation.queue_save(queue_remaining)
 
     pending = tasks_total - (completed + failed)
     finalize_progress(
@@ -309,11 +312,11 @@ def run_breakdown(automation: Any, db: Database) -> None:
         completed=completed,
         failed=failed,
         total=tasks_total,
-        now=automation._now_iso(),
+        now=automation.now_iso(),
         processed_ids=processed_ids,
         track_processed=track_processed,
     )
-    automation._progress_save(progress)
+    automation.progress_save(progress)
 
 
 # === CANDIDATE SELECTION ====================================================
@@ -368,7 +371,7 @@ def collect_candidates(
             continue
         if task.id in processed_ids:
             continue
-        variant_key, _ = automation._resolve_variant(llm_label)
+        variant_key, _ = automation.resolve_variant(llm_label)
         candidates.append(
             BreakdownCandidate(
                 task=task,

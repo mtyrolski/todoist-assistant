@@ -118,9 +118,21 @@ jobs:
           $productCode = $record.StringData(1)
           if (-not $productCode) { throw "Failed to read ProductCode from MSI" }
 
+          $logPath = Join-Path $env:RUNNER_TEMP "todoist-assistant-msi-install.log"
+          if (Test-Path $logPath) { Remove-Item $logPath -Force }
+
+          Get-Process todoist-assistant -ErrorAction SilentlyContinue | Stop-Process -Force
+          $installDir = "C:\\Program Files\\TodoistAssistant"
+          if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
+          $dataDir = "C:\\ProgramData\\TodoistAssistant"
+          if (Test-Path $dataDir) { Remove-Item -Recurse -Force $dataDir }
+
           $allowed = @(0, 3010, 1641)
-          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait -PassThru
-          if ($allowed -notcontains $install.ExitCode) { throw "msiexec install failed with code $($install.ExitCode)" }
+          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart /l*v `"$logPath`"" -Wait -PassThru
+          if ($allowed -notcontains $install.ExitCode) {
+            if (Test-Path $logPath) { Get-Content $logPath -Tail 200 }
+            throw "msiexec install failed with code $($install.ExitCode)"
+          }
 
           $exe = "C:\Program Files\TodoistAssistant\todoist-assistant.exe"
           if (-not (Test-Path $exe)) { throw "Installed executable not found at $exe" }
@@ -128,8 +140,19 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
-          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart" -Wait -PassThru
-          if ($allowed -notcontains $uninstall.ExitCode) { throw "msiexec uninstall failed with code $($uninstall.ExitCode)" }
+          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart /l*v `"$logPath`"" -Wait -PassThru
+          if ($allowed -notcontains $uninstall.ExitCode) {
+            if (Test-Path $logPath) { Get-Content $logPath -Tail 200 }
+            throw "msiexec uninstall failed with code $($uninstall.ExitCode)"
+          }
 
           Start-Sleep -Seconds 2
           if (Test-Path $exe) { throw "Executable still present after uninstall" }
+
+      - name: Upload MSI install log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-assistant-msi-install-log
+          path: ${{ runner.temp }}/todoist-assistant-msi-install.log
+          if-no-files-found: ignore

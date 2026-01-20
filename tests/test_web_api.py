@@ -307,7 +307,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
         return False, False  # enabled, loading
 
     monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
-    
+
     # Mock storage functions to return empty data
     monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: [])
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
@@ -322,7 +322,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
     assert "loading" in payload
     assert "queue" in payload
     assert "conversations" in payload
-    
+
     # Verify queue structure
     assert "total" in payload["queue"]
     assert "queued" in payload["queue"]
@@ -331,7 +331,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
     assert "failed" in payload["queue"]
     assert "items" in payload["queue"]
     assert "current" in payload["queue"]
-    
+
     # Verify disabled state
     assert payload["enabled"] is False
     assert payload["loading"] is False
@@ -387,7 +387,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
     monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
     monkeypatch.setattr(web_api, "_prune_queue", lambda q: q)
-    
+
     # Mock worker start to do nothing
     async def _mock_start_worker():
         pass
@@ -402,7 +402,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     assert payload["queued"] is True
     assert "item" in payload
     assert "conversationId" in payload
-    
+
     # Verify a conversation was created
     assert len(saved_conversations) == 1
     conv = saved_conversations[0]
@@ -411,7 +411,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     assert "created_at" in conv
     assert "updated_at" in conv
     assert conv["messages"] == []
-    
+
     # Verify queue item was created
     assert len(saved_queue) == 1
     item = saved_queue[0]
@@ -455,7 +455,7 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
     monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
     monkeypatch.setattr(web_api, "_prune_queue", lambda q: q)
-    
+
     # Mock worker start to do nothing
     async def _mock_start_worker():
         pass
@@ -468,7 +468,7 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
 
     # Verify response uses existing conversation
     assert payload["conversationId"] == existing_conv_id
-    
+
     # Verify conversation was updated (not created)
     assert len(saved_conversations) == 1
     assert saved_conversations[0]["id"] == existing_conv_id
@@ -553,12 +553,12 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
     assert payload["createdAt"] == "2025-01-01T10:00:00"
     assert payload["updatedAt"] == "2025-01-01T10:05:00"
     assert len(payload["messages"]) == 2
-    
+
     # Verify messages
     assert payload["messages"][0]["role"] == "user"
     assert payload["messages"][0]["content"] == "Hello"
     assert payload["messages"][0]["createdAt"] == "2025-01-01T10:00:00"
-    
+
     assert payload["messages"][1]["role"] == "assistant"
     assert payload["messages"][1]["content"] == "Hi there!"
     assert payload["messages"][1]["createdAt"] == "2025-01-01T10:00:05"
@@ -569,7 +569,7 @@ def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     # Mock start load to do nothing
     async def _mock_start_load():
         pass
-    
+
     # Mock status to return loading state
     async def _mock_model_status():
         return False, True  # enabled, loading

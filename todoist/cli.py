@@ -69,7 +69,7 @@ def _download(url: str, filename: str) -> Path:
 
 
 def _run(cmd: list[str]) -> None:
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         raise typer.Exit(code=result.returncode)
 

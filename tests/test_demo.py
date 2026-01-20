@@ -1,7 +1,18 @@
 import pandas as pd
 from datetime import datetime, timedelta
+from typing import cast
 
 from todoist.database.demo import anonymize_activity_dates
+
+
+def _duration(index: pd.Index) -> pd.Timedelta:
+    if not isinstance(index, pd.DatetimeIndex) or index.empty:
+        return cast(pd.Timedelta, pd.Timedelta(0))
+    start = index.min()
+    end = index.max()
+    if not isinstance(start, pd.Timestamp) or not isinstance(end, pd.Timestamp):
+        return cast(pd.Timedelta, pd.Timedelta(0))
+    return cast(pd.Timedelta, end - start)
 
 
 def test_anonymize_activity_dates_preserves_task_durations():
@@ -31,4 +42,4 @@ def test_anonymize_activity_dates_preserves_task_durations():
     for task_id in ["task1", "task2"]:
         original = df[df["task_id"] == task_id].sort_index()
         anonymized = result[result["task_id"] == task_id].sort_index()
-        assert original.index.max() - original.index.min() == anonymized.index.max() - anonymized.index.min()
+        assert _duration(original.index) == _duration(anonymized.index)
