@@ -6,7 +6,7 @@
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
       <Directory Id="ProgramMenuFolder" />
-      <Directory Id="CommonDesktopFolder" />
+      <Directory Id="DesktopFolder" />
       <Directory Id="CommonAppDataFolder">
         <Directory Id="APPDATADIR" Name="TodoistAssistant">
           <Directory Id="CONFIGDIR" Name="config" />
@@ -43,7 +43,7 @@
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\TodoistAssistant"
           Name="installed"
           Type="integer"
@@ -54,7 +54,7 @@
   </Fragment>
 
   <Fragment>
-    <DirectoryRef Id="CommonDesktopFolder">
+    <DirectoryRef Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="*">
         <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
         <Shortcut
@@ -64,7 +64,7 @@
           Target="[INSTALLFOLDER]todoist-assistant.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\TodoistAssistant"
           Name="desktop_shortcut"
           Type="integer"

@@ -102,8 +102,11 @@ jobs:
           if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
           Get-Process todoist-assistant -ErrorAction SilentlyContinue | Stop-Process -Force
-          $installDir = "C:\\Program Files\\TodoistAssistant"
-          if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
+          $installDirs = @(
+            "C:\\Program Files\\TodoistAssistant",
+            "C:\\Program Files (x86)\\TodoistAssistant"
+          )
+          $installDirs | Where-Object { Test-Path $_ } | ForEach-Object { Remove-Item -Recurse -Force $_ }
           $dataDir = "C:\\ProgramData\\TodoistAssistant"
           if (Test-Path $dataDir) { Remove-Item -Recurse -Force $dataDir }
 
@@ -114,8 +117,12 @@ jobs:
             throw "msiexec install failed with code $($install.ExitCode)"
           }
 
-          $exe = "C:\Program Files\TodoistAssistant\todoist-assistant.exe"
-          if (-not (Test-Path $exe)) { throw "Installed executable not found at $exe" }
+          $exeCandidates = @(
+            "C:\\Program Files\\TodoistAssistant\\todoist-assistant.exe",
+            "C:\\Program Files (x86)\\TodoistAssistant\\todoist-assistant.exe"
+          )
+          $exe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "Installed executable not found at any expected path." }
 
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
@@ -127,7 +134,8 @@ jobs:
           }
 
           Start-Sleep -Seconds 2
-          if (Test-Path $exe) { throw "Executable still present after uninstall" }
+          $remaining = $exeCandidates | Where-Object { Test-Path $_ }
+          if ($remaining) { throw "Executable still present after uninstall: $($remaining -join ', ')" }
 
       - name: Upload MSI install log
         if: always()
