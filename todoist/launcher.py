@@ -1,7 +1,5 @@
 """Local launcher for the Todoist Assistant dashboard stack."""
 
-from __future__ import annotations
-
 import argparse
 import os
 from pathlib import Path

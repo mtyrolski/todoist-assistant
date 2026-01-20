@@ -69,52 +69,16 @@ just the dashboard, or just the automations without rewriting the data layer.
 
 ```mermaid
 flowchart LR
-    subgraph Sources
-        direction TB
-        API["Todoist API"]
-        Gmail["Gmail API"]
-    end
-
-    subgraph Core["Core Pipeline"]
-        direction TB
-        Observer["Observer (run_observer)"]
-        Cache["Local cache: joblib"]
-        DB["Database + DataFrame layer"]
-        Auto["Automations"]
-    end
-
-    subgraph Outputs["Dashboards and Agents"]
-        direction TB
-        Dash["Dashboards (FastAPI + Next.js / Streamlit)"]
-        Agent["Agentic chat (local LLM + safe Python REPL)"]
-    end
-
-    API --> Cache
-    Cache --> DB
-    DB --> Dash
-    DB --> Auto
-    Cache --> Agent
-    Observer --> Cache
-    Observer --> Auto
-    Auto --> API
-    Gmail --> Auto
-
-    classDef source fill:#FFE082,stroke:#FFB300,color:#5D4037;
-    classDef observer fill:#FFCC80,stroke:#F57C00,color:#4E342E;
-    classDef cache fill:#C8E6C9,stroke:#2E7D32,color:#1B5E20;
-    classDef db fill:#B3E5FC,stroke:#0277BD,color:#01579B;
-    classDef automation fill:#FFCCBC,stroke:#E64A19,color:#BF360C;
-    classDef output fill:#B2DFDB,stroke:#00796B,color:#004D40;
-    classDef agent fill:#F8BBD0,stroke:#C2185B,color:#880E4F;
-
-    class API,Gmail source;
-    class Observer observer;
-    class Cache cache;
-    class DB db;
-    class Auto automation;
-    class Dash output;
-    class Agent agent;
+    A[Todoist API] --> B[Observer sync]
+    B --> C[Local cache (joblib)]
+    C --> D[Normalized models + DataFrame layer]
+    D --> E[Dashboards (FastAPI + Next.js)]
+    D --> F[Automations]
+    D --> G[Agentic chat (local LLM + safe tools)]
+    F --> A
 ```
+
+If Mermaid doesn't render, read it left-to-right: sync once from Todoist, cache locally, normalize into models/dataframes, then power dashboards, automations, and agentic chat (automations can write back to Todoist).
 
 At a glance, the Database layer wraps the Todoist API, hydrates in-memory caches, and standardizes project/task/activity
 models. The DataFrame pipeline turns cached activity into a pandas timeline that powers plots and dashboards. Automations
@@ -366,7 +330,9 @@ Privacy / telemetry:
 
 - Telemetry is opt-in and off by default.
 - Enable or disable with `todoist-assistant --enable-telemetry` or `todoist-assistant --disable-telemetry`.
+- Telemetry is a no-op unless `TODOIST_TELEMETRY_ENDPOINT` is set.
 - If enabled, only install success/failure and version are sent to the endpoint in `TODOIST_TELEMETRY_ENDPOINT`.
+- Set `TODOIST_TELEMETRY_DEBUG=1` to log telemetry failures.
 
 ## Makefile Usage (recommended)
 

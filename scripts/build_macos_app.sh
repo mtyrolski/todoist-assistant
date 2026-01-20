@@ -75,11 +75,20 @@ download_node() {
 
   require_cmd curl
   require_cmd tar
+  require_cmd shasum
 
   if [ ! -f "${tar_path}" ]; then
     echo "Downloading Node.js ${version}..." >&2
     curl -fsSL "${url}" -o "${tar_path}"
   fi
+
+  shasums_url="https://nodejs.org/dist/v${version}/SHASUMS256.txt"
+  expected_sha="$(curl -fsSL "${shasums_url}" | awk "/${tarball}\$/ {print \$1}")"
+  if [ -z "${expected_sha}" ]; then
+    echo "Failed to resolve checksum for ${tarball}" >&2
+    exit 1
+  fi
+  echo "${expected_sha}  ${tar_path}" | shasum -a 256 -c - >/dev/null
 
   rm -rf "${extract_dir}"
   tar -xzf "${tar_path}" -C "${DIST_DIR}"
@@ -87,6 +96,22 @@ download_node() {
   rm -rf "${dest_dir}"
   mkdir -p "${dest_dir}"
   cp -R "${extract_dir}/." "${dest_dir}/"
+}
+
+stage_node_runtime() {
+  local dest_dir="$1"
+  local version="$2"
+  local node_path
+  node_path="$(command -v node 2>/dev/null || true)"
+  if [ -n "${node_path}" ]; then
+    echo "Bundling Node runtime from ${node_path}" >&2
+    rm -rf "${dest_dir}"
+    mkdir -p "${dest_dir}"
+    cp -L "${node_path}" "${dest_dir}/node"
+    return
+  fi
+
+  download_node "${dest_dir}" "${version}"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -142,7 +167,9 @@ fi
 
 rm -rf "${APP_PATH}" "${DIST_DIR}/build"
 export TODOIST_VERSION="${version}"
+pushd "${REPO_ROOT}" >/dev/null
 uv run python3 -m PyInstaller "${SPEC_FILE}" --distpath "${DIST_DIR}" --workpath "${DIST_DIR}/build" --clean
+popd >/dev/null
 
 if [ "${INCLUDE_DASHBOARD}" -eq 1 ]; then
   stage_dir="${DIST_DIR}/app_stage"
@@ -172,7 +199,7 @@ if [ "${INCLUDE_DASHBOARD}" -eq 1 ]; then
     exit 1
   fi
 
-  download_node "${stage_dir}/node" "${NODE_VERSION}"
+  stage_node_runtime "${stage_dir}/node" "${NODE_VERSION}"
 
   resources_dir="${APP_PATH}/Contents/Resources"
   rm -rf "${resources_dir}/frontend" "${resources_dir}/node"

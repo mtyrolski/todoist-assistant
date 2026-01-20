@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
 import subprocess
@@ -55,6 +53,12 @@ def test_brew_install_smoke() -> None:
     formula = os.environ.get("TODOIST_BREW_FORMULA", "Formula/todoist-assistant.rb")
     if not Path(formula).exists():
         pytest.skip("Homebrew formula not available in this checkout")
+
+    tarball = os.environ.get("TODOIST_BREW_TARBALL")
+    if tarball and not Path(tarball).exists():
+        raise AssertionError(f"TODOIST_BREW_TARBALL not found at {tarball}")
+
+    os.environ.setdefault("HOMEBREW_NO_AUTO_UPDATE", "1")
 
     _run(["brew", "install", "--build-from-source", formula])
     _run(["todoist-assistant", "--help"])

@@ -1,11 +1,20 @@
+require "digest"
+
 class TodoistAssistant < Formula
   include Language::Python::Virtualenv
 
   desc "Local-first Todoist automation and analytics assistant"
   homepage "https://github.com/mtyrolski/todoist-assistant"
   version "0.2.4"
-  url "https://github.com/mtyrolski/todoist-assistant/archive/refs/tags/todoist-assistant-v#{version}.tar.gz"
-  sha256 "5142411bd2a00444ea40b692d3ebffa09e425c0506d1634182b2a1438aeb1773"
+  tarball = ENV["TODOIST_BREW_TARBALL"]
+  if tarball && !tarball.empty?
+    tarball_path = Pathname.new(tarball).realpath
+    url "file://#{tarball_path}"
+    sha256 Digest::SHA256.file(tarball_path).hexdigest
+  else
+    url "https://github.com/mtyrolski/todoist-assistant/archive/refs/tags/todoist-assistant-v#{version}.tar.gz"
+    sha256 "5142411bd2a00444ea40b692d3ebffa09e425c0506d1634182b2a1438aeb1773"
+  end
   license "MIT"
 
   depends_on "python@3.11"

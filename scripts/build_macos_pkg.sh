@@ -60,16 +60,23 @@ if [ -z "${version}" ] || [ "${version}" = "0.0.0" ]; then
   exit 1
 fi
 
+if [ ! -d "${SCRIPTS_DIR}" ]; then
+  echo "Installer scripts directory not found at ${SCRIPTS_DIR}" >&2
+  exit 1
+fi
+
 rm -rf "${BUILD_DIR}"
 mkdir -p "${APP_ROOT}" "${BIN_DIR}" "${ETC_DIR}"
 
 echo "Building PyInstaller CLI bundle..." >&2
+pushd "${REPO_ROOT}" >/dev/null
 uv run python3 -m PyInstaller \
   --clean \
   --name todoist-assistant \
   --onedir todoist/cli.py \
   --distpath "${PYINSTALLER_DIST}" \
   --workpath "${BUILD_DIR}/pyinstaller-build"
+popd >/dev/null
 
 if [ ! -d "${PYINSTALLER_DIST}/todoist-assistant" ]; then
   echo "PyInstaller output not found at ${PYINSTALLER_DIST}/todoist-assistant" >&2

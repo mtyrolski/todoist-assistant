@@ -47,6 +47,12 @@ jobs:
         run: |
           uv sync --locked --group build || uv sync --group build
 
+      - name: Ensure python3 shim for uv run
+        run: |
+          if [ ! -x .venv/bin/python3 ] && [ -x .venv/bin/python ]; then
+            ln -sf python .venv/bin/python3
+          fi
+
       - name: Version consistency check
         run: |
           uv run python3 -m scripts.check_versions
@@ -77,6 +83,8 @@ jobs:
         env:
           TODOIST_PKG_PATH: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}.pkg
           TODOIST_BREW_FORMULA: Formula/todoist-assistant.rb
+          TODOIST_BREW_TARBALL: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}.tar.gz
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           uv run python3 -m pytest tests/macos/test_macos_installers.py
 

@@ -1,7 +1,5 @@
 """Lightweight CLI entrypoint for Todoist Assistant."""
 
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
@@ -103,6 +101,8 @@ def main(
         config_dir = telemetry.resolve_config_dir()
         telemetry.set_enabled(config_dir, True)
         typer.echo("Telemetry enabled.")
+        if not os.getenv("TODOIST_TELEMETRY_ENDPOINT"):
+            typer.echo("NOTE: TODOIST_TELEMETRY_ENDPOINT is not set, so no telemetry will be sent.")
         raise typer.Exit()
     if disable_telemetry:
         config_dir = telemetry.resolve_config_dir()

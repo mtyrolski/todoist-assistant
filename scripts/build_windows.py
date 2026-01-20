@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -75,11 +74,15 @@ def _download_node(dist_root: Path, node_version: str, *, target_dir: Path) -> N
     node_zip_name = f"node-v{node_version}-win-x64.zip"
     node_zip = dist_root / node_zip_name
     node_url = f"https://nodejs.org/dist/v{node_version}/{node_zip_name}"
+    shasums_url = f"https://nodejs.org/dist/v{node_version}/SHASUMS256.txt"
 
     if not node_zip.exists():
         print(f"Downloading Node.js {node_version}...")
         with urlopen(node_url) as response, node_zip.open("wb") as handle:
             handle.write(response.read())
+
+    expected = _fetch_node_sha256(shasums_url, node_zip_name)
+    _verify_sha256(node_zip, expected)
 
     extract_dir = dist_root / f"node-v{node_version}-win-x64"
     if extract_dir.exists():
@@ -93,6 +96,26 @@ def _download_node(dist_root: Path, node_version: str, *, target_dir: Path) -> N
     if target_dir.exists():
         shutil.rmtree(target_dir)
     shutil.copytree(extract_dir, target_dir)
+
+
+def _fetch_node_sha256(shasums_url: str, node_zip_name: str) -> str:
+    with urlopen(shasums_url) as response:
+        text = response.read().decode("utf-8")
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[1].endswith(node_zip_name):
+            return parts[0]
+    raise RuntimeError(f"Checksum for {node_zip_name} not found in SHASUMS256.txt")
+
+
+def _verify_sha256(path: Path, expected: str) -> None:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual.lower() != expected.lower():
+        raise RuntimeError(f"Checksum mismatch for {path.name}: expected {expected}, got {actual}")
 
 
 def _stage_node_runtime(app_root: Path, node_version: str) -> None:

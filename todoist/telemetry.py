@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
@@ -96,11 +94,23 @@ def _endpoint() -> str | None:
     return os.getenv("TODOIST_TELEMETRY_ENDPOINT")
 
 
+def _debug_enabled() -> bool:
+    value = os.getenv("TODOIST_TELEMETRY_DEBUG", "")
+    return value.strip().lower() in {"1", "true", "yes"}
+
+
+def _log_debug(message: str) -> None:
+    if _debug_enabled():
+        print(f"[telemetry] {message}", file=sys.stderr)
+
+
 def send_event(event: str, *, config_dir: Path, data_dir: Path) -> bool:
     if not is_enabled(config_dir):
+        _log_debug("Telemetry disabled; skipping event.")
         return False
     endpoint = _endpoint()
     if not endpoint:
+        _log_debug("TODOIST_TELEMETRY_ENDPOINT not set; skipping event.")
         return False
 
     payload = {
@@ -113,7 +123,8 @@ def send_event(event: str, *, config_dir: Path, data_dir: Path) -> bool:
     try:
         with urlopen(request, timeout=5):
             return True
-    except Exception:
+    except Exception as exc:
+        _log_debug(f"Telemetry request failed: {exc}")
         return False
 
 

@@ -193,6 +193,8 @@ _API_KEY_PLACEHOLDERS = {
     "your todoist api key",
 }
 _API_KEY_MIN_LENGTH = 20
+_API_KEY_HEX_RE = re.compile(r"^[a-fA-F0-9]{32,64}$")
+_API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 
 def _resolve_env_path() -> Path:
@@ -219,7 +221,11 @@ def _normalize_api_key(raw: str | None) -> str:
 def _looks_like_api_key(value: str) -> bool:
     if len(value) < _API_KEY_MIN_LENGTH:
         return False
-    return not any(char.isspace() for char in value)
+    if any(char.isspace() for char in value):
+        return False
+    if _API_KEY_HEX_RE.fullmatch(value):
+        return True
+    return _API_KEY_FALLBACK_RE.fullmatch(value) is not None
 
 
 def _resolve_api_key() -> str:
