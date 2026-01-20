@@ -92,10 +92,10 @@ jobs:
           if (-not $msiPath) { throw "TODOIST_MSI_PATH not set" }
           $installer = New-Object -ComObject WindowsInstaller.Installer
           $db = $installer.OpenDatabase($msiPath, 0)
-          $view = $db.OpenView("SELECT Value FROM Property WHERE Property='ProductCode'")
+          $view = $db.OpenView("SELECT ProductCode FROM Product")
           $view.Execute()
           $record = $view.Fetch()
-          $productCode = $record.StringData(1)
+          $productCode = if ($record) { $record.StringData(1) } else { $null }
           if (-not $productCode) { throw "Failed to read ProductCode from MSI" }
           $summary = $installer.SummaryInformation($msiPath, 0)
           $template = $summary.Property(7)
