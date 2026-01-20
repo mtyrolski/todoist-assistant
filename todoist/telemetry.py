@@ -59,12 +59,14 @@ def _read_windows_registry_opt_in() -> bool | None:
         import winreg
     except ImportError:
         return None
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\TodoistAssistant") as key:
-            value, _ = winreg.QueryValueEx(key, "telemetry_opt_in")
-            return bool(int(value))
-    except OSError:
-        return None
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(root, r"Software\TodoistAssistant") as key:
+                value, _ = winreg.QueryValueEx(key, "telemetry_opt_in")
+                return bool(int(value))
+        except OSError:
+            continue
+    return None
 
 
 def bootstrap_config(config_dir: Path) -> bool:

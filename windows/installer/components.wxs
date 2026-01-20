@@ -109,7 +109,7 @@
     <DirectoryRef Id="INSTALLFOLDER">
       <Component Id="TelemetryOptIn" Guid="*" Win64="yes">
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\TodoistAssistant"
           Name="telemetry_opt_in"
           Type="integer"

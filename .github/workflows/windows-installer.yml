@@ -90,13 +90,21 @@ jobs:
         run: |
           $msiPath = $env:TODOIST_MSI_PATH
           if (-not $msiPath) { throw "TODOIST_MSI_PATH not set" }
+          Write-Host "MSI path: $msiPath"
+          Write-Host "Runner temp: $env:RUNNER_TEMP"
+          Write-Host ("Runner user: {0}" -f (whoami))
+          $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+          Write-Host ("Is admin: {0}" -f $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator))
           $installer = New-Object -ComObject WindowsInstaller.Installer
           $summary = $installer.SummaryInformation($msiPath, 0)
           $template = $summary.Property(7)
           $arch = if ($template -match "x64|AMD64") { "x64" } else { "x86" }
+          Write-Host "MSI template: $template"
+          Write-Host "Detected MSI arch: $arch"
 
           $logPath = Join-Path $env:RUNNER_TEMP "todoist-assistant-msi-install.log"
           if (Test-Path $logPath) { Remove-Item $logPath -Force }
+          Write-Host "MSI log: $logPath"
 
           Get-Process todoist-assistant -ErrorAction SilentlyContinue | Stop-Process -Force
           $programFilesX86 = ${env:ProgramFiles(x86)}
@@ -114,10 +122,13 @@ jobs:
 
           $allowed = @(0, 3010, 1641)
           $installDir = $installDirs[0]
-          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" /l*v `"$logPath`"" -Wait -PassThru
+          Write-Host "Install dir: $installDir"
+          $installArgs = "/i `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" WIXUI_EXITDIALOGOPTIONALCHECKBOX=0 /l*v `"$logPath`""
+          Write-Host "msiexec install args: $installArgs"
+          $install = Start-Process msiexec -ArgumentList $installArgs -Wait -PassThru
           if ($allowed -notcontains $install.ExitCode) {
             if (Test-Path $logPath) {
-              $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8
+              $matches = Select-String -Path $logPath -Pattern "Error 1406|Return value 3" -Context 8,8
               if ($matches) {
                 $matches | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext }
               } else {
@@ -134,10 +145,12 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
-          $uninstall = Start-Process msiexec -ArgumentList "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`"" -Wait -PassThru
+          $uninstallArgs = "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`""
+          Write-Host "msiexec uninstall args: $uninstallArgs"
+          $uninstall = Start-Process msiexec -ArgumentList $uninstallArgs -Wait -PassThru
           if ($allowed -notcontains $uninstall.ExitCode) {
             if (Test-Path $logPath) {
-              $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8
+              $matches = Select-String -Path $logPath -Pattern "Error 1406|Return value 3" -Context 8,8
               if ($matches) {
                 $matches | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext }
               } else {
