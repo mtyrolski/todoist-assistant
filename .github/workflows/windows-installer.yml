@@ -91,12 +91,6 @@ jobs:
           $msiPath = $env:TODOIST_MSI_PATH
           if (-not $msiPath) { throw "TODOIST_MSI_PATH not set" }
           $installer = New-Object -ComObject WindowsInstaller.Installer
-          $db = $installer.OpenDatabase($msiPath, 0)
-          $view = $db.OpenView("SELECT ProductCode FROM Product")
-          $view.Execute()
-          $record = $view.Fetch()
-          $productCode = if ($record) { $record.StringData(1) } else { $null }
-          if (-not $productCode) { throw "Failed to read ProductCode from MSI" }
           $summary = $installer.SummaryInformation($msiPath, 0)
           $template = $summary.Property(7)
           $arch = if ($template -match "x64|AMD64") { "x64" } else { "x86" }
@@ -140,7 +134,7 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
-          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`"" -Wait -PassThru
+          $uninstall = Start-Process msiexec -ArgumentList "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`"" -Wait -PassThru
           if ($allowed -notcontains $uninstall.ExitCode) {
             if (Test-Path $logPath) {
               $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8
