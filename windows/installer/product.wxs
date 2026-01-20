@@ -18,11 +18,16 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
     <MediaTemplate />
     <Property Id="MSIINSTALLPERUSER" Value="0" />
+    <Property Id="SKIP_TELEMETRY_REGISTRY" Value="0" />
 
     <Feature Id="MainFeature" Title="Todoist Assistant" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentGroupRef Id="ConfigFiles" />
       <ComponentGroupRef Id="TodoistAssistantComponents" />
+    </Feature>
+    <Feature Id="TelemetryFeature" Title="Telemetry Opt-In" Level="1" Absent="allow">
+      <Condition Level="0">WIXUI_EXITDIALOGOPTIONALCHECKBOX &lt;&gt; 1 OR SKIP_TELEMETRY_REGISTRY=1</Condition>
+      <ComponentRef Id="TelemetryOptIn" />
     </Feature>
   </Product>
 </Wix>

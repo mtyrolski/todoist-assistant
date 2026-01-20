@@ -123,7 +123,7 @@ jobs:
           $allowed = @(0, 3010, 1641)
           $installDir = $installDirs[0]
           Write-Host "Install dir: $installDir"
-          $installArgs = "/i `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" WIXUI_EXITDIALOGOPTIONALCHECKBOX=0 /l*v `"$logPath`""
+          $installArgs = "/i `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" WIXUI_EXITDIALOGOPTIONALCHECKBOX=0 SKIP_TELEMETRY_REGISTRY=1 /l*v `"$logPath`""
           Write-Host "msiexec install args: $installArgs"
           $install = Start-Process msiexec -ArgumentList $installArgs -Wait -PassThru
           if ($allowed -notcontains $install.ExitCode) {

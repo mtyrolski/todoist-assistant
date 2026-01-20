@@ -24,7 +24,6 @@
       <ComponentRef Id="DesktopShortcut" />
       <ComponentRef Id="AppDataPermissions" />
       <ComponentRef Id="LogsFolder" />
-      <ComponentRef Id="TelemetryOptIn" />
     </ComponentGroup>
   </Fragment>
 
@@ -108,6 +107,7 @@
   <Fragment>
     <DirectoryRef Id="INSTALLFOLDER">
       <Component Id="TelemetryOptIn" Guid="*" Win64="yes">
+        <Condition>WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND SKIP_TELEMETRY_REGISTRY &lt;&gt; 1</Condition>
         <RegistryValue
           Root="HKCU"
           Key="Software\TodoistAssistant"
