@@ -9,6 +9,7 @@ import sys
 import zipfile
 from pathlib import Path
 from urllib.request import urlopen
+from xml.etree import ElementTree
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
@@ -225,7 +226,7 @@ def _build_dashboard(frontend_dir: Path, *, npm_path: str) -> None:
     _run([npm_path, "run", "build"], cwd=frontend_dir, env=env)
 
 
-def _stage_dashboard(frontend_dir: Path, app_root: Path) -> None:
+def _stage_dashboard(frontend_dir: Path, target_dir: Path) -> None:
     standalone_dir = frontend_dir / ".next" / "standalone"
     static_dir = frontend_dir / ".next" / "static"
     public_dir = frontend_dir / "public"
@@ -233,17 +234,70 @@ def _stage_dashboard(frontend_dir: Path, app_root: Path) -> None:
     if not standalone_dir.exists():
         raise RuntimeError("Next.js standalone output not found. Ensure next.config.js sets output=standalone.")
 
-    frontend_target = app_root / "frontend"
-    _copy_tree(standalone_dir, frontend_target)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    frontend_target = target_dir
+    _copy_tree_merge(standalone_dir, frontend_target)
+
+    nested_dir = frontend_target / frontend_dir.name
+    server_js = frontend_target / "server.js"
+    if not server_js.exists() and (nested_dir / "server.js").exists():
+        for item in nested_dir.iterdir():
+            dest = frontend_target / item.name
+            if dest.exists():
+                if item.is_dir():
+                    _copy_tree_merge(item, dest)
+                else:
+                    _copy_file(item, dest)
+            else:
+                shutil.move(str(item), str(dest))
+        shutil.rmtree(nested_dir)
 
     if static_dir.exists():
         _copy_tree_merge(static_dir, frontend_target / ".next" / "static")
     if public_dir.exists():
         _copy_tree_merge(public_dir, frontend_target / "public")
 
-    server_js = frontend_target / "server.js"
     if not server_js.exists():
         raise RuntimeError("Next.js standalone server.js missing from packaged frontend.")
+
+
+def _zip_frontend(frontend_root: Path, zip_path: Path) -> None:
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in frontend_root.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(frontend_root))
+
+
+def _force_win64_components(wxs_path: Path) -> None:
+    tree = ElementTree.parse(wxs_path)
+    root = tree.getroot()
+    ns = {"wix": "http://schemas.microsoft.com/wix/2006/wi"}
+    updated = False
+    for component in root.findall(".//wix:Component", ns):
+        if component.get("Win64") != "yes":
+            component.set("Win64", "yes")
+            updated = True
+    if updated:
+        tree.write(wxs_path, encoding="utf-8", xml_declaration=True)
+
+
+def _check_install_path_lengths(app_root: Path, install_root: Path) -> None:
+    max_len = 0
+    max_path: Path | None = None
+    for path in app_root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel_path = path.relative_to(app_root)
+        abs_len = len(str(install_root / rel_path))
+        if abs_len > max_len:
+            max_len = abs_len
+            max_path = rel_path
+    if max_len >= 240 and max_path is not None:
+        raise RuntimeError(
+            f"Installer payload path length {max_len} exceeds safe limit for Windows: {max_path}"
+        )
 
 
 def _stage_assets(repo_root: Path, app_root: Path, config_stage: Path, *, include_dashboard: bool, node_version: str) -> None:
@@ -276,8 +330,18 @@ def _stage_assets(repo_root: Path, app_root: Path, config_stage: Path, *, includ
 
     if include_dashboard:
         frontend_dir = repo_root / "frontend"
-        _stage_dashboard(frontend_dir, app_root)
+        frontend_stage = app_root / "_frontend"
+        _stage_dashboard(frontend_dir, frontend_stage)
         _stage_node_runtime(app_root, node_version)
+        _zip_frontend(frontend_stage, app_root / "frontend.zip")
+        shutil.rmtree(frontend_stage)
+        if (app_root / "_frontend").exists() or (app_root / "frontend").exists():
+            raise RuntimeError("Frontend staging left an unpacked directory; aborting MSI build.")
+        if not (app_root / "frontend.zip").exists():
+            raise RuntimeError("frontend.zip missing after staging dashboard.")
+        node_exe = app_root / "node" / ("node.exe" if os.name == "nt" else "node")
+        if not node_exe.exists():
+            raise RuntimeError("Bundled Node runtime missing; expected node executable under app_root/node.")
 
 
 def _build_msi(
@@ -312,10 +376,12 @@ def _build_msi(
             "-ag",
             "-srd",
             "-sfrag",
+            "-sreg",
             "-out",
             str(app_wxs),
         ]
     )
+    _force_win64_components(app_wxs)
     _run(
         [
             heat,
@@ -330,10 +396,12 @@ def _build_msi(
             "-gg",
             "-srd",
             "-sfrag",
+            "-sreg",
             "-out",
             str(config_wxs),
         ]
     )
+    _force_win64_components(config_wxs)
 
     installer_dir = repo_root / "windows" / "installer"
     product_wxs = installer_dir / "product.wxs"
@@ -349,6 +417,8 @@ def _build_msi(
         [
             candle,
             "-nologo",
+            "-arch",
+            "x64",
             "-ext",
             "WixUtilExtension",
             "-ext",
@@ -460,6 +530,7 @@ def main() -> int:
         include_dashboard=include_dashboard,
         node_version=args.node_version,
     )
+    _check_install_path_lengths(app_root, Path(r"C:\Program Files\TodoistAssistant"))
 
     print("Building MSI...")
     msi_path = _build_msi(repo_root, dist_root, app_root, dist_root / "config", msi_version, wix_tools)

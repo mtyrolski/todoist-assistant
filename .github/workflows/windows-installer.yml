@@ -109,6 +109,7 @@ jobs:
           $programFiles64 = $env:ProgramFiles
           $programFilesRoot = if ($arch -eq "x64" -and $programFiles64) { $programFiles64 } elseif ($programFilesX86) { $programFilesX86 } else { $programFiles64 }
           $installDirs = @(
+            "C:\\TodoistAssistant",
             "$programFilesRoot\\TodoistAssistant",
             "C:\\Program Files\\TodoistAssistant",
             "C:\\Program Files (x86)\\TodoistAssistant"
@@ -119,7 +120,7 @@ jobs:
 
           $allowed = @(0, 3010, 1641)
           $installDir = $installDirs[0]
-          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" /l*v `"$logPath`"" -Wait -PassThru
+          $install = Start-Process msiexec -ArgumentList "/i `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 ROOTDRIVE=C:\\ INSTALLFOLDER=`"$installDir`" /l*v `"$logPath`"" -Wait -PassThru
           if ($allowed -notcontains $install.ExitCode) {
             if (Test-Path $logPath) {
               $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8
@@ -139,7 +140,7 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
-          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart /l*v `"$logPath`"" -Wait -PassThru
+          $uninstall = Start-Process msiexec -ArgumentList "/x $productCode /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`"" -Wait -PassThru
           if ($allowed -notcontains $uninstall.ExitCode) {
             if (Test-Path $logPath) {
               $matches = Select-String -Path $logPath -Pattern "Return value 3" -Context 8,8

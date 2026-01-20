@@ -1,13 +1,15 @@
 """Local launcher for the Todoist Assistant dashboard stack."""
 
 import argparse
+import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
 import time
 import webbrowser
+import zipfile
 
 import uvicorn
 
@@ -92,8 +94,79 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _start_frontend(install_dir: Path, host: str, port: int) -> subprocess.Popen[bytes]:
-    frontend_dir = install_dir / "frontend"
+def _frontend_manifest_info(zip_path: Path) -> dict[str, int]:
+    stat = zip_path.stat()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _frontend_manifest_path(data_dir: Path) -> Path:
+    return data_dir / ".frontend_manifest.json"
+
+
+def _load_frontend_manifest(path: Path) -> dict[str, int] | None:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    size = payload.get("size")
+    mtime_ns = payload.get("mtime_ns")
+    if isinstance(size, int) and isinstance(mtime_ns, int):
+        return {"size": size, "mtime_ns": mtime_ns}
+    return None
+
+
+def _write_frontend_manifest(path: Path, info: dict[str, int]) -> None:
+    path.write_text(json.dumps(info, sort_keys=True), encoding="utf-8")
+
+
+def _frontend_ready(frontend_dir: Path) -> bool:
+    server_js = frontend_dir / "server.js"
+    if not server_js.exists():
+        return False
+    static_dir = frontend_dir / ".next" / "static"
+    public_dir = frontend_dir / "public"
+    return static_dir.exists() or public_dir.exists()
+
+
+def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
+    frontend_zip = install_dir / "frontend.zip"
+    extracted_dir = data_dir / "frontend"
+    if frontend_zip.exists():
+        manifest_path = _frontend_manifest_path(data_dir)
+        current = _frontend_manifest_info(frontend_zip)
+        cached = _load_frontend_manifest(manifest_path)
+        needs_extract = (cached != current) or (not _frontend_ready(extracted_dir))
+        server_js = extracted_dir / "server.js"
+        if needs_extract:
+            temp_dir = data_dir / f"frontend.tmp-{os.getpid()}"
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                _extract_zip(frontend_zip, temp_dir)
+                if not _frontend_ready(temp_dir):
+                    raise RuntimeError("Extracted frontend is missing server.js or assets")
+                if extracted_dir.exists():
+                    shutil.rmtree(extracted_dir)
+                shutil.move(str(temp_dir), str(extracted_dir))
+                _write_frontend_manifest(manifest_path, current)
+            finally:
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+        return extracted_dir
+    if (install_dir / "frontend" / "server.js").exists():
+        return install_dir / "frontend"
+    return install_dir
+
+
+def _start_frontend(install_dir: Path, data_dir: Path, host: str, port: int) -> subprocess.Popen[bytes]:
+    frontend_dir = _prepare_frontend_dir(install_dir, data_dir)
     node_exe = install_dir / "node" / ("node.exe" if os.name == "nt" else "node")
     if os.name != "nt" and not node_exe.exists():
         fallback = install_dir / "node" / "bin" / "node"
@@ -109,6 +182,37 @@ def _start_frontend(install_dir: Path, host: str, port: int) -> subprocess.Popen
     env["HOSTNAME"] = host
 
     return subprocess.Popen([node_cmd, str(server_js)], cwd=str(frontend_dir), env=env)
+
+
+def _win_long_path(path: Path) -> str:
+    if os.name != "nt":
+        return str(path)
+    resolved = os.path.abspath(str(path))
+    if resolved.startswith("\\\\?\\"):
+        return resolved
+    if resolved.startswith("\\\\"):
+        return f"\\\\?\\UNC\\{resolved[2:]}"
+    return f"\\\\?\\{resolved}"
+
+
+def _extract_zip(zip_path: Path, dest: Path) -> None:
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for member in archive.infolist():
+            if not member.filename:
+                continue
+            normalized = member.filename.replace("\\", "/")
+            member_path = PurePosixPath(normalized)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise RuntimeError(f"Refusing to extract unsafe path: {member.filename}")
+            if member_path.parts and ":" in member_path.parts[0]:
+                raise RuntimeError(f"Refusing to extract unsafe path: {member.filename}")
+            target = dest / Path(*member_path.parts)
+            if member.is_dir():
+                os.makedirs(_win_long_path(target), exist_ok=True)
+                continue
+            os.makedirs(_win_long_path(target.parent), exist_ok=True)
+            with archive.open(member, "r") as src, open(_win_long_path(target), "wb") as dst:
+                shutil.copyfileobj(src, dst)
 
 
 def main() -> int:
@@ -142,7 +246,7 @@ def main() -> int:
     frontend_proc: subprocess.Popen[bytes] | None = None
     try:
         if not args.no_frontend:
-            frontend_proc = _start_frontend(install_dir, args.frontend_host, args.frontend_port)
+            frontend_proc = _start_frontend(install_dir, data_dir, args.frontend_host, args.frontend_port)
             time.sleep(1.0)
         if not args.no_browser:
             target = f"http://{args.frontend_host}:{args.frontend_port}" if not args.no_frontend else None

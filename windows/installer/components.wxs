@@ -2,11 +2,13 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Fragment>
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFilesFolder">
+      <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
-      <Directory Id="CommonProgramsFolder" />
-      <Directory Id="CommonDesktopFolder" />
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppStartMenuDir" Name="Todoist Assistant" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
       <Directory Id="CommonAppDataFolder">
         <Directory Id="APPDATADIR" Name="TodoistAssistant">
           <Directory Id="CONFIGDIR" Name="config" />
@@ -14,12 +16,6 @@
         </Directory>
       </Directory>
     </Directory>
-  </Fragment>
-
-  <Fragment>
-    <DirectoryRef Id="CommonProgramsFolder">
-      <Directory Id="AppStartMenuDir" Name="Todoist Assistant" />
-    </DirectoryRef>
   </Fragment>
 
   <Fragment>
@@ -34,7 +30,7 @@
 
   <Fragment>
     <DirectoryRef Id="AppStartMenuDir">
-      <Component Id="AppShortcuts" Guid="*">
+      <Component Id="AppShortcuts" Guid="*" Win64="yes">
         <Shortcut
           Id="StartMenuShortcut"
           Name="Todoist Assistant"
@@ -43,7 +39,7 @@
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\TodoistAssistant"
           Name="installed"
           Type="integer"
@@ -54,8 +50,8 @@
   </Fragment>
 
   <Fragment>
-    <DirectoryRef Id="CommonDesktopFolder">
-      <Component Id="DesktopShortcut" Guid="*">
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*" Win64="yes">
         <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
         <Shortcut
           Id="DesktopShortcut"
@@ -64,7 +60,7 @@
           Target="[INSTALLFOLDER]todoist-assistant.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\TodoistAssistant"
           Name="desktop_shortcut"
           Type="integer"
@@ -76,7 +72,7 @@
 
   <Fragment>
     <DirectoryRef Id="APPDATADIR">
-      <Component Id="AppDataPermissions" Guid="*">
+      <Component Id="AppDataPermissions" Guid="*" Win64="yes">
         <CreateFolder>
           <util:PermissionEx WellKnownSid="BuiltinUsers" GenericAll="yes" />
         </CreateFolder>
@@ -94,7 +90,7 @@
 
   <Fragment>
     <DirectoryRef Id="LOGSDIR">
-      <Component Id="LogsFolder" Guid="*">
+      <Component Id="LogsFolder" Guid="*" Win64="yes">
         <CreateFolder>
           <util:PermissionEx WellKnownSid="BuiltinUsers" GenericAll="yes" />
         </CreateFolder>
@@ -111,7 +107,7 @@
 
   <Fragment>
     <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="TelemetryOptIn" Guid="*">
+      <Component Id="TelemetryOptIn" Guid="*" Win64="yes">
         <RegistryValue
           Root="HKLM"
           Key="Software\TodoistAssistant"

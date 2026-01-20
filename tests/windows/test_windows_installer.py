@@ -3,6 +3,7 @@ import sys
 import subprocess
 from pathlib import Path
 import tempfile
+import zipfile
 
 import pytest
 
@@ -37,11 +38,34 @@ def test_windows_msi_contents() -> None:
         assert has_python, "Expected bundled Python runtime artifacts in installer payload"
 
         if expected_dashboard:
-            server_js = app_root / "frontend" / "server.js"
-            assert server_js.exists(), "Dashboard server.js missing from packaged frontend"
-            static_dir = app_root / "frontend" / ".next" / "static"
-            public_dir = app_root / "frontend" / "public"
-            assert static_dir.exists() or public_dir.exists(), "Dashboard assets missing (.next/static or public)"
+            frontend_zip = app_root / "frontend.zip"
+            if frontend_zip.exists():
+                with zipfile.ZipFile(frontend_zip, "r") as archive:
+                    names = set(archive.namelist())
+                has_server = "server.js" in names
+                has_assets = any(
+                    name.startswith(".next/static/") or name.startswith("public/")
+                    for name in names
+                )
+                assert has_server, "Dashboard server.js missing from frontend.zip"
+                assert has_assets, "Dashboard assets missing from frontend.zip (.next/static or public)"
+            else:
+                server_candidates = [
+                    app_root / "server.js",
+                    app_root / "frontend" / "server.js",
+                ]
+                server_js = next((path for path in server_candidates if path.exists()), None)
+                assert server_js is not None, "Dashboard server.js missing from packaged frontend"
+                static_candidates = [
+                    app_root / ".next" / "static",
+                    app_root / "frontend" / ".next" / "static",
+                ]
+                public_candidates = [
+                    app_root / "public",
+                    app_root / "frontend" / "public",
+                ]
+                has_assets = any(path.exists() for path in static_candidates + public_candidates)
+                assert has_assets, "Dashboard assets missing (.next/static or public)"
 
 
 def _resolve_msi_path(repo_root: Path) -> Path:
