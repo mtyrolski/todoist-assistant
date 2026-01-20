@@ -17,7 +17,6 @@
     <Condition Message="Todoist Assistant requires a 64-bit version of Windows.">VersionNT64</Condition>
     <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
     <MediaTemplate />
-    <Property Id="ALLUSERS" Value="1" />
     <Property Id="MSIINSTALLPERUSER" Value="0" />
 
     <Feature Id="MainFeature" Title="Todoist Assistant" Level="1">
