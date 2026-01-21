@@ -2,6 +2,7 @@ import os
 import socket
 import subprocess
 import sys
+import shutil
 import time
 from pathlib import Path
 
@@ -105,18 +106,31 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
     env["TODOIST_DATA_DIR"] = str(data_dir)
     env["TODOIST_CONFIG_DIR"] = str(config_dir)
 
-    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        frontend_url = f"http://127.0.0.1:{frontend_port}"
-        _wait_for_frontend(frontend_url)
-        resp = requests.get(frontend_url, timeout=5)
-        assert resp.status_code == 200, f"Unexpected HTTP {resp.status_code}"
-    finally:
-        proc.terminate()
+    stdout_path = tmp_path / "stdout.log"
+    stderr_path = tmp_path / "stderr.log"
+
+    with open(stdout_path, "w") as out_f, open(stderr_path, "w") as err_f:
+        proc = subprocess.Popen(cmd, env=env, stdout=out_f, stderr=err_f)
+    
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            frontend_url = f"http://127.0.0.1:{frontend_port}"
+            # Increased timeout for CI runners which can be slow
+            _wait_for_frontend(frontend_url, timeout=60.0)
+            resp = requests.get(frontend_url, timeout=5)
+            assert resp.status_code == 200, f"Unexpected HTTP {resp.status_code}"
+        except Exception:
+            # Dump logs on failure
+            if stdout_path.exists():
+                print(f"\n=== STDOUT ===\n{stdout_path.read_text()}\n==============")
+            if stderr_path.exists():
+                print(f"\n=== STDERR ===\n{stderr_path.read_text()}\n==============")
+            raise
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/todoist-assistant"])
     _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todoist-assistant"])

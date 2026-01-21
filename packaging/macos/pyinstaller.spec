@@ -70,7 +70,7 @@ info_plist.update(
 script_path = repo_root / "todoist" / "launcher.py"
 
 a = Analysis(
-    [str(script_path)],
+    [str(scriptpath)],
     pathex=[str(repo_root)],
     binaries=binaries,
     datas=datas,

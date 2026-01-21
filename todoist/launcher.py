@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import webbrowser
 import zipfile
 
@@ -260,12 +261,20 @@ def main() -> int:
             log_level="info",
         )
     except Exception:
+        traceback.print_exc()
         try:
             telemetry.maybe_send_install_failure(config_dir, data_dir)
         except Exception:
             # Telemetry is best-effort; avoid masking the original error.
             pass
-        raise
+        if getattr(sys, "frozen", False) and os.name == "nt":
+            print("\nApplication failed to start or crashed.")
+            print("Press Enter to exit...")
+            try:
+                input()
+            except Exception:
+                pass
+        sys.exit(1)
     finally:
         if frontend_proc and frontend_proc.poll() is None:
             frontend_proc.terminate()
