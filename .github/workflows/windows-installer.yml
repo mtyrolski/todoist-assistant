@@ -67,6 +67,16 @@ jobs:
             Copy-Item $python $python3
           }
 
+      - name: Prepare signing certificate
+        if: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+        shell: powershell
+        run: |
+          $certBase64 = '${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}'
+          $certPath = Join-Path $env:GITHUB_WORKSPACE 'todoist-assistant.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($certBase64))
+          "WINDOWS_SIGNING_CERTIFICATE=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "WINDOWS_SIGNING_CERTIFICATE_PASSWORD=${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build MSI
         shell: powershell
         run: |

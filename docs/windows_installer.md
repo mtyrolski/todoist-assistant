@@ -96,3 +96,28 @@ The launcher sets:
 - The Start Menu/Desktop shortcut launches the API + Next.js dashboard and opens `http://127.0.0.1:3000`.
 - To skip the Desktop shortcut, install with `msiexec /i todoist-assistant-<version>.msi INSTALLDESKTOPSHORTCUT=0`.
 - Uninstall removes the installed files and the ProgramData folder used by the app.
+
+## macOS build notes
+
+- The macOS packaging workflow installs PostgreSQL via Homebrew so `pg_config` is available, and then sets the macOS-specific extra (`uv sync --locked --group build --extra macos`) to pin `psycopg2-binary`. If you build locally, run `brew install postgresql` before `uv sync --extra macos` so that `pg_config --version` succeeds and the environment matches CI.
+- The macOS smoke test installs the pkg, launches `todoist-assistant --no-browser` on ephemeral API/front-end ports, waits for `http://127.0.0.1:3000` to respond, and only then uninstalls, ensuring the dashboard really hosts on localhost.
+
+## Code signing
+
+The Windows MSI is unsigned by default, which is why SmartScreen/UAC show “Unknown publisher”. When you sign the PyInstaller executable and MSI with a trusted code signing certificate, those warnings go away and end users only need to download the single `todoist-assistant-<version>.msi` asset (the cabinet is embedded with the installer via `windows/installer/product.wxs`, so there is no separate `cab1.cab` file to carry alongside the MSI).
+
+### Local builds
+
+Before running `uv run python -m scripts.build_windows`, populate the following environment variables:
+
+```powershell
+$env:WINDOWS_SIGNING_CERTIFICATE = "C:\path\to\certificate.pfx"
+$env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD = "pfx-password"
+uv run python -m scripts.build_windows
+```
+
+`WINDOWS_SIGNING_TIMESTAMP_URL` can override the default timestamp server (`http://timestamp.digicert.com`), and `WINDOWS_SIGNTOOL_PATH` points to a custom `signtool.exe` when it is not on `PATH`. Providing the PFX and password causes the build script to sign `todoist-assistant.exe` before WiX stages it and to sign the final MSI after `light.exe` finishes.
+
+### GitHub Actions
+
+Store the base64-encoded PFX in a secret like `WINDOWS_SIGNING_CERTIFICATE` and keep the password in `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`. The Windows installer workflow can decode the certificate into the workspace, export those environment variables, and then the `uv run python -m scripts.build_windows` step automatically signs both artifacts during the build. Once the release MSI carries that signature, Windows no longer treats it as an unknown publisher.

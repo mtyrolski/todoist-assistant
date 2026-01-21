@@ -43,9 +43,20 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Install PostgreSQL tooling
+        run: |
+          brew install postgresql
+          postgresql_prefix=$(brew --prefix postgresql)
+          echo "PATH=${postgresql_prefix}/bin:$PATH" >> "$GITHUB_ENV"
+          echo "PG_CONFIG=${postgresql_prefix}/bin/pg_config" >> "$GITHUB_ENV"
+
+      - name: Validate pg_config
+        run: |
+          pg_config --version
+
       - name: Install Python dependencies
         run: |
-          uv sync --locked --group build || uv sync --group build
+          uv sync --locked --group build --extra macos || uv sync --group build --extra macos
 
       - name: Ensure python3 shim for uv run
         run: |
