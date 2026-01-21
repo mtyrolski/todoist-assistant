@@ -27,6 +27,7 @@
     - [Recommended Setup Environment](#recommended-setup-environment)
     - [Setup Instructions (Linux / Ubuntu / Debian)](#setup-instructions-linux--ubuntu--debian)
     - [macOS Installation](#macos-installation)
+      - [Build prerequisites](#build-prerequisites)
     - [Platform Installers](#platform-installers)
   - [Makefile Usage (recommended)](#makefile-usage-recommended)
   - [Manual Usage](#manual-usage)
@@ -56,9 +57,10 @@
 
 ### Screenshots
 <div style="text-align: center;">
-  <img src="img/header.png" alt="header" width="900"/>
-  <img src="img/header2.png" alt="header2" width="900"/>
-  <img src="img/control.png" alt="control" width="900"/>
+  <img src="img/fig1.png" alt="fig1" width="900"/>
+  <img src="img/fig2.png" alt="fig2" width="900"/>
+  <img src="img/fig3.png" alt="fig3" width="900"/>
+  <img src="img/fig4.png" alt="fig4" width="900"/>
 </div>
 
 ## Library Design Overview
@@ -78,6 +80,9 @@ layer is optional and runs fully local, using cached events with a restricted Py
 ## Installation
 
 ### Windows installer (MSI, recommended for end users)
+
+> [!WARNING]
+> This part is under development.
 
 1. Download the latest `todoist-assistant-<version>.msi` from GitHub Releases.
 2. Double-click the MSI. If SmartScreen appears, click **More info** → **Run anyway** and accept the prompt (Security & signing info is below).
@@ -181,6 +186,9 @@ Unsigned releases trigger the “Unknown publisher” SmartScreen/UAC prompt. Th
    ```
 
 ### macOS Installation
+
+> [!WARNING]
+> This part is under development.
 
 End users (Homebrew, CLI only):
 

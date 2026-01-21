@@ -16,7 +16,7 @@
     />
     <Condition Message="Todoist Assistant requires a 64-bit version of Windows.">VersionNT64</Condition>
     <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
-    <MediaTemplate EmbedCab="yes" Cabinet="todoist-assistant.cab" />
+    <MediaTemplate EmbedCab="yes" />
     <Property Id="MSIINSTALLPERUSER" Value="0" />
     <Property Id="SKIP_TELEMETRY_REGISTRY" Value="0" />
 
