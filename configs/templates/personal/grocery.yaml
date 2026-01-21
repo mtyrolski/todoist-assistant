@@ -1,0 +1,19 @@
+# Grocery Shopping Template
+content: Grocery Shopping
+description: Weekly grocery run
+children:
+  -
+    content: Check fridge and pantry
+    description: See what is missing
+  -
+    content: Meal plan for the week
+    description: Decide on meals
+  -
+    content: Create shopping list
+    description: Write down items
+  -
+    content: Go to supermarket
+    description: Buy the items
+  -
+    content: Unpack groceries
+    description: Put items away
