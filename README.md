@@ -22,9 +22,10 @@
     - [Screenshots](#screenshots)
   - [Library Design Overview](#library-design-overview)
   - [Installation](#installation)
+    - [Windows installer (MSI, recommended for end users)](#windows-installer-msi-recommended-for-end-users)
+      - [Security \& signing](#security--signing)
     - [Recommended Setup Environment](#recommended-setup-environment)
     - [Setup Instructions (Linux / Ubuntu / Debian)](#setup-instructions-linux--ubuntu--debian)
-    - [Windows Installer (MSI)](#windows-installer-msi)
     - [macOS Installation](#macos-installation)
     - [Platform Installers](#platform-installers)
   - [Makefile Usage (recommended)](#makefile-usage-recommended)
@@ -67,19 +68,6 @@ Todoist Assistant is organized as a local-first analytics pipeline. The core ide
 once, then run repeatable analysis, automations, and dashboards on top. The stack is modular so you can use just the library,
 just the dashboard, or just the automations without rewriting the data layer.
 
-```mermaid
-flowchart LR
-    A[Todoist API] --> B[Observer sync]
-    B --> C[Local cache (joblib)]
-    C --> D[Normalized models + DataFrame layer]
-    D --> E[Dashboards (FastAPI + Next.js)]
-    D --> F[Automations]
-    D --> G[Agentic chat (local LLM + safe tools)]
-    F --> A
-```
-
-If Mermaid doesn't render, read it left-to-right: sync once from Todoist, cache locally, normalize into models/dataframes, then power dashboards, automations, and agentic chat (automations can write back to Todoist).
-
 At a glance, the Database layer wraps the Todoist API, hydrates in-memory caches, and standardizes project/task/activity
 models. The DataFrame pipeline turns cached activity into a pandas timeline that powers plots and dashboards. Automations
 are config-driven classes that either extend tasks (templates) or refresh activity data on a schedule. The agentic chat
@@ -88,11 +76,58 @@ layer is optional and runs fully local, using cached events with a restricted Py
 
 
 ## Installation
+
+### Windows installer (MSI, recommended for end users)
+
+1. Download the latest `todoist-assistant-<version>.msi` from GitHub Releases.
+2. Double-click the MSI. If SmartScreen appears, click **More info** → **Run anyway** and accept the prompt (Security & signing info is below).
+3. Choose an install directory (default: `C:\Program Files\TodoistAssistant`) and finish the wizard.
+4. On the final screen you can opt in to anonymous telemetry (off by default).
+5. Launch Todoist Assistant from the Start Menu or Desktop shortcut.
+6. Configure your API key:
+   - Edit `C:\ProgramData\TodoistAssistant\.env` (created from the template on first launch) and set `API_KEY = 'your_todoist_api_key'`.
+   - Or use the dashboard: Control Panel → Settings → paste the token and Save.
+
+First launch notes:
+
+- The installer places config templates in `C:\ProgramData\TodoistAssistant\config`.
+- On first launch, the app copies `config\.env.template` to `C:\ProgramData\TodoistAssistant\.env` if needed.
+- The dashboard opens at `http://127.0.0.1:3000`; if it does not open automatically, launch the app and visit that URL manually.
+- `C:\ProgramData` is hidden by default; paste it into File Explorer's address bar.
+
+Quick commands (PowerShell):
+
+```powershell
+# Interactive install
+msiexec /i todoist-assistant-<version>.msi
+
+# Silent install (no UI)
+msiexec /i todoist-assistant-<version>.msi /qn /norestart
+
+# Install log
+msiexec /i todoist-assistant-<version>.msi /l*v install.log
+
+# Skip desktop shortcut
+msiexec /i todoist-assistant-<version>.msi INSTALLDESKTOPSHORTCUT=0
+
+# Uninstall (Apps & Features is easiest)
+msiexec /x todoist-assistant-<version>.msi /qn /norestart
+```
+
+Runtime locations:
+
+- Executable: `C:\Program Files\TodoistAssistant\todoist-assistant.exe`
+- Data/config/logs: `C:\ProgramData\TodoistAssistant`
+  - Config templates: `C:\ProgramData\TodoistAssistant\config`
+  - Logs: `C:\ProgramData\TodoistAssistant\logs`
+
+#### Security & signing
+
+Unsigned releases trigger the “Unknown publisher” SmartScreen/UAC prompt. The installer now embeds its cabinet, and the build script can sign the PyInstaller runtime + MSI if you set `WINDOWS_SIGNING_CERTIFICATE`/`WINDOWS_SIGNING_CERTIFICATE_PASSWORD` before invoking `uv run python -m scripts.build_windows`. See `docs/windows_installer.md#code-signing` for maintainer-side details; once a trusted certificate is applied, Windows should stop flagging the release.
+
 ### Recommended Setup Environment
 
-> **Windows:** recommended via [Ubuntu 20.04 (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) for the best experience.
-> For an MSI-based installer, see `docs/windows_installer.md`.
-
+> **Windows:** recommended via [Ubuntu 20.04 (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) for the best experience. See `docs/windows_installer.md` if you want to build or install via the MSI instead.
 
 ### Setup Instructions (Linux / Ubuntu / Debian)
 
@@ -145,104 +180,6 @@ layer is optional and runs fully local, using cached events with a restricted Py
    make update_env
    ```
 
-### Windows Installer (MSI)
-
-#### End users (recommended)
-
-1. Download the latest `todoist-assistant-<version>.msi` from GitHub Releases.
-2. Double-click the MSI. If Windows SmartScreen appears, click "More info" -> "Run anyway".
-3. Choose an install directory (default: `C:\Program Files\TodoistAssistant`) and finish the wizard.
-4. On the final screen you can opt in to anonymous telemetry (off by default).
-5. Launch the app from the Start Menu or Desktop shortcut.
-6. Configure your API key:
-   - Open `C:\ProgramData\TodoistAssistant\.env` in a text editor.
-   - Set `API_KEY = 'your_todoist_api_key'`, save, and relaunch the app.
-   - Or use the dashboard: Control Panel → Settings → paste the token and Save (recommended for UI-only users).
-
-First launch notes:
-
-- The installer places config templates in `C:\ProgramData\TodoistAssistant\config`.
-- On first launch, the app copies `config\.env.template` to `C:\ProgramData\TodoistAssistant\.env` if needed.
-- The dashboard opens at `http://127.0.0.1:3000`.
-- If the browser does not open automatically, launch the app and open `http://127.0.0.1:3000`.
-- `C:\ProgramData` is hidden by default; paste it into File Explorer's address bar.
-
-Quick commands (PowerShell):
-
-```powershell
-# Interactive install
-msiexec /i todoist-assistant-<version>.msi
-
-# Silent install (no UI)
-msiexec /i todoist-assistant-<version>.msi /qn /norestart
-
-# Install log
-msiexec /i todoist-assistant-<version>.msi /l*v install.log
-
-# Skip desktop shortcut
-msiexec /i todoist-assistant-<version>.msi INSTALLDESKTOPSHORTCUT=0
-
-# Uninstall (Apps & Features is easiest)
-msiexec /x todoist-assistant-<version>.msi /qn /norestart
-```
-
-Runtime locations:
-
-- Executable: `C:\Program Files\TodoistAssistant\todoist-assistant.exe`
-- Data/config/logs: `C:\ProgramData\TodoistAssistant`
-  - Config templates: `C:\ProgramData\TodoistAssistant\config`
-  - Logs: `C:\ProgramData\TodoistAssistant\logs`
-
-Advanced launch flags:
-
-```powershell
-"C:\Program Files\TodoistAssistant\todoist-assistant.exe" --no-frontend
-"C:\Program Files\TodoistAssistant\todoist-assistant.exe" --api-port 8001 --frontend-port 3001
-```
-
-#### Contributors (build the MSI)
-
-Contributor prerequisites (Windows 10/11 build machine):
-
-- Python 3.11+ and `uv`
-- WiX Toolset v3.11+ (`candle.exe`, `light.exe`, `heat.exe` on PATH)
-- Node.js 20+ + npm (required if you package the dashboard)
-
-Build command (from repo root):
-
-```powershell
-uv sync --group build
-# Windows only: ensure uv can resolve python3 in the venv
-if (-not (Test-Path .venv\Scripts\python3.exe)) { Copy-Item .venv\Scripts\python.exe .venv\Scripts\python3.exe }
-uv run python3 -m scripts.build_windows
-```
-
-Skip dashboard packaging (no Node required):
-
-```powershell
-uv run python3 -m scripts.build_windows --no-dashboard
-```
-
-Expected output:
-
-```
-dist\windows\todoist-assistant-<version>.msi
-```
-
-User install:
-
-```powershell
-msiexec /i dist\windows\todoist-assistant-<version>.msi
-```
-
-Install locations:
-
-- Program files: `C:\Program Files\TodoistAssistant`
-- Writable data/config/logs: `C:\ProgramData\TodoistAssistant`
-  - Config templates: `C:\ProgramData\TodoistAssistant\config`
-  - Logs: `C:\ProgramData\TodoistAssistant\logs`
-End users do not need Python installed; the MSI bundles the runtime via PyInstaller.
-
 ### macOS Installation
 
 End users (Homebrew, CLI only):
@@ -257,6 +194,12 @@ End users (pkg installer, CLI bundle):
 ```bash
 sudo installer -pkg dist/macos/todoist-assistant-<version>.pkg -target /
 ```
+
+#### Build prerequisites
+
+- macOS builds now depend on `psycopg2-binary` so that packaging doesn't require `pg_config`. The CI workflow still installs `postgresql` via Homebrew to provide `pg_config` for any tooling that may need it and validates it by calling `pg_config --version`.
+- Locally, run `brew install postgresql` (so `pg_config` is on `PATH`), then use `uv sync --locked --group build --extra macos` before building installers to pull in the same binary dependency as the macOS workflow.
+- The macOS installer smoke test (`tests/macos/test_macos_installers.py`) now installs the pkg, launches `todoist-assistant --no-browser` on free ports, and waits for `http://127.0.0.1:3000` to serve the dashboard before removing the install so the workflow can verify the app is hosted on localhost.
 
 Install locations (pkg):
 

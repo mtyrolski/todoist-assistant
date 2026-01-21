@@ -11,6 +11,11 @@ from pathlib import Path
 from urllib.request import urlopen
 from xml.etree import ElementTree
 
+SIGNING_CERT_ENV = "WINDOWS_SIGNING_CERTIFICATE"
+SIGNING_PASSWORD_ENV = "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
+SIGNING_TIMESTAMP_ENV = "WINDOWS_SIGNING_TIMESTAMP_URL"
+SIGNTOOL_ENV = "WINDOWS_SIGNTOOL_PATH"
+
 
 def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
     try:
@@ -164,6 +169,25 @@ def _find_wix_tool(tool: str) -> str:
     )
 
 
+def _find_signtool() -> str:
+    candidate = os.getenv(SIGNTOOL_ENV)
+    if candidate:
+        path = Path(candidate)
+        if path.exists():
+            return str(path)
+        raise RuntimeError(f"{SIGNTOOL_ENV} is set but {path} does not exist.")
+
+    for exe_name in ("signtool.exe", "signtool"):
+        resolved = shutil.which(exe_name)
+        if resolved:
+            return resolved
+
+    raise RuntimeError(
+        "signtool.exe not found. Install the Windows SDK (signtool) and add it to PATH, or set "
+        f"{SIGNTOOL_ENV} to the explicit path."
+    )
+
+
 def _require_command(name: str, hint: str | None = None) -> str:
     resolved = shutil.which(name)
     if resolved:
@@ -180,6 +204,49 @@ def _resolve_wix_tools() -> dict[str, str]:
         "candle": _find_wix_tool("candle.exe"),
         "light": _find_wix_tool("light.exe"),
     }
+
+
+def _resolve_signing_config() -> tuple[Path, str, str] | None:
+    cert_path_str = os.getenv(SIGNING_CERT_ENV)
+    cert_password = os.getenv(SIGNING_PASSWORD_ENV)
+    if not cert_path_str or not cert_password:
+        return None
+
+    cert_path = Path(cert_path_str)
+    if not cert_path.exists():
+        raise RuntimeError(f"Signing certificate not found: {cert_path}")
+
+    timestamp_url = os.getenv(SIGNING_TIMESTAMP_ENV, "http://timestamp.digicert.com")
+    return cert_path, cert_password, timestamp_url
+
+
+def _sign_with_signtool(
+    signtool: str,
+    target: Path,
+    cert_path: Path,
+    cert_password: str,
+    timestamp_url: str,
+) -> None:
+    print(f"Signing {target.name} with signtool...")
+    _run(
+        [
+            signtool,
+            "sign",
+            "/fd",
+            "SHA256",
+            "/td",
+            "SHA256",
+            "/tr",
+            timestamp_url,
+            "/f",
+            str(cert_path),
+            "/p",
+            cert_password,
+            "/a",
+            "/as",
+            str(target),
+        ]
+    )
 
 
 def _python_has_module(python_path: Path, module: str) -> bool:
@@ -472,6 +539,12 @@ def main() -> int:
     msi_version = _normalize_msi_version(version)
     print(f"Using version {version} (MSI {msi_version}) from {source}")
 
+    signing_config = _resolve_signing_config()
+    signtool_path: str | None = None
+    if signing_config:
+        signtool_path = _find_signtool()
+        print("Code signing enabled for MSI build.")
+
     dist_root = repo_root / "dist" / "windows"
     if dist_root.exists():
         shutil.rmtree(dist_root)
@@ -522,6 +595,13 @@ def main() -> int:
     if not app_root.exists():
         raise RuntimeError("PyInstaller output not found; expected onedir build under dist/windows/pyinstaller")
 
+    if signtool_path and signing_config:
+        cert_path, cert_password, timestamp_url = signing_config
+        payload_exe = app_root / "todoist-assistant.exe"
+        if not payload_exe.exists():
+            raise RuntimeError(f"Expected PyInstaller executable not found for signing: {payload_exe}")
+        _sign_with_signtool(signtool_path, payload_exe, cert_path, cert_password, timestamp_url)
+
     print("Staging runtime assets...")
     _stage_assets(
         repo_root,
@@ -534,6 +614,9 @@ def main() -> int:
 
     print("Building MSI...")
     msi_path = _build_msi(repo_root, dist_root, app_root, dist_root / "config", msi_version, wix_tools)
+    if signtool_path and signing_config:
+        cert_path, cert_password, timestamp_url = signing_config
+        _sign_with_signtool(signtool_path, msi_path, cert_path, cert_password, timestamp_url)
     print(f"MSI created: {msi_path}")
     return 0
 
