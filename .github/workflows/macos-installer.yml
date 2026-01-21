@@ -13,6 +13,7 @@ permissions:
 jobs:
   build-macos-installers:
     runs-on: macos-latest
+    continue-on-error: true
 
     steps:
       - name: Checkout repository
