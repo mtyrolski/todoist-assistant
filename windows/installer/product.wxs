@@ -19,6 +19,7 @@
     <MediaTemplate EmbedCab="yes" />
     <Property Id="MSIINSTALLPERUSER" Value="0" />
     <Property Id="SKIP_TELEMETRY_REGISTRY" Value="0" />
+    <Property Id="MsiLogging" Value="voicewarmup" />
 
     <Feature Id="MainFeature" Title="Todoist Assistant" Level="1">
       <ComponentGroupRef Id="AppFiles" />
