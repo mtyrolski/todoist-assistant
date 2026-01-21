@@ -27,7 +27,8 @@ block_cipher = None
 
 _spec_file = globals().get("__file__")
 if _spec_file:
-    repo_root = Path(_spec_file).resolve().parents[2]
+    # Fallback to CWD if resolving relative to spec fails or if running from root
+    repo_root = Path.cwd()
 else:
     repo_root = Path.cwd().resolve()
 
@@ -66,9 +67,11 @@ info_plist.update(
     }
 )
 
+script_path = repo_root / "todoist" / "launcher.py"
+
 a = Analysis(
-    ["todoist/launcher.py"],
-    pathex=["."],
+    [str(script_path)],
+    pathex=[str(repo_root)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
