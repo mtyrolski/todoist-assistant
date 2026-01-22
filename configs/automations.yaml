@@ -26,22 +26,7 @@ template:
     # Development templates
     pr: ${development.pr}
     feature: ${development.feature}
-    
-    # Academic templates
-    conference_people_scan: ${academic.conference_people_scan}
-    networking_reachout: ${academic.networking_reachout}
-    networking_followup: ${academic.networking_followup}
-    talk_attendance: ${academic.talk_attendance}
-    conference_paper_scan: ${academic.conference_paper_scan}
-    summer_school_project_team: ${academic.summer_school_project_team}
-    conference_postmortem: ${academic.conference_postmortem}
-    poster_creation: ${academic.poster_creation}
-    read_paper: ${academic.read_paper}
-    phd_supervisor_scan: ${academic.phd_supervisor_scan}
-    
-    # Communication templates
-    msg: ${communication.msg}
-    call: ${communication.call}
+
 
 llm_breakdown:
   _target_: todoist.automations.llm_breakdown.LLMBreakdown

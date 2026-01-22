@@ -273,6 +273,7 @@ def main() -> int:
             try:
                 input()
             except Exception:
+                # Ignore any stdin errors; this pause is best-effort and should not block exit.
                 pass
         sys.exit(1)
     finally:

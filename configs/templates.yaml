@@ -3,19 +3,3 @@ defaults:
   # Development templates
   - templates/development@development.pr: pr
   - templates/development@development.feature: feature
-
-  # Academic templates
-  - templates/academic@academic.conference_people_scan: conference_people_scan
-  - templates/academic@academic.networking_reachout: networking_reachout
-  - templates/academic@academic.networking_followup: networking_followup
-  - templates/academic@academic.talk_attendance: talk_attendance
-  - templates/academic@academic.conference_paper_scan: conference_paper_scan
-  - templates/academic@academic.summer_school_project_team: summer_school_project_team
-  - templates/academic@academic.conference_postmortem: conference_postmortem
-  - templates/academic@academic.poster_creation: poster_creation
-  - templates/academic@academic.read_paper: read_paper
-  - templates/academic@academic.phd_supervisor_scan: phd_supervisor_scan
-
-  # Communication templates
-  - templates/communication@communication.msg: msg
-  - templates/communication@communication.call: call
