@@ -118,7 +118,8 @@ def run_breakdown(automation: Any, db: Database) -> None:
         logger.info("No LLM breakdown tasks queued.")
         return
 
-    tasks_to_process = candidates[:automation.max_tasks_per_tick]
+    limit = automation.max_tasks_per_tick
+    tasks_to_process = candidates[:limit] if limit > 0 else candidates
     tasks_total = len(candidates)
     tasks_pending = tasks_total - len(tasks_to_process)
     run_id = automation.new_run_id()

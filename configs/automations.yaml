@@ -39,7 +39,7 @@ llm_breakdown:
   allow_existing_children: false
   remove_label_after_processing: true
   propagate_labels: true
-  max_tasks_per_tick: 1
+  max_tasks_per_tick: 0
   max_queue_depth: 1
   auto_queue_children: true
   variants:
