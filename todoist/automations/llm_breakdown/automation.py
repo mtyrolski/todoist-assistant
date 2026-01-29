@@ -84,7 +84,7 @@ class LLMBreakdown(Automation):
         self.allow_existing_children = settings_obj.allow_existing_children
         self.remove_label_after_processing = settings_obj.remove_label_after_processing
         self.propagate_labels = settings_obj.propagate_labels
-        self.max_tasks_per_tick = max(1, int(settings_obj.max_tasks_per_tick))
+        self.max_tasks_per_tick = max(0, int(settings_obj.max_tasks_per_tick))
         self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
         self.auto_queue_children = settings_obj.auto_queue_children
         self.track_progress = settings_obj.track_progress
