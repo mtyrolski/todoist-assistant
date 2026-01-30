@@ -318,7 +318,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       const res = await fetch("/api/admin/api_token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: tokenDraft.trim() })
+        body: JSON.stringify({ token: tokenDraft.trim(), validate: true })
       });
       const payload = (await res.json()) as ApiTokenStatus & { detail?: string };
       if (!res.ok) {
@@ -326,7 +326,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       }
       setTokenStatus(payload);
       setTokenDraft("");
-      setTokenNotice("API token saved.");
+      setTokenNotice("API token saved and validated.");
       onAfterMutation();
     } catch (e) {
       setTokenError(e instanceof Error ? e.message : "Failed to save token");

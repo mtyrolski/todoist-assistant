@@ -661,6 +661,29 @@ textarea.textInput {
   box-shadow: var(--glow);
 }
 
+.tokenGate {
+  max-width: 680px;
+  margin: 6vh auto 0;
+  display: grid;
+  gap: 14px;
+}
+
+.tokenGateInputRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.tokenGateInputRow .textInput {
+  flex: 1;
+}
+
+.tokenGateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .chatCard {
   border-color: rgba(255, 184, 108, 0.28);
   background: linear-gradient(135deg, rgba(255, 184, 108, 0.08), rgba(255, 255, 255, 0.03));

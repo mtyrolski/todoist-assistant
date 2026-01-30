@@ -25,6 +25,8 @@ import hydra
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
+from todoist.api.client import RequestSpec, TodoistAPIClient, TimeoutSettings
+from todoist.api.endpoints import TodoistEndpoints
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
 from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
@@ -177,13 +179,20 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _resolve_data_dir() -> Path:
+    override = os.getenv("TODOIST_DATA_DIR") or os.getenv("TODOIST_CACHE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT
+
+
 def _resolve_config_dir() -> Path:
     override = os.getenv("TODOIST_CONFIG_DIR")
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT / "configs"
 
-
+_DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
 _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
@@ -250,6 +259,21 @@ def _mask_api_key(value: str) -> str:
     if len(value) <= 4:
         return "••••"
     return f"••••{value[-4:]}"
+
+
+def _validate_api_token(token: str) -> tuple[bool, str | None]:
+    client = TodoistAPIClient(max_attempts=1)
+    spec = RequestSpec(
+        endpoint=TodoistEndpoints.LIST_LABELS,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=TimeoutSettings(connect=5.0, read=10.0),
+        max_attempts=1,
+    )
+    try:
+        client.request(spec, operation_name="validate_api_token")
+    except Exception as exc:  # pragma: no cover - network dependent
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, None
 
 
 @dataclass
@@ -1403,7 +1427,7 @@ def _serialize_dt(value: Any) -> str | None:
 
 
 def _load_automations() -> list[Automation]:
-    config = load_config("automations", str((_REPO_ROOT / "configs").resolve()))
+    config = load_config("automations", str(_CONFIG_DIR.resolve()))
     automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
     return automations
 
@@ -1450,6 +1474,12 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
             status_code=400,
             detail="API token looks invalid. Use the Todoist API token (no spaces, at least 20 characters).",
         )
+    validate = payload.get("validate", True)
+    if validate:
+        ok, detail = _validate_api_token(token)
+        if not ok:
+            status = 400 if detail and ("403" in detail or "401" in detail) else 502
+            raise HTTPException(status_code=status, detail=f"API token validation failed: {detail}")
     env_path = _resolve_env_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), "API_KEY", token)
@@ -1458,6 +1488,21 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
         "configured": True,
         "masked": _mask_api_key(token),
         "envPath": str(env_path),
+        "validated": bool(validate),
+    }
+
+
+@app.post("/api/admin/api_token/validate", tags=["admin"])
+async def admin_validate_api_token(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    token = _normalize_api_key(payload.get("token")) or _resolve_api_key()
+    if not token:
+        return {"configured": False, "valid": False, "detail": "API token missing."}
+    ok, detail = _validate_api_token(token)
+    return {
+        "configured": True,
+        "valid": ok,
+        "detail": detail or "",
+        "masked": _mask_api_key(token),
     }
 
 
@@ -1726,7 +1771,7 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
 
 def _log_files() -> list[dict[str, Any]]:
     log_files: list[dict[str, Any]] = []
-    for log_path in _REPO_ROOT.rglob("*.log"):
+    for log_path in _DATA_DIR.rglob("*.log"):
         if not log_path.is_file():
             continue
         try:
@@ -1735,20 +1780,23 @@ def _log_files() -> list[dict[str, Any]]:
             continue
         if stat.st_size <= 0:
             continue
+        try:
+            rel_path = log_path.relative_to(_DATA_DIR)
+        except ValueError:
+            rel_path = log_path.name
         log_files.append(
             {
-                "path": str(log_path.relative_to(_REPO_ROOT)),
+                "path": str(rel_path),
                 "size": stat.st_size,
                 "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
             }
         )
     return sorted(log_files, key=lambda x: x["path"])
 
-
-def _safe_repo_path(rel_path: str, *, suffix: str | None = None) -> Path:
-    candidate = (_REPO_ROOT / rel_path).resolve()
-    if _REPO_ROOT not in candidate.parents and candidate != _REPO_ROOT:
-        raise HTTPException(status_code=400, detail="Path must be within repository")
+def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
+    candidate = (_DATA_DIR / rel_path).resolve()
+    if _DATA_DIR not in candidate.parents and candidate != _DATA_DIR:
+        raise HTTPException(status_code=400, detail="Path must be within data directory")
     if suffix and candidate.suffix != suffix:
         raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
     return candidate
@@ -1785,11 +1833,11 @@ def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
 
 @app.get("/api/admin/logs/read", tags=["admin"])
 async def admin_read_log(path: str, tail_lines: int = 40, page: int = 1) -> dict[str, Any]:
-    abs_path = _safe_repo_path(path, suffix=".log")
+    abs_path = _safe_data_path(path, suffix=".log")
     stat = abs_path.stat()
     payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
     return {
-        "path": str(abs_path.relative_to(_REPO_ROOT)),
+        "path": str(abs_path.relative_to(_DATA_DIR)),
         "size": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         **payload,
@@ -1797,7 +1845,7 @@ async def admin_read_log(path: str, tail_lines: int = 40, page: int = 1) -> dict
 
 
 def _available_mapping_files() -> list[str]:
-    personal_dir = _REPO_ROOT / "personal"
+    personal_dir = _DATA_DIR / "personal"
     if not personal_dir.exists():
         return ["archived_root_projects.py"]
 
@@ -1830,9 +1878,9 @@ def _generate_adjustment_file_content(mappings: dict[str, str]) -> str:
 
 
 def _load_mapping_file(filename: str) -> dict[str, str]:
-    personal_dir = _REPO_ROOT / "personal"
-    personal_dir.mkdir(exist_ok=True)
-    target = _safe_repo_path(str(Path("personal") / filename), suffix=".py")
+    personal_dir = _DATA_DIR / "personal"
+    personal_dir.mkdir(parents=True, exist_ok=True)
+    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
     if not target.exists():
         target.write_text(_generate_adjustment_file_content({}), encoding="utf-8")
         return {}
@@ -1853,7 +1901,7 @@ def _load_mapping_file(filename: str) -> dict[str, str]:
 
 
 def _save_mapping_file(filename: str, mappings: dict[str, str]) -> None:
-    target = _safe_repo_path(str(Path("personal") / filename), suffix=".py")
+    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
     target.write_text(_generate_adjustment_file_content(mappings), encoding="utf-8")
 
 
@@ -2182,7 +2230,7 @@ def _template_summary(path: Path) -> dict[str, Any]:
         "name": name,
         "title": data.get("content", name),
         "description": data.get("description"),
-        "path": str(path.relative_to(_REPO_ROOT)),
+        "path": str(path.relative_to(_CONFIG_DIR)),
         "label": f"template-{name}",
         "childrenCount": len(children),
     }

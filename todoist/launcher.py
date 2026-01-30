@@ -70,6 +70,8 @@ def _seed_config_dir(config_dir: Path, install_dir: Path) -> None:
 def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | None = None) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = data_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
     if install_dir and getattr(sys, "frozen", False):
         _seed_config_dir(config_dir, install_dir)
@@ -84,6 +86,9 @@ def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | 
 
     os.environ["TODOIST_CONFIG_DIR"] = str(config_dir)
     os.environ["TODOIST_CACHE_DIR"] = str(data_dir)
+    os.environ.setdefault("TODOIST_DATA_DIR", str(data_dir))
+    os.environ.setdefault("TODOIST_LOGS_DIR", str(logs_dir))
+    os.environ.setdefault("TODOIST_PERSONAL_DIR", str(data_dir / "personal"))
     os.environ["TODOIST_AGENT_CACHE_PATH"] = str(data_dir)
     os.environ["TODOIST_AGENT_INSTRUCTIONS_DIR"] = str(config_dir / "agent_instructions")
 
