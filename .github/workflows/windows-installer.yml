@@ -165,6 +165,8 @@ jobs:
             param([string]$Uri, [int]$TimeoutSec = 5)
             try {
               $handler = New-Object System.Net.Http.HttpClientHandler
+              $handler.UseProxy = $false
+              $handler.Proxy = $null
               $client = New-Object System.Net.Http.HttpClient($handler)
               $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
               $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
@@ -173,6 +175,14 @@ jobs:
               $client.Dispose()
               return $status
             } catch {
+              try {
+                $resp = Invoke-WebRequest -Uri $Uri -Method Get -UseBasicParsing -TimeoutSec $TimeoutSec -Proxy $null
+                if ($resp -and $resp.StatusCode) { return [int]$resp.StatusCode }
+              } catch {
+                if ($_.Exception -and $_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                  return [int]$_.Exception.Response.StatusCode
+                }
+              }
               return $null
             }
           }

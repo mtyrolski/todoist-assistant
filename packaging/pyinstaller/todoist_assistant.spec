@@ -28,8 +28,8 @@ binaries = plotly_binaries + matplotlib_binaries
 datas = plotly_datas + matplotlib_datas
 hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
 
-# Uvicorn loads the FastAPI app via a module string ("todoist.web.api:app"),
-# so PyInstaller needs these as explicit hidden imports.
+# launcher.py imports the FastAPI app object and calls uvicorn.run(api_app, ...),
+# but PyInstaller still needs these as explicit hidden imports to bundle the API modules.
 hiddenimports += ["todoist.web", "todoist.web.api"]
 # Guard against new submodules added under todoist.web being missed in future builds.
 hiddenimports += collect_submodules("todoist.web")
