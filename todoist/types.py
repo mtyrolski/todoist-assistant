@@ -291,18 +291,25 @@ def events_to_dataframe(
     not_found_in_project_id_to_root = set()
 
     for event in event:
-        if event.event_entry.parent_project_id not in project_id_to_root:
-            not_found_in_project_id_to_root.add(event.event_entry.parent_project_id)
-            continue
-        mapping_data['root_project_id'].append(project_id_to_root[event.event_entry.parent_project_id].id)
-        mapping_data['root_project_name'].append(
-            project_id_to_root[event.event_entry.parent_project_id].project_entry.name)
+        parent_project_id = event.event_entry.parent_project_id or ""
+        root_project = project_id_to_root.get(parent_project_id) if parent_project_id else None
+        if root_project is None:
+            not_found_in_project_id_to_root.add(parent_project_id or "<missing>")
+        root_project_id = root_project.id if root_project else parent_project_id
+        root_project_name = (
+            root_project.project_entry.name
+            if root_project
+            else project_id_to_name.get(parent_project_id, "(unknown)") if parent_project_id else "(unknown)"
+        )
+
+        mapping_data['root_project_id'].append(root_project_id)
+        mapping_data['root_project_name'].append(root_project_name)
         mapping_data['id'].append(event.id)
         mapping_data['title'].append(event.name)
         mapping_data['date'].append(event.date)
         mapping_data['type'].append(event.event_type)
-        mapping_data['parent_project_id'].append(event.event_entry.parent_project_id)
-        mapping_data['parent_project_name'].append(project_id_to_name.get(event.event_entry.parent_project_id, ''))
+        mapping_data['parent_project_id'].append(parent_project_id)
+        mapping_data['parent_project_name'].append(project_id_to_name.get(parent_project_id, ''))
         mapping_data['parent_item_id'].append(event.event_entry.parent_item_id)
         # Compute robust task identifier
         ee = event.event_entry

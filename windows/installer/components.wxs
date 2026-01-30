@@ -88,6 +88,8 @@
       <Component Id="AppDataCleanup" Guid="*" Win64="yes">
         <Condition>NOT UPGRADINGPRODUCTCODE</Condition>
         <RemoveFile Id="RemoveEnvFile" Name=".env" On="uninstall" />
+        <RemoveFile Id="RemoveTelemetryConfig" Name="telemetry.json" On="uninstall" />
+        <RemoveFile Id="RemoveTelemetrySent" Name=".telemetry_sent" On="uninstall" />
         <RegistryValue
           Root="HKLM"
           Key="Software\TodoistAssistant"

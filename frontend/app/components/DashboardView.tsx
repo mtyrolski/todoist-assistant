@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PlotCard } from "./PlotCard";
 import { StatCard } from "./StatCard";
 import { LoadingBar } from "./LoadingBar";
@@ -13,6 +13,7 @@ import { LlmBreakdownStatus } from "./LlmBreakdownStatus";
 import { ObserverControl } from "./ObserverControl";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
+import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -29,6 +30,8 @@ import {
   useLlmBreakdownProgress,
   useSyncLabel
 } from "../lib/dashboardHooks";
+
+const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
 
 export function DashboardView() {
   const { health, loadingHealth, error } = useApiHealth();
@@ -52,11 +55,50 @@ export function DashboardView() {
   const { status, loadingStatus, refreshStatus } = useDashboardStatus();
   const { progress: llmProgress, loading: loadingLlmProgress, refresh: refreshLlmProgress } = useLlmBreakdownProgress();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
+  const [firstSyncPending, setFirstSyncPending] = useState(false);
+  const [firstSyncTriggered, setFirstSyncTriggered] = useState(false);
+  const [activityRecoveryAttempted, setActivityRecoveryAttempted] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const done = window.localStorage.getItem(FIRST_SYNC_KEY) === "1";
+    setFirstSyncPending(!done);
+  }, []);
 
   const periodLabel = useMemo(() => {
     if (!dashboard) return null;
     return `${dashboard.range.beg} -> ${dashboard.range.end}`;
   }, [dashboard]);
+
+  useEffect(() => {
+    if (!status || activityRecoveryAttempted) return;
+    if (!status.activityCache) {
+      setActivityRecoveryAttempted(true);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(FIRST_SYNC_KEY);
+      }
+      if (!firstSyncPending) {
+        setFirstSyncPending(true);
+        setFirstSyncTriggered(false);
+      }
+    }
+  }, [status, activityRecoveryAttempted, firstSyncPending]);
+
+  useEffect(() => {
+    if (!firstSyncPending || firstSyncTriggered) return;
+    setFirstSyncTriggered(true);
+    refresh();
+  }, [firstSyncPending, firstSyncTriggered, refresh]);
+
+  useEffect(() => {
+    if (!firstSyncPending) return;
+    if (loadingDashboard || progressDisplay?.active) return;
+    if (!dashboard && !dashboardError) return;
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(FIRST_SYNC_KEY, "1");
+    }
+    setFirstSyncPending(false);
+  }, [firstSyncPending, loadingDashboard, progressDisplay, dashboard, dashboardError]);
 
   const noData = Boolean(dashboard?.noData);
   const figures = dashboard?.figures ?? {};
@@ -131,9 +173,24 @@ export function DashboardView() {
     { key: "p4", label: "P4", className: "badge badge-p4", value: dashboard?.badges.p4 }
   ];
 
+  const showFirstSyncOverlay = firstSyncPending && (loadingDashboard || progressDisplay?.active);
+
   return (
     <div>
       <LoadingBar active={loadingDashboard || loadingStatus} />
+      {showFirstSyncOverlay ? (
+        <div className="firstSyncOverlay" role="status" aria-live="polite">
+          <div className="firstSyncPanel">
+            <p className="eyebrow">First-time sync</p>
+            <h2>Preparing your dashboard</h2>
+            <p className="muted">
+              We are fetching your Todoist data and building the first set of charts. This can take a few minutes on
+              large accounts.
+            </p>
+            <ProgressSteps progress={progressDisplay} />
+          </div>
+        </div>
+      ) : null}
       <header className="topbar">
         <div>
           <p className="eyebrow">Todoist Assistant</p>
@@ -234,7 +291,8 @@ export function DashboardView() {
         </div>
       </header>
 
-      <ProgressSteps progress={progressDisplay} />
+      {showFirstSyncOverlay ? null : <ProgressSteps progress={progressDisplay} />}
+      <ProjectAdjustmentsBoard onAfterSave={onAfterMutation} />
 
       {!noData ? (
         <nav className="jumpNav" aria-label="Jump to sections">

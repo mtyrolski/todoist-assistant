@@ -37,8 +37,13 @@ class DatabaseProjects:
         if self.archived_projects_cache is not None:
             return list(self.archived_projects_cache.values())
 
-        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_ARCHIVED_PROJECTS)
-        data_dicts = self._api_client.request_json(spec, operation_name="list archived projects")
+        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_ARCHIVED_PROJECTS, rate_limited=True)
+        try:
+            data_dicts = self._api_client.request_json(spec, operation_name="list archived projects")
+        except Exception as exc:  # pragma: no cover - network safety
+            logger.warning("Failed fetching archived projects: {}", exc)
+            self.archived_projects_cache = {}
+            return []
         if not isinstance(data_dicts, list):
             logger.error("Unexpected payload returned when fetching archived projects")
             self.archived_projects_cache = {}
@@ -57,6 +62,7 @@ class DatabaseProjects:
             endpoint=TodoistEndpoints.GET_PROJECT_DATA,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             data={"project_id": project_id},
+            rate_limited=True,
         )
 
         result_dict = self._api_client.request_json(
@@ -143,6 +149,7 @@ class DatabaseProjects:
             endpoint=TodoistEndpoints.GET_PROJECT_DATA,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             data={"project_id": project_id},
+            rate_limited=True,
         )
 
         result_dict = self._api_client.request_json(
@@ -263,6 +270,7 @@ class DatabaseProjects:
                 'sync_token': '*',
                 'resource_types': '["projects"]',
             },
+            rate_limited=True,
         )
 
         result_dict = self._api_client.request_json(spec, operation_name="sync projects")

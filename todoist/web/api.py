@@ -30,7 +30,7 @@ from todoist.api.endpoints import TodoistEndpoints
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
 from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
-from todoist.types import Project
+from todoist.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
@@ -168,6 +168,7 @@ class _ProgressState:
 
 _state = _DashboardState()
 _progress_state = _ProgressState()
+_activity_backfill_attempted = False
 _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
@@ -367,6 +368,7 @@ async def _finish_progress(error: str | None = None) -> None:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
+    global _activity_backfill_attempted
     # Reset progress state to clear any stale information from previous failed refreshes
     _run_async_in_main_loop(_finish_progress(error=None))
 
@@ -385,31 +387,69 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             cached_events = Cache().activity.load()
         except LocalStorageError:
             cached_events = set()
-        if not cached_events and _resolve_api_key():
-            try:
-                logger.info("Activity cache empty; fetching recent activity to seed dashboard.")
-                events = dbio.fetch_activity(max_pages=2)
-                if not events:
+
+        def _should_backfill(events: set[Event]) -> bool:
+            if not events:
+                return True
+            dates = [e.date for e in events if isinstance(e.date, datetime)]
+            if not dates:
+                return True
+            span = max(dates) - min(dates)
+            return span < timedelta(weeks=12)
+
+        if cached_events and _resolve_api_key() and not _activity_backfill_attempted:
+            if _should_backfill(cached_events):
+                try:
                     cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
                     activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
-                    nweeks = 2
+                    nweeks = 10
                     early_stop = 2
                     if isinstance(activity_cfg, Mapping):
                         nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
                         early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
                     logger.info(
-                        "Recent activity empty; running adaptive fetch (window={}w, stop={}).",
+                        "Activity cache looks short; backfilling history (window={}w, stop={}).",
                         nweeks,
                         early_stop,
                     )
                     events = dbio.fetch_activity_adaptively(
                         nweeks_window_size=nweeks,
                         early_stop_after_n_windows=early_stop,
-                        events_already_fetched=set(),
+                        events_already_fetched=set(cached_events),
                     )
+                    Cache().activity.save(set(events))
+                except Exception as exc:  # pragma: no cover - network-dependent
+                    logger.warning("Failed to backfill activity cache: {}", exc)
+                finally:
+                    _activity_backfill_attempted = True
+
+        if not cached_events and _resolve_api_key():
+            try:
+                cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
+                activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                nweeks = 10
+                early_stop = 2
+                if isinstance(activity_cfg, Mapping):
+                    nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
+                    early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
+                logger.info(
+                    "Activity cache empty; fetching full history (window={}w, stop={}).",
+                    nweeks,
+                    early_stop,
+                )
+                events = dbio.fetch_activity_adaptively(
+                    nweeks_window_size=nweeks,
+                    early_stop_after_n_windows=early_stop,
+                    events_already_fetched=set(),
+                )
+                if not events:
+                    logger.info("Adaptive fetch returned no events; attempting recent activity pages.")
+                    events = dbio.fetch_activity(max_pages=2)
                 Cache().activity.save(set(events))
             except Exception as exc:  # pragma: no cover - network-dependent
                 logger.warning("Failed to seed activity cache: {}", exc)
+            finally:
+                _activity_backfill_attempted = True
 
         _run_async_in_main_loop(_set_progress(
             "Building project hierarchy",

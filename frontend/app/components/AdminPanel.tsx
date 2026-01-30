@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { InfoTip } from "./InfoTip";
+import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 
 type Tab = "automations" | "logs" | "adjustments" | "settings";
 
@@ -37,14 +38,6 @@ type LogReadResponse = LogFile & {
   totalLines: number;
 };
 
-type ProjectAdjustmentsResponse = {
-  files: string[];
-  selectedFile: string;
-  mappings: Record<string, string>;
-  activeRootProjects: string[];
-  archivedProjects: string[];
-  unmappedArchivedProjects: string[];
-};
 
 type AdminJob = {
   id: string;
@@ -94,21 +87,12 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [logLines, setLogLines] = useState<number>(80);
   const [logPage, setLogPage] = useState<number>(1);
 
-  const [adjustments, setAdjustments] = useState<ProjectAdjustmentsResponse | null>(null);
-  const [adjustmentFile, setAdjustmentFile] = useState<string>("");
-  const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
-  const [selectedArchived, setSelectedArchived] = useState<string>("");
-  const [selectedActive, setSelectedActive] = useState<string>("");
-  const [savingAdjustments, setSavingAdjustments] = useState(false);
-
   const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>("");
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenNotice, setTokenNotice] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
-
-  const mergedMappings = mappingDraft;
 
   useEffect(() => {
     const loadAutomations = async () => {
@@ -146,25 +130,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     };
     loadLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const loadAdjustments = async (file?: string) => {
-      try {
-        const qs = file ? `?file=${encodeURIComponent(file)}` : "";
-        const res = await fetch(`/api/admin/project_adjustments${qs}`);
-        const payload = (await res.json()) as ProjectAdjustmentsResponse;
-        if (!res.ok) throw new Error("adjustments");
-        setAdjustments(payload);
-        setAdjustmentFile(payload.selectedFile);
-        setMappingDraft(payload.mappings ?? {});
-        setSelectedArchived(payload.unmappedArchivedProjects[0] ?? payload.archivedProjects[0] ?? "");
-        setSelectedActive(payload.activeRootProjects[0] ?? "");
-      } catch {
-        setAdjustments(null);
-      }
-    };
-    loadAdjustments();
   }, []);
 
   const loadApiToken = async () => {
@@ -286,31 +251,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logLines, logPage]);
 
-  const saveAdjustments = async () => {
-    if (!adjustmentFile) return;
-    try {
-      setSavingAdjustments(true);
-      setAdminError(null);
-      const res = await fetch(`/api/admin/project_adjustments?file=${encodeURIComponent(adjustmentFile)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mappingDraft)
-      });
-      if (!res.ok) throw new Error("save_adjustments");
-      const reload = await fetch(`/api/admin/project_adjustments?file=${encodeURIComponent(adjustmentFile)}&refresh=true`);
-      if (reload.ok) {
-        const payload = (await reload.json()) as ProjectAdjustmentsResponse;
-        setAdjustments(payload);
-        setMappingDraft(payload.mappings ?? {});
-        onAfterMutation();
-      }
-    } catch (e) {
-      setAdminError(e instanceof Error ? e.message : "Failed to save adjustments");
-    } finally {
-      setSavingAdjustments(false);
-    }
-  };
-
   const saveApiToken = async () => {
     if (!tokenDraft.trim()) {
       setTokenError("Paste your Todoist API token.");
@@ -357,12 +297,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setTokenSaving(false);
     }
   };
-
-  const mappingRows = useMemo(() => {
-    const entries = Object.entries(mergedMappings);
-    entries.sort(([a], [b]) => a.localeCompare(b));
-    return entries;
-  }, [mergedMappings]);
 
   return (
     <section className="card">
@@ -511,142 +445,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
 
       {tab === "adjustments" ? (
         <div className="stack">
-          {!adjustments ? (
-            <div className="skeleton" style={{ minHeight: 180 }} />
-          ) : (
-            <>
-              <div className="adminRow">
-                <div className="control" style={{ margin: 0 }}>
-                  <label className="muted tiny" htmlFor="mapping-file">
-                    Mapping file
-                  </label>
-                  <select
-                    id="mapping-file"
-                    value={adjustmentFile}
-                    onChange={async (e) => {
-                      const next = e.target.value;
-                      setAdjustmentFile(next);
-                      const res = await fetch(`/api/admin/project_adjustments?file=${encodeURIComponent(next)}`);
-                      if (res.ok) {
-                        const payload = (await res.json()) as ProjectAdjustmentsResponse;
-                      setAdjustments(payload);
-                      setMappingDraft(payload.mappings ?? {});
-                      setSelectedArchived(payload.unmappedArchivedProjects[0] ?? payload.archivedProjects[0] ?? "");
-                      setSelectedActive(payload.activeRootProjects[0] ?? "");
-                    }
-                  }}
-                    className="select"
-                  >
-                    {adjustments.files.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="adminRowRight">
-                  <button className="button buttonSmall" onClick={saveAdjustments} type="button" disabled={savingAdjustments}>
-                    {savingAdjustments ? "Saving…" : "Save"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid2">
-                <div className="card cardInner">
-                  <header className="cardHeader">
-                    <h3>Create mapping</h3>
-                  </header>
-                  <div className="stack">
-                    <div className="control">
-                      <label className="muted tiny" htmlFor="archived-project">
-                        Archived project
-                      </label>
-                      <select
-                        id="archived-project"
-                        value={selectedArchived}
-                        onChange={(e) => setSelectedArchived(e.target.value)}
-                        className="select"
-                      >
-                        {adjustments.archivedProjects.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="control">
-                      <label className="muted tiny" htmlFor="active-project">
-                        Map to active root project
-                      </label>
-                      <select
-                        id="active-project"
-                        value={selectedActive}
-                        onChange={(e) => setSelectedActive(e.target.value)}
-                        className="select"
-                      >
-                        {adjustments.activeRootProjects.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => {
-                        if (!selectedArchived || !selectedActive) return;
-                        setMappingDraft((prev) => ({ ...prev, [selectedArchived]: selectedActive }));
-                      }}
-                    >
-                      Add mapping
-                    </button>
-                    <p className="muted tiny" style={{ margin: 0 }}>
-                      Unmapped archived projects: {adjustments.unmappedArchivedProjects.length}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="card cardInner">
-                  <header className="cardHeader">
-                    <h3>Current mappings</h3>
-                  </header>
-                  <div className="list scrollArea">
-                    {mappingRows.length ? (
-                      mappingRows.map(([archived, active]) => (
-                        <div key={archived} className="row rowTight">
-                          <div className="dot dot-neutral" />
-                          <div className="rowMain">
-                            <p className="rowTitle">{archived}</p>
-                            <p className="muted tiny">→ {active}</p>
-                          </div>
-                          <div className="rowActions">
-                            <button
-                              className="button buttonSmall"
-                              type="button"
-                              onClick={() =>
-                                setMappingDraft((prev) => {
-                                  const next = { ...prev };
-                                  delete next[archived];
-                                  return next;
-                                })
-                              }
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="muted tiny" style={{ margin: 0 }}>
-                        No mappings yet.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+          <ProjectAdjustmentsBoard variant="embedded" showWhenEmpty onAfterSave={onAfterMutation} />
         </div>
       ) : null}
 

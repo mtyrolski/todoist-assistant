@@ -90,6 +90,9 @@ export function TokenGate({ children }: { children: ReactNode }) {
       setValidation({ configured: true, valid: true });
       setTokenDraft("");
       setTokenNotice("API token saved and validated.");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("todoist-assistant.firstSyncComplete");
+      }
     } catch (e) {
       setTokenError(e instanceof Error ? e.message : "Failed to save token");
     } finally {

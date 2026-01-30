@@ -41,7 +41,7 @@ class DatabaseLabels:
         """
         Fetches label data from the Todoist API and populates local attributes.
         """
-        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
+        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS, rate_limited=True)
         labels = self._api_client.request_json(spec, operation_name="list labels")
         if not isinstance(labels, list):
             logger.error("Unexpected payload returned when fetching labels")

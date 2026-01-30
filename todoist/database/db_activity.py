@@ -29,7 +29,7 @@ class DatabaseActivity:
 
         return self._api_client.last_call_result
 
-    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
+    def fetch_activity_adaptively(self, nweeks_window_size: int = 10, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
         """
         Fetches activity events from the Todoist API using a sliding window approach.
         This method adaptively fetches activity data going backwards in time window by window(week by week) in fixed windows size(nweeks_window_size arg).
@@ -106,7 +106,11 @@ class DatabaseActivity:
             future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
             for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
                 page = future_to_page[future]
-                page_events = future.result(timeout=TIMEOUT_SECONDS)
+                try:
+                    page_events = future.result(timeout=TIMEOUT_SECONDS)
+                except Exception as exc:  # pragma: no cover - network safety
+                    logger.warning("Failed fetching activity page {}: {}", page, exc)
+                    page_events = []
                 results_by_page[page] = page_events
 
 
@@ -128,6 +132,7 @@ class DatabaseActivity:
         spec = RequestSpec(
             endpoint=TodoistEndpoints.LIST_ACTIVITY,
             params={"page": page, "limit": limit},
+            rate_limited=True,
         )
         decoded_result = self._api_client.request_json(
             spec, operation_name=f"fetch activity page {page}"
