@@ -215,6 +215,7 @@ jobs:
           try {
             $apiUrl = "http://127.0.0.1:$apiPort/api/health"
             $apiStatus = Wait-Http -Uri $apiUrl -TimeoutSec 60
+            Write-Host "API health status: $apiStatus"
             if ($apiStatus -ne 200) {
               Write-Host "API health check failed or timed out (status: $apiStatus)."
               if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
@@ -233,14 +234,17 @@ jobs:
             Write-Host "Frontend responded with status $frontendStatus"
           } finally {
             if ($appProc -and -not $appProc.HasExited) {
-              Stop-Process -Id $appProc.Id -Force
+              & taskkill /PID $appProc.Id /T /F | Out-Null
               Start-Sleep -Seconds 2
             }
+            Get-Process todoist-assistant,node -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 1
           }
 
           $uninstallArgs = "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`""
           Write-Host "msiexec uninstall args: $uninstallArgs"
           $uninstall = Start-Process msiexec -ArgumentList $uninstallArgs -Wait -PassThru
+          Write-Host "msiexec uninstall exit code: $($uninstall.ExitCode)"
           if ($allowed -notcontains $uninstall.ExitCode) {
             if (Test-Path $logPath) {
               $matches = Select-String -Path $logPath -Pattern "Error 1406|Return value 3" -Context 8,8
