@@ -161,6 +161,73 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
+          function Get-HttpStatus {
+            param([string]$Uri, [int]$TimeoutSec = 5)
+            try {
+              $handler = New-Object System.Net.Http.HttpClientHandler
+              $client = New-Object System.Net.Http.HttpClient($handler)
+              $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+              $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+              $status = [int]$response.StatusCode
+              $response.Dispose()
+              $client.Dispose()
+              return $status
+            } catch {
+              return $null
+            }
+          }
+
+          function Wait-Http {
+            param([string]$Uri, [int]$TimeoutSec = 60)
+            $start = Get-Date
+            while ((Get-Date) - $start).TotalSeconds -lt $TimeoutSec) {
+              $status = Get-HttpStatus -Uri $Uri -TimeoutSec 5
+              if ($status -ne $null) { return $status }
+              Start-Sleep -Milliseconds 500
+            }
+            return $null
+          }
+
+          $smokeDir = Join-Path $env:RUNNER_TEMP "todoist-assistant-smoke"
+          if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
+          New-Item -ItemType Directory -Path $smokeDir | Out-Null
+          $dataDir = Join-Path $smokeDir "data"
+          $configDir = Join-Path $dataDir "config"
+          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          $stdoutLog = Join-Path $smokeDir "app-stdout.log"
+          $stderrLog = Join-Path $smokeDir "app-stderr.log"
+
+          $apiPort = 8001
+          $frontendPort = 3001
+          $runArgs = "--api-host 127.0.0.1 --api-port $apiPort --frontend-host 127.0.0.1 --frontend-port $frontendPort --no-browser --data-dir `"$dataDir`" --config-dir `"$configDir`""
+          Write-Host "Launching app: $exe $runArgs"
+          $appProc = Start-Process -FilePath $exe -ArgumentList $runArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+          try {
+            $apiUrl = "http://127.0.0.1:$apiPort/api/health"
+            $apiStatus = Wait-Http -Uri $apiUrl -TimeoutSec 60
+            if ($apiStatus -ne 200) {
+              Write-Host "API health check failed or timed out (status: $apiStatus)."
+              if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
+              if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
+              throw "API health check failed"
+            }
+
+            $frontendUrl = "http://127.0.0.1:$frontendPort/"
+            $frontendStatus = Wait-Http -Uri $frontendUrl -TimeoutSec 60
+            if ($frontendStatus -eq $null) {
+              Write-Host "Frontend check failed or timed out."
+              if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
+              if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
+              throw "Frontend check failed"
+            }
+            Write-Host "Frontend responded with status $frontendStatus"
+          } finally {
+            if ($appProc -and -not $appProc.HasExited) {
+              Stop-Process -Id $appProc.Id -Force
+              Start-Sleep -Seconds 2
+            }
+          }
+
           $uninstallArgs = "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`""
           Write-Host "msiexec uninstall args: $uninstallArgs"
           $uninstall = Start-Process msiexec -ArgumentList $uninstallArgs -Wait -PassThru

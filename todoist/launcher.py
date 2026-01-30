@@ -29,6 +29,12 @@ def _default_data_dir() -> Path:
     return Path.home() / ".local" / "share" / "todoist-assistant"
 
 
+def _log_startup_paths(install_dir: Path, data_dir: Path, config_dir: Path) -> None:
+    print(f"Install dir: {install_dir}")
+    print(f"Data dir: {data_dir}")
+    print(f"Config dir: {config_dir}")
+
+
 def _resolve_config_dir(data_dir: Path, install_dir: Path, override: str | None) -> Path:
     if override:
         return Path(override).expanduser().resolve()
@@ -143,8 +149,8 @@ def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
         current = _frontend_manifest_info(frontend_zip)
         cached = _load_frontend_manifest(manifest_path)
         needs_extract = (cached != current) or (not _frontend_ready(extracted_dir))
-        server_js = extracted_dir / "server.js"
         if needs_extract:
+            print(f"Extracting frontend from {frontend_zip} to {extracted_dir}")
             temp_dir = data_dir / f"frontend.tmp-{os.getpid()}"
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
@@ -160,10 +166,24 @@ def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
             finally:
                 if temp_dir.exists():
                     shutil.rmtree(temp_dir)
+        else:
+            print(f"Using cached frontend at {extracted_dir}")
         return extracted_dir
     if (install_dir / "frontend" / "server.js").exists():
+        print(f"Using unpacked frontend at {install_dir / 'frontend'}")
         return install_dir / "frontend"
     return install_dir
+
+
+def _load_api_app():
+    try:
+        from todoist.web.api import app as api_app
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to import todoist.web.api. This usually means the packaged build "
+            "is missing dashboard API modules."
+        ) from exc
+    return api_app
 
 
 def _start_frontend(install_dir: Path, data_dir: Path, host: str, port: int) -> subprocess.Popen[bytes]:
@@ -229,6 +249,7 @@ def main() -> int:
         install_dir = Path(__file__).resolve().parents[1]
     data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else _default_data_dir()
     config_dir = _resolve_config_dir(data_dir, install_dir, args.config_dir)
+    _log_startup_paths(install_dir, data_dir, config_dir)
     _ensure_env_and_files(data_dir, config_dir, install_dir=install_dir)
     try:
         telemetry.bootstrap_config(config_dir)
@@ -245,17 +266,29 @@ def main() -> int:
     os.chdir(data_dir)
 
     frontend_proc: subprocess.Popen[bytes] | None = None
+    frontend_running = False
     try:
+        api_app = _load_api_app()
         if not args.no_frontend:
-            frontend_proc = _start_frontend(install_dir, data_dir, args.frontend_host, args.frontend_port)
-            time.sleep(1.0)
+            try:
+                frontend_proc = _start_frontend(install_dir, data_dir, args.frontend_host, args.frontend_port)
+                frontend_running = True
+                time.sleep(1.0)
+                if frontend_proc.poll() is not None:
+                    raise RuntimeError("Frontend process exited during startup")
+            except Exception as exc:
+                print(
+                    f"WARNING: Failed to start frontend ({type(exc).__name__}: {exc}). "
+                    "Continuing with API only.",
+                    file=sys.stderr,
+                )
         if not args.no_browser:
-            target = f"http://{args.frontend_host}:{args.frontend_port}" if not args.no_frontend else None
+            target = f"http://{args.frontend_host}:{args.frontend_port}" if frontend_running else None
             if target:
                 webbrowser.open(target)
 
         uvicorn.run(
-            "todoist.web.api:app",
+            api_app,
             host=args.api_host,
             port=args.api_port,
             log_level="info",

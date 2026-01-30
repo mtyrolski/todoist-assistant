@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
 def _collect(module_name):
@@ -27,6 +27,14 @@ matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matp
 binaries = plotly_binaries + matplotlib_binaries
 datas = plotly_datas + matplotlib_datas
 hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
+
+# Uvicorn loads the FastAPI app via a module string ("todoist.web.api:app"),
+# so PyInstaller needs these as explicit hidden imports.
+hiddenimports += ["todoist.web", "todoist.web.api"]
+# Guard against new submodules added under todoist.web being missed in future builds.
+hiddenimports += collect_submodules("todoist.web")
+
+hiddenimports = list(dict.fromkeys(hiddenimports))
 
 block_cipher = None
 
