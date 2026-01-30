@@ -33,6 +33,7 @@ hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
 hiddenimports += ["todoist.web", "todoist.web.api"]
 # Guard against new submodules added under todoist.web being missed in future builds.
 hiddenimports += collect_submodules("todoist.web")
+hiddenimports += collect_submodules("todoist.automations")
 
 hiddenimports = list(dict.fromkeys(hiddenimports))
 

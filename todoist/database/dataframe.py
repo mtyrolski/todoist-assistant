@@ -9,7 +9,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from todoist.utils import Cache
+from todoist.utils import Cache, LocalStorageError
 
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
@@ -92,7 +92,11 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     """
     activity_filename = 'activity.joblib'
     # activity_db: set[Event] = load(activity_filename) if exists(activity_filename) else set()
-    activity_db: set[Event] = Cache().activity.load()
+    try:
+        activity_db: set[Event] = Cache().activity.load()
+    except LocalStorageError as exc:
+        logger.warning("Failed to load activity cache; using empty set: {}", exc)
+        activity_db = set()
 
     # Filter supported events and check for events with missing titles
     supported_events = list(filter(lambda ev: ev.event_entry.event_type in SUPPORTED_EVENT_TYPES, activity_db))
@@ -120,7 +124,11 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     logger.info('Adjusting root project names...')
     # Adjust project names and map back to ids
     df['root_project_name'] = df['root_project_name'].apply(lambda name: link_mapping.get(name, name))
-    df['root_project_id'] = df['root_project_name'].apply(lambda name: mapping_project_name_to_id[name])
+    mapped_ids = df['root_project_name'].map(mapping_project_name_to_id)
+    df['root_project_id'] = mapped_ids.fillna(original_root_id)
+    missing_names = set(df.loc[mapped_ids.isna(), 'root_project_name'])
+    if missing_names:
+        logger.warning("Missing root project ids for {} adjusted names", len(missing_names))
 
     diff_count = (original_root_id != df['root_project_id']).sum()
     total = len(df)

@@ -23,6 +23,7 @@
       <ComponentRef Id="AppShortcuts" />
       <ComponentRef Id="DesktopShortcut" />
       <ComponentRef Id="AppDataPermissions" />
+      <ComponentRef Id="AppDataCleanup" />
       <ComponentRef Id="LogsFolder" />
     </ComponentGroup>
   </Fragment>
@@ -82,6 +83,17 @@
           Name="appdata"
           Type="string"
           Value="[APPDATADIR]"
+          KeyPath="yes" />
+      </Component>
+      <Component Id="AppDataCleanup" Guid="*" Win64="yes">
+        <Condition>NOT UPGRADINGPRODUCTCODE</Condition>
+        <RemoveFile Id="RemoveEnvFile" Name=".env" On="uninstall" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\TodoistAssistant"
+          Name="cleanup"
+          Type="integer"
+          Value="1"
           KeyPath="yes" />
       </Component>
     </DirectoryRef>

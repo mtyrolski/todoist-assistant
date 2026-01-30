@@ -114,8 +114,13 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     const loadAutomations = async () => {
       try {
         const res = await fetch("/api/admin/automations");
-        const payload = (await res.json()) as AutomationListResponse;
+        const payload = (await res.json()) as AutomationListResponse & { error?: string };
         if (!res.ok) throw new Error("automations");
+        if (payload.error) {
+          setAutomations(payload.automations ?? []);
+          setAdminError(payload.error);
+          return;
+        }
         setAutomations(payload.automations);
       } catch {
         setAutomations(null);

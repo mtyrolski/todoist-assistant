@@ -31,7 +31,7 @@ from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
 from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
 from todoist.types import Project
-from todoist.plots import (
+from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
     plot_events_over_time,
@@ -381,13 +381,47 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         dbio = Database(".env")
         dbio.pull()
 
+        try:
+            cached_events = Cache().activity.load()
+        except LocalStorageError:
+            cached_events = set()
+        if not cached_events and _resolve_api_key():
+            try:
+                logger.info("Activity cache empty; fetching recent activity to seed dashboard.")
+                events = dbio.fetch_activity(max_pages=2)
+                if not events:
+                    cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
+                    activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                    nweeks = 2
+                    early_stop = 2
+                    if isinstance(activity_cfg, Mapping):
+                        nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
+                        early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
+                    logger.info(
+                        "Recent activity empty; running adaptive fetch (window={}w, stop={}).",
+                        nweeks,
+                        early_stop,
+                    )
+                    events = dbio.fetch_activity_adaptively(
+                        nweeks_window_size=nweeks,
+                        early_stop_after_n_windows=early_stop,
+                        events_already_fetched=set(),
+                    )
+                Cache().activity.save(set(events))
+            except Exception as exc:  # pragma: no cover - network-dependent
+                logger.warning("Failed to seed activity cache: {}", exc)
+
         _run_async_in_main_loop(_set_progress(
             "Building project hierarchy",
             step=2,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Resolving roots across active and archived projects",
         ))
-        df_activity = load_activity_data(dbio)
+        try:
+            df_activity = load_activity_data(dbio)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load activity data; using empty dataset: {}", exc)
+            df_activity = _empty_activity_df()
 
         _run_async_in_main_loop(_set_progress(
             "Preparing dashboard data",
@@ -1146,6 +1180,25 @@ def _safe_activity_anchor(df_activity) -> datetime:
         return datetime.now()
 
 
+def _empty_activity_df() -> pd.DataFrame:
+    df = pd.DataFrame(
+        columns=[
+            "id",
+            "title",
+            "type",
+            "parent_project_id",
+            "parent_project_name",
+            "root_project_id",
+            "root_project_name",
+            "parent_item_id",
+            "task_id",
+            "date",
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
 def _compute_plot_range(
     df_activity,
     *,
@@ -1481,7 +1534,11 @@ def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
 async def admin_automations() -> dict[str, Any]:
     """List configured automations plus cached launch metadata."""
 
-    automations = _load_automations()
+    try:
+        automations = _load_automations()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to load automations: {}", exc)
+        return {"automations": [], "error": f"{type(exc).__name__}: {exc}"}
     return {"automations": [_automation_launch_metadata(a) for a in automations]}
 
 

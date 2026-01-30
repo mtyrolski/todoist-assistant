@@ -12,8 +12,6 @@ import traceback
 import webbrowser
 import zipfile
 
-import uvicorn
-
 from todoist import telemetry
 
 
@@ -291,6 +289,8 @@ def main() -> int:
             target = f"http://{args.frontend_host}:{args.frontend_port}" if frontend_running else None
             if target:
                 webbrowser.open(target)
+
+        import uvicorn
 
         uvicorn.run(
             api_app,
