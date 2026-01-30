@@ -180,7 +180,7 @@ jobs:
           function Wait-Http {
             param([string]$Uri, [int]$TimeoutSec = 60)
             $start = Get-Date
-            while ((Get-Date) - $start).TotalSeconds -lt $TimeoutSec) {
+            while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSec) {
               $status = Get-HttpStatus -Uri $Uri -TimeoutSec 5
               if ($status -ne $null) { return $status }
               Start-Sleep -Milliseconds 500
