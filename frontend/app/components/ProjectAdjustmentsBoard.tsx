@@ -30,7 +30,13 @@ Map archived projects to active root projects so your history stays grouped.
 async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) return {} as T;
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.trim();
+    const summary = snippet.length > 200 ? `${snippet.slice(0, 200)}...` : snippet;
+    throw new Error(summary ? `Invalid JSON response: ${summary}` : "Invalid JSON response");
+  }
 }
 
 export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = false, onAfterSave }: Props) {
@@ -57,7 +63,12 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       setMappingDraft(payload.mappings ?? {});
     } catch (e) {
       setAdjustments(null);
-      setError(e instanceof Error ? e.message : "Failed to load adjustments");
+      const message = e instanceof Error ? e.message : "Failed to load adjustments";
+      if (message.startsWith("Invalid JSON response")) {
+        setError("Project adjustments API error. Check backend logs.");
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }

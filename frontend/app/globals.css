@@ -675,23 +675,23 @@ textarea.textInput {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px;
-  background: rgba(6, 10, 18, 0.78);
-  backdrop-filter: blur(6px);
+  padding: 20px 20px 28px;
+  background: rgba(6, 10, 18, 0.45);
+  backdrop-filter: blur(14px) saturate(1.05);
   z-index: 1000;
 }
 
 .firstSyncPanel {
-  width: min(720px, 92vw);
+  width: min(980px, 94vw);
   display: grid;
   gap: 12px;
-  padding: 20px 20px 22px;
+  padding: 18px 20px 20px;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: linear-gradient(135deg, rgba(20, 28, 45, 0.92), rgba(10, 14, 24, 0.94));
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 18, 32, 0.82);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
 }
 
 .firstSyncPanel .progressCard {
