@@ -128,7 +128,9 @@ Runtime locations:
 
 #### Security & signing
 
-Unsigned releases trigger the “Unknown publisher” SmartScreen/UAC prompt. The installer now embeds its cabinet, and the build script can sign the PyInstaller runtime + MSI if you set `WINDOWS_SIGNING_CERTIFICATE`/`WINDOWS_SIGNING_CERTIFICATE_PASSWORD` before invoking `uv run python -m scripts.build_windows`. See `docs/windows_installer.md#code-signing` for maintainer-side details; once a trusted certificate is applied, Windows should stop flagging the release.
+Unsigned releases trigger the “Unknown publisher” SmartScreen/UAC prompt. The Windows build can sign `todoist-assistant.exe`, the MSI, and `TodoistAssistantSetup.exe` when you set `WINDOWS_SIGNING_CERTIFICATE` and `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` before invoking `uv run python -m scripts.build_windows`. Optionally set `WINDOWS_SIGNING_TIMESTAMP_URL` (defaults to `http://timestamp.digicert.com`) or `WINDOWS_SIGNTOOL_PATH` if signtool is not on `PATH`. To sign existing outputs, run `scripts/windows/sign_windows_artifacts.ps1` after the build. See `docs/windows_installer.md#code-signing` for maintainer-side details; once a trusted certificate is applied, Windows should stop flagging the release.
+
+CI signing: store the base64-encoded PFX in `WINDOWS_SIGNING_CERTIFICATE` and the password in `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` (optionally `WINDOWS_SIGNING_TIMESTAMP_URL`). The Windows installer workflow decodes the PFX and exports the environment variables before building the MSI and setup.exe.
 
 ### Recommended Setup Environment
 

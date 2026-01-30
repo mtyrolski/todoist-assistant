@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:bal="http://schemas.microsoft.com/wix/BalExtension"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Bundle
+    Name="Todoist Assistant"
+    Manufacturer="Todoist Assistant"
+    Version="$(var.BundleVersion)"
+    UpgradeCode="C52FB79B-B401-49F1-9B2B-C8EFCD068CB5"
+    IconSourceFile="$(var.BootstrapperIcon)"
+    Compressed="yes"
+    PerMachine="yes"
+    LogPathVariable="BundleLogPath">
+    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
+      <bal:WixStandardBootstrapperApplication
+        LicenseFile="$(var.LicenseFile)"
+        ShowVersion="yes"
+        SuppressRepair="no" />
+    </BootstrapperApplicationRef>
+
+    <Variable Name="BundleLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\setup.log" />
+    <Variable Name="MsiLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\msi.log" />
+    <Variable Name="VCRedistLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\vc_redist.log" />
+    <Variable Name="REMOVE_APPDATA" Type="numeric" Value="0" />
+
+    <util:RegistrySearch
+      Id="VCRedistInstalledSearch"
+      Root="HKLM"
+      Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+      Value="Installed"
+      Variable="VCRedistInstalled"
+      Result="value"
+      Win64="yes" />
+
+    <Chain>
+      <ExePackage
+        Id="VCRedist"
+        DisplayName="Microsoft Visual C++ 2015-2022 Redistributable (x64)"
+        SourceFile="$(var.VCRedistPath)"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes"
+        Compressed="yes"
+        Cache="yes"
+        InstallCommand="/quiet /norestart"
+        RepairCommand="/quiet /repair /norestart"
+        UninstallCommand="/quiet /uninstall /norestart"
+        DetectCondition="VCRedistInstalled = 1"
+        InstallCondition="VCRedistInstalled <> 1"
+        LogPathVariable="VCRedistLogPath">
+        <ExitCode Value="3010" Behavior="forceReboot" />
+        <ExitCode Value="1641" Behavior="forceReboot" />
+      </ExePackage>
+      <MsiPackage
+        Id="TodoistAssistantMsi"
+        SourceFile="$(var.MsiPath)"
+        DisplayInternalUI="no"
+        Visible="no"
+        PerMachine="yes"
+        LogPathVariable="MsiLogPath">
+        <MsiProperty Name="ALLUSERS" Value="1" />
+        <MsiProperty Name="MSIINSTALLPERUSER" Value="0" />
+        <MsiProperty Name="REMOVE_APPDATA" Value="[REMOVE_APPDATA]" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

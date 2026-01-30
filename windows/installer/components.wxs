@@ -24,6 +24,7 @@
       <ComponentRef Id="DesktopShortcut" />
       <ComponentRef Id="AppDataPermissions" />
       <ComponentRef Id="AppDataCleanup" />
+      <ComponentRef Id="CloseTodoistAssistant" />
       <ComponentRef Id="LogsFolder" />
     </ComponentGroup>
   </Fragment>
@@ -76,7 +77,6 @@
         <CreateFolder>
           <util:PermissionEx User="Users" Domain="BUILTIN" GenericAll="yes" />
         </CreateFolder>
-        <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
         <RegistryValue
           Root="HKLM"
           Key="Software\TodoistAssistant"
@@ -86,10 +86,7 @@
           KeyPath="yes" />
       </Component>
       <Component Id="AppDataCleanup" Guid="*" Win64="yes">
-        <Condition>NOT UPGRADINGPRODUCTCODE</Condition>
-        <RemoveFile Id="RemoveEnvFile" Name=".env" On="uninstall" />
-        <RemoveFile Id="RemoveTelemetryConfig" Name="telemetry.json" On="uninstall" />
-        <RemoveFile Id="RemoveTelemetrySent" Name=".telemetry_sent" On="uninstall" />
+        <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATAREMOVE" />
         <RegistryValue
           Root="HKLM"
           Key="Software\TodoistAssistant"
@@ -99,6 +96,36 @@
           KeyPath="yes" />
       </Component>
     </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CloseTodoistAssistant" Guid="*" Win64="yes">
+        <util:CloseApplication
+          Id="CloseTodoistAssistantExe"
+          Target="todoist-assistant.exe"
+          CloseMessage="yes"
+          RebootPrompt="no"
+          Terminate="yes"
+          Timeout="15" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\TodoistAssistant"
+          Name="close_app"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <CustomAction Id="SetRemoveAppData" Property="APPDATAREMOVE" Value="[APPDATADIR]" />
+    <InstallExecuteSequence>
+      <Custom Action="SetRemoveAppData" Before="RemoveFiles">
+        REMOVE="ALL" AND REMOVE_APPDATA=1 AND NOT UPGRADINGPRODUCTCODE
+      </Custom>
+    </InstallExecuteSequence>
   </Fragment>
 
   <Fragment>
