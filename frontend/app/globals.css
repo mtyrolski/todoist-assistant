@@ -661,6 +661,16 @@ textarea.textInput {
   box-shadow: var(--glow);
 }
 
+.emptyState {
+  display: grid;
+  gap: 12px;
+}
+
+.emptyStateActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .tokenGate {
   max-width: 680px;
   margin: 6vh auto 0;

@@ -83,7 +83,7 @@ def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
     }
     timespan = granularity_to_timedelta[granularity]
 
-    end_range = df_activity.index.max().to_pydatetime()
+    end_range = _safe_activity_anchor(df_activity)
     beg_range = end_range - timespan
     previous_beg_range = beg_range - timespan
     previous_end_range = end_range - timespan
@@ -1126,6 +1126,26 @@ def _parse_yyyy_mm_dd(value: str) -> datetime:
         raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD format") from exc
 
 
+def _safe_activity_anchor(df_activity) -> datetime:
+    if df_activity is None or df_activity.empty:
+        return datetime.now()
+    try:
+        max_value = pd.to_datetime(df_activity.index).max()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Failed to resolve activity anchor; defaulting to now: {}", exc)
+        return datetime.now()
+    if pd.isna(max_value):
+        return datetime.now()
+    if isinstance(max_value, pd.Timestamp):
+        return max_value.to_pydatetime()
+    if isinstance(max_value, datetime):
+        return max_value
+    try:
+        return datetime.fromisoformat(str(max_value))
+    except ValueError:
+        return datetime.now()
+
+
 def _compute_plot_range(
     df_activity,
     *,
@@ -1149,7 +1169,7 @@ def _compute_plot_range(
     if weeks < 1 or weeks > 260:
         raise HTTPException(status_code=400, detail="weeks must be between 1 and 260")
 
-    end_range = df_activity.index.max().to_pydatetime()
+    end_range = _safe_activity_anchor(df_activity)
     beg_range = end_range - timedelta(weeks=weeks)
     return beg_range, end_range
 
@@ -1333,6 +1353,7 @@ async def dashboard_home(
     if df_activity is None or active_projects is None or project_colors is None or label_colors is None:
         return {"error": "Dashboard data unavailable. Please ensure the database is configured and accessible."}
 
+    no_data = df_activity.empty
     beg_range, end_range = _compute_plot_range(df_activity, weeks=weeks, beg=beg, end=end)
     beg_label = beg if beg is not None else beg_range.strftime("%Y-%m-%d")
     end_label = end if end is not None else end_range.strftime("%Y-%m-%d")
@@ -1350,42 +1371,51 @@ async def dashboard_home(
         f"g={granularity}",
         f"beg={beg_label}",
         f"end={end_label}",
+        f"no_data={int(no_data)}",
     )
     cached = _state.home_payload_cache.get(cache_key)
     if cached and not refresh:
         return cached
 
-    figures = {
-        "mostPopularLabels": _fig_to_dict(plot_most_popular_labels(active_projects, label_colors)),
-        "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
-        "completedTasksPeriodically": _fig_to_dict(
-            plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
-        ),
-        "cumsumCompletedTasksPeriodically": _fig_to_dict(
-            cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
-        ),
-        "heatmapEventsByDayHour": _fig_to_dict(plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range)),
-        "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
-    }
-
-    anchor_dt = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.max())).to_pydatetime())
+    anchor_dt = _safe_activity_anchor(df_activity)
     last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(anchor_dt)
-    parent_completed_share = _completed_share_leaderboard(
-        df_activity,
-        beg=last_week_beg,
-        end=last_week_end,
-        column="parent_project_name",
-        project_colors=project_colors,
-    )
-    root_completed_share = _completed_share_leaderboard(
-        df_activity,
-        beg=last_week_beg,
-        end=last_week_end,
-        column="root_project_name",
-        project_colors=project_colors,
-    )
+
+    if no_data:
+        figures = {}
+        parent_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
+        root_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
+    else:
+        figures = {
+            "mostPopularLabels": _fig_to_dict(plot_most_popular_labels(active_projects, label_colors)),
+            "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
+            "completedTasksPeriodically": _fig_to_dict(
+                plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
+            ),
+            "cumsumCompletedTasksPeriodically": _fig_to_dict(
+                cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
+            ),
+            "heatmapEventsByDayHour": _fig_to_dict(
+                plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range)
+            ),
+            "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
+        }
+        parent_completed_share = _completed_share_leaderboard(
+            df_activity,
+            beg=last_week_beg,
+            end=last_week_end,
+            column="parent_project_name",
+            project_colors=project_colors,
+        )
+        root_completed_share = _completed_share_leaderboard(
+            df_activity,
+            beg=last_week_beg,
+            end=last_week_end,
+            column="root_project_name",
+            project_colors=project_colors,
+        )
 
     payload = {
+        "noData": no_data,
         "range": {
             "beg": beg_label,
             "end": end_label,
@@ -1400,7 +1430,9 @@ async def dashboard_home(
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
         "insights": {
             "label": last_week_label,
-            "items": _compute_insights(df_activity, beg=last_week_beg, end=last_week_end, project_colors=project_colors),
+            "items": []
+            if no_data
+            else _compute_insights(df_activity, beg=last_week_beg, end=last_week_end, project_colors=project_colors),
         },
         "leaderboards": {
             "lastCompletedWeek": {

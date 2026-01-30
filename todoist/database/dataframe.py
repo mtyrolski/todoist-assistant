@@ -123,8 +123,9 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     df['root_project_id'] = df['root_project_name'].apply(lambda name: mapping_project_name_to_id[name])
 
     diff_count = (original_root_id != df['root_project_id']).sum()
-    logger.info(f'Changed {diff_count} root project ids out of {len(df)} '
-                f'({diff_count/len(df)*100:.2f}%)')
+    total = len(df)
+    ratio = (diff_count / total * 100) if total else 0.0
+    logger.info(f'Changed {diff_count} root project ids out of {total} ({ratio:.2f}%)')
 
     not_adjusted = set(df['root_project_name']) - set(link_mapping.keys())
     if not_adjusted:

@@ -8,6 +8,7 @@ export type Health = { status: string; version?: string } | null;
 export type Granularity = "W" | "ME" | "3ME";
 
 export type DashboardHome = {
+  noData?: boolean;
   range: { beg: string; end: string; granularity: Granularity; weeks: number };
   metrics: {
     items: { name: string; value: number; deltaPercent: number | null; inverseDelta: boolean }[];

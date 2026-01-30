@@ -58,6 +58,7 @@ export function DashboardView() {
     return `${dashboard.range.beg} -> ${dashboard.range.end}`;
   }, [dashboard]);
 
+  const noData = Boolean(dashboard?.noData);
   const figures = dashboard?.figures ?? {};
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
@@ -235,86 +236,119 @@ export function DashboardView() {
 
       <ProgressSteps progress={progressDisplay} />
 
-      <nav className="jumpNav" aria-label="Jump to sections">
-        <span className="muted tiny">Jump to</span>
-        <div className="jumpLinks">
-          {jumpTargets.map((target) => (
-            <a key={target.id} className="jumpLink" href={`#${target.id}`}>
-              {target.label}
-            </a>
-          ))}
-        </div>
-      </nav>
+      {!noData ? (
+        <nav className="jumpNav" aria-label="Jump to sections">
+          <span className="muted tiny">Jump to</span>
+          <div className="jumpLinks">
+            {jumpTargets.map((target) => (
+              <a key={target.id} className="jumpLink" href={`#${target.id}`}>
+                {target.label}
+              </a>
+            ))}
+          </div>
+        </nav>
+      ) : null}
 
-      <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
-        {insightItems.map((it, idx) =>
-          it ? (
-            <InsightCard
-              key={`${it.title}-${idx}`}
-              item={it}
-              help={INSIGHT_HELP[it.title] ?? DEFAULT_INSIGHT_HELP}
-            />
-          ) : (
-            <div key={idx} className="stat skeleton" />
-          )
-        )}
-        {dashboard?.insights?.label ? (
-          <p className="muted tiny" style={{ gridColumn: "1 / -1", marginTop: "-6px" }}>
-            Insights for {dashboard.insights.label}.
+      {noData ? (
+        <section className="card emptyState">
+          <div className="cardHeader">
+            <div className="cardTitleRow">
+              <h2>No activity yet</h2>
+            </div>
+          </div>
+          <p className="muted">
+            Once Todoist events start syncing, charts and insights will appear here. You can still manage automations and
+            configuration in the Control Panel below.
           </p>
-        ) : null}
-      </section>
+          <div className="emptyStateActions">
+            <button className="button buttonSmall" type="button" onClick={refresh} disabled={loadingDashboard}>
+              {loadingDashboard ? "Loading..." : "Retry sync"}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
-      <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
-        {labelPlots.map((plot) => (
-          <PlotCard key={plot.title} {...plot} />
-        ))}
-      </section>
+      {!noData ? (
+        <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
+          {insightItems.map((it, idx) =>
+            it ? (
+              <InsightCard
+                key={`${it.title}-${idx}`}
+                item={it}
+                help={INSIGHT_HELP[it.title] ?? DEFAULT_INSIGHT_HELP}
+              />
+            ) : (
+              <div key={idx} className="stat skeleton" />
+            )
+          )}
+          {dashboard?.insights?.label ? (
+            <p className="muted tiny" style={{ gridColumn: "1 / -1", marginTop: "-6px" }}>
+              Insights for {dashboard.insights.label}.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
-      <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
-        {metricItems.map((m, idx) =>
-          m ? (
-            <StatCard
-              key={m.name}
-              name={m.name}
-              value={m.value}
-              deltaPercent={m.deltaPercent}
-              inverseDelta={m.inverseDelta}
-              currentPeriod={metricsCurrentPeriod}
-              previousPeriod={metricsPreviousPeriod}
-              help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
-            />
-          ) : (
-            <div key={idx} className="stat skeleton" />
-          )
-        )}
-      </section>
-
-      <section id="badges" className="jumpTarget" aria-label="Priority badges">
-        <div className="sectionHeader">
-          <h2>Priority badges</h2>
-          <InfoTip label="About priority badges" content={BADGES_HELP} />
-        </div>
-        <div className="badges">
-          {badgeItems.map((item) => (
-            <span key={item.key} className={item.className}>
-              {item.label} {item.value ?? "-"}
-            </span>
+      {!noData ? (
+        <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
+          {labelPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
           ))}
-        </div>
-      </section>
+        </section>
+      ) : null}
 
-      <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
-        {completionPlots.map((plot) => (
-          <PlotCard key={plot.title} {...plot} />
-        ))}
-      </section>
+      {!noData ? (
+        <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
+          {metricItems.map((m, idx) =>
+            m ? (
+              <StatCard
+                key={m.name}
+                name={m.name}
+                value={m.value}
+                deltaPercent={m.deltaPercent}
+                inverseDelta={m.inverseDelta}
+                currentPeriod={metricsCurrentPeriod}
+                previousPeriod={metricsPreviousPeriod}
+                help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
+              />
+            ) : (
+              <div key={idx} className="stat skeleton" />
+            )
+          )}
+        </section>
+      ) : null}
 
-      <section id="events" className="stack jumpTarget" aria-label="Event trends">
-        {eventPlots.map((plot) => (
-          <PlotCard key={plot.title} {...plot} />
-        ))}
-      </section>
+      {!noData ? (
+        <section id="badges" className="jumpTarget" aria-label="Priority badges">
+          <div className="sectionHeader">
+            <h2>Priority badges</h2>
+            <InfoTip label="About priority badges" content={BADGES_HELP} />
+          </div>
+          <div className="badges">
+            {badgeItems.map((item) => (
+              <span key={item.key} className={item.className}>
+                {item.label} {item.value ?? "-"}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {!noData ? (
+        <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
+          {completionPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
+          ))}
+        </section>
+      ) : null}
+
+      {!noData ? (
+        <section id="events" className="stack jumpTarget" aria-label="Event trends">
+          {eventPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
+          ))}
+        </section>
+      ) : null}
 
       <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">
         <section className="card">
