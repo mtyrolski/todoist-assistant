@@ -46,7 +46,7 @@
         RepairCommand="/quiet /repair /norestart"
         UninstallCommand="/quiet /uninstall /norestart"
         DetectCondition="VCRedistInstalled = 1"
-        InstallCondition="VCRedistInstalled <> 1"
+        InstallCondition="VCRedistInstalled &lt;&gt; 1"
         LogPathVariable="VCRedistLogPath">
         <ExitCode Value="3010" Behavior="forceReboot" />
         <ExitCode Value="1641" Behavior="forceReboot" />
