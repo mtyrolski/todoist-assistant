@@ -24,7 +24,6 @@
       <ComponentRef Id="DesktopShortcut" />
       <ComponentRef Id="AppDataPermissions" />
       <ComponentRef Id="AppDataCleanup" />
-      <ComponentRef Id="CloseTodoistAssistant" />
       <ComponentRef Id="LogsFolder" />
     </ComponentGroup>
   </Fragment>
@@ -99,24 +98,13 @@
   </Fragment>
 
   <Fragment>
-    <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="CloseTodoistAssistant" Guid="*" Win64="yes">
-        <util:CloseApplication
-          Id="CloseTodoistAssistantExe"
-          Target="todoist-assistant.exe"
-          CloseMessage="yes"
-          RebootPrompt="no"
-          Terminate="yes"
-          Timeout="15" />
-        <RegistryValue
-          Root="HKLM"
-          Key="Software\TodoistAssistant"
-          Name="close_app"
-          Type="integer"
-          Value="1"
-          KeyPath="yes" />
-      </Component>
-    </DirectoryRef>
+    <util:CloseApplication
+      Id="CloseTodoistAssistantExe"
+      Target="todoist-assistant.exe"
+      CloseMessage="yes"
+      RebootPrompt="no"
+      Terminate="yes"
+      Timeout="15" />
   </Fragment>
 
   <Fragment>
