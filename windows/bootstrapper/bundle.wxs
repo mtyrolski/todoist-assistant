@@ -21,6 +21,7 @@
     <Variable Name="BundleLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\setup.log" />
     <Variable Name="MsiLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\msi.log" />
     <Variable Name="VCRedistLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\vc_redist.log" />
+    <Variable Name="MsiLogging" Type="string" Value="voicewarmupx" />
     <Variable Name="REMOVE_APPDATA" Type="numeric" Value="0" />
 
     <util:RegistrySearch
@@ -57,6 +58,7 @@
         DisplayInternalUI="no"
         Visible="no"
         LogPathVariable="MsiLogPath">
+        <MsiProperty Name="MsiLogging" Value="[MsiLogging]" />
         <MsiProperty Name="REMOVE_APPDATA" Value="[REMOVE_APPDATA]" />
       </MsiPackage>
     </Chain>

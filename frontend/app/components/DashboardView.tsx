@@ -33,7 +33,7 @@ import {
 
 const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
 
-export function DashboardView() {
+export function DashboardView({ setupActive = false }: { setupActive?: boolean }) {
   const { health, loadingHealth, error } = useApiHealth();
   const {
     dashboard,
@@ -51,7 +51,7 @@ export function DashboardView() {
     customEnd,
     setCustomEnd,
     refresh
-  } = useDashboardHome();
+  } = useDashboardHome({ enabled: !setupActive });
   const { status, loadingStatus, refreshStatus } = useDashboardStatus();
   const { progress: llmProgress, loading: loadingLlmProgress, refresh: refreshLlmProgress } = useLlmBreakdownProgress();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);

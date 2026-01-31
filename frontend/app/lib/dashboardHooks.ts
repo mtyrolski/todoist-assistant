@@ -55,10 +55,12 @@ export function useApiHealth(pollMs = 10_000) {
 
 export function useDashboardHome({
   defaultGranularity = "W",
-  defaultWeeks = 12
+  defaultWeeks = 12,
+  enabled = true
 }: {
   defaultGranularity?: Granularity;
   defaultWeeks?: number;
+  enabled?: boolean;
 } = {}) {
   const [granularity, setGranularity] = useState<Granularity>(defaultGranularity);
   const [weeks, setWeeks] = useState<number>(defaultWeeks);
@@ -76,6 +78,15 @@ export function useDashboardHome({
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoadingDashboard(false);
+      setDashboardError(null);
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
+      return;
+    }
     const controller = new AbortController();
     const load = async () => {
       try {
@@ -126,7 +137,7 @@ export function useDashboardHome({
     };
     load();
     return () => controller.abort();
-  }, [granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce, retryNonce]);
+  }, [enabled, granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce, retryNonce]);
 
   useEffect(() => {
     return () => {
@@ -137,7 +148,7 @@ export function useDashboardHome({
     };
   }, []);
 
-  const shouldPollProgress = loadingDashboard || (!dashboard && !dashboardError);
+  const shouldPollProgress = enabled && (loadingDashboard || (!dashboard && !dashboardError));
 
   useEffect(() => {
     if (!shouldPollProgress) {

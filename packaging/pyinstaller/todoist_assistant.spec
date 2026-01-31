@@ -20,6 +20,7 @@ if _spec_file:
 else:
     ROOT = Path.cwd().resolve()
 ENTRYPOINT = ROOT / "todoist" / "launcher.py"
+ICON_PATH = ROOT / "windows" / "bootstrapper" / "todoist-assistant.ico"
 
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matplotlib")
@@ -68,6 +69,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    icon=str(ICON_PATH) if ICON_PATH.exists() else None,
     console=True,
 )
 

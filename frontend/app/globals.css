@@ -698,6 +698,79 @@ textarea.textInput {
   margin: 0;
 }
 
+.setupOverlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20px 20px 40px;
+  background: rgba(6, 10, 18, 0.55);
+  backdrop-filter: blur(16px) saturate(1.08);
+  z-index: 1100;
+}
+
+.setupPanel {
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  padding: 20px 22px 24px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 18, 32, 0.9);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.45);
+}
+
+.setupHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.setupStatusRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.setupStep {
+  display: grid;
+  gap: 12px;
+}
+
+.setupStepHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.setupStepHeader h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.setupStepBadge {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(106, 227, 255, 0.16);
+  border: 1px solid rgba(106, 227, 255, 0.35);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.setupStepActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .tokenGate {
   max-width: 680px;
   margin: 6vh auto 0;

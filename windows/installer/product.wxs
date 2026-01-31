@@ -20,7 +20,9 @@
     <Property Id="MSIINSTALLPERUSER" Value="0" />
     <Property Id="SKIP_TELEMETRY_REGISTRY" Value="0" />
     <Property Id="REMOVE_APPDATA" Value="0" />
-    <Property Id="MsiLogging" Value="voicewarmup" />
+    <Property Id="MsiLogging" Value="voicewarmupx" />
+    <Icon Id="TodoistAssistantIcon" SourceFile="windows/bootstrapper/todoist-assistant.ico" />
+    <Property Id="ARPPRODUCTICON" Value="TodoistAssistantIcon" />
 
     <Feature Id="MainFeature" Title="Todoist Assistant" Level="1">
       <ComponentGroupRef Id="AppFiles" />

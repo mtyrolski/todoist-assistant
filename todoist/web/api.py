@@ -262,7 +262,7 @@ def _mask_api_key(value: str) -> str:
     return f"••••{value[-4:]}"
 
 
-def _validate_api_token(token: str) -> tuple[bool, str | None]:
+def _validate_api_token(token: str) -> tuple[bool, str | None, int | None]:
     client = TodoistAPIClient(max_attempts=1)
     spec = RequestSpec(
         endpoint=TodoistEndpoints.LIST_LABELS,
@@ -271,10 +271,11 @@ def _validate_api_token(token: str) -> tuple[bool, str | None]:
         max_attempts=1,
     )
     try:
-        client.request(spec, operation_name="validate_api_token")
+        payload = client.request_json(spec, operation_name="validate_api_token")
     except Exception as exc:  # pragma: no cover - network dependent
-        return False, f"{type(exc).__name__}: {exc}"
-    return True, None
+        return False, f"{type(exc).__name__}: {exc}", None
+    label_count = len(payload) if isinstance(payload, list) else None
+    return True, None, label_count
 
 
 @dataclass
@@ -1604,8 +1605,9 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
             detail="API token looks invalid. Use the Todoist API token (no spaces, at least 20 characters).",
         )
     validate = payload.get("validate", True)
+    labels_count = None
     if validate:
-        ok, detail = _validate_api_token(token)
+        ok, detail, labels_count = _validate_api_token(token)
         if not ok:
             status = 400 if detail and ("403" in detail or "401" in detail) else 502
             raise HTTPException(status_code=status, detail=f"API token validation failed: {detail}")
@@ -1618,6 +1620,7 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
         "masked": _mask_api_key(token),
         "envPath": str(env_path),
         "validated": bool(validate),
+        "labelsCount": labels_count,
     }
 
 
@@ -1626,12 +1629,13 @@ async def admin_validate_api_token(payload: dict[str, Any] = Body(default_factor
     token = _normalize_api_key(payload.get("token")) or _resolve_api_key()
     if not token:
         return {"configured": False, "valid": False, "detail": "API token missing."}
-    ok, detail = _validate_api_token(token)
+    ok, detail, labels_count = _validate_api_token(token)
     return {
         "configured": True,
         "valid": ok,
         "detail": detail or "",
         "masked": _mask_api_key(token),
+        "labelsCount": labels_count,
     }
 
 

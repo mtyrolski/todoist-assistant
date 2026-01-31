@@ -85,6 +85,13 @@ Open:
 - **macOS:** DMG for the full app; pkg/Homebrew for CLI-only. See [docs/INSTALLATION.md](docs/INSTALLATION.md).
 - **Linux:** source setup only. See [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
+## First run (what it looks like)
+- The app opens with a guided setup overlay.
+- Step 1: paste your Todoist API token. It validates immediately and shows a connection sanity check (masked token + label count).
+- Step 2: optional project adjustments (map archived projects to active roots). This can be edited later in Control Panel → Project Adjustments.
+- You can always change the token later in Control Panel → Settings.
+- After setup, the first data sync starts and a progress overlay appears while charts are generated (can take a few minutes on large accounts).
+
 ## Contributing
 Issues and PRs are welcome. See [docs/BUILDING.md](docs/BUILDING.md) for build structure and CI workflows.
 
