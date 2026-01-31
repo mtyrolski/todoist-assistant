@@ -202,7 +202,7 @@ todoist-assistant --help
 End users (pkg installer, CLI bundle):
 
 ```bash
-sudo installer -pkg dist/macos/todoist-assistant-<version>.pkg -target /
+sudo installer -pkg dist/macos/todoist-assistant-<version>-macos-<arch>.pkg -target /
 ```
 
 #### Build prerequisites
@@ -210,6 +210,8 @@ sudo installer -pkg dist/macos/todoist-assistant-<version>.pkg -target /
 - macOS builds now depend on `psycopg2-binary` so that packaging doesn't require `pg_config`. The CI workflow still installs `postgresql` via Homebrew to provide `pg_config` for any tooling that may need it and validates it by calling `pg_config --version`.
 - Locally, run `brew install postgresql` (so `pg_config` is on `PATH`), then use `uv sync --locked --group build --extra macos` before building installers to pull in the same binary dependency as the macOS workflow.
 - The macOS installer smoke test (`tests/macos/test_macos_installers.py`) now installs the pkg, launches `todoist-assistant --no-browser` on free ports, and waits for `http://127.0.0.1:3000` to serve the dashboard before removing the install so the workflow can verify the app is hosted on localhost.
+- macOS artifacts are published per architecture (`macos-arm64` and `macos-x86_64`). Pick the one that matches your Mac.
+- Optional signing: set `MACOS_APP_SIGN_IDENTITY` (app) and/or `MACOS_INSTALLER_SIGN_IDENTITY` (pkg) before running the build scripts.
 
 Install locations (pkg):
 
@@ -250,7 +252,7 @@ macOS (Homebrew):
 
 macOS (pkg):
 
-- Install: `sudo installer -pkg todoist-assistant-<version>.pkg -target /`
+- Install: `sudo installer -pkg todoist-assistant-<version>-macos-<arch>.pkg -target /`
 - Upgrade: re-run the pkg with a newer version
 - Files: `/usr/local/todoist-assistant`, `/usr/local/bin/todoist-assistant`
 - Config templates: `/usr/local/etc/todoist-assistant`
@@ -259,7 +261,7 @@ macOS (pkg):
 macOS (App / DMG):
 
 - Build: `make build_macos_app` and `make build_macos_dmg`
-- Install: drag `TodoistAssistant.app` into `/Applications`
+- Install: drag `TodoistAssistant.app` into `/Applications` from `todoist-assistant-<version>-macos-<arch>.dmg`
 - Launch: open the app to start the dashboard
 
 CLI helpers:

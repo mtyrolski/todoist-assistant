@@ -11,9 +11,12 @@ ICON_PNG="${REPO_ROOT}/img/logo.png"
 ICON_ICNS="${REPO_ROOT}/packaging/macos/TodoistAssistant.icns"
 NODE_VERSION="20.11.1"
 INCLUDE_DASHBOARD=1
+PREFER_SYSTEM_NODE=0
+SIGN_ID=""
+ENTITLEMENTS=""
 
 usage() {
-  echo "Usage: $0 [--no-dashboard] [--node-version VERSION]" >&2
+  echo "Usage: $0 [--no-dashboard] [--node-version VERSION] [--prefer-system-node] [--sign \"Developer ID Application: ...\"] [--entitlements path]" >&2
 }
 
 require_cmd() {
@@ -21,6 +24,23 @@ require_cmd() {
     echo "Required command not found: $1" >&2
     exit 1
   fi
+}
+
+retry() {
+  local attempts="$1"
+  local delay="$2"
+  shift 2
+  local n=1
+  until "$@"; do
+    if [ "${n}" -ge "${attempts}" ]; then
+      echo "Command failed after ${attempts} attempts: $*" >&2
+      return 1
+    fi
+    echo "Command failed (attempt ${n}/${attempts}); retrying in ${delay}s..." >&2
+    sleep "${delay}"
+    n=$((n + 1))
+    delay=$((delay * 2))
+  done
 }
 
 ensure_macos() {
@@ -54,6 +74,37 @@ ensure_icon() {
   rm -rf "${tmp_dir}"
 }
 
+host_arch() {
+  local arch
+  arch="$(uname -m)"
+  if [ "${arch}" = "arm64" ]; then
+    echo "arm64"
+  elif [ "${arch}" = "x86_64" ]; then
+    echo "x86_64"
+  else
+    echo "${arch}"
+  fi
+}
+
+node_arch_matches() {
+  local expected_arch="$1"
+  local node_arch
+  node_arch="$(node -p 'process.arch' 2>/dev/null || true)"
+  if [ "${node_arch}" = "arm64" ]; then
+    node_arch="arm64"
+  elif [ "${node_arch}" = "x64" ]; then
+    node_arch="x86_64"
+  fi
+  [ "${node_arch}" = "${expected_arch}" ]
+}
+
+node_version_matches() {
+  local expected_version="$1"
+  local node_version
+  node_version="$(node -p 'process.versions.node' 2>/dev/null || true)"
+  [ "${node_version}" = "${expected_version}" ]
+}
+
 download_node() {
   local dest_dir="$1"
   local version="$2"
@@ -77,18 +128,29 @@ download_node() {
   require_cmd tar
   require_cmd shasum
 
-  if [ ! -f "${tar_path}" ]; then
-    echo "Downloading Node.js ${version}..." >&2
-    curl -fsSL "${url}" -o "${tar_path}"
-  fi
-
   shasums_url="https://nodejs.org/dist/v${version}/SHASUMS256.txt"
-  expected_sha="$(curl -fsSL "${shasums_url}" | awk "/${tarball}\$/ {print \$1}")"
+  expected_sha="$(retry 3 2 curl -fsSL "${shasums_url}" | awk "/${tarball}\$/ {print \$1}")"
   if [ -z "${expected_sha}" ]; then
     echo "Failed to resolve checksum for ${tarball}" >&2
     exit 1
   fi
-  echo "${expected_sha}  ${tar_path}" | shasum -a 256 -c - >/dev/null
+
+  verify_tarball() {
+    echo "${expected_sha}  ${tar_path}" | shasum -a 256 -c - >/dev/null
+  }
+
+  fetch_tarball() {
+    echo "Downloading Node.js ${version}..." >&2
+    retry 3 2 curl -fsSL "${url}" -o "${tar_path}"
+    verify_tarball
+  }
+
+  if [ -f "${tar_path}" ] && verify_tarball; then
+    echo "Using cached Node.js tarball at ${tar_path}" >&2
+  else
+    rm -f "${tar_path}"
+    fetch_tarball
+  fi
 
   rm -rf "${extract_dir}"
   tar -xzf "${tar_path}" -C "${DIST_DIR}"
@@ -101,14 +163,19 @@ download_node() {
 stage_node_runtime() {
   local dest_dir="$1"
   local version="$2"
+  local expected_arch
+  expected_arch="$(host_arch)"
   local node_path
   node_path="$(command -v node 2>/dev/null || true)"
-  if [ -n "${node_path}" ]; then
-    echo "Bundling Node runtime from ${node_path}" >&2
-    rm -rf "${dest_dir}"
-    mkdir -p "${dest_dir}"
-    cp -L "${node_path}" "${dest_dir}/node"
-    return
+  if [ "${PREFER_SYSTEM_NODE}" -eq 1 ] && [ -n "${node_path}" ]; then
+    if node_arch_matches "${expected_arch}" && node_version_matches "${version}"; then
+      echo "Bundling Node runtime from ${node_path}" >&2
+      rm -rf "${dest_dir}"
+      mkdir -p "${dest_dir}"
+      cp -L "${node_path}" "${dest_dir}/node"
+      return
+    fi
+    echo "System node does not match requested ${version} (${expected_arch}); downloading Node runtime." >&2
   fi
 
   download_node "${dest_dir}" "${version}"
@@ -122,6 +189,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     --node-version)
       NODE_VERSION="$2"
+      shift 2
+      ;;
+    --prefer-system-node)
+      PREFER_SYSTEM_NODE=1
+      shift
+      ;;
+    --sign)
+      SIGN_ID="$2"
+      shift 2
+      ;;
+    --entitlements)
+      ENTITLEMENTS="$2"
       shift 2
       ;;
     -h|--help)
@@ -144,6 +223,13 @@ if [ ! -f "${SPEC_FILE}" ]; then
   exit 1
 fi
 
+if [ -z "${SIGN_ID}" ] && [ -n "${MACOS_APP_SIGN_IDENTITY:-}" ]; then
+  SIGN_ID="${MACOS_APP_SIGN_IDENTITY}"
+fi
+if [ -z "${ENTITLEMENTS}" ] && [ -n "${MACOS_APP_SIGN_ENTITLEMENTS:-}" ]; then
+  ENTITLEMENTS="${MACOS_APP_SIGN_ENTITLEMENTS}"
+fi
+
 version="$(uv run python3 -m scripts.get_version)"
 if [ -z "${version}" ] || [ "${version}" = "0.0.0" ]; then
   echo "Failed to resolve project version." >&2
@@ -159,10 +245,14 @@ if [ "${INCLUDE_DASHBOARD}" -eq 1 ]; then
     echo "Dashboard directory not found at ${FRONTEND_DIR}" >&2
     exit 1
   fi
+  if [ ! -f "${FRONTEND_DIR}/package-lock.json" ]; then
+    echo "package-lock.json missing in frontend; npm ci requires a lockfile." >&2
+    exit 1
+  fi
   require_cmd npm
   export NEXT_TELEMETRY_DISABLED=1
-  (cd "${FRONTEND_DIR}" && npm ci)
-  (cd "${FRONTEND_DIR}" && npm run build)
+  (cd "${FRONTEND_DIR}" && retry 3 2 npm ci --no-audit --no-fund)
+  (cd "${FRONTEND_DIR}" && retry 2 2 npm run build)
 fi
 
 rm -rf "${APP_PATH}" "${DIST_DIR}/build"
@@ -194,6 +284,12 @@ if [ "${INCLUDE_DASHBOARD}" -eq 1 ]; then
     cp -R "${public_dir}" "${stage_dir}/frontend/public"
   fi
 
+  nested_dir="${stage_dir}/frontend/$(basename "${FRONTEND_DIR}")"
+  if [ ! -f "${stage_dir}/frontend/server.js" ] && [ -f "${nested_dir}/server.js" ]; then
+    cp -R "${nested_dir}/." "${stage_dir}/frontend/"
+    rm -rf "${nested_dir}"
+  fi
+
   if [ ! -f "${stage_dir}/frontend/server.js" ]; then
     echo "Next.js standalone server.js missing in staged frontend." >&2
     exit 1
@@ -206,6 +302,23 @@ if [ "${INCLUDE_DASHBOARD}" -eq 1 ]; then
   mkdir -p "${resources_dir}"
   cp -R "${stage_dir}/frontend" "${resources_dir}/frontend"
   cp -R "${stage_dir}/node" "${resources_dir}/node"
+
+  node_exe="${resources_dir}/node/node"
+  if [ ! -f "${node_exe}" ] && [ ! -f "${resources_dir}/node/bin/node" ]; then
+    echo "Bundled Node runtime missing from app resources." >&2
+    exit 1
+  fi
 fi
 
 echo "Built macOS app: ${APP_PATH}"
+
+if [ -n "${SIGN_ID}" ]; then
+  require_cmd codesign
+  sign_args=(--force --timestamp --options runtime --sign "${SIGN_ID}")
+  if [ -n "${ENTITLEMENTS}" ]; then
+    sign_args+=(--entitlements "${ENTITLEMENTS}")
+  fi
+  codesign "${sign_args[@]}" "${APP_PATH}"
+  codesign --verify --deep --strict "${APP_PATH}"
+  echo "Signed macOS app: ${APP_PATH}"
+fi

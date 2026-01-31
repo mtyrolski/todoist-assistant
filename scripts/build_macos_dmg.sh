@@ -4,9 +4,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${REPO_ROOT}/dist/macos"
 APP_PATH="${DIST_DIR}/TodoistAssistant.app"
+OUTPUT_SUFFIX=""
 
 usage() {
-  echo "Usage: $0 [--force]" >&2
+  echo "Usage: $0 [--force] [--output-suffix SUFFIX]" >&2
 }
 
 require_cmd() {
@@ -29,6 +30,10 @@ while [ "$#" -gt 0 ]; do
     --force)
       FORCE=1
       shift
+      ;;
+    --output-suffix)
+      OUTPUT_SUFFIX="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -58,7 +63,11 @@ if [ -z "${version}" ] || [ "${version}" = "0.0.0" ]; then
 fi
 
 mkdir -p "${DIST_DIR}"
-output_dmg="${DIST_DIR}/todoist-assistant-${version}.dmg"
+suffix=""
+if [ -n "${OUTPUT_SUFFIX}" ]; then
+  suffix="-${OUTPUT_SUFFIX}"
+fi
+output_dmg="${DIST_DIR}/todoist-assistant-${version}${suffix}.dmg"
 
 if [ -f "${output_dmg}" ] && [ "${FORCE}" -ne 1 ]; then
   echo "DMG already exists at ${output_dmg}. Use --force to overwrite." >&2

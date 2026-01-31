@@ -8,12 +8,11 @@
     Version="$(var.BundleVersion)"
     UpgradeCode="C52FB79B-B401-49F1-9B2B-C8EFCD068CB5"
     IconSourceFile="$(var.BootstrapperIcon)"
-    Compressed="yes"
-    PerMachine="yes"
-    LogPathVariable="BundleLogPath">
+    Compressed="yes">
     <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
       <bal:WixStandardBootstrapperApplication
         LicenseFile="$(var.LicenseFile)"
+        LogPathVariable="BundleLogPath"
         ShowVersion="yes"
         SuppressRepair="no" />
     </BootstrapperApplicationRef>
@@ -56,10 +55,7 @@
         SourceFile="$(var.MsiPath)"
         DisplayInternalUI="no"
         Visible="no"
-        PerMachine="yes"
         LogPathVariable="MsiLogPath">
-        <MsiProperty Name="ALLUSERS" Value="1" />
-        <MsiProperty Name="MSIINSTALLPERUSER" Value="0" />
         <MsiProperty Name="REMOVE_APPDATA" Value="[REMOVE_APPDATA]" />
       </MsiPackage>
     </Chain>

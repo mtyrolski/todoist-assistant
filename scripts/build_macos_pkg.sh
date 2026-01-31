@@ -10,9 +10,10 @@ PYINSTALLER_DIST="${BUILD_DIR}/pyinstaller"
 APP_ROOT="${PKG_ROOT}/usr/local/todoist-assistant"
 BIN_DIR="${PKG_ROOT}/usr/local/bin"
 ETC_DIR="${PKG_ROOT}/usr/local/etc/todoist-assistant"
+OUTPUT_SUFFIX=""
 
 usage() {
-  echo "Usage: $0 [--sign \"Developer ID Installer: ...\"]" >&2
+  echo "Usage: $0 [--sign \"Developer ID Installer: ...\"] [--output-suffix SUFFIX]" >&2
 }
 
 require_cmd() {
@@ -35,6 +36,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --sign)
       SIGN_ID="$2"
+      shift 2
+      ;;
+    --output-suffix)
+      OUTPUT_SUFFIX="$2"
       shift 2
       ;;
     -h|--help)
@@ -63,6 +68,10 @@ fi
 if [ ! -d "${SCRIPTS_DIR}" ]; then
   echo "Installer scripts directory not found at ${SCRIPTS_DIR}" >&2
   exit 1
+fi
+
+if [ -z "${SIGN_ID}" ] && [ -n "${MACOS_INSTALLER_SIGN_IDENTITY:-}" ]; then
+  SIGN_ID="${MACOS_INSTALLER_SIGN_IDENTITY}"
 fi
 
 rm -rf "${BUILD_DIR}"
@@ -104,6 +113,7 @@ if [ -f "${REPO_ROOT}/README.md" ]; then
 fi
 
 component_pkg="${BUILD_DIR}/todoist-assistant-component.pkg"
+chmod +x "${SCRIPTS_DIR}/postinstall" || true
 pkgbuild \
   --root "${PKG_ROOT}" \
   --identifier "com.todoist.assistant" \
@@ -111,7 +121,11 @@ pkgbuild \
   --scripts "${SCRIPTS_DIR}" \
   "${component_pkg}"
 
-output_pkg="${DIST_DIR}/todoist-assistant-${version}.pkg"
+suffix=""
+if [ -n "${OUTPUT_SUFFIX}" ]; then
+  suffix="-${OUTPUT_SUFFIX}"
+fi
+output_pkg="${DIST_DIR}/todoist-assistant-${version}${suffix}.pkg"
 if [ -n "${SIGN_ID}" ]; then
   productbuild --sign "${SIGN_ID}" --package "${component_pkg}" "${output_pkg}"
 else
