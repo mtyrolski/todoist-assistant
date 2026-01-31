@@ -12,10 +12,11 @@
     <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
       <bal:WixStandardBootstrapperApplication
         LicenseFile="$(var.LicenseFile)"
-        LogPathVariable="BundleLogPath"
         ShowVersion="yes"
         SuppressRepair="no" />
     </BootstrapperApplicationRef>
+
+    <Log PathVariable="BundleLogPath" Prefix="TodoistAssistant" Extension="log" />
 
     <Variable Name="BundleLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\setup.log" />
     <Variable Name="MsiLogPath" Type="string" Value="C:\ProgramData\TodoistAssistant\logs\installer\msi.log" />

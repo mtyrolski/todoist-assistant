@@ -27,7 +27,7 @@ package-dir = { "" = ".." }
 
 [tool.setuptools.packages.find]
 where = [".."]
-include = ["todoist", "todoist.*"]
+include = ["todoist", "todoist.*", "todoist_assistant", "todoist_assistant.*"]
 exclude = [
     "todoist.web*",
     "todoist.dashboard*",
@@ -38,4 +38,7 @@ exclude = [
     "todoist.automations.template*",
     "todoist.automations.update_env*",
     "todoist.automations.init_env*",
+    "todoist_assistant.web*",
+    "todoist_assistant.dashboard*",
+    "todoist_assistant.ai*",
 ]

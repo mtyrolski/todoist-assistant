@@ -62,4 +62,4 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["todoist", "todoist.*"]
+include = ["todoist", "todoist.*", "todoist_assistant", "todoist_assistant.*"]
