@@ -5,7 +5,14 @@ from loguru import logger
 from tqdm import tqdm
 from functools import partial
 from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import TODOIST_COLOR_NAME_TO_RGB, safe_instantiate_entry, try_n_times, with_retry, RETRY_MAX_ATTEMPTS
+from todoist.utils import (
+    TODOIST_COLOR_NAME_TO_RGB,
+    safe_instantiate_entry,
+    try_n_times,
+    with_retry,
+    RETRY_MAX_ATTEMPTS,
+    report_tqdm_progress,
+)
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
 
@@ -121,9 +128,20 @@ class DatabaseProjects:
         logger.info(f"Fetching {len(projects)} projects (include_tasks={include_tasks}) with thread pool")
         max_workers = min(8, len(projects))
         ordered_results: list[Optional[Project]] = [None] * len(projects)
+        total_projects = len(projects)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {executor.submit(process_project_with_retry, proj): idx for idx, proj in enumerate(projects)}
-            for future in tqdm(as_completed(future_to_index), total=len(projects), desc='Querying project data', unit='project', position=0, leave=True):
+            for completed, future in enumerate(
+                tqdm(
+                    as_completed(future_to_index),
+                    total=total_projects,
+                    desc='Querying project data',
+                    unit='project',
+                    position=0,
+                    leave=True,
+                ),
+                start=1,
+            ):
                 idx = future_to_index[future]
                 try:
                     proj_result = future.result(timeout=60)
@@ -132,6 +150,7 @@ class DatabaseProjects:
                     proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
                 ordered_results[idx] = proj_result
                 logger.debug(f"Fetched tasks for project {proj_result.project_entry.name} ({idx+1}/{len(projects)})")
+                report_tqdm_progress("Querying project data", completed, total_projects, "project")
 
         # Replace any remaining None with empty project shells (should be rare)
         for i, maybe_proj in enumerate(ordered_results):
@@ -200,9 +219,18 @@ class DatabaseProjects:
             return mapping_project_id_to_root
 
         max_workers = min(8, len(all_projects_seq))
+        total_projects = len(all_projects_seq)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_pid = {executor.submit(get_root_project_with_retry, p.id): p.id for p in all_projects_seq}
-            for future in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc='Building project hierarchy', unit='project'):
+            for completed, future in enumerate(
+                tqdm(
+                    as_completed(future_to_pid),
+                    total=total_projects,
+                    desc='Building project hierarchy',
+                    unit='project',
+                ),
+                start=1,
+            ):
                 pid = future_to_pid[future]
                 try:
                     root = future.result(timeout=60)
@@ -211,6 +239,7 @@ class DatabaseProjects:
                     continue
                 if root is not None:
                     mapping_project_id_to_root[pid] = root
+                report_tqdm_progress("Building project hierarchy", completed, total_projects, "project")
 
         return mapping_project_id_to_root
 

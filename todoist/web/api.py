@@ -48,7 +48,7 @@ from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
-from todoist.utils import Cache, LocalStorageError, load_config
+from todoist.utils import Cache, LocalStorageError, load_config, set_tqdm_progress_callback, get_tqdm_progress_callback
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
 
@@ -176,6 +176,11 @@ _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
 _main_loop: asyncio.AbstractEventLoop | None = None
+_TQDM_STEP_MAP = {
+    "Querying project data": 1,
+    "Building project hierarchy": 2,
+    "Querying activity data": 1,
+}
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -368,10 +373,39 @@ async def _finish_progress(error: str | None = None) -> None:
         _progress_state.error = error
 
 
+def _build_tqdm_progress_callback():
+    last_update = 0.0
+    last_value = -1
+
+    def _callback(desc: str, current: int, total: int, unit: str | None) -> None:
+        nonlocal last_update, last_value
+        now = time.time()
+        if current == last_value and (now - last_update) < 0.4:
+            return
+        if current != total and (now - last_update) < 0.35:
+            return
+        last_value = current
+        last_update = now
+        step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
+        unit_suffix = f" {unit}" if unit else ""
+        detail = f"{desc}: {current}/{total}{unit_suffix}"
+        _run_async_in_main_loop(_set_progress(
+            desc or "Working",
+            step=step,
+            total_steps=_PROGRESS_TOTAL_STEPS,
+            detail=detail,
+        ))
+
+    return _callback
+
+
 def _refresh_state_sync(*, demo_mode: bool) -> None:
     global _activity_backfill_attempted
     # Reset progress state to clear any stale information from previous failed refreshes
     _run_async_in_main_loop(_finish_progress(error=None))
+
+    previous_callback = get_tqdm_progress_callback()
+    set_tqdm_progress_callback(_build_tqdm_progress_callback())
 
     error: str | None = None
     try:
@@ -499,6 +533,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
+        set_tqdm_progress_callback(previous_callback)
         _run_async_in_main_loop(_finish_progress(error))
 
 

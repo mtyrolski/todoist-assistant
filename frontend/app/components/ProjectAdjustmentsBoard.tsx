@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { InfoTip } from "./InfoTip";
+import { ProgressSteps } from "./ProgressSteps";
+import type { DashboardProgress } from "./ProgressSteps";
 
 type ProjectAdjustmentsResponse = {
   files: string[];
@@ -27,6 +29,9 @@ Map archived projects to active root projects so your history stays grouped.
 - Map archived projects to a root project.
 - Save to update the dashboard data.`;
 
+const RETRY_LIMIT = 6;
+const RETRY_DELAY_MS = 2000;
+
 async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) return {} as T;
@@ -39,6 +44,10 @@ async function readJson<T>(res: Response): Promise<T> {
   }
 }
 
+function isRetryableFetchError(message: string): boolean {
+  return /invalid json response|failed to fetch|networkerror|econnrefused|socket hang up|econnreset/i.test(message);
+}
+
 export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = false, onAfterSave }: Props) {
   const [adjustments, setAdjustments] = useState<ProjectAdjustmentsResponse | null>(null);
   const [adjustmentFile, setAdjustmentFile] = useState("");
@@ -47,36 +56,114 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [loadingHint, setLoadingHint] = useState<string | null>(null);
+  const [progress, setProgress] = useState<DashboardProgress | null>(null);
+  const retryAttempts = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadAdjustments = async (file?: string, refresh = false) => {
+  const loadAdjustments = async (file?: string, refresh = false, resetRetries = false) => {
+    let keepLoading = false;
     try {
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
+      if (resetRetries) {
+        retryAttempts.current = 0;
+      }
       setLoading(true);
       setError(null);
+      setLoadingHint("Fetching archived and active projects from Todoist. This can take a few minutes on first sync.");
       const qs = new URLSearchParams();
       if (file) qs.set("file", file);
       if (refresh) qs.set("refresh", "true");
       const res = await fetch(`/api/admin/project_adjustments${qs.toString() ? `?${qs.toString()}` : ""}`);
       const payload = await readJson<ProjectAdjustmentsResponse>(res);
-      if (!res.ok) throw new Error("Failed to load adjustments");
+      if (!res.ok) {
+        const detail = (payload as unknown as { detail?: string })?.detail;
+        throw new Error(detail ?? "Failed to load adjustments");
+      }
       setAdjustments(payload);
       setAdjustmentFile(payload.selectedFile);
       setMappingDraft(payload.mappings ?? {});
+      retryAttempts.current = 0;
+      setLoadingHint(null);
     } catch (e) {
-      setAdjustments(null);
       const message = e instanceof Error ? e.message : "Failed to load adjustments";
-      if (message.startsWith("Invalid JSON response")) {
-        setError("Project adjustments API error. Check backend logs.");
+      const retryable = isRetryableFetchError(message) && retryAttempts.current < RETRY_LIMIT;
+      if (retryable) {
+        retryAttempts.current += 1;
+        keepLoading = true;
+        setError(null);
+        setLoadingHint(
+          "Preparing project adjustments. The Todoist API can be rate-limited during first sync — retrying shortly…"
+        );
+        if (retryTimer.current) {
+          clearTimeout(retryTimer.current);
+        }
+        retryTimer.current = setTimeout(() => {
+          loadAdjustments(file, refresh);
+        }, RETRY_DELAY_MS);
       } else {
-        setError(message);
+        setLoadingHint(null);
+        if (message.startsWith("Invalid JSON response")) {
+          setError("Project adjustments API error. Check backend logs.");
+        } else if (/socket hang up|econnreset/i.test(message)) {
+          setError("Connection dropped while loading adjustments. The backend may still be syncing; try Refresh.");
+        } else {
+          setError(message);
+        }
       }
     } finally {
-      setLoading(false);
+      if (!keepLoading) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadAdjustments();
+    loadAdjustments(undefined, false, true);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setProgress(null);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+
+    const loadProgress = async () => {
+      try {
+        const res = await fetch("/api/dashboard/progress", { signal: controller.signal });
+        if (!res.ok) return;
+        const payload = await readJson<DashboardProgress>(res);
+        if (!active) return;
+        setProgress(payload);
+      } catch (e) {
+        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
+          return;
+        }
+      }
+    };
+
+    loadProgress();
+    const interval = setInterval(loadProgress, 700);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [loading]);
 
   const activeRoots = adjustments?.activeRootProjects ?? [];
   const archivedProjects = adjustments?.archivedProjects ?? [];
@@ -92,6 +179,23 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     return entries;
   }, [mappingDraft]);
 
+  const progressDisplay = useMemo(() => {
+    if (progress?.active) return progress;
+    if (!loading) return null;
+    return {
+      active: true,
+      stage: "Building project hierarchy",
+      step: 2,
+      totalSteps: 3,
+      startedAt: null,
+      updatedAt: null,
+      detail:
+        loadingHint ??
+        "Fetching archived and active projects from Todoist. This can take a few minutes on first sync.",
+      error: null
+    } satisfies DashboardProgress;
+  }, [progress, loading, loadingHint]);
+
   const saveAdjustments = async () => {
     if (!adjustmentFile) return;
     try {
@@ -104,7 +208,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         body: JSON.stringify(mappingDraft)
       });
       if (!res.ok) throw new Error("Failed to save adjustments");
-      await loadAdjustments(adjustmentFile, true);
+      await loadAdjustments(adjustmentFile, true, true);
       setNotice("Mappings saved.");
       onAfterSave?.();
     } catch (e) {
@@ -131,7 +235,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             <InfoTip label="About adjustments" content={HELP_TEXT} />
           </div>
           <p className="muted tiny" style={{ margin: 0 }}>
-            Map archived projects to a root project so history and charts stay together.
+            Map archived projects to a root project so history and charts stay together. First load may take a few minutes while
+            Todoist data syncs.
           </p>
         </div>
         <div className="adjustmentsHeaderActions">
@@ -142,7 +247,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             <select
               id={`adjustment-file-${variant}`}
               value={adjustmentFile}
-              onChange={(e) => loadAdjustments(e.target.value)}
+              onChange={(e) => loadAdjustments(e.target.value, false, true)}
               className="select"
             >
               {(adjustments?.files ?? []).map((f) => (
@@ -153,7 +258,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             </select>
           </div>
           <div className="adjustmentsHeaderButtons">
-            <button className="button buttonSmall" type="button" onClick={() => loadAdjustments(adjustmentFile)} disabled={loading}>
+            <button className="button buttonSmall" type="button" onClick={() => loadAdjustments(adjustmentFile, false, true)} disabled={loading}>
               Refresh
             </button>
             <button className="button buttonSmall" type="button" onClick={saveAdjustments} disabled={saving || loading}>
@@ -167,7 +272,14 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       {notice ? <p className="pill" style={{ margin: "0 0 12px" }}>{notice}</p> : null}
 
       {loading ? (
-        <div className="skeleton" style={{ minHeight: 180 }} />
+        <div className="adjustmentsLoading">
+          <ProgressSteps progress={progressDisplay} />
+          <p className="muted tiny" style={{ margin: 0 }}>
+            {loadingHint ??
+              "Fetching archived and active projects. If this is your first sync, the Todoist API may be rate-limited; progress will appear above."}
+          </p>
+          <div className="skeleton" style={{ minHeight: 180 }} />
+        </div>
       ) : (
         <>
           <div className="adjustmentsSummary">

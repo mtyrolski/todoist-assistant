@@ -993,6 +993,11 @@ textarea.textInput {
   gap: 16px;
 }
 
+.adjustmentsLoading {
+  display: grid;
+  gap: 12px;
+}
+
 .adjustmentsBoardWide {
   padding: 20px 20px 22px;
 }

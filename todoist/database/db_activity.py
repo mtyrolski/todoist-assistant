@@ -8,7 +8,7 @@ from todoist.types import Event, EventEntry
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS
+from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS, report_tqdm_progress
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TIMEOUT_SECONDS = 10
@@ -102,9 +102,18 @@ class DatabaseActivity:
             logger.warning("No pages requested (max_pages=0). Returning empty result.")
             return result
 
+        total_pages = max_pages
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
-            for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
+            for completed, future in enumerate(
+                tqdm(
+                    as_completed(future_to_page),
+                    total=total_pages,
+                    desc='Querying activity data',
+                    unit='page',
+                ),
+                start=1,
+            ):
                 page = future_to_page[future]
                 try:
                     page_events = future.result(timeout=TIMEOUT_SECONDS)
@@ -112,6 +121,7 @@ class DatabaseActivity:
                     logger.warning("Failed fetching activity page {}: {}", page, exc)
                     page_events = []
                 results_by_page[page] = page_events
+                report_tqdm_progress("Querying activity data", completed, total_pages, "page")
 
 
         # logger.debug(f"Fetched {len(page_events)} events from page {page}")
