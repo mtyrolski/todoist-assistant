@@ -10,6 +10,8 @@ type ProjectAdjustmentsResponse = {
   selectedFile: string;
   mappings: Record<string, string>;
   activeRootProjects: string[];
+  archivedRootProjects: string[];
+  archivedParentProjects: string[];
   archivedProjects: string[];
   unmappedArchivedProjects: string[];
 };
@@ -26,6 +28,7 @@ const HELP_TEXT = `**Project hierarchy adjustments**
 Map archived projects to active root projects so your history stays grouped.
 
 - Pick a mapping file (stored locally in \`personal/\`).
+- Select archived root projects you want to use as parent targets.
 - Map archived projects to a root project.
 - Save to update the dashboard data.`;
 
@@ -52,6 +55,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   const [adjustments, setAdjustments] = useState<ProjectAdjustmentsResponse | null>(null);
   const [adjustmentFile, setAdjustmentFile] = useState("");
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
+  const [archivedParentsDraft, setArchivedParentsDraft] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +90,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       setAdjustments(payload);
       setAdjustmentFile(payload.selectedFile);
       setMappingDraft(payload.mappings ?? {});
+      setArchivedParentsDraft(payload.archivedParentProjects ?? []);
       retryAttempts.current = 0;
       setLoadingHint(null);
     } catch (e) {
@@ -166,6 +171,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   }, [loading]);
 
   const activeRoots = adjustments?.activeRootProjects ?? [];
+  const archivedRootProjects = adjustments?.archivedRootProjects ?? [];
   const archivedProjects = adjustments?.archivedProjects ?? [];
 
   const unmappedProjects = useMemo(() => {
@@ -178,6 +184,16 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     entries.sort(([a], [b]) => a.localeCompare(b));
     return entries;
   }, [mappingDraft]);
+
+  const parentOptions = useMemo(() => {
+    const options = new Set<string>();
+    for (const name of activeRoots) options.add(name);
+    for (const name of archivedParentsDraft) options.add(name);
+    for (const target of Object.values(mappingDraft)) {
+      if (target) options.add(target);
+    }
+    return Array.from(options).sort((a, b) => a.localeCompare(b));
+  }, [activeRoots, archivedParentsDraft, mappingDraft]);
 
   const progressDisplay = useMemo(() => {
     if (progress?.active) return progress;
@@ -205,7 +221,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       const res = await fetch(`/api/admin/project_adjustments?file=${encodeURIComponent(adjustmentFile)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mappingDraft)
+        body: JSON.stringify({ mappings: mappingDraft, archivedParents: archivedParentsDraft })
       });
       if (!res.ok) throw new Error("Failed to save adjustments");
       await loadAdjustments(adjustmentFile, true, true);
@@ -285,9 +301,65 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
           <div className="adjustmentsSummary">
             <span className="pill pill-warn">Unmapped: {unmappedProjects.length}</span>
             <span className="pill">Mapped: {mappingRows.length}</span>
+            <span className="pill">Archived parents: {archivedParentsDraft.length}</span>
             <span className="muted tiny">
               {archivedProjects.length} archived projects • {activeRoots.length} root projects
             </span>
+          </div>
+
+          <div className="card cardInner adjustmentsParents">
+            <header className="cardHeader">
+              <h3>Archived parent candidates</h3>
+            </header>
+            <p className="muted tiny" style={{ margin: 0 }}>
+              Select archived projects that should be available as mapping targets (roots recommended). You can edit this list anytime.
+            </p>
+            <div className="adjustmentsParentActions">
+              <button
+                className="button buttonSmall buttonGhost"
+                type="button"
+                onClick={() => setArchivedParentsDraft(archivedRootProjects)}
+                disabled={!archivedRootProjects.length}
+              >
+                Use all archived roots
+              </button>
+              <button
+                className="button buttonSmall buttonGhost"
+                type="button"
+                onClick={() => setArchivedParentsDraft([])}
+                disabled={!archivedParentsDraft.length}
+              >
+                Clear selection
+              </button>
+            </div>
+            <div className="list scrollArea">
+              {archivedProjects.length ? (
+                archivedProjects.map((name) => {
+                  const checked = archivedParentsDraft.includes(name);
+                  return (
+                    <label key={name} className="adjustmentsParentRow">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setArchivedParentsDraft((prev) => {
+                            if (prev.includes(name)) {
+                              return prev.filter((item) => item !== name);
+                            }
+                            return [...prev, name];
+                          });
+                        }}
+                      />
+                      <span>{name}</span>
+                    </label>
+                  );
+                })
+              ) : (
+                <p className="muted tiny" style={{ margin: 0 }}>
+                  No archived projects detected.
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="adjustmentsGrid">
@@ -322,7 +394,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                           }}
                         >
                           <option value="">Choose root…</option>
-                          {activeRoots.map((p) => (
+                          {parentOptions.map((p) => (
                             <option key={p} value={p}>
                               {p}
                             </option>
@@ -361,7 +433,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                             setMappingDraft((prev) => ({ ...prev, [archived]: value }));
                           }}
                         >
-                          {activeRoots.map((p) => (
+                          {parentOptions.map((p) => (
                             <option key={p} value={p}>
                               {p}
                             </option>

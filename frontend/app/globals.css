@@ -266,6 +266,32 @@ a {
   color: var(--muted);
 }
 
+.progressSub {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.progressSubMeta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.progressSubTrack {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.progressSubFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(106, 227, 255, 0.9), rgba(97, 244, 179, 0.85));
+  box-shadow: 0 0 12px rgba(106, 227, 255, 0.35);
+}
+
 .progressError {
   margin: 4px 0 0;
   font-size: 11px;
@@ -1034,6 +1060,30 @@ textarea.textInput {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.adjustmentsParents {
+  display: grid;
+  gap: 10px;
+}
+
+.adjustmentsParentActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adjustmentsParentRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.adjustmentsParentRow input {
+  accent-color: var(--accent);
 }
 
 .adjustmentsGrid {

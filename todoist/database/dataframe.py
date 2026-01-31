@@ -47,7 +47,11 @@ def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
                 '# No adjustments made\n',
                 '# "some_archived_project": "some_current_main_project"\n',
                 '# "other_archived_project": "other_archived_main_project"\n',
-                '}\n\n'
+                '}\n\n',
+                'archived_parent_projects = [\n',
+                '# Optional: archived root projects allowed as mapping targets\n',
+                '# "Some archived root project",\n',
+                ']\n\n'
             ])
         logger.info(f'Created empty adjustments file in {personal_dir}')
         return {}
