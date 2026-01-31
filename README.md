@@ -41,16 +41,18 @@ The Python package is meant for **local-first data access** and **automation**:
 
 Basic import:
 ```python
-import todoist_assistant as ta
+import todoist
 ```
 
 ### Structure (where things live)
-- `todoist_assistant` - public entrypoint + lazy submodules.
-- `todoist_assistant.core` - core API, DB, types, utils, activity, automations, stats, telemetry.
-- `todoist_assistant.ai` - LLM/agent helpers (plus `llm_breakdown`).
-- `todoist_assistant.web` - FastAPI app + web API surface.
-- `todoist_assistant.dashboard` - plots + dashboard utilities.
-- `todoist_assistant.frontend` - frontend path helpers.
+- `todoist` - public package (core modules + helpers).
+- `todoist.api` - Todoist API client.
+- `todoist.database` - local data store and persistence helpers.
+- `todoist.automations` - automation workflows (observer, gmail, templates).
+- `todoist.llm` - AI/LLM helpers.
+- `todoist.agent` - agent tools and chat helpers.
+- `todoist.web` - FastAPI app + web API surface.
+- `todoist.dashboard` - plots + dashboard utilities.
 
 ### Core package notes (from `core/README.md`)
 - Install editable core-only package:
