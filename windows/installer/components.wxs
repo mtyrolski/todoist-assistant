@@ -103,7 +103,6 @@
       Target="todoist-assistant.exe"
       CloseMessage="yes"
       RebootPrompt="no"
-      Terminate="yes"
       Timeout="15" />
   </Fragment>
 

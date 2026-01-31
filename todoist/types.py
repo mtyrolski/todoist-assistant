@@ -292,9 +292,11 @@ def events_to_dataframe(
 
     for event in event:
         parent_project_id = event.event_entry.parent_project_id or ""
+        if parent_project_id and parent_project_id not in project_id_to_root and parent_project_id not in project_id_to_name:
+            not_found_in_project_id_to_root.add(parent_project_id)
+            continue
+
         root_project = project_id_to_root.get(parent_project_id) if parent_project_id else None
-        if root_project is None:
-            not_found_in_project_id_to_root.add(parent_project_id or "<missing>")
         root_project_id = root_project.id if root_project else parent_project_id
         root_project_name = (
             root_project.project_entry.name
@@ -319,6 +321,6 @@ def events_to_dataframe(
     logger.info(f'Processed {len(mapping_data["id"])} events')
 
     if len(not_found_in_project_id_to_root) > 0:
-        logger.warning(f'Not found {len(not_found_in_project_id_to_root)} projects in project_id_to_root.')
+        logger.warning(f'Not found {len(not_found_in_project_id_to_root)} projects in project mappings.')
 
     return DataFrame(mapping_data)
