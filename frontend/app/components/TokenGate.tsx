@@ -51,6 +51,7 @@ export function TokenGate({
   const [showToken, setShowToken] = useState(false);
   const [setupComplete, setSetupComplete] = useState(false);
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
+  const [reloading, setReloading] = useState(false);
 
   const refreshStatus = async () => {
     setChecking(true);
@@ -162,6 +163,14 @@ export function TokenGate({
     setSetupComplete(true);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(SETUP_COMPLETE_KEY, "1");
+    }
+  };
+
+  const completeSetupAndReload = () => {
+    finishSetup();
+    if (typeof window !== "undefined") {
+      setReloading(true);
+      window.setTimeout(() => window.location.reload(), 250);
     }
   };
 
@@ -291,17 +300,22 @@ export function TokenGate({
                   <div>
                     <h3>Project adjustments</h3>
                     <p className="muted tiny" style={{ margin: 0 }}>
-                      Can be changed later in Control Panel → Project Adjustments.
+                      Can be changed later in Control Panel → Project Adjustments. Saving reloads the app to refresh caches.
                     </p>
                   </div>
                 </div>
-                <ProjectAdjustmentsBoard variant="embedded" showWhenEmpty onAfterSave={refreshStatus} />
+                <ProjectAdjustmentsBoard variant="embedded" showWhenEmpty onAfterSave={completeSetupAndReload} />
                 <div className="setupStepActions">
-                  <button className="button buttonSmall buttonGhost" type="button" onClick={() => setCurrentStep(1)}>
+                  <button
+                    className="button buttonSmall buttonGhost"
+                    type="button"
+                    onClick={() => setCurrentStep(1)}
+                    disabled={reloading}
+                  >
                     Back
                   </button>
-                  <button className="button buttonSmall" type="button" onClick={finishSetup}>
-                    Finish setup
+                  <button className="button buttonSmall" type="button" onClick={completeSetupAndReload} disabled={reloading}>
+                    {reloading ? "Reloading…" : "Finish & Reload"}
                   </button>
                 </div>
               </section>

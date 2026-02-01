@@ -13,7 +13,6 @@ import { LlmBreakdownStatus } from "./LlmBreakdownStatus";
 import { ObserverControl } from "./ObserverControl";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
-import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -292,7 +291,6 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
       </header>
 
       {showFirstSyncOverlay ? null : <ProgressSteps progress={progressDisplay} />}
-      <ProjectAdjustmentsBoard onAfterSave={onAfterMutation} />
 
       {!noData ? (
         <nav className="jumpNav" aria-label="Jump to sections">
