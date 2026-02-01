@@ -23,6 +23,7 @@
       <ComponentRef Id="AppShortcuts" />
       <ComponentRef Id="DesktopShortcut" />
       <ComponentRef Id="AppDataPermissions" />
+      <ComponentRef Id="AppDataCleanup" />
       <ComponentRef Id="LogsFolder" />
     </ComponentGroup>
   </Fragment>
@@ -75,7 +76,6 @@
         <CreateFolder>
           <util:PermissionEx User="Users" Domain="BUILTIN" GenericAll="yes" />
         </CreateFolder>
-        <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
         <RegistryValue
           Root="HKLM"
           Key="Software\TodoistAssistant"
@@ -84,7 +84,35 @@
           Value="[APPDATADIR]"
           KeyPath="yes" />
       </Component>
+      <Component Id="AppDataCleanup" Guid="*" Win64="yes">
+        <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATAREMOVE" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\TodoistAssistant"
+          Name="cleanup"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
     </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <util:CloseApplication
+      Id="CloseTodoistAssistantExe"
+      Target="todoist-assistant.exe"
+      CloseMessage="yes"
+      RebootPrompt="no"
+      Timeout="15" />
+  </Fragment>
+
+  <Fragment>
+    <CustomAction Id="SetRemoveAppData" Property="APPDATAREMOVE" Value="[APPDATADIR]" />
+    <InstallExecuteSequence>
+      <Custom Action="SetRemoveAppData" Before="RemoveFiles">
+        REMOVE="ALL" AND REMOVE_APPDATA=1 AND NOT UPGRADINGPRODUCTCODE
+      </Custom>
+    </InstallExecuteSequence>
   </Fragment>
 
   <Fragment>

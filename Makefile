@@ -1,4 +1,4 @@
-.PHONY: init_local_env install_app ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate static_check check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
+.PHONY: init_local_env ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -8,9 +8,6 @@ init_local_env: # syncs history, fetches activity
 
 update_env: # updates history, fetches activity, do templates
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations
-
-install_app: # installs frontend dependencies
-	npm --prefix $(FRONTEND_DIR) install
 
 ensure_frontend_deps: # installs frontend deps if missing
 	@if [ ! -x "$(FRONTEND_NEXT)" ]; then \
@@ -29,6 +26,19 @@ run_dashboard: ensure_frontend_deps
 	@bash -c '\
 		set -euo pipefail; \
 		pids=""; api_pid=""; fe_pid=""; \
+		wait_for_api() { \
+			local tries=0; \
+			echo "Waiting for API to be ready..."; \
+			if command -v curl >/dev/null 2>&1; then \
+				until curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; do \
+					tries=$$((tries+1)); \
+					[ $$tries -ge 60 ] && break; \
+					sleep 0.5; \
+				done; \
+			else \
+				sleep 2; \
+			fi; \
+		}; \
 		cleanup() { \
 			echo "Stopping dashboard servers..."; \
 			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
@@ -36,6 +46,7 @@ run_dashboard: ensure_frontend_deps
 		}; \
 		trap cleanup INT TERM EXIT; \
 		uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		wait_for_api; \
 		npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
 		echo "Dashboard running:"; \
 		echo "  API:      http://127.0.0.1:8000"; \
@@ -47,6 +58,19 @@ run_demo: ensure_frontend_deps
 	@bash -c '\
 		set -euo pipefail; \
 		pids=""; api_pid=""; fe_pid=""; \
+		wait_for_api() { \
+			local tries=0; \
+			echo "Waiting for API to be ready..."; \
+			if command -v curl >/dev/null 2>&1; then \
+				until curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; do \
+					tries=$$((tries+1)); \
+					[ $$tries -ge 60 ] && break; \
+					sleep 0.5; \
+				done; \
+			else \
+				sleep 2; \
+			fi; \
+		}; \
 		cleanup() { \
 			echo "Stopping demo dashboard servers..."; \
 			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
@@ -54,6 +78,7 @@ run_demo: ensure_frontend_deps
 		}; \
 		trap cleanup INT TERM EXIT; \
 		TODOIST_DASHBOARD_DEMO=1 uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		wait_for_api; \
 		TODOIST_DASHBOARD_DEMO=1 npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
 		echo "Demo dashboard running (anonymized):"; \
 		echo "  API:      http://127.0.0.1:8000"; \
@@ -75,16 +100,12 @@ test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
 
 typecheck: ## Run pyright type checks
-	$(MAKE) static_check
+	PYTHONPATH=. uv run python3 -m pyright --warnings
 
 lint: ## Run pylint
 	PYTHONPATH=. uv run pylint -j 0 todoist tests
 
-static_check: ## Run pyright + pylint
-	PYTHONPATH=. uv run python3 -m pyright --warnings
-	$(MAKE) lint
-
-validate: static_check ## Run pyright + pylint
+validate: typecheck lint ## Run typecheck + lint
 
 check: validate test ## Run validate + tests
 

@@ -169,6 +169,38 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     assert abs(by_name["Parent B"]["percentOfCompleted"] - 33.33) < 0.02
 
 
+def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
+    async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
+        return None
+
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _stub_all_figures(monkeypatch)
+
+    df = pd.DataFrame(
+        columns=[
+            "date",
+            "id",
+            "title",
+            "type",
+            "parent_project_name",
+            "root_project_name",
+            "task_id",
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    df.set_index("date", inplace=True)
+    _set_state_with_df(df)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/home?weeks=12")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["range"]["weeks"] == 12
+    assert payload["leaderboards"]["lastCompletedWeek"]["label"]
+    assert payload.get("noData") is True
+
+
 def test_dashboard_status_returns_services() -> None:
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/status")

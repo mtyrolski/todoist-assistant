@@ -525,6 +525,90 @@ def _build_msi(
     return msi_path
 
 
+def _build_bundle(
+    repo_root: Path,
+    dist_root: Path,
+    msi_path: Path,
+    bundle_version: str,
+    vc_redist_path: Path,
+    wix_tools: dict[str, str],
+) -> Path:
+    bootstrapper_dir = repo_root / "windows" / "bootstrapper"
+    bundle_wxs = bootstrapper_dir / "bundle.wxs"
+    icon_path = bootstrapper_dir / "todoist-assistant.ico"
+    license_path = bootstrapper_dir / "license.rtf"
+
+    missing = [path for path in (bundle_wxs, icon_path, license_path, vc_redist_path) if not path.exists()]
+    if missing:
+        missing_str = ", ".join(str(path) for path in missing)
+        raise RuntimeError(f"Bootstrapper files missing: {missing_str}")
+
+    wixobj_dir = dist_root / "wixobj" / "bundle"
+    wixobj_dir.mkdir(parents=True, exist_ok=True)
+    wix_out_dir = str(wixobj_dir) + os.sep
+
+    candle = wix_tools["candle"]
+    light = wix_tools["light"]
+
+    _run(
+        [
+            candle,
+            "-nologo",
+            "-ext",
+            "WixBalExtension",
+            "-ext",
+            "WixUtilExtension",
+            f"-dBundleVersion={bundle_version}",
+            f"-dMsiPath={msi_path}",
+            f"-dBootstrapperIcon={icon_path}",
+            f"-dLicenseFile={license_path}",
+            f"-dVCRedistPath={vc_redist_path}",
+            "-out",
+            wix_out_dir,
+            str(bundle_wxs),
+        ]
+    )
+
+    wixobjs = sorted(str(path) for path in wixobj_dir.glob("*.wixobj"))
+    if not wixobjs:
+        raise RuntimeError("No WiX bundle object files generated; candle.exe did not produce outputs")
+
+    setup_path = dist_root / "TodoistAssistantSetup.exe"
+    _run(
+        [
+            light,
+            "-nologo",
+            "-ext",
+            "WixBalExtension",
+            "-ext",
+            "WixUtilExtension",
+            "-out",
+            str(setup_path),
+            *wixobjs,
+        ]
+    )
+
+    return setup_path
+
+
+def _download_vc_redist(dist_root: Path) -> Path:
+    redist_name = "vc_redist.x64.exe"
+    redist_path = dist_root / redist_name
+    redist_url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+    if redist_path.exists():
+        return redist_path
+
+    print("Downloading Microsoft Visual C++ Redistributable (x64)...")
+    with urlopen(redist_url) as response, redist_path.open("wb") as handle:
+        handle.write(response.read())
+
+    if redist_path.stat().st_size == 0:
+        raise RuntimeError("Downloaded vc_redist.x64.exe is empty.")
+
+    return redist_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the Todoist Assistant Windows MSI installer.")
     parser.add_argument("--no-dashboard", action="store_true", help="Skip building/packaging the dashboard frontend.")
@@ -618,6 +702,14 @@ def main() -> int:
         cert_path, cert_password, timestamp_url = signing_config
         _sign_with_signtool(signtool_path, msi_path, cert_path, cert_password, timestamp_url)
     print(f"MSI created: {msi_path}")
+
+    print("Building setup.exe bootstrapper...")
+    vc_redist_path = _download_vc_redist(dist_root)
+    setup_path = _build_bundle(repo_root, dist_root, msi_path, msi_version, vc_redist_path, wix_tools)
+    if signtool_path and signing_config:
+        cert_path, cert_password, timestamp_url = signing_config
+        _sign_with_signtool(signtool_path, setup_path, cert_path, cert_password, timestamp_url)
+    print(f"Bootstrapper created: {setup_path}")
     return 0
 
 

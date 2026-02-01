@@ -6,13 +6,14 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from todoist.version import get_version
+from todoist.env import EnvVar
 
 CONFIG_FILENAME = "telemetry.json"
 SENTINEL_FILENAME = ".telemetry_sent"
 
 
 def default_data_dir() -> Path:
-    override = os.getenv("TODOIST_DATA_DIR")
+    override = os.getenv(EnvVar.DATA_DIR)
     if override:
         return Path(override).expanduser().resolve()
     if os.name == "nt":
@@ -24,7 +25,7 @@ def default_data_dir() -> Path:
 
 
 def resolve_config_dir() -> Path:
-    override = os.getenv("TODOIST_CONFIG_DIR")
+    override = os.getenv(EnvVar.CONFIG_DIR)
     if override:
         return Path(override).expanduser().resolve()
     return default_data_dir() / "config"
@@ -93,11 +94,11 @@ def is_enabled(config_dir: Path) -> bool:
 
 
 def _endpoint() -> str | None:
-    return os.getenv("TODOIST_TELEMETRY_ENDPOINT")
+    return os.getenv(EnvVar.TELEMETRY_ENDPOINT)
 
 
 def _debug_enabled() -> bool:
-    value = os.getenv("TODOIST_TELEMETRY_DEBUG", "")
+    value = os.getenv(EnvVar.TELEMETRY_DEBUG, "")
     return value.strip().lower() in {"1", "true", "yes"}
 
 
@@ -112,7 +113,7 @@ def send_event(event: str, *, config_dir: Path, _data_dir: Path) -> bool:
         return False
     endpoint = _endpoint()
     if not endpoint:
-        _log_debug("TODOIST_TELEMETRY_ENDPOINT not set; skipping event.")
+        _log_debug(f"{EnvVar.TELEMETRY_ENDPOINT} not set; skipping event.")
         return False
 
     payload = {

@@ -5,6 +5,7 @@ import os
 import plistlib
 
 from PyInstaller.utils.hooks import collect_all
+from todoist.env import EnvVar
 
 
 def _collect(module_name):
@@ -48,7 +49,7 @@ img_dir = repo_root / "img"
 if img_dir.exists():
     datas.append((str(img_dir), "img"))
 
-version = os.environ.get("TODOIST_VERSION", "0.0.0")
+version = os.environ.get(EnvVar.VERSION, "0.0.0")
 info_plist_path = repo_root / "packaging" / "macos" / "Info.plist"
 if info_plist_path.exists():
     info_plist = plistlib.loads(info_plist_path.read_bytes())

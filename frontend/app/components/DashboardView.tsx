@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PlotCard } from "./PlotCard";
 import { StatCard } from "./StatCard";
 import { LoadingBar } from "./LoadingBar";
@@ -30,13 +30,24 @@ import {
   useSyncLabel
 } from "../lib/dashboardHooks";
 
-export function DashboardView() {
+const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
+
+export function DashboardView({
+  setupActive = false,
+  tokenReady = false,
+  setupComplete = false
+}: {
+  setupActive?: boolean;
+  tokenReady?: boolean;
+  setupComplete?: boolean;
+}) {
   const { health, loadingHealth, error } = useApiHealth();
   const {
     dashboard,
     loadingDashboard,
     dashboardError,
     progressDisplay,
+    retrying,
     granularity,
     setGranularity,
     weeks,
@@ -48,16 +59,80 @@ export function DashboardView() {
     customEnd,
     setCustomEnd,
     refresh
-  } = useDashboardHome();
+  } = useDashboardHome({ enabled: !setupActive });
   const { status, loadingStatus, refreshStatus } = useDashboardStatus();
   const { progress: llmProgress, loading: loadingLlmProgress, refresh: refreshLlmProgress } = useLlmBreakdownProgress();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
+  const [firstSyncPending, setFirstSyncPending] = useState(false);
+  const [firstSyncTriggered, setFirstSyncTriggered] = useState(false);
+  const [activityRecoveryAttempted, setActivityRecoveryAttempted] = useState(false);
+  const activityReady = Boolean(status?.activityCache);
+  const mappingReady = setupComplete;
+  const setupSteps = useMemo(() => {
+    return [
+      {
+        label: "Token connected",
+        hint: tokenReady ? "Validated and saved" : "Add your API token",
+        done: tokenReady
+      },
+      {
+        label: "Activity cache loaded",
+        hint: activityReady ? "Activity history ready" : "Fetching activity history",
+        done: activityReady
+      },
+      {
+        label: "Project mapping confirmed",
+        hint: mappingReady ? "Mappings saved" : "Confirm project adjustments",
+        done: mappingReady
+      }
+    ];
+  }, [tokenReady, activityReady, mappingReady]);
+  const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
+  const setupChecklistActive = setupSteps.some((step) => !step.done);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const done = window.localStorage.getItem(FIRST_SYNC_KEY) === "1";
+    setFirstSyncPending(!done);
+  }, []);
 
   const periodLabel = useMemo(() => {
     if (!dashboard) return null;
     return `${dashboard.range.beg} -> ${dashboard.range.end}`;
   }, [dashboard]);
 
+  useEffect(() => {
+    if (!status || activityRecoveryAttempted) return;
+    if (!activityReady) {
+      setActivityRecoveryAttempted(true);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(FIRST_SYNC_KEY);
+      }
+      if (!firstSyncPending) {
+        setFirstSyncPending(true);
+        setFirstSyncTriggered(false);
+      }
+    }
+  }, [status, activityRecoveryAttempted, activityReady, firstSyncPending]);
+
+  useEffect(() => {
+    if (!firstSyncPending || firstSyncTriggered) return;
+    setFirstSyncTriggered(true);
+    refresh();
+  }, [firstSyncPending, firstSyncTriggered, refresh]);
+
+  useEffect(() => {
+    if (!firstSyncPending) return;
+    if (!activityReady) return;
+    if (loadingDashboard || progressDisplay?.active) return;
+    if (!dashboard && !dashboardError) return;
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(FIRST_SYNC_KEY, "1");
+    }
+    setFirstSyncPending(false);
+  }, [firstSyncPending, activityReady, loadingDashboard, progressDisplay, dashboard, dashboardError]);
+
+  const noData = Boolean(dashboard?.noData);
   const figures = dashboard?.figures ?? {};
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
@@ -130,9 +205,48 @@ export function DashboardView() {
     { key: "p4", label: "P4", className: "badge badge-p4", value: dashboard?.badges.p4 }
   ];
 
+  const showFirstSyncOverlay =
+    !setupActive && (setupChecklistActive || loadingDashboard || progressDisplay?.active || retrying);
+
   return (
     <div>
       <LoadingBar active={loadingDashboard || loadingStatus} />
+      {showFirstSyncOverlay ? (
+        <div className="firstSyncOverlay" role="status" aria-live="polite">
+          <div className="firstSyncPanel">
+            <p className="eyebrow">First-time sync</p>
+            <h2>Preparing your dashboard</h2>
+            <p className="muted">
+              We are fetching your Todoist data and building the first set of charts. This can take a few minutes on
+              large accounts.
+            </p>
+            {setupSteps.length ? (
+              <div className="setupChecklist">
+                <p className="eyebrow">Setup status</p>
+                <div className="progressSteps">
+                  {setupSteps.map((step, idx) => {
+                    const state = step.done
+                      ? "done"
+                      : idx === firstIncompleteSetup
+                        ? "active"
+                        : "pending";
+                    return (
+                      <div key={step.label} className={`progressStep progressStep-${state}`}>
+                        <span className="progressDot" />
+                        <div>
+                          <p className="progressLabel">{step.label}</p>
+                          <p className="progressHint">{step.hint}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <ProgressSteps progress={progressDisplay} />
+          </div>
+        </div>
+      ) : null}
       <header className="topbar">
         <div>
           <p className="eyebrow">Todoist Assistant</p>
@@ -233,88 +347,121 @@ export function DashboardView() {
         </div>
       </header>
 
-      <ProgressSteps progress={progressDisplay} />
+      {showFirstSyncOverlay ? null : <ProgressSteps progress={progressDisplay} />}
 
-      <nav className="jumpNav" aria-label="Jump to sections">
-        <span className="muted tiny">Jump to</span>
-        <div className="jumpLinks">
-          {jumpTargets.map((target) => (
-            <a key={target.id} className="jumpLink" href={`#${target.id}`}>
-              {target.label}
-            </a>
-          ))}
-        </div>
-      </nav>
+      {!noData ? (
+        <nav className="jumpNav" aria-label="Jump to sections">
+          <span className="muted tiny">Jump to</span>
+          <div className="jumpLinks">
+            {jumpTargets.map((target) => (
+              <a key={target.id} className="jumpLink" href={`#${target.id}`}>
+                {target.label}
+              </a>
+            ))}
+          </div>
+        </nav>
+      ) : null}
 
-      <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
-        {insightItems.map((it, idx) =>
-          it ? (
-            <InsightCard
-              key={`${it.title}-${idx}`}
-              item={it}
-              help={INSIGHT_HELP[it.title] ?? DEFAULT_INSIGHT_HELP}
-            />
-          ) : (
-            <div key={idx} className="stat skeleton" />
-          )
-        )}
-        {dashboard?.insights?.label ? (
-          <p className="muted tiny" style={{ gridColumn: "1 / -1", marginTop: "-6px" }}>
-            Insights for {dashboard.insights.label}.
+      {noData ? (
+        <section className="card emptyState">
+          <div className="cardHeader">
+            <div className="cardTitleRow">
+              <h2>No activity yet</h2>
+            </div>
+          </div>
+          <p className="muted">
+            Once Todoist events start syncing, charts and insights will appear here. You can still manage automations and
+            configuration in the Control Panel below.
           </p>
-        ) : null}
-      </section>
+          <div className="emptyStateActions">
+            <button className="button buttonSmall" type="button" onClick={refresh} disabled={loadingDashboard}>
+              {loadingDashboard ? "Loading..." : "Retry sync"}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
-      <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
-        {labelPlots.map((plot) => (
-          <PlotCard key={plot.title} {...plot} />
-        ))}
-      </section>
+      {!noData ? (
+        <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
+          {insightItems.map((it, idx) =>
+            it ? (
+              <InsightCard
+                key={`${it.title}-${idx}`}
+                item={it}
+                help={INSIGHT_HELP[it.title] ?? DEFAULT_INSIGHT_HELP}
+              />
+            ) : (
+              <div key={idx} className="stat skeleton" />
+            )
+          )}
+          {dashboard?.insights?.label ? (
+            <p className="muted tiny" style={{ gridColumn: "1 / -1", marginTop: "-6px" }}>
+              Insights for {dashboard.insights.label}.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
-      <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
-        {metricItems.map((m, idx) =>
-          m ? (
-            <StatCard
-              key={m.name}
-              name={m.name}
-              value={m.value}
-              deltaPercent={m.deltaPercent}
-              inverseDelta={m.inverseDelta}
-              currentPeriod={metricsCurrentPeriod}
-              previousPeriod={metricsPreviousPeriod}
-              help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
-            />
-          ) : (
-            <div key={idx} className="stat skeleton" />
-          )
-        )}
-      </section>
-
-      <section id="badges" className="jumpTarget" aria-label="Priority badges">
-        <div className="sectionHeader">
-          <h2>Priority badges</h2>
-          <InfoTip label="About priority badges" content={BADGES_HELP} />
-        </div>
-        <div className="badges">
-          {badgeItems.map((item) => (
-            <span key={item.key} className={item.className}>
-              {item.label} {item.value ?? "-"}
-            </span>
+      {!noData ? (
+        <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
+          {labelPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
           ))}
-        </div>
-      </section>
+        </section>
+      ) : null}
 
-      <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
-        {completionPlots.map((plot) => (
-          <PlotCard key={plot.title} {...plot} />
-        ))}
-      </section>
+      {!noData ? (
+        <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
+          {metricItems.map((m, idx) =>
+            m ? (
+              <StatCard
+                key={m.name}
+                name={m.name}
+                value={m.value}
+                deltaPercent={m.deltaPercent}
+                inverseDelta={m.inverseDelta}
+                currentPeriod={metricsCurrentPeriod}
+                previousPeriod={metricsPreviousPeriod}
+                help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
+              />
+            ) : (
+              <div key={idx} className="stat skeleton" />
+            )
+          )}
+        </section>
+      ) : null}
 
-      <section id="events" className="stack jumpTarget" aria-label="Event trends">
-        {eventPlots.map((plot) => (
-          <PlotCard key={plot.title} {...plot} />
-        ))}
-      </section>
+      {!noData ? (
+        <section id="badges" className="jumpTarget" aria-label="Priority badges">
+          <div className="sectionHeader">
+            <h2>Priority badges</h2>
+            <InfoTip label="About priority badges" content={BADGES_HELP} />
+          </div>
+          <div className="badges">
+            {badgeItems.map((item) => (
+              <span key={item.key} className={item.className}>
+                {item.label} {item.value ?? "-"}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {!noData ? (
+        <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
+          {completionPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
+          ))}
+        </section>
+      ) : null}
+
+      {!noData ? (
+        <section id="events" className="stack jumpTarget" aria-label="Event trends">
+          {eventPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
+          ))}
+        </section>
+      ) : null}
 
       <section id="ops" className="grid2 jumpTarget" aria-label="Activity and operations">
         <section className="card">

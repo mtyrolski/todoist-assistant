@@ -1,0 +1,44 @@
+[project]
+name = "todoist-assistant-core"
+version = "0.2.4"
+description = "Core Todoist Assistant data + automation library (no dashboard/frontend)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "../LICENSE" }
+dependencies = [
+    "hydra-core>=1.3.2",
+    "joblib>=1.5.0",
+    "loguru>=0.7.3",
+    "numpy>=2.2.5",
+    "omegaconf>=2.3.0",
+    "pandas>=2.2.3",
+    "python-dotenv>=1.1.0",
+    "requests>=2.32.3",
+    "tqdm>=4.67.1",
+    "typer>=0.15.3",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = ".." }
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["todoist", "todoist.*", "todoist_assistant", "todoist_assistant.*"]
+exclude = [
+    "todoist.web*",
+    "todoist.dashboard*",
+    "todoist.agent*",
+    "todoist.llm*",
+    "todoist.automations.llm_breakdown*",
+    "todoist.automations.gmail_tasks*",
+    "todoist.automations.template*",
+    "todoist.automations.update_env*",
+    "todoist.automations.init_env*",
+    "todoist_assistant.web*",
+    "todoist_assistant.dashboard*",
+    "todoist_assistant.ai*",
+]

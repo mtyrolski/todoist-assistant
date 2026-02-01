@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 import typer
 
 from todoist import telemetry
+from todoist.env import EnvVar
 from todoist.version import get_version
 
 GITHUB_REPO = "mtyrolski/todoist-assistant"
@@ -101,8 +102,8 @@ def main(
         config_dir = telemetry.resolve_config_dir()
         telemetry.set_enabled(config_dir, True)
         typer.echo("Telemetry enabled.")
-        if not os.getenv("TODOIST_TELEMETRY_ENDPOINT"):
-            typer.echo("NOTE: TODOIST_TELEMETRY_ENDPOINT is not set, so no telemetry will be sent.")
+        if not os.getenv(EnvVar.TELEMETRY_ENDPOINT):
+            typer.echo(f"NOTE: {EnvVar.TELEMETRY_ENDPOINT} is not set, so no telemetry will be sent.")
         raise typer.Exit()
     if disable_telemetry:
         config_dir = telemetry.resolve_config_dir()

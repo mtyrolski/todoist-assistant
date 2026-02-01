@@ -5,8 +5,8 @@ import type { DashboardHome, DashboardStatus, Granularity, Health } from "./dash
 import type { DashboardProgress } from "../components/ProgressSteps";
 import type { LlmBreakdownProgress } from "../components/LlmBreakdownStatus";
 
-const DASHBOARD_RETRY_LIMIT = 8;
-const DASHBOARD_RETRY_DELAY_MS = 2000;
+const DASHBOARD_RETRY_LIMIT = 300;
+const DASHBOARD_RETRY_DELAY_MS = 2500;
 
 async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -21,7 +21,9 @@ async function readJson<T>(res: Response): Promise<T> {
 }
 
 function isRetryableFetchError(message: string): boolean {
-  return /invalid json response|failed to fetch|networkerror|econnrefused/i.test(message);
+  return /invalid json response|failed to fetch|networkerror|socket hang up|econnrefused|econnreset|timed out|timeout/i.test(
+    message
+  );
 }
 
 export function useApiHealth(pollMs = 10_000) {
@@ -55,10 +57,12 @@ export function useApiHealth(pollMs = 10_000) {
 
 export function useDashboardHome({
   defaultGranularity = "W",
-  defaultWeeks = 12
+  defaultWeeks = 12,
+  enabled = true
 }: {
   defaultGranularity?: Granularity;
   defaultWeeks?: number;
+  enabled?: boolean;
 } = {}) {
   const [granularity, setGranularity] = useState<Granularity>(defaultGranularity);
   const [weeks, setWeeks] = useState<number>(defaultWeeks);
@@ -74,8 +78,19 @@ export function useDashboardHome({
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoadingDashboard(false);
+      setDashboardError(null);
+      setRetrying(false);
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
+      return;
+    }
     const controller = new AbortController();
     const load = async () => {
       try {
@@ -97,6 +112,7 @@ export function useDashboardHome({
           throw new Error(detail ?? `Failed to load dashboard (${res.status})`);
         }
         setDashboard(payload);
+        setRetrying(false);
         retryAttempts.current = 0;
         if (retryTimer.current) {
           clearTimeout(retryTimer.current);
@@ -110,6 +126,7 @@ export function useDashboardHome({
         const message = e instanceof Error ? e.message : "Failed to load dashboard";
         if (isRetryableFetchError(message) && retryAttempts.current < DASHBOARD_RETRY_LIMIT) {
           retryAttempts.current += 1;
+          setRetrying(true);
           setDashboardError("Dashboard API is starting. Retrying shortly...");
           if (retryTimer.current) {
             clearTimeout(retryTimer.current);
@@ -119,6 +136,7 @@ export function useDashboardHome({
           }, DASHBOARD_RETRY_DELAY_MS);
           return;
         }
+        setRetrying(false);
         setDashboardError(message);
       } finally {
         setLoadingDashboard(false);
@@ -126,7 +144,7 @@ export function useDashboardHome({
     };
     load();
     return () => controller.abort();
-  }, [granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce, retryNonce]);
+  }, [enabled, granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce, retryNonce]);
 
   useEffect(() => {
     return () => {
@@ -137,7 +155,7 @@ export function useDashboardHome({
     };
   }, []);
 
-  const shouldPollProgress = loadingDashboard || (!dashboard && !dashboardError);
+  const shouldPollProgress = enabled && (loadingDashboard || retrying || (!dashboard && !dashboardError));
 
   useEffect(() => {
     if (!shouldPollProgress) {
@@ -192,6 +210,7 @@ export function useDashboardHome({
     loadingDashboard,
     dashboardError,
     progressDisplay,
+    retrying,
     granularity,
     setGranularity,
     weeks,

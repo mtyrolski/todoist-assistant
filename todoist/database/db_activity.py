@@ -8,7 +8,7 @@ from todoist.types import Event, EventEntry
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS
+from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS, report_tqdm_progress, get_max_concurrent_requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TIMEOUT_SECONDS = 10
@@ -29,7 +29,7 @@ class DatabaseActivity:
 
         return self._api_client.last_call_result
 
-    def fetch_activity_adaptively(self, nweeks_window_size: int = 3, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
+    def fetch_activity_adaptively(self, nweeks_window_size: int = 10, early_stop_after_n_windows: int = 5, events_already_fetched: set[Event] | None = None) -> list[Event]:
         """
         Fetches activity events from the Todoist API using a sliding window approach.
         This method adaptively fetches activity data going backwards in time window by window(week by week) in fixed windows size(nweeks_window_size arg).
@@ -97,17 +97,31 @@ class DatabaseActivity:
 
         # Use ThreadPoolExecutor instead of joblib for simpler, standard concurrency
         results_by_page: dict[int, list[Event]] = {}
-        max_workers = min(8, max_pages) if max_pages > 0 else 0
+        max_workers = min(get_max_concurrent_requests(), max_pages) if max_pages > 0 else 0
         if max_workers == 0:
             logger.warning("No pages requested (max_pages=0). Returning empty result.")
             return result
 
+        total_pages = max_pages
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_page = {executor.submit(process_page_with_retry, page): page for page in pages}
-            for future in tqdm(as_completed(future_to_page), total=max_pages, desc='Querying activity data', unit='page'):
+            for completed, future in enumerate(
+                tqdm(
+                    as_completed(future_to_page),
+                    total=total_pages,
+                    desc='Querying activity data',
+                    unit='page',
+                ),
+                start=1,
+            ):
                 page = future_to_page[future]
-                page_events = future.result(timeout=TIMEOUT_SECONDS)
+                try:
+                    page_events = future.result(timeout=TIMEOUT_SECONDS)
+                except Exception as exc:  # pragma: no cover - network safety
+                    logger.warning("Failed fetching activity page {}: {}", page, exc)
+                    page_events = []
                 results_by_page[page] = page_events
+                report_tqdm_progress("Querying activity data", completed, total_pages, "page")
 
 
         # logger.debug(f"Fetched {len(page_events)} events from page {page}")
@@ -128,6 +142,7 @@ class DatabaseActivity:
         spec = RequestSpec(
             endpoint=TodoistEndpoints.LIST_ACTIVITY,
             params={"page": page, "limit": limit},
+            rate_limited=True,
         )
         decoded_result = self._api_client.request_json(
             spec, operation_name=f"fetch activity page {page}"

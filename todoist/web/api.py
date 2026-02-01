@@ -25,11 +25,13 @@ import hydra
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
+from todoist.api.client import RequestSpec, TodoistAPIClient, TimeoutSettings
+from todoist.api.endpoints import TodoistEndpoints
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
 from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
-from todoist.types import Project
-from todoist.plots import (
+from todoist.types import Event, Project
+from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
     plot_events_over_time,
@@ -46,7 +48,8 @@ from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
-from todoist.utils import Cache, LocalStorageError, load_config
+from todoist.utils import Cache, LocalStorageError, load_config, set_tqdm_progress_callback, get_tqdm_progress_callback
+from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
 
@@ -81,7 +84,7 @@ def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
     }
     timespan = granularity_to_timedelta[granularity]
 
-    end_range = df_activity.index.max().to_pydatetime()
+    end_range = _safe_activity_anchor(df_activity)
     beg_range = end_range - timespan
     previous_beg_range = beg_range - timespan
     previous_end_range = end_range - timespan
@@ -161,11 +164,14 @@ class _ProgressState:
     started_at: str | None = None
     updated_at: str | None = None
     detail: str | None = None
+    sub_current: int | None = None
+    sub_total: int | None = None
     error: str | None = None
 
 
 _state = _DashboardState()
 _progress_state = _ProgressState()
+_activity_backfill_attempted = False
 _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
@@ -173,17 +179,29 @@ _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
 _main_loop: asyncio.AbstractEventLoop | None = None
+_TQDM_STEP_MAP = {
+    "Querying project data": 1,
+    "Building project hierarchy": 2,
+    "Querying activity data": 1,
+}
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _resolve_data_dir() -> Path:
+    override = os.getenv(EnvVar.DATA_DIR) or os.getenv(EnvVar.CACHE_DIR)
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT
+
+
 def _resolve_config_dir() -> Path:
-    override = os.getenv("TODOIST_CONFIG_DIR")
+    override = os.getenv(EnvVar.CONFIG_DIR)
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT / "configs"
 
-
+_DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
 _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
@@ -200,7 +218,7 @@ _API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 
 def _resolve_env_path() -> Path:
-    cache_dir = os.getenv("TODOIST_CACHE_DIR")
+    cache_dir = os.getenv(EnvVar.CACHE_DIR)
     if cache_dir:
         return Path(cache_dir).expanduser().resolve() / ".env"
     cwd_env = Path.cwd() / ".env"
@@ -252,6 +270,22 @@ def _mask_api_key(value: str) -> str:
     return f"••••{value[-4:]}"
 
 
+def _validate_api_token(token: str) -> tuple[bool, str | None, int | None]:
+    client = TodoistAPIClient(max_attempts=1)
+    spec = RequestSpec(
+        endpoint=TodoistEndpoints.LIST_LABELS,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=TimeoutSettings(connect=5.0, read=10.0),
+        max_attempts=1,
+    )
+    try:
+        payload = client.request_json(spec, operation_name="validate_api_token")
+    except Exception as exc:  # pragma: no cover - network dependent
+        return False, f"{type(exc).__name__}: {exc}", None
+    label_count = len(payload) if isinstance(payload, list) else None
+    return True, None, label_count
+
+
 @dataclass
 class _AdminJob:
     id: str
@@ -287,7 +321,7 @@ _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
 
 def _env_demo_mode() -> bool:
-    value = os.getenv("TODOIST_DASHBOARD_DEMO", "").strip().lower()
+    value = os.getenv(EnvVar.DASHBOARD_DEMO, "").strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 
@@ -311,11 +345,21 @@ async def _progress_snapshot() -> dict[str, Any]:
             "startedAt": _progress_state.started_at,
             "updatedAt": _progress_state.updated_at,
             "detail": _progress_state.detail,
+            "subCurrent": _progress_state.sub_current,
+            "subTotal": _progress_state.sub_total,
             "error": _progress_state.error,
         }
 
 
-async def _set_progress(stage: str, *, step: int, total_steps: int, detail: str | None = None) -> None:
+async def _set_progress(
+    stage: str,
+    *,
+    step: int,
+    total_steps: int,
+    detail: str | None = None,
+    sub_current: int | None = None,
+    sub_total: int | None = None,
+) -> None:
     now = _now_iso()
     async with _PROGRESS_LOCK:
         if not _progress_state.active:
@@ -326,6 +370,8 @@ async def _set_progress(stage: str, *, step: int, total_steps: int, detail: str 
         _progress_state.step = step
         _progress_state.total_steps = total_steps
         _progress_state.detail = detail
+        _progress_state.sub_current = sub_current
+        _progress_state.sub_total = sub_total
         _progress_state.updated_at = now
 
 
@@ -338,13 +384,47 @@ async def _finish_progress(error: str | None = None) -> None:
         _progress_state.total_steps = 0
         _progress_state.detail = None
         _progress_state.started_at = None
+        _progress_state.sub_current = None
+        _progress_state.sub_total = None
         _progress_state.updated_at = now
         _progress_state.error = error
 
 
+def _build_tqdm_progress_callback():
+    last_update = 0.0
+    last_value = -1
+
+    def _callback(desc: str, current: int, total: int, unit: str | None) -> None:
+        nonlocal last_update, last_value
+        now = time.time()
+        if current == last_value and (now - last_update) < 0.4:
+            return
+        if current != total and (now - last_update) < 0.35:
+            return
+        last_value = current
+        last_update = now
+        step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
+        unit_suffix = f" {unit}" if unit else ""
+        detail = f"{desc}: {current}/{total}{unit_suffix}"
+        _run_async_in_main_loop(_set_progress(
+            desc or "Working",
+            step=step,
+            total_steps=_PROGRESS_TOTAL_STEPS,
+            detail=detail,
+            sub_current=current,
+            sub_total=total,
+        ))
+
+    return _callback
+
+
 def _refresh_state_sync(*, demo_mode: bool) -> None:
+    global _activity_backfill_attempted
     # Reset progress state to clear any stale information from previous failed refreshes
     _run_async_in_main_loop(_finish_progress(error=None))
+
+    previous_callback = get_tqdm_progress_callback()
+    set_tqdm_progress_callback(_build_tqdm_progress_callback())
 
     error: str | None = None
     try:
@@ -357,13 +437,85 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         dbio = Database(".env")
         dbio.pull()
 
+        try:
+            cached_events = Cache().activity.load()
+        except LocalStorageError:
+            cached_events = set()
+
+        def _should_backfill(events: set[Event]) -> bool:
+            if not events:
+                return True
+            dates = [e.date for e in events if isinstance(e.date, datetime)]
+            if not dates:
+                return True
+            span = max(dates) - min(dates)
+            return span < timedelta(weeks=12)
+
+        if cached_events and _resolve_api_key() and not _activity_backfill_attempted:
+            if _should_backfill(cached_events):
+                try:
+                    cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
+                    activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                    nweeks = 10
+                    early_stop = 2
+                    if isinstance(activity_cfg, Mapping):
+                        nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
+                        early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
+                    logger.info(
+                        "Activity cache looks short; backfilling history (window={}w, stop={}).",
+                        nweeks,
+                        early_stop,
+                    )
+                    events = dbio.fetch_activity_adaptively(
+                        nweeks_window_size=nweeks,
+                        early_stop_after_n_windows=early_stop,
+                        events_already_fetched=set(cached_events),
+                    )
+                    Cache().activity.save(set(events))
+                except Exception as exc:  # pragma: no cover - network-dependent
+                    logger.warning("Failed to backfill activity cache: {}", exc)
+                finally:
+                    _activity_backfill_attempted = True
+
+        if not cached_events and _resolve_api_key():
+            try:
+                cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
+                activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                nweeks = 10
+                early_stop = 2
+                if isinstance(activity_cfg, Mapping):
+                    nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
+                    early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
+                logger.info(
+                    "Activity cache empty; fetching full history (window={}w, stop={}).",
+                    nweeks,
+                    early_stop,
+                )
+                events = dbio.fetch_activity_adaptively(
+                    nweeks_window_size=nweeks,
+                    early_stop_after_n_windows=early_stop,
+                    events_already_fetched=set(),
+                )
+                if not events:
+                    logger.info("Adaptive fetch returned no events; attempting recent activity pages.")
+                    events = dbio.fetch_activity(max_pages=2)
+                Cache().activity.save(set(events))
+            except Exception as exc:  # pragma: no cover - network-dependent
+                logger.warning("Failed to seed activity cache: {}", exc)
+            finally:
+                _activity_backfill_attempted = True
+
         _run_async_in_main_loop(_set_progress(
             "Building project hierarchy",
             step=2,
             total_steps=_PROGRESS_TOTAL_STEPS,
             detail="Resolving roots across active and archived projects",
         ))
-        df_activity = load_activity_data(dbio)
+        try:
+            df_activity = load_activity_data(dbio)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load activity data; using empty dataset: {}", exc)
+            df_activity = _empty_activity_df()
 
         _run_async_in_main_loop(_set_progress(
             "Preparing dashboard data",
@@ -400,6 +552,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
+        set_tqdm_progress_callback(previous_callback)
         _run_async_in_main_loop(_finish_progress(error))
 
 
@@ -764,9 +917,9 @@ def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
         logger.warning("LLM chat agent unavailable: {}", exc)
         return
 
-    cache_path = os.getenv("TODOIST_AGENT_CACHE_PATH", str(_REPO_ROOT))
-    prefabs_dir = os.getenv("TODOIST_AGENT_INSTRUCTIONS_DIR", str(_REPO_ROOT / "configs/agent_instructions"))
-    max_tool_loops_env = os.getenv("TODOIST_AGENT_MAX_TOOL_LOOPS", "8").strip()
+    cache_path = os.getenv(EnvVar.AGENT_CACHE_PATH, str(_REPO_ROOT))
+    prefabs_dir = os.getenv(EnvVar.AGENT_INSTRUCTIONS_DIR, str(_REPO_ROOT / "configs/agent_instructions"))
+    max_tool_loops_env = os.getenv(EnvVar.AGENT_MAX_TOOL_LOOPS, "8").strip()
     try:
         max_tool_loops = max(1, int(max_tool_loops_env))
     except ValueError:
@@ -1102,6 +1255,45 @@ def _parse_yyyy_mm_dd(value: str) -> datetime:
         raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD format") from exc
 
 
+def _safe_activity_anchor(df_activity) -> datetime:
+    if df_activity is None or df_activity.empty:
+        return datetime.now()
+    try:
+        max_value = pd.to_datetime(df_activity.index).max()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Failed to resolve activity anchor; defaulting to now: {}", exc)
+        return datetime.now()
+    if pd.isna(max_value):
+        return datetime.now()
+    if isinstance(max_value, pd.Timestamp):
+        return max_value.to_pydatetime()
+    if isinstance(max_value, datetime):
+        return max_value
+    try:
+        return datetime.fromisoformat(str(max_value))
+    except ValueError:
+        return datetime.now()
+
+
+def _empty_activity_df() -> pd.DataFrame:
+    df = pd.DataFrame(
+        columns=[
+            "id",
+            "title",
+            "type",
+            "parent_project_id",
+            "parent_project_name",
+            "root_project_id",
+            "root_project_name",
+            "parent_item_id",
+            "task_id",
+            "date",
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
 def _compute_plot_range(
     df_activity,
     *,
@@ -1125,7 +1317,7 @@ def _compute_plot_range(
     if weeks < 1 or weeks > 260:
         raise HTTPException(status_code=400, detail="weeks must be between 1 and 260")
 
-    end_range = df_activity.index.max().to_pydatetime()
+    end_range = _safe_activity_anchor(df_activity)
     beg_range = end_range - timedelta(weeks=weeks)
     return beg_range, end_range
 
@@ -1309,6 +1501,7 @@ async def dashboard_home(
     if df_activity is None or active_projects is None or project_colors is None or label_colors is None:
         return {"error": "Dashboard data unavailable. Please ensure the database is configured and accessible."}
 
+    no_data = df_activity.empty
     beg_range, end_range = _compute_plot_range(df_activity, weeks=weeks, beg=beg, end=end)
     beg_label = beg if beg is not None else beg_range.strftime("%Y-%m-%d")
     end_label = end if end is not None else end_range.strftime("%Y-%m-%d")
@@ -1326,42 +1519,51 @@ async def dashboard_home(
         f"g={granularity}",
         f"beg={beg_label}",
         f"end={end_label}",
+        f"no_data={int(no_data)}",
     )
     cached = _state.home_payload_cache.get(cache_key)
     if cached and not refresh:
         return cached
 
-    figures = {
-        "mostPopularLabels": _fig_to_dict(plot_most_popular_labels(active_projects, label_colors)),
-        "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
-        "completedTasksPeriodically": _fig_to_dict(
-            plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
-        ),
-        "cumsumCompletedTasksPeriodically": _fig_to_dict(
-            cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
-        ),
-        "heatmapEventsByDayHour": _fig_to_dict(plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range)),
-        "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
-    }
-
-    anchor_dt = cast(datetime, pd.Timestamp(cast(Any, df_activity.index.max())).to_pydatetime())
+    anchor_dt = _safe_activity_anchor(df_activity)
     last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(anchor_dt)
-    parent_completed_share = _completed_share_leaderboard(
-        df_activity,
-        beg=last_week_beg,
-        end=last_week_end,
-        column="parent_project_name",
-        project_colors=project_colors,
-    )
-    root_completed_share = _completed_share_leaderboard(
-        df_activity,
-        beg=last_week_beg,
-        end=last_week_end,
-        column="root_project_name",
-        project_colors=project_colors,
-    )
+
+    if no_data:
+        figures = {}
+        parent_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
+        root_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
+    else:
+        figures = {
+            "mostPopularLabels": _fig_to_dict(plot_most_popular_labels(active_projects, label_colors)),
+            "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
+            "completedTasksPeriodically": _fig_to_dict(
+                plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
+            ),
+            "cumsumCompletedTasksPeriodically": _fig_to_dict(
+                cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
+            ),
+            "heatmapEventsByDayHour": _fig_to_dict(
+                plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range)
+            ),
+            "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
+        }
+        parent_completed_share = _completed_share_leaderboard(
+            df_activity,
+            beg=last_week_beg,
+            end=last_week_end,
+            column="parent_project_name",
+            project_colors=project_colors,
+        )
+        root_completed_share = _completed_share_leaderboard(
+            df_activity,
+            beg=last_week_beg,
+            end=last_week_end,
+            column="root_project_name",
+            project_colors=project_colors,
+        )
 
     payload = {
+        "noData": no_data,
         "range": {
             "beg": beg_label,
             "end": end_label,
@@ -1376,7 +1578,9 @@ async def dashboard_home(
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
         "insights": {
             "label": last_week_label,
-            "items": _compute_insights(df_activity, beg=last_week_beg, end=last_week_end, project_colors=project_colors),
+            "items": []
+            if no_data
+            else _compute_insights(df_activity, beg=last_week_beg, end=last_week_end, project_colors=project_colors),
         },
         "leaderboards": {
             "lastCompletedWeek": {
@@ -1403,7 +1607,7 @@ def _serialize_dt(value: Any) -> str | None:
 
 
 def _load_automations() -> list[Automation]:
-    config = load_config("automations", str((_REPO_ROOT / "configs").resolve()))
+    config = load_config("automations", str(_CONFIG_DIR.resolve()))
     automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
     return automations
 
@@ -1425,7 +1629,11 @@ def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
 async def admin_automations() -> dict[str, Any]:
     """List configured automations plus cached launch metadata."""
 
-    automations = _load_automations()
+    try:
+        automations = _load_automations()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to load automations: {}", exc)
+        return {"automations": [], "error": f"{type(exc).__name__}: {exc}"}
     return {"automations": [_automation_launch_metadata(a) for a in automations]}
 
 
@@ -1450,6 +1658,13 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
             status_code=400,
             detail="API token looks invalid. Use the Todoist API token (no spaces, at least 20 characters).",
         )
+    validate = payload.get("validate", True)
+    labels_count = None
+    if validate:
+        ok, detail, labels_count = _validate_api_token(token)
+        if not ok:
+            status = 400 if detail and ("403" in detail or "401" in detail) else 502
+            raise HTTPException(status_code=status, detail=f"API token validation failed: {detail}")
     env_path = _resolve_env_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), "API_KEY", token)
@@ -1458,6 +1673,23 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
         "configured": True,
         "masked": _mask_api_key(token),
         "envPath": str(env_path),
+        "validated": bool(validate),
+        "labelsCount": labels_count,
+    }
+
+
+@app.post("/api/admin/api_token/validate", tags=["admin"])
+async def admin_validate_api_token(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    token = _normalize_api_key(payload.get("token")) or _resolve_api_key()
+    if not token:
+        return {"configured": False, "valid": False, "detail": "API token missing."}
+    ok, detail, labels_count = _validate_api_token(token)
+    return {
+        "configured": True,
+        "valid": ok,
+        "detail": detail or "",
+        "masked": _mask_api_key(token),
+        "labelsCount": labels_count,
     }
 
 
@@ -1726,7 +1958,7 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
 
 def _log_files() -> list[dict[str, Any]]:
     log_files: list[dict[str, Any]] = []
-    for log_path in _REPO_ROOT.rglob("*.log"):
+    for log_path in _DATA_DIR.rglob("*.log"):
         if not log_path.is_file():
             continue
         try:
@@ -1735,20 +1967,23 @@ def _log_files() -> list[dict[str, Any]]:
             continue
         if stat.st_size <= 0:
             continue
+        try:
+            rel_path = log_path.relative_to(_DATA_DIR)
+        except ValueError:
+            rel_path = log_path.name
         log_files.append(
             {
-                "path": str(log_path.relative_to(_REPO_ROOT)),
+                "path": str(rel_path),
                 "size": stat.st_size,
                 "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
             }
         )
     return sorted(log_files, key=lambda x: x["path"])
 
-
-def _safe_repo_path(rel_path: str, *, suffix: str | None = None) -> Path:
-    candidate = (_REPO_ROOT / rel_path).resolve()
-    if _REPO_ROOT not in candidate.parents and candidate != _REPO_ROOT:
-        raise HTTPException(status_code=400, detail="Path must be within repository")
+def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
+    candidate = (_DATA_DIR / rel_path).resolve()
+    if _DATA_DIR not in candidate.parents and candidate != _DATA_DIR:
+        raise HTTPException(status_code=400, detail="Path must be within data directory")
     if suffix and candidate.suffix != suffix:
         raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
     return candidate
@@ -1785,11 +2020,11 @@ def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
 
 @app.get("/api/admin/logs/read", tags=["admin"])
 async def admin_read_log(path: str, tail_lines: int = 40, page: int = 1) -> dict[str, Any]:
-    abs_path = _safe_repo_path(path, suffix=".log")
+    abs_path = _safe_data_path(path, suffix=".log")
     stat = abs_path.stat()
     payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
     return {
-        "path": str(abs_path.relative_to(_REPO_ROOT)),
+        "path": str(abs_path.relative_to(_DATA_DIR)),
         "size": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         **payload,
@@ -1797,7 +2032,7 @@ async def admin_read_log(path: str, tail_lines: int = 40, page: int = 1) -> dict
 
 
 def _available_mapping_files() -> list[str]:
-    personal_dir = _REPO_ROOT / "personal"
+    personal_dir = _DATA_DIR / "personal"
     if not personal_dir.exists():
         return ["archived_root_projects.py"]
 
@@ -1815,7 +2050,8 @@ def _available_mapping_files() -> list[str]:
     return sorted(mapping_files) if mapping_files else ["archived_root_projects.py"]
 
 
-def _generate_adjustment_file_content(mappings: dict[str, str]) -> str:
+def _generate_adjustment_file_content(mappings: dict[str, str], archived_parents: list[str] | None = None) -> str:
+    archived_parents = archived_parents or []
     content = [
         "# Adjustments for archived root projects",
         "# This file was generated by the web dashboard admin UI",
@@ -1826,16 +2062,22 @@ def _generate_adjustment_file_content(mappings: dict[str, str]) -> str:
         content.append(f'    "{archived_name}": "{active_name}",')
     content.append("}")
     content.append("")
+    content.append("# Archived projects allowed as parent/root targets in the UI")
+    content.append("archived_parent_projects = [")
+    for name in sorted(set(archived_parents)):
+        content.append(f'    "{name}",')
+    content.append("]")
+    content.append("")
     return "\n".join(content)
 
 
-def _load_mapping_file(filename: str) -> dict[str, str]:
-    personal_dir = _REPO_ROOT / "personal"
-    personal_dir.mkdir(exist_ok=True)
-    target = _safe_repo_path(str(Path("personal") / filename), suffix=".py")
+def _load_mapping_file(filename: str) -> tuple[dict[str, str], list[str]]:
+    personal_dir = _DATA_DIR / "personal"
+    personal_dir.mkdir(parents=True, exist_ok=True)
+    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
     if not target.exists():
-        target.write_text(_generate_adjustment_file_content({}), encoding="utf-8")
-        return {}
+        target.write_text(_generate_adjustment_file_content({}, []), encoding="utf-8")
+        return {}, []
 
     # Match dataframe.py behavior (exec python file) so the UI shows the effective mapping.
     import importlib.util
@@ -1844,17 +2086,35 @@ def _load_mapping_file(filename: str) -> dict[str, str]:
     module_name = "dashboard_adjustments"
     spec = importlib.util.spec_from_file_location(module_name, target)
     if spec is None or spec.loader is None:
-        return {}
+        return {}, []
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     mapping = getattr(module, ADJUSTMENTS_VARIABLE_NAME, {})
-    return mapping if isinstance(mapping, dict) else {}
+    archived_parents = getattr(module, "archived_parent_projects", [])
+    if not isinstance(archived_parents, list) or not all(isinstance(name, str) for name in archived_parents):
+        archived_parents = []
+    return (mapping if isinstance(mapping, dict) else {}), archived_parents
 
 
-def _save_mapping_file(filename: str, mappings: dict[str, str]) -> None:
-    target = _safe_repo_path(str(Path("personal") / filename), suffix=".py")
-    target.write_text(_generate_adjustment_file_content(mappings), encoding="utf-8")
+def _save_mapping_file(filename: str, mappings: dict[str, str], archived_parents: list[str]) -> None:
+    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
+    target.write_text(_generate_adjustment_file_content(mappings, archived_parents), encoding="utf-8")
+
+
+def _load_projects_for_adjustments_sync(refresh: bool) -> tuple[list[str], list[str], list[str]]:
+    if not refresh and _state.db is not None:
+        dbio = _state.db
+    else:
+        dbio = Database(".env")
+    if dbio is None:
+        raise RuntimeError("Database unavailable")
+    active_projects = dbio.fetch_projects(include_tasks=False)
+    archived_projects = dbio.fetch_archived_projects()
+    active_root = sorted({p.project_entry.name for p in active_projects if p.project_entry.parent_id is None})
+    archived_root = sorted({p.project_entry.name for p in archived_projects if p.project_entry.parent_id is None})
+    archived_names = sorted({p.project_entry.name for p in archived_projects})
+    return active_root, archived_root, archived_names
 
 
 def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
@@ -1949,27 +2209,32 @@ async def admin_project_adjustments(file: str | None = None, refresh: bool = Fal
     """Return mapping files, current mapping content, and project lists for building adjustments."""
 
     selected = file or _available_mapping_files()[0]
-    mappings = _load_mapping_file(selected)
-
-    await _ensure_state(refresh=refresh)
-    dbio = _state.db
-    if dbio is None:
-        raise HTTPException(status_code=500, detail="Database unavailable")
-
-    active_projects = dbio.fetch_projects(include_tasks=False)
-    archived_projects = dbio.fetch_archived_projects()
-
-    active_root = sorted({p.project_entry.name for p in active_projects if p.project_entry.parent_id is None})
-    archived_names = sorted({p.project_entry.name for p in archived_projects})
+    mappings, archived_parents = _load_mapping_file(selected)
+    warning: str | None = None
+    try:
+        active_root, archived_root, archived_names = await asyncio.to_thread(
+            _load_projects_for_adjustments_sync,
+            refresh,
+        )
+    except Exception as exc:  # pragma: no cover - network safety
+        logger.warning("Failed loading project lists for adjustments: {}", exc)
+        active_root = []
+        archived_root = []
+        archived_names = []
+        warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
     unmapped_archived = [name for name in archived_names if name not in mappings]
+    archived_parents = sorted([name for name in archived_parents if name in archived_names])
 
     return {
         "files": _available_mapping_files(),
         "selectedFile": selected,
         "mappings": mappings,
         "activeRootProjects": active_root,
+        "archivedRootProjects": archived_root,
+        "archivedParentProjects": archived_parents,
         "archivedProjects": archived_names,
         "unmappedArchivedProjects": unmapped_archived,
+        "warning": warning,
     }
 
 
@@ -1977,18 +2242,29 @@ async def admin_project_adjustments(file: str | None = None, refresh: bool = Fal
 async def admin_save_project_adjustments(
     file: str,
     refresh: bool = True,
-    mappings: dict[str, str] = Body(default_factory=dict),
+    payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Save mapping dict to the selected mapping file."""
 
+    mappings: dict[str, str]
+    archived_parents: list[str]
+    if isinstance(payload.get("mappings"), dict) or "archivedParents" in payload:
+        mappings = payload.get("mappings") or {}
+        archived_parents = payload.get("archivedParents") or []
+    else:
+        mappings = payload if isinstance(payload, dict) else {}
+        archived_parents = []
+
     if not isinstance(mappings, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in mappings.items()):
         raise HTTPException(status_code=400, detail="Body must be a JSON object of string->string mappings")
+    if not isinstance(archived_parents, list) or not all(isinstance(name, str) for name in archived_parents):
+        raise HTTPException(status_code=400, detail="archivedParents must be a list of strings")
 
     async with _ADMIN_LOCK:
-        _save_mapping_file(file, mappings)
+        _save_mapping_file(file, mappings, archived_parents)
         if refresh:
             await _ensure_state(refresh=True)
-    return {"saved": True, "file": file, "count": len(mappings)}
+    return {"saved": True, "file": file, "count": len(mappings), "archivedParents": len(archived_parents)}
 
 
 def _llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
@@ -2182,7 +2458,7 @@ def _template_summary(path: Path) -> dict[str, Any]:
         "name": name,
         "title": data.get("content", name),
         "description": data.get("description"),
-        "path": str(path.relative_to(_REPO_ROOT)),
+        "path": str(path.relative_to(_CONFIG_DIR)),
         "label": f"template-{name}",
         "childrenCount": len(children),
     }

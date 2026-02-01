@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
 def _collect(module_name):
@@ -20,6 +20,7 @@ if _spec_file:
 else:
     ROOT = Path.cwd().resolve()
 ENTRYPOINT = ROOT / "todoist" / "launcher.py"
+ICON_PATH = ROOT / "windows" / "bootstrapper" / "todoist-assistant.ico"
 
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matplotlib")
@@ -27,6 +28,15 @@ matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matp
 binaries = plotly_binaries + matplotlib_binaries
 datas = plotly_datas + matplotlib_datas
 hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
+
+# launcher.py imports the FastAPI app object and calls uvicorn.run(api_app, ...),
+# but PyInstaller still needs these as explicit hidden imports to bundle the API modules.
+hiddenimports += ["todoist.web", "todoist.web.api"]
+# Guard against new submodules added under todoist.web being missed in future builds.
+hiddenimports += collect_submodules("todoist.web")
+hiddenimports += collect_submodules("todoist.automations")
+
+hiddenimports = list(dict.fromkeys(hiddenimports))
 
 block_cipher = None
 
@@ -59,6 +69,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    icon=str(ICON_PATH) if ICON_PATH.exists() else None,
     console=True,
 )
 

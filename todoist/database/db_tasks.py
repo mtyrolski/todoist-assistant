@@ -12,7 +12,7 @@ from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.constants import TaskField
 from todoist.api.client import EndpointCallResult
 from todoist.types import Task
-from todoist.utils import MaxRetriesExceeded, RETRY_MAX_ATTEMPTS, with_retry
+from todoist.utils import MaxRetriesExceeded, RETRY_MAX_ATTEMPTS, with_retry, get_max_concurrent_requests
 
 
 class DatabaseTasks:
@@ -349,7 +349,7 @@ class DatabaseTasks:
             )
 
         logger.info(f"Inserting {len(tasks_data)} tasks with thread pool")
-        max_workers = min(8, len(tasks_data))
+        max_workers = min(get_max_concurrent_requests(), len(tasks_data))
         ordered_results: list[dict[str, Any] | None] = [None] * len(tasks_data)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {

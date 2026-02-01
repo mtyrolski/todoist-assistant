@@ -9,7 +9,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from todoist.utils import Cache
+from todoist.utils import Cache, LocalStorageError
 
 ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
 
@@ -47,7 +47,11 @@ def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
                 '# No adjustments made\n',
                 '# "some_archived_project": "some_current_main_project"\n',
                 '# "other_archived_project": "other_archived_main_project"\n',
-                '}\n\n'
+                '}\n\n',
+                'archived_parent_projects = [\n',
+                '# Optional: archived root projects allowed as mapping targets\n',
+                '# "Some archived root project",\n',
+                ']\n\n'
             ])
         logger.info(f'Created empty adjustments file in {personal_dir}')
         return {}
@@ -92,7 +96,11 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     """
     activity_filename = 'activity.joblib'
     # activity_db: set[Event] = load(activity_filename) if exists(activity_filename) else set()
-    activity_db: set[Event] = Cache().activity.load()
+    try:
+        activity_db: set[Event] = Cache().activity.load()
+    except LocalStorageError as exc:
+        logger.warning("Failed to load activity cache; using empty set: {}", exc)
+        activity_db = set()
 
     # Filter supported events and check for events with missing titles
     supported_events = list(filter(lambda ev: ev.event_entry.event_type in SUPPORTED_EVENT_TYPES, activity_db))
@@ -120,11 +128,16 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     logger.info('Adjusting root project names...')
     # Adjust project names and map back to ids
     df['root_project_name'] = df['root_project_name'].apply(lambda name: link_mapping.get(name, name))
-    df['root_project_id'] = df['root_project_name'].apply(lambda name: mapping_project_name_to_id[name])
+    mapped_ids = df['root_project_name'].map(mapping_project_name_to_id)
+    df['root_project_id'] = mapped_ids.fillna(original_root_id)
+    missing_names = set(df.loc[mapped_ids.isna(), 'root_project_name'])
+    if missing_names:
+        logger.warning("Missing root project ids for {} adjusted names", len(missing_names))
 
     diff_count = (original_root_id != df['root_project_id']).sum()
-    logger.info(f'Changed {diff_count} root project ids out of {len(df)} '
-                f'({diff_count/len(df)*100:.2f}%)')
+    total = len(df)
+    ratio = (diff_count / total * 100) if total else 0.0
+    logger.info(f'Changed {diff_count} root project ids out of {total} ({ratio:.2f}%)')
 
     not_adjusted = set(df['root_project_name']) - set(link_mapping.keys())
     if not_adjusted:

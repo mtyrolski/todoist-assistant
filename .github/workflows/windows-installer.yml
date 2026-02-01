@@ -72,6 +72,7 @@ jobs:
         env:
           WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: |
           if (-not $env:WINDOWS_SIGNING_CERTIFICATE) {
             Write-Host 'Signing certificate secret not set; skipping.'
@@ -82,6 +83,9 @@ jobs:
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($certBase64))
           "WINDOWS_SIGNING_CERTIFICATE=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Append
           "WINDOWS_SIGNING_CERTIFICATE_PASSWORD=$($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if ($env:WINDOWS_SIGNING_TIMESTAMP_URL) {
+            "WINDOWS_SIGNING_TIMESTAMP_URL=$($env:WINDOWS_SIGNING_TIMESTAMP_URL)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
       - name: Build MSI
         shell: powershell
@@ -95,13 +99,16 @@ jobs:
           if (-not $msi) { throw "MSI not found in dist/windows" }
           "TODOIST_MSI_PATH=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TODOIST_EXPECT_DASHBOARD=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $setup = Join-Path $env:GITHUB_WORKSPACE "dist\\windows\\TodoistAssistantSetup.exe"
+          if (-not (Test-Path $setup)) { throw "Setup.exe not found in dist/windows" }
+          "TODOIST_SETUP_PATH=$setup" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Run installer content tests
         shell: powershell
         run: |
           uv run python3 -m pytest tests\windows\test_windows_installer.py
 
-      - name: Install and run smoke test
+      - name: Install and run MSI smoke test
         shell: powershell
         run: |
           $msiPath = $env:TODOIST_MSI_PATH
@@ -161,9 +168,90 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Executable --help failed with code $LASTEXITCODE" }
 
+          function Get-HttpStatus {
+            param([string]$Uri, [int]$TimeoutSec = 5)
+            try {
+              $handler = New-Object System.Net.Http.HttpClientHandler
+              $handler.UseProxy = $false
+              $handler.Proxy = $null
+              $client = New-Object System.Net.Http.HttpClient($handler)
+              $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+              $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+              $status = [int]$response.StatusCode
+              $response.Dispose()
+              $client.Dispose()
+              return $status
+            } catch {
+              try {
+                $resp = Invoke-WebRequest -Uri $Uri -Method Get -UseBasicParsing -TimeoutSec $TimeoutSec -Proxy $null
+                if ($resp -and $resp.StatusCode) { return [int]$resp.StatusCode }
+              } catch {
+                if ($_.Exception -and $_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                  return [int]$_.Exception.Response.StatusCode
+                }
+              }
+              return $null
+            }
+          }
+
+          function Wait-Http {
+            param([string]$Uri, [int]$TimeoutSec = 60)
+            $start = Get-Date
+            while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSec) {
+              $status = Get-HttpStatus -Uri $Uri -TimeoutSec 5
+              if ($status -ne $null) { return $status }
+              Start-Sleep -Milliseconds 500
+            }
+            return $null
+          }
+
+          $smokeDir = Join-Path $env:RUNNER_TEMP "todoist-assistant-smoke"
+          if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
+          New-Item -ItemType Directory -Path $smokeDir | Out-Null
+          $dataDir = Join-Path $smokeDir "data"
+          $configDir = Join-Path $dataDir "config"
+          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          $stdoutLog = Join-Path $smokeDir "app-stdout.log"
+          $stderrLog = Join-Path $smokeDir "app-stderr.log"
+
+          $apiPort = 8001
+          $frontendPort = 3001
+          $runArgs = "--api-host 127.0.0.1 --api-port $apiPort --frontend-host 127.0.0.1 --frontend-port $frontendPort --no-browser --data-dir `"$dataDir`" --config-dir `"$configDir`""
+          Write-Host "Launching app: $exe $runArgs"
+          $appProc = Start-Process -FilePath $exe -ArgumentList $runArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+          try {
+            $apiUrl = "http://127.0.0.1:$apiPort/api/health"
+            $apiStatus = Wait-Http -Uri $apiUrl -TimeoutSec 60
+            Write-Host "API health status: $apiStatus"
+            if ($apiStatus -ne 200) {
+              Write-Host "API health check failed or timed out (status: $apiStatus)."
+              if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
+              if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
+              throw "API health check failed"
+            }
+
+            $frontendUrl = "http://127.0.0.1:$frontendPort/"
+            $frontendStatus = Wait-Http -Uri $frontendUrl -TimeoutSec 60
+            if ($frontendStatus -eq $null) {
+              Write-Host "Frontend check failed or timed out."
+              if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
+              if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
+              throw "Frontend check failed"
+            }
+            Write-Host "Frontend responded with status $frontendStatus"
+          } finally {
+            if ($appProc -and -not $appProc.HasExited) {
+              & taskkill /PID $appProc.Id /T /F | Out-Null
+              Start-Sleep -Seconds 2
+            }
+            Get-Process todoist-assistant,node -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 1
+          }
+
           $uninstallArgs = "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`""
           Write-Host "msiexec uninstall args: $uninstallArgs"
           $uninstall = Start-Process msiexec -ArgumentList $uninstallArgs -Wait -PassThru
+          Write-Host "msiexec uninstall exit code: $($uninstall.ExitCode)"
           if ($allowed -notcontains $uninstall.ExitCode) {
             if (Test-Path $logPath) {
               $matches = Select-String -Path $logPath -Pattern "Error 1406|Return value 3" -Context 8,8
@@ -180,6 +268,13 @@ jobs:
           $remaining = $exeCandidates | Where-Object { Test-Path $_ }
           if ($remaining) { throw "Executable still present after uninstall: $($remaining -join ', ')" }
 
+      - name: Install and run setup.exe smoke test
+        shell: powershell
+        run: |
+          $setupPath = $env:TODOIST_SETUP_PATH
+          if (-not $setupPath) { throw "TODOIST_SETUP_PATH not set" }
+          uv run powershell -File scripts\\windows\\smoke_test_installer.ps1 -SetupExe $setupPath
+
       - name: Upload MSI install log
         if: always()
         uses: actions/upload-artifact@v4
@@ -188,14 +283,18 @@ jobs:
           path: ${{ runner.temp }}/todoist-assistant-msi-install.log
           if-no-files-found: ignore
 
-      - name: Upload MSI artifact
+      - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: todoist-assistant-msi
-          path: dist/windows/todoist-assistant-*.msi
+          name: todoist-assistant-windows-installers
+          path: |
+            dist/windows/todoist-assistant-*.msi
+            dist/windows/TodoistAssistantSetup.exe
 
-      - name: Attach MSI to Release
+      - name: Attach installers to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/windows/todoist-assistant-*.msi
+          files: |
+            dist/windows/todoist-assistant-*.msi
+            dist/windows/TodoistAssistantSetup.exe

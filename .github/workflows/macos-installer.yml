@@ -12,8 +12,18 @@ permissions:
 
 jobs:
   build-macos-installers:
-    runs-on: macos-latest
-    continue-on-error: true
+    runs-on: ${{ matrix.runner }}
+    env:
+      NODE_VERSION: '20.11.1'
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x86_64
 
     steps:
       - name: Checkout repository
@@ -40,14 +50,45 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install PostgreSQL tooling
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
-          brew install postgresql
-          postgresql_prefix=$(brew --prefix postgresql)
+          set -euo pipefail
+          retry() {
+            local attempts="$1"
+            local delay="$2"
+            shift 2
+            local n=1
+            until "$@"; do
+              if [ "${n}" -ge "${attempts}" ]; then
+                echo "Command failed after ${attempts} attempts: $*" >&2
+                return 1
+              fi
+              echo "Command failed (attempt ${n}/${attempts}); retrying in ${delay}s..." >&2
+              sleep "${delay}"
+              n=$((n + 1))
+              delay=$((delay * 2))
+            done
+          }
+          formula=""
+          if brew list --versions postgresql@16 >/dev/null 2>&1; then
+            formula="postgresql@16"
+          elif brew list --versions postgresql >/dev/null 2>&1; then
+            formula="postgresql"
+          else
+            retry 3 5 brew install postgresql@16 || retry 3 5 brew install postgresql
+            if brew list --versions postgresql@16 >/dev/null 2>&1; then
+              formula="postgresql@16"
+            else
+              formula="postgresql"
+            fi
+          fi
+          postgresql_prefix=$(brew --prefix "${formula}")
           echo "PATH=${postgresql_prefix}/bin:$PATH" >> "$GITHUB_ENV"
           echo "PG_CONFIG=${postgresql_prefix}/bin/pg_config" >> "$GITHUB_ENV"
 
@@ -57,7 +98,24 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv sync --locked --group build --extra macos || uv sync --group build --extra macos
+          set -euo pipefail
+          retry() {
+            local attempts="$1"
+            local delay="$2"
+            shift 2
+            local n=1
+            until "$@"; do
+              if [ "${n}" -ge "${attempts}" ]; then
+                echo "Command failed after ${attempts} attempts: $*" >&2
+                return 1
+              fi
+              echo "Command failed (attempt ${n}/${attempts}); retrying in ${delay}s..." >&2
+              sleep "${delay}"
+              n=$((n + 1))
+              delay=$((delay * 2))
+            done
+          }
+          retry 3 5 uv sync --locked --group build --extra macos || retry 3 5 uv sync --group build --extra macos
 
       - name: Ensure python3 shim for uv run
         run: |
@@ -72,30 +130,31 @@ jobs:
       - name: Resolve version
         run: |
           echo "TODOIST_VERSION=$(uv run python3 -m scripts.get_version)" >> "$GITHUB_ENV"
+          echo "TODOIST_ARCH_SUFFIX=macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
 
       - name: Build release tarball
         run: |
           mkdir -p dist/macos
-          tarball="dist/macos/todoist-assistant-${TODOIST_VERSION}.tar.gz"
+          tarball="dist/macos/todoist-assistant-${TODOIST_VERSION}-${TODOIST_ARCH_SUFFIX}.tar.gz"
           git archive --format=tar.gz -o "$tarball" HEAD
 
       - name: Build macOS pkg
         run: |
-          ./scripts/build_macos_pkg.sh
+          ./scripts/build_macos_pkg.sh --output-suffix "${TODOIST_ARCH_SUFFIX}"
 
       - name: Build macOS app
         run: |
-          ./scripts/build_macos_app.sh
+          ./scripts/build_macos_app.sh --prefer-system-node --node-version "${NODE_VERSION}"
 
       - name: Build macOS dmg
         run: |
-          ./scripts/build_macos_dmg.sh --force
+          ./scripts/build_macos_dmg.sh --force --output-suffix "${TODOIST_ARCH_SUFFIX}"
 
       - name: Run macOS install tests
         env:
-          TODOIST_PKG_PATH: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}.pkg
+          TODOIST_PKG_PATH: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.pkg
           TODOIST_BREW_FORMULA: Formula/todoist-assistant.rb
-          TODOIST_BREW_TARBALL: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}.tar.gz
+          TODOIST_BREW_TARBALL: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.tar.gz
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           uv run python3 -m pytest tests/macos/test_macos_installers.py
@@ -103,7 +162,7 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: todoist-assistant-macos
+          name: todoist-assistant-macos-${{ matrix.arch }}
           path: |
             dist/macos/todoist-assistant-*.pkg
             dist/macos/todoist-assistant-*.dmg

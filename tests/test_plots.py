@@ -1,5 +1,5 @@
 """
-Tests for plotting functions in todoist.plots module.
+Tests for plotting functions in todoist.dashboard.plots module.
 """
 import pytest
 import pandas as pd
@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 import plotly.graph_objects as go
 
-from todoist.plots import (
+from todoist.dashboard.plots import (
     plot_completed_tasks_periodically,
     plot_cumulative_events_over_time,
     cumsum_completed_tasks_periodically,
