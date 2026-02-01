@@ -1,11 +1,11 @@
 <div align="center">
   <table>
     <tr>
-      <td align="center" width="180">
+      <td align="center" width="340">
         <table border="1" cellpadding="8">
           <tr>
             <td align="center">
-              <img src="img/logo.png" alt="Todoist Assistant Logo" width="140" />
+              <img src="img/logo.png" alt="Todoist Assistant Logo" width="320" />
             </td>
           </tr>
         </table>
@@ -25,6 +25,11 @@
     </tr>
   </table>
 </div>
+
+<p><strong>Install v0.2.4 (CI artifacts)</strong><br/>
+  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21554592007#artifacts">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
+  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21554592007#artifacts">todoist-assistant-msi-install-log</a>: optional install logs (zip).
+</p>
 
 ## Highlights
 - Fast, local dashboard from your cached Todoist data (reproducible analytics, works offline after sync).
