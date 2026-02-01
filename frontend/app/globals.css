@@ -1117,6 +1117,13 @@ textarea.textInput {
   cursor: grabbing;
 }
 
+.adjustmentsTileActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .adjustmentsTiles.isDragOver,
 .adjustmentsBucket.isDragOver,
 .adjustmentsDropzone.isDragOver {

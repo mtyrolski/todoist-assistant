@@ -175,6 +175,12 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
 
   const activeRoots = adjustments?.activeRootProjects ?? [];
   const archivedProjects = adjustments?.archivedProjects ?? [];
+  const parentSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const name of activeRoots) set.add(name);
+    for (const name of archivedParentsDraft) set.add(name);
+    return set;
+  }, [activeRoots, archivedParentsDraft]);
 
   const mappedEntries = useMemo(
     () => Object.entries(mappingDraft).filter(([, parent]) => Boolean(parent)),
@@ -457,24 +463,30 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
               </div>
               <div className={`adjustmentsTiles ${dragOverZone === "pool" ? "isDragOver" : ""}`}>
                 {unmappedProjects.length ? (
-                  unmappedProjects.map((name) => (
-                    <div
-                      key={name}
-                      className="adjustmentsTile"
-                      draggable
-                      onDragStart={startDrag(name)}
-                      onDragEnd={endDrag}
-                    >
-                      <span>{name}</span>
-                      <button
-                        className="button buttonSmall buttonGhost"
-                        type="button"
-                        onClick={() => addParent(name)}
+                  unmappedProjects.map((name) => {
+                    const isParent = parentSet.has(name);
+                    return (
+                      <div
+                        key={name}
+                        className="adjustmentsTile"
+                        draggable
+                        onDragStart={startDrag(name)}
+                        onDragEnd={endDrag}
                       >
-                        Make parent
-                      </button>
-                    </div>
-                  ))
+                        <span>{name}</span>
+                        <div className="adjustmentsTileActions">
+                          <button
+                            className="button buttonSmall buttonGhost"
+                            type="button"
+                            onClick={() => addParent(name)}
+                            disabled={isParent}
+                          >
+                            {isParent ? "Parent" : "Make parent"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 ) : (
                   <p className="muted tiny" style={{ margin: 0 }}>
                     All archived projects are mapped.
@@ -530,19 +542,30 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                               onDragEnd={endDrag}
                             >
                               <span>{name}</span>
-                              <button
-                                className="button buttonSmall buttonGhost"
-                                type="button"
-                                onClick={() =>
-                                  setMappingDraft((prev) => {
-                                    const next = { ...prev };
-                                    delete next[name];
-                                    return next;
-                                  })
-                                }
-                              >
-                                Unmap
-                              </button>
+                              <div className="adjustmentsTileActions">
+                                <button
+                                  className="button buttonSmall buttonGhost"
+                                  type="button"
+                                  onClick={() =>
+                                    setMappingDraft((prev) => {
+                                      const next = { ...prev };
+                                      delete next[name];
+                                      return next;
+                                    })
+                                  }
+                                >
+                                  Unmap
+                                </button>
+                                {!parentSet.has(name) ? (
+                                  <button
+                                    className="button buttonSmall buttonGhost"
+                                    type="button"
+                                    onClick={() => addParent(name)}
+                                  >
+                                    Make parent
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
                           ))
                         ) : (
