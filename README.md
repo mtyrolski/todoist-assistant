@@ -27,10 +27,10 @@
 </div>
 
 ## Highlights
-- Local cache + reproducible analytics
-- Next.js dashboard + FastAPI backend
-- Automations and observer loop
-- Agentic, read-only chat over cached activity
+- Fast, local dashboard from your cached Todoist data (reproducible analytics, works offline after sync).
+- Guided first-run setup with token validation and project hierarchy cleanup.
+- Automations you can enable: task multiplication, local-only LLM breakdown, and an observer loop.
+- Read-only chat over cached activity for summaries and insights (no writes to Todoist).
 
 ## Python library (what you can do)
 The Python package is meant for **local-first data access** and **automation**:

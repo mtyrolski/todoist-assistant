@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import { InfoTip } from "./InfoTip";
 import { ProgressSteps } from "./ProgressSteps";
 import type { DashboardProgress } from "./ProgressSteps";
@@ -25,11 +26,11 @@ type Props = {
 };
 
 const HELP_TEXT = `**Project hierarchy adjustments**
-Map archived projects to active root projects so your history stays grouped.
+Map archived projects to root projects so your history stays grouped.
 
 - Pick a mapping file (stored locally in \`personal/\`).
-- Select archived root projects you want to use as parent targets.
-- Map archived projects to a root project.
+- Drag archived project tiles into parent buckets to map them.
+- Drop a tile onto "Make parent" to allow that archived project as a parent bucket.
 - Save to update the dashboard data.`;
 
 const RETRY_LIMIT = 6;
@@ -62,8 +63,10 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingHint, setLoadingHint] = useState<string | null>(null);
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
+  const [dragOverZone, setDragOverZone] = useState<string | null>(null);
   const retryAttempts = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draggedProjectRef = useRef<string | null>(null);
 
   const loadAdjustments = async (file?: string, refresh = false, resetRetries = false) => {
     let keepLoading = false;
@@ -171,29 +174,75 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   }, [loading]);
 
   const activeRoots = adjustments?.activeRootProjects ?? [];
-  const archivedRootProjects = adjustments?.archivedRootProjects ?? [];
   const archivedProjects = adjustments?.archivedProjects ?? [];
 
+  const mappedEntries = useMemo(
+    () => Object.entries(mappingDraft).filter(([, parent]) => Boolean(parent)),
+    [mappingDraft]
+  );
+
   const unmappedProjects = useMemo(() => {
-    const mapped = new Set(Object.keys(mappingDraft));
+    const mapped = new Set(mappedEntries.map(([archived]) => archived));
     return archivedProjects.filter((p) => !mapped.has(p));
-  }, [archivedProjects, mappingDraft]);
+  }, [archivedProjects, mappedEntries]);
 
-  const mappingRows = useMemo(() => {
-    const entries = Object.entries(mappingDraft);
-    entries.sort(([a], [b]) => a.localeCompare(b));
-    return entries;
-  }, [mappingDraft]);
-
-  const parentOptions = useMemo(() => {
-    const options = new Set<string>();
-    for (const name of activeRoots) options.add(name);
-    for (const name of archivedParentsDraft) options.add(name);
-    for (const target of Object.values(mappingDraft)) {
-      if (target) options.add(target);
+  const assignments = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    for (const [archived, parent] of mappedEntries) {
+      if (!parent) continue;
+      if (!result[parent]) result[parent] = [];
+      result[parent].push(archived);
     }
-    return Array.from(options).sort((a, b) => a.localeCompare(b));
-  }, [activeRoots, archivedParentsDraft, mappingDraft]);
+    for (const list of Object.values(result)) {
+      list.sort((a, b) => a.localeCompare(b));
+    }
+    return result;
+  }, [mappedEntries]);
+
+  const mappingTargets = useMemo(() => {
+    const set = new Set<string>();
+    for (const [, parent] of mappedEntries) {
+      if (parent) set.add(parent);
+    }
+    return Array.from(set);
+  }, [mappedEntries]);
+
+  useEffect(() => {
+    if (!archivedProjects.length) return;
+    setArchivedParentsDraft((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const target of mappingTargets) {
+        if (archivedProjects.includes(target) && !next.has(target)) {
+          next.add(target);
+          changed = true;
+        }
+      }
+      return changed ? Array.from(next).sort((a, b) => a.localeCompare(b)) : prev;
+    });
+  }, [archivedProjects, mappingTargets]);
+
+  const parentBuckets = useMemo(() => {
+    const buckets: Array<{ name: string; kind: "active" | "archived" | "unknown"; removable: boolean }> = [];
+    const seen = new Set<string>();
+    for (const name of activeRoots) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      buckets.push({ name, kind: "active", removable: false });
+    }
+    const archivedSorted = Array.from(new Set(archivedParentsDraft)).sort((a, b) => a.localeCompare(b));
+    for (const name of archivedSorted) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      buckets.push({ name, kind: "archived", removable: true });
+    }
+    const unknown = mappingTargets.filter((name) => !seen.has(name));
+    unknown.sort((a, b) => a.localeCompare(b));
+    for (const name of unknown) {
+      buckets.push({ name, kind: "unknown", removable: true });
+    }
+    return buckets;
+  }, [activeRoots, archivedParentsDraft, mappingTargets]);
 
   const progressDisplay = useMemo(() => {
     if (progress?.active) return progress;
@@ -211,6 +260,83 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       error: null
     } satisfies DashboardProgress;
   }, [progress, loading, loadingHint]);
+
+  const addParent = (name: string) => {
+    if (!name || activeRoots.includes(name)) return;
+    setArchivedParentsDraft((prev) => {
+      if (prev.includes(name)) return prev;
+      const next = [...prev, name];
+      next.sort((a, b) => a.localeCompare(b));
+      return next;
+    });
+  };
+
+  const removeParent = (name: string) => {
+    setArchivedParentsDraft((prev) => prev.filter((item) => item !== name));
+    setMappingDraft((prev) => {
+      const next = { ...prev };
+      for (const [archived, parent] of Object.entries(next)) {
+        if (parent === name) delete next[archived];
+      }
+      return next;
+    });
+  };
+
+  const startDrag = (name: string) => (event: DragEvent) => {
+    draggedProjectRef.current = name;
+    event.dataTransfer.setData("text/plain", name);
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const endDrag = () => {
+    draggedProjectRef.current = null;
+    setDragOverZone(null);
+  };
+
+  const resolveDraggedName = (event: DragEvent): string | null => {
+    const fromData = event.dataTransfer.getData("text/plain");
+    return fromData || draggedProjectRef.current || null;
+  };
+
+  const handleDropOnBucket = (bucket: string) => (event: DragEvent) => {
+    event.preventDefault();
+    const name = resolveDraggedName(event);
+    if (!name) return;
+    setMappingDraft((prev) => ({ ...prev, [name]: bucket }));
+    setDragOverZone(null);
+  };
+
+  const handleDropUnassigned = (event: DragEvent) => {
+    event.preventDefault();
+    const name = resolveDraggedName(event);
+    if (!name) return;
+    setMappingDraft((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+    setDragOverZone(null);
+  };
+
+  const handleDropMakeParent = (event: DragEvent) => {
+    event.preventDefault();
+    const name = resolveDraggedName(event);
+    if (!name) return;
+    addParent(name);
+    setDragOverZone(null);
+  };
+
+  const handleDragOverZone = (zone: string) => (event: DragEvent) => {
+    event.preventDefault();
+    if (dragOverZone !== zone) {
+      setDragOverZone(zone);
+    }
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDragLeaveZone = (zone: string) => () => {
+    setDragOverZone((prev) => (prev === zone ? null : prev));
+  };
 
   const saveAdjustments = async () => {
     if (!adjustmentFile) return;
@@ -300,107 +426,53 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         <>
           <div className="adjustmentsSummary">
             <span className="pill pill-warn">Unmapped: {unmappedProjects.length}</span>
-            <span className="pill">Mapped: {mappingRows.length}</span>
-            <span className="pill">Archived parents: {archivedParentsDraft.length}</span>
+            <span className="pill">Mapped: {mappedEntries.length}</span>
+            <span className="pill">Parents: {parentBuckets.length}</span>
             <span className="muted tiny">
-              {archivedProjects.length} archived projects • {activeRoots.length} root projects
+              {archivedProjects.length} archived projects • {activeRoots.length} active roots
             </span>
           </div>
 
-          <div className="card cardInner adjustmentsParents">
-            <header className="cardHeader">
-              <h3>Archived parent candidates</h3>
-            </header>
-            <p className="muted tiny" style={{ margin: 0 }}>
-              Select archived projects that should be available as mapping targets (roots recommended). You can edit this list anytime.
-            </p>
-            <div className="adjustmentsParentActions">
-              <button
-                className="button buttonSmall buttonGhost"
-                type="button"
-                onClick={() => setArchivedParentsDraft(archivedRootProjects)}
-                disabled={!archivedRootProjects.length}
-              >
-                Use all archived roots
-              </button>
-              <button
-                className="button buttonSmall buttonGhost"
-                type="button"
-                onClick={() => setArchivedParentsDraft([])}
-                disabled={!archivedParentsDraft.length}
-              >
-                Clear selection
-              </button>
-            </div>
-            <div className="list scrollArea">
-              {archivedProjects.length ? (
-                archivedProjects.map((name) => {
-                  const checked = archivedParentsDraft.includes(name);
-                  return (
-                    <label key={name} className="adjustmentsParentRow">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setArchivedParentsDraft((prev) => {
-                            if (prev.includes(name)) {
-                              return prev.filter((item) => item !== name);
-                            }
-                            return [...prev, name];
-                          });
-                        }}
-                      />
-                      <span>{name}</span>
-                    </label>
-                  );
-                })
-              ) : (
-                <p className="muted tiny" style={{ margin: 0 }}>
-                  No archived projects detected.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="adjustmentsGrid">
-            <div className="card cardInner">
+          <div className="adjustmentsDnD">
+            <div
+              className="card cardInner adjustmentsPool"
+              onDragOver={handleDragOverZone("pool")}
+              onDragLeave={handleDragLeaveZone("pool")}
+              onDrop={handleDropUnassigned}
+            >
               <header className="cardHeader">
-                <h3>Unmapped archived projects</h3>
+                <h3>Archived projects</h3>
               </header>
-              <div className="list scrollArea">
+              <p className="muted tiny" style={{ margin: 0 }}>
+                Drag tiles into parent buckets to map them. Drop a tile onto Make parent to create a new parent bucket.
+              </p>
+              <div
+                className={`adjustmentsDropzone ${dragOverZone === "make-parent" ? "isDragOver" : ""}`}
+                onDragOver={handleDragOverZone("make-parent")}
+                onDragLeave={handleDragLeaveZone("make-parent")}
+                onDrop={handleDropMakeParent}
+              >
+                <strong>Make parent</strong>
+                <span className="muted tiny">Drop archived project here to allow it as a parent bucket</span>
+              </div>
+              <div className={`adjustmentsTiles ${dragOverZone === "pool" ? "isDragOver" : ""}`}>
                 {unmappedProjects.length ? (
-                  unmappedProjects.map((archived) => (
-                    <div key={archived} className="row rowTight adjustmentsRow">
-                      <div className="dot dot-neutral" />
-                      <div className="rowMain">
-                        <p className="rowTitle">{archived}</p>
-                        <p className="muted tiny">Assign a root project</p>
-                      </div>
-                      <div className="rowActions">
-                        <select
-                          className="select adjustmentsSelect"
-                          value={mappingDraft[archived] ?? ""}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setMappingDraft((prev) => {
-                              const next = { ...prev };
-                              if (!value) {
-                                delete next[archived];
-                              } else {
-                                next[archived] = value;
-                              }
-                              return next;
-                            });
-                          }}
-                        >
-                          <option value="">Choose root…</option>
-                          {parentOptions.map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                  unmappedProjects.map((name) => (
+                    <div
+                      key={name}
+                      className="adjustmentsTile"
+                      draggable
+                      onDragStart={startDrag(name)}
+                      onDragEnd={endDrag}
+                    >
+                      <span>{name}</span>
+                      <button
+                        className="button buttonSmall buttonGhost"
+                        type="button"
+                        onClick={() => addParent(name)}
+                      >
+                        Make parent
+                      </button>
                     </div>
                   ))
                 ) : (
@@ -411,56 +483,82 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
               </div>
             </div>
 
-            <div className="card cardInner">
-              <header className="cardHeader">
-                <h3>Current mappings</h3>
-              </header>
-              <div className="list scrollArea">
-                {mappingRows.length ? (
-                  mappingRows.map(([archived, active]) => (
-                    <div key={archived} className="row rowTight adjustmentsRow">
-                      <div className="dot dot-neutral" />
-                      <div className="rowMain">
-                        <p className="rowTitle">{archived}</p>
-                        <p className="muted tiny">→ {active}</p>
+            <div className="adjustmentsBuckets">
+              {parentBuckets.length ? (
+                parentBuckets.map((bucket) => {
+                  const zone = `bucket:${bucket.name}`;
+                  const items = assignments[bucket.name] ?? [];
+                  const meta =
+                    bucket.kind === "active"
+                      ? "Active root"
+                      : bucket.kind === "archived"
+                      ? "Archived parent"
+                      : "Custom target";
+                  return (
+                    <div
+                      key={bucket.name}
+                      className={`card cardInner adjustmentsBucket ${dragOverZone === zone ? "isDragOver" : ""}`}
+                      onDragOver={handleDragOverZone(zone)}
+                      onDragLeave={handleDragLeaveZone(zone)}
+                      onDrop={handleDropOnBucket(bucket.name)}
+                    >
+                      <div className="adjustmentsBucketHeader">
+                        <div>
+                          <p className="bucketTitle">{bucket.name}</p>
+                          <p className="muted tiny" style={{ margin: 0 }}>
+                            {meta}
+                          </p>
+                        </div>
+                        {bucket.removable ? (
+                          <button
+                            className="button buttonSmall buttonGhost"
+                            type="button"
+                            onClick={() => removeParent(bucket.name)}
+                          >
+                            Remove parent
+                          </button>
+                        ) : null}
                       </div>
-                      <div className="rowActions">
-                        <select
-                          className="select adjustmentsSelect"
-                          value={active}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setMappingDraft((prev) => ({ ...prev, [archived]: value }));
-                          }}
-                        >
-                          {parentOptions.map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="button buttonSmall"
-                          type="button"
-                          onClick={() =>
-                            setMappingDraft((prev) => {
-                              const next = { ...prev };
-                              delete next[archived];
-                              return next;
-                            })
-                          }
-                        >
-                          Remove
-                        </button>
+                      <div className="adjustmentsBucketBody">
+                        {items.length ? (
+                          items.map((name) => (
+                            <div
+                              key={name}
+                              className="adjustmentsTile adjustmentsTileCompact"
+                              draggable
+                              onDragStart={startDrag(name)}
+                              onDragEnd={endDrag}
+                            >
+                              <span>{name}</span>
+                              <button
+                                className="button buttonSmall buttonGhost"
+                                type="button"
+                                onClick={() =>
+                                  setMappingDraft((prev) => {
+                                    const next = { ...prev };
+                                    delete next[name];
+                                    return next;
+                                  })
+                                }
+                              >
+                                Unmap
+                              </button>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="adjustmentsBucketEmpty">
+                            Drop archived projects here
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <p className="muted tiny" style={{ margin: 0 }}>
-                    No mappings yet.
-                  </p>
-                )}
-              </div>
+                  );
+                })
+              ) : (
+                <p className="muted tiny" style={{ margin: 0 }}>
+                  No parent buckets available yet.
+                </p>
+              )}
             </div>
           </div>
         </>

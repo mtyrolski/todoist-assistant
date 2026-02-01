@@ -4,14 +4,19 @@ This repository ships a Windows packaging pipeline that bundles the Python backe
 
 ## End user install (Windows 10/11)
 
-1. Download `todoist-assistant-<version>.msi` from GitHub Releases.
-2. Double-click the MSI to launch the installer. If SmartScreen appears, click "More info" -> "Run anyway".
-3. Choose an install directory (default: `C:\Program Files\TodoistAssistant`) and complete the wizard.
-4. On the final screen you can opt in to anonymous telemetry (off by default).
-5. Launch Todoist Assistant from the Start Menu or Desktop shortcut.
-6. Set your API key by editing `C:\ProgramData\TodoistAssistant\.env`.
-   - Or use the dashboard: Control Panel → Settings → paste the token and Save.
+1. Download `TodoistAssistantSetup.exe` from GitHub Releases (recommended).
+   - If you only have the MSI, download `todoist-assistant-<version>.msi` instead.
+2. Double-click the installer. If SmartScreen appears, click "More info" -> "Run anyway".
+3. Choose an install directory (default: `C:\Program Files\TodoistAssistant`) and finish the wizard.
+   - You can toggle the desktop shortcut and anonymous telemetry (off by default).
+4. Launch Todoist Assistant from the Start Menu or Desktop shortcut.
+5. On first run you will see a guided setup overlay:
+   - Step 1: paste your Todoist API token (validated immediately).
+   - Step 2: optional project hierarchy adjustments (map archived projects to parents).
+6. You can change the token later in Control Panel -> Settings, and adjust mappings in Control Panel -> Project Adjustments.
 
+Manual token setup (optional):
+`C:\ProgramData\TodoistAssistant\.env` is created on first run. If you prefer, you can edit it directly.
 If the `.env` file does not exist yet, run the app once to generate it from
 `C:\ProgramData\TodoistAssistant\config\.env.template`, then edit the `.env` file.
 `C:\ProgramData` is hidden by default; paste it into File Explorer's address bar.
@@ -41,6 +46,24 @@ msiexec /x todoist-assistant-<version>.msi /qn /norestart
 "C:\Program Files\TodoistAssistant\todoist-assistant.exe" --no-frontend
 "C:\Program Files\TodoistAssistant\todoist-assistant.exe" --api-port 8001 --frontend-port 3001
 ```
+
+## Settings and data locations
+
+- Install dir: `C:\Program Files\TodoistAssistant`
+- Writable data/config: `C:\ProgramData\TodoistAssistant`
+  - `config\` (YAML config + templates + agent instructions)
+  - `.env` (created on first launch)
+  - `logs\` (runtime logs and installer logs)
+
+## Installer logs (verbose)
+
+If the installer fails, check the logs in:
+
+- `C:\ProgramData\TodoistAssistant\logs\installer\setup.log`
+- `C:\ProgramData\TodoistAssistant\logs\installer\msi.log`
+- `C:\ProgramData\TodoistAssistant\logs\installer\vc_redist.log`
+
+These logs are intentionally verbose to help troubleshoot installation issues.
 
 ## Prerequisites
 

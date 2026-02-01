@@ -2085,7 +2085,7 @@ def _load_mapping_file(filename: str) -> tuple[dict[str, str], list[str]]:
     module_name = "dashboard_adjustments"
     spec = importlib.util.spec_from_file_location(module_name, target)
     if spec is None or spec.loader is None:
-        return {}
+        return {}, []
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
@@ -2099,6 +2099,21 @@ def _load_mapping_file(filename: str) -> tuple[dict[str, str], list[str]]:
 def _save_mapping_file(filename: str, mappings: dict[str, str], archived_parents: list[str]) -> None:
     target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
     target.write_text(_generate_adjustment_file_content(mappings, archived_parents), encoding="utf-8")
+
+
+def _load_projects_for_adjustments_sync(refresh: bool) -> tuple[list[str], list[str], list[str]]:
+    if not refresh and _state.db is not None:
+        dbio = _state.db
+    else:
+        dbio = Database(".env")
+    if dbio is None:
+        raise RuntimeError("Database unavailable")
+    active_projects = dbio.fetch_projects(include_tasks=False)
+    archived_projects = dbio.fetch_archived_projects()
+    active_root = sorted({p.project_entry.name for p in active_projects if p.project_entry.parent_id is None})
+    archived_root = sorted({p.project_entry.name for p in archived_projects if p.project_entry.parent_id is None})
+    archived_names = sorted({p.project_entry.name for p in archived_projects})
+    return active_root, archived_root, archived_names
 
 
 def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
@@ -2194,18 +2209,14 @@ async def admin_project_adjustments(file: str | None = None, refresh: bool = Fal
 
     selected = file or _available_mapping_files()[0]
     mappings, archived_parents = _load_mapping_file(selected)
-
-    await _ensure_state(refresh=refresh)
-    dbio = _state.db
-    if dbio is None:
-        raise HTTPException(status_code=500, detail="Database unavailable")
-
-    active_projects = dbio.fetch_projects(include_tasks=False)
-    archived_projects = dbio.fetch_archived_projects()
-
-    active_root = sorted({p.project_entry.name for p in active_projects if p.project_entry.parent_id is None})
-    archived_root = sorted({p.project_entry.name for p in archived_projects if p.project_entry.parent_id is None})
-    archived_names = sorted({p.project_entry.name for p in archived_projects})
+    try:
+        active_root, archived_root, archived_names = await asyncio.to_thread(
+            _load_projects_for_adjustments_sync,
+            refresh,
+        )
+    except Exception as exc:  # pragma: no cover - network safety
+        logger.exception("Failed loading project lists for adjustments")
+        raise HTTPException(status_code=502, detail=f"Failed to load project lists: {exc}") from exc
     unmapped_archived = [name for name in archived_names if name not in mappings]
     archived_parents = sorted([name for name in archived_parents if name in archived_names])
 

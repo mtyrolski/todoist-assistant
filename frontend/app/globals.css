@@ -1062,6 +1062,109 @@ textarea.textInput {
   align-items: center;
 }
 
+.adjustmentsDnD {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.adjustmentsPool {
+  display: grid;
+  gap: 12px;
+}
+
+.adjustmentsDropzone {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(106, 227, 255, 0.35);
+  background: rgba(106, 227, 255, 0.08);
+  font-size: 12px;
+}
+
+.adjustmentsDropzone strong {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.adjustmentsTiles {
+  display: grid;
+  gap: 8px;
+}
+
+.adjustmentsTile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  cursor: grab;
+}
+
+.adjustmentsTileCompact {
+  padding: 8px 10px;
+}
+
+.adjustmentsTile:active {
+  cursor: grabbing;
+}
+
+.adjustmentsTiles.isDragOver,
+.adjustmentsBucket.isDragOver,
+.adjustmentsDropzone.isDragOver {
+  border-color: rgba(106, 227, 255, 0.7);
+  box-shadow: 0 0 0 2px rgba(106, 227, 255, 0.12);
+  background: rgba(106, 227, 255, 0.12);
+}
+
+.adjustmentsBuckets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.adjustmentsBucket {
+  display: grid;
+  gap: 12px;
+  min-height: 160px;
+}
+
+.adjustmentsBucketHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bucketTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.adjustmentsBucketBody {
+  display: grid;
+  gap: 8px;
+}
+
+.adjustmentsBucketEmpty {
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .adjustmentsParents {
   display: grid;
   gap: 10px;
@@ -1763,6 +1866,14 @@ textarea.textInput {
   }
 
   .adjustmentsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .adjustmentsDnD {
+    grid-template-columns: 1fr;
+  }
+
+  .adjustmentsBuckets {
     grid-template-columns: 1fr;
   }
 }
