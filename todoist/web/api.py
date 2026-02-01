@@ -2209,14 +2209,18 @@ async def admin_project_adjustments(file: str | None = None, refresh: bool = Fal
 
     selected = file or _available_mapping_files()[0]
     mappings, archived_parents = _load_mapping_file(selected)
+    warning: str | None = None
     try:
         active_root, archived_root, archived_names = await asyncio.to_thread(
             _load_projects_for_adjustments_sync,
             refresh,
         )
     except Exception as exc:  # pragma: no cover - network safety
-        logger.exception("Failed loading project lists for adjustments")
-        raise HTTPException(status_code=502, detail=f"Failed to load project lists: {exc}") from exc
+        logger.warning("Failed loading project lists for adjustments: {}", exc)
+        active_root = []
+        archived_root = []
+        archived_names = []
+        warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
     unmapped_archived = [name for name in archived_names if name not in mappings]
     archived_parents = sorted([name for name in archived_parents if name in archived_names])
 
@@ -2229,6 +2233,7 @@ async def admin_project_adjustments(file: str | None = None, refresh: bool = Fal
         "archivedParentProjects": archived_parents,
         "archivedProjects": archived_names,
         "unmappedArchivedProjects": unmapped_archived,
+        "warning": warning,
     }
 
 

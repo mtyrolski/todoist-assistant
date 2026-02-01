@@ -29,6 +29,19 @@ run_dashboard: ensure_frontend_deps
 	@bash -c '\
 		set -euo pipefail; \
 		pids=""; api_pid=""; fe_pid=""; \
+		wait_for_api() { \
+			local tries=0; \
+			echo "Waiting for API to be ready..."; \
+			if command -v curl >/dev/null 2>&1; then \
+				until curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; do \
+					tries=$$((tries+1)); \
+					[ $$tries -ge 60 ] && break; \
+					sleep 0.5; \
+				done; \
+			else \
+				sleep 2; \
+			fi; \
+		}; \
 		cleanup() { \
 			echo "Stopping dashboard servers..."; \
 			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
@@ -36,6 +49,7 @@ run_dashboard: ensure_frontend_deps
 		}; \
 		trap cleanup INT TERM EXIT; \
 		uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		wait_for_api; \
 		npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
 		echo "Dashboard running:"; \
 		echo "  API:      http://127.0.0.1:8000"; \
@@ -47,6 +61,19 @@ run_demo: ensure_frontend_deps
 	@bash -c '\
 		set -euo pipefail; \
 		pids=""; api_pid=""; fe_pid=""; \
+		wait_for_api() { \
+			local tries=0; \
+			echo "Waiting for API to be ready..."; \
+			if command -v curl >/dev/null 2>&1; then \
+				until curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; do \
+					tries=$$((tries+1)); \
+					[ $$tries -ge 60 ] && break; \
+					sleep 0.5; \
+				done; \
+			else \
+				sleep 2; \
+			fi; \
+		}; \
 		cleanup() { \
 			echo "Stopping demo dashboard servers..."; \
 			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
@@ -54,6 +81,7 @@ run_demo: ensure_frontend_deps
 		}; \
 		trap cleanup INT TERM EXIT; \
 		TODOIST_DASHBOARD_DEMO=1 uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		wait_for_api; \
 		TODOIST_DASHBOARD_DEMO=1 npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
 		echo "Demo dashboard running (anonymized):"; \
 		echo "  API:      http://127.0.0.1:8000"; \

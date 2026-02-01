@@ -15,6 +15,7 @@ type ProjectAdjustmentsResponse = {
   archivedParentProjects: string[];
   archivedProjects: string[];
   unmappedArchivedProjects: string[];
+  warning?: string | null;
 };
 
 type Variant = "wide" | "embedded";
@@ -60,6 +61,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingHint, setLoadingHint] = useState<string | null>(null);
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
@@ -80,6 +82,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       }
       setLoading(true);
       setError(null);
+      setWarning(null);
       setLoadingHint("Fetching archived and active projects from Todoist. This can take a few minutes on first sync.");
       const qs = new URLSearchParams();
       if (file) qs.set("file", file);
@@ -94,6 +97,9 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       setAdjustmentFile(payload.selectedFile);
       setMappingDraft(payload.mappings ?? {});
       setArchivedParentsDraft(payload.archivedParentProjects ?? []);
+      if (payload.warning) {
+        setWarning(payload.warning);
+      }
       retryAttempts.current = 0;
       setLoadingHint(null);
     } catch (e) {
@@ -417,6 +423,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       </header>
 
       {error ? <p className="pill pill-warn" style={{ margin: "0 0 12px" }}>{error}</p> : null}
+      {warning ? <p className="pill pill-warn" style={{ margin: "0 0 12px" }}>{warning}</p> : null}
       {notice ? <p className="pill" style={{ margin: "0 0 12px" }}>{notice}</p> : null}
 
       {loading ? (
@@ -489,7 +496,9 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                   })
                 ) : (
                   <p className="muted tiny" style={{ margin: 0 }}>
-                    All archived projects are mapped.
+                    {warning && !archivedProjects.length
+                      ? "Archived project list unavailable. Showing saved mappings only."
+                      : "All archived projects are mapped."}
                   </p>
                 )}
               </div>
