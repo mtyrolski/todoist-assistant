@@ -6,7 +6,9 @@ import { TokenGate } from "./components/TokenGate";
 export default function Page() {
   return (
     <TokenGate>
-      {({ setupActive }) => <DashboardView setupActive={setupActive} />}
+      {({ setupActive, tokenReady, setupComplete }) => (
+        <DashboardView setupActive={setupActive} tokenReady={tokenReady} setupComplete={setupComplete} />
+      )}
     </TokenGate>
   );
 }

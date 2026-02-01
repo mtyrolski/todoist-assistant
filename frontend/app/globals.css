@@ -341,6 +341,10 @@ a {
   z-index: 1;
 }
 
+.setupChecklist {
+  margin: 16px 0 8px;
+}
+
 .progressStep {
   display: flex;
   gap: 10px;

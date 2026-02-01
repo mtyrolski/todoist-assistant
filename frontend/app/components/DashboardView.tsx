@@ -32,13 +32,22 @@ import {
 
 const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
 
-export function DashboardView({ setupActive = false }: { setupActive?: boolean }) {
+export function DashboardView({
+  setupActive = false,
+  tokenReady = false,
+  setupComplete = false
+}: {
+  setupActive?: boolean;
+  tokenReady?: boolean;
+  setupComplete?: boolean;
+}) {
   const { health, loadingHealth, error } = useApiHealth();
   const {
     dashboard,
     loadingDashboard,
     dashboardError,
     progressDisplay,
+    retrying,
     granularity,
     setGranularity,
     weeks,
@@ -57,6 +66,29 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
   const [firstSyncPending, setFirstSyncPending] = useState(false);
   const [firstSyncTriggered, setFirstSyncTriggered] = useState(false);
   const [activityRecoveryAttempted, setActivityRecoveryAttempted] = useState(false);
+  const activityReady = Boolean(status?.activityCache);
+  const mappingReady = setupComplete;
+  const setupSteps = useMemo(() => {
+    return [
+      {
+        label: "Token connected",
+        hint: tokenReady ? "Validated and saved" : "Add your API token",
+        done: tokenReady
+      },
+      {
+        label: "Activity cache loaded",
+        hint: activityReady ? "Activity history ready" : "Fetching activity history",
+        done: activityReady
+      },
+      {
+        label: "Project mapping confirmed",
+        hint: mappingReady ? "Mappings saved" : "Confirm project adjustments",
+        done: mappingReady
+      }
+    ];
+  }, [tokenReady, activityReady, mappingReady]);
+  const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
+  const setupChecklistActive = setupSteps.some((step) => !step.done);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -71,7 +103,7 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
 
   useEffect(() => {
     if (!status || activityRecoveryAttempted) return;
-    if (!status.activityCache) {
+    if (!activityReady) {
       setActivityRecoveryAttempted(true);
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(FIRST_SYNC_KEY);
@@ -81,7 +113,7 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
         setFirstSyncTriggered(false);
       }
     }
-  }, [status, activityRecoveryAttempted, firstSyncPending]);
+  }, [status, activityRecoveryAttempted, activityReady, firstSyncPending]);
 
   useEffect(() => {
     if (!firstSyncPending || firstSyncTriggered) return;
@@ -91,13 +123,14 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
 
   useEffect(() => {
     if (!firstSyncPending) return;
+    if (!activityReady) return;
     if (loadingDashboard || progressDisplay?.active) return;
     if (!dashboard && !dashboardError) return;
     if (typeof window !== "undefined") {
       window.localStorage.setItem(FIRST_SYNC_KEY, "1");
     }
     setFirstSyncPending(false);
-  }, [firstSyncPending, loadingDashboard, progressDisplay, dashboard, dashboardError]);
+  }, [firstSyncPending, activityReady, loadingDashboard, progressDisplay, dashboard, dashboardError]);
 
   const noData = Boolean(dashboard?.noData);
   const figures = dashboard?.figures ?? {};
@@ -172,7 +205,8 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
     { key: "p4", label: "P4", className: "badge badge-p4", value: dashboard?.badges.p4 }
   ];
 
-  const showFirstSyncOverlay = firstSyncPending && (loadingDashboard || progressDisplay?.active);
+  const showFirstSyncOverlay =
+    !setupActive && (setupChecklistActive || loadingDashboard || progressDisplay?.active || retrying);
 
   return (
     <div>
@@ -186,6 +220,29 @@ export function DashboardView({ setupActive = false }: { setupActive?: boolean }
               We are fetching your Todoist data and building the first set of charts. This can take a few minutes on
               large accounts.
             </p>
+            {setupSteps.length ? (
+              <div className="setupChecklist">
+                <p className="eyebrow">Setup status</p>
+                <div className="progressSteps">
+                  {setupSteps.map((step, idx) => {
+                    const state = step.done
+                      ? "done"
+                      : idx === firstIncompleteSetup
+                        ? "active"
+                        : "pending";
+                    return (
+                      <div key={step.label} className={`progressStep progressStep-${state}`}>
+                        <span className="progressDot" />
+                        <div>
+                          <p className="progressLabel">{step.label}</p>
+                          <p className="progressHint">{step.hint}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
             <ProgressSteps progress={progressDisplay} />
           </div>
         </div>
