@@ -8,7 +8,7 @@ from todoist.types import Event, EventEntry
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS, report_tqdm_progress
+from todoist.utils import safe_instantiate_entry, with_retry, RETRY_MAX_ATTEMPTS, report_tqdm_progress, get_max_concurrent_requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TIMEOUT_SECONDS = 10
@@ -97,7 +97,7 @@ class DatabaseActivity:
 
         # Use ThreadPoolExecutor instead of joblib for simpler, standard concurrency
         results_by_page: dict[int, list[Event]] = {}
-        max_workers = min(8, max_pages) if max_pages > 0 else 0
+        max_workers = min(get_max_concurrent_requests(), max_pages) if max_pages > 0 else 0
         if max_workers == 0:
             logger.warning("No pages requested (max_pages=0). Returning empty result.")
             return result

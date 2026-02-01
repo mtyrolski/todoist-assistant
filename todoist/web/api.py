@@ -49,6 +49,7 @@ from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.utils import Cache, LocalStorageError, load_config, set_tqdm_progress_callback, get_tqdm_progress_callback
+from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
 
@@ -188,14 +189,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _resolve_data_dir() -> Path:
-    override = os.getenv("TODOIST_DATA_DIR") or os.getenv("TODOIST_CACHE_DIR")
+    override = os.getenv(EnvVar.DATA_DIR) or os.getenv(EnvVar.CACHE_DIR)
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT
 
 
 def _resolve_config_dir() -> Path:
-    override = os.getenv("TODOIST_CONFIG_DIR")
+    override = os.getenv(EnvVar.CONFIG_DIR)
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT / "configs"
@@ -217,7 +218,7 @@ _API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 
 def _resolve_env_path() -> Path:
-    cache_dir = os.getenv("TODOIST_CACHE_DIR")
+    cache_dir = os.getenv(EnvVar.CACHE_DIR)
     if cache_dir:
         return Path(cache_dir).expanduser().resolve() / ".env"
     cwd_env = Path.cwd() / ".env"
@@ -320,7 +321,7 @@ _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
 
 def _env_demo_mode() -> bool:
-    value = os.getenv("TODOIST_DASHBOARD_DEMO", "").strip().lower()
+    value = os.getenv(EnvVar.DASHBOARD_DEMO, "").strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 
@@ -916,9 +917,9 @@ def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
         logger.warning("LLM chat agent unavailable: {}", exc)
         return
 
-    cache_path = os.getenv("TODOIST_AGENT_CACHE_PATH", str(_REPO_ROOT))
-    prefabs_dir = os.getenv("TODOIST_AGENT_INSTRUCTIONS_DIR", str(_REPO_ROOT / "configs/agent_instructions"))
-    max_tool_loops_env = os.getenv("TODOIST_AGENT_MAX_TOOL_LOOPS", "8").strip()
+    cache_path = os.getenv(EnvVar.AGENT_CACHE_PATH, str(_REPO_ROOT))
+    prefabs_dir = os.getenv(EnvVar.AGENT_INSTRUCTIONS_DIR, str(_REPO_ROOT / "configs/agent_instructions"))
+    max_tool_loops_env = os.getenv(EnvVar.AGENT_MAX_TOOL_LOOPS, "8").strip()
     try:
         max_tool_loops = max(1, int(max_tool_loops_env))
     except ValueError:

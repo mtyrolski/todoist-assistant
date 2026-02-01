@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import requests
 
+from todoist.env import EnvVar
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(cmd, text=True, capture_output=True)
@@ -39,9 +40,9 @@ def _wait_for_frontend(url: str, timeout: float = 30.0) -> None:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only test")
 def test_pkg_install_smoke() -> None:
-    pkg_path = os.environ.get("TODOIST_PKG_PATH")
+    pkg_path = os.environ.get(EnvVar.PKG_PATH)
     if not pkg_path:
-        pytest.skip("TODOIST_PKG_PATH not set")
+        pytest.skip(f"{EnvVar.PKG_PATH} not set")
 
     pkg = Path(pkg_path)
     if not pkg.exists():
@@ -69,9 +70,9 @@ def test_pkg_install_smoke() -> None:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only test")
 def test_pkg_frontend_host(tmp_path: Path) -> None:
-    pkg_path = os.environ.get("TODOIST_PKG_PATH")
+    pkg_path = os.environ.get(EnvVar.PKG_PATH)
     if not pkg_path:
-        pytest.skip("TODOIST_PKG_PATH not set")
+        pytest.skip(f"{EnvVar.PKG_PATH} not set")
 
     pkg = Path(pkg_path)
     if not pkg.exists():
@@ -103,8 +104,8 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
         str(config_dir),
     ]
     env = os.environ.copy()
-    env["TODOIST_DATA_DIR"] = str(data_dir)
-    env["TODOIST_CONFIG_DIR"] = str(config_dir)
+    env[EnvVar.DATA_DIR] = str(data_dir)
+    env[EnvVar.CONFIG_DIR] = str(config_dir)
 
     stdout_path = tmp_path / "stdout.log"
     stderr_path = tmp_path / "stderr.log"
@@ -143,13 +144,13 @@ def test_brew_install_smoke() -> None:
     if shutil.which("brew") is None:
         pytest.skip("Homebrew not available on this runner")
 
-    formula = os.environ.get("TODOIST_BREW_FORMULA", "Formula/todoist-assistant.rb")
+    formula = os.environ.get(EnvVar.BREW_FORMULA, "Formula/todoist-assistant.rb")
     if not Path(formula).exists():
         pytest.skip("Homebrew formula not available in this checkout")
 
-    tarball = os.environ.get("TODOIST_BREW_TARBALL")
+    tarball = os.environ.get(EnvVar.BREW_TARBALL)
     if tarball and not Path(tarball).exists():
-        raise AssertionError(f"TODOIST_BREW_TARBALL not found at {tarball}")
+        raise AssertionError(f"{EnvVar.BREW_TARBALL} not found at {tarball}")
 
     os.environ.setdefault("HOMEBREW_NO_AUTO_UPDATE", "1")
 

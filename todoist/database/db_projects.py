@@ -12,6 +12,7 @@ from todoist.utils import (
     with_retry,
     RETRY_MAX_ATTEMPTS,
     report_tqdm_progress,
+    get_max_concurrent_requests,
 )
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
@@ -126,7 +127,7 @@ class DatabaseProjects:
             return self.projects_cache
 
         logger.info(f"Fetching {len(projects)} projects (include_tasks={include_tasks}) with thread pool")
-        max_workers = min(8, len(projects))
+        max_workers = min(get_max_concurrent_requests(), len(projects))
         ordered_results: list[Optional[Project]] = [None] * len(projects)
         total_projects = len(projects)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -218,7 +219,7 @@ class DatabaseProjects:
         if not all_projects_seq:
             return mapping_project_id_to_root
 
-        max_workers = min(8, len(all_projects_seq))
+        max_workers = min(get_max_concurrent_requests(), len(all_projects_seq))
         total_projects = len(all_projects_seq)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_pid = {executor.submit(get_root_project_with_retry, p.id): p.id for p in all_projects_seq}

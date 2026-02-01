@@ -15,6 +15,7 @@ from joblib import dump, load
 from loguru import logger
 from omegaconf import DictConfig
 
+from todoist.env import EnvVar
 T = TypeVar('T')
 LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
                             OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
@@ -96,7 +97,7 @@ class LocalStorage(Generic[T]):
 class Cache:
     def __init__(self, path: str | None = None):
         if path is None:
-            path = os.getenv("TODOIST_CACHE_DIR", "./")
+            path = os.getenv(EnvVar.CACHE_DIR, "./")
         self.path = path
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
         self.observer_state = LocalStorage(join(self.path, 'observer_state.joblib'), dict)
@@ -151,6 +152,25 @@ RETRY_BACKOFF_STD = 3.0    # seconds
 # Rate limit configuration constants
 DEFAULT_MAX_REQUESTS_PER_MINUTE = 45
 RATE_LIMIT_WINDOW_SECONDS = 60.0
+
+# Concurrency configuration constants
+DEFAULT_MAX_CONCURRENT_REQUESTS = 4
+
+
+def get_max_concurrent_requests() -> int:
+    """
+    Returns the max number of concurrent Todoist API requests used by thread pools.
+    Override with EnvVar.MAX_CONCURRENT_REQUESTS env var.
+    """
+    raw = getenv(EnvVar.MAX_CONCURRENT_REQUESTS)
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            logger.warning("Invalid {} value: {}", EnvVar.MAX_CONCURRENT_REQUESTS, raw)
+    return DEFAULT_MAX_CONCURRENT_REQUESTS
 
 
 def try_n_times(fn: Callable[[], U], n) -> U | None:
