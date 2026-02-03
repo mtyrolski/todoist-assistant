@@ -350,6 +350,25 @@ def _force_win64_components(wxs_path: Path) -> None:
         tree.write(wxs_path, encoding="utf-8", xml_declaration=True)
 
 
+def _assert_no_localized_accounts(wxs_paths: list[Path]) -> None:
+    localized_names = ("Users", "Administrators", "Guests", "Power Users")
+    offenders: list[str] = []
+    for path in wxs_paths:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for name in localized_names:
+            needle = f'User="{name}"'
+            if needle in text:
+                offenders.append(f"{path}: {needle}")
+    if offenders:
+        details = "\n".join(offenders)
+        raise RuntimeError(
+            "WiX sources include localized account names; use WIX_ACCOUNT_* properties instead:\n"
+            f"{details}"
+        )
+
+
 def _check_install_path_lengths(app_root: Path, install_root: Path) -> None:
     max_len = 0
     max_path: Path | None = None
@@ -478,6 +497,8 @@ def _build_msi(
     if missing:
         missing_str = ", ".join(str(path) for path in missing)
         raise RuntimeError(f"WiX installer files missing: {missing_str}")
+    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "todoist-assistant.wxs"
+    _assert_no_localized_accounts([product_wxs, components_wxs, legacy_wxs])
 
     wix_out_dir = str(wixobj_dir) + os.sep
     _run(
