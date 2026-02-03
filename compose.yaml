@@ -1,0 +1,51 @@
+name: todoist-assistant
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: ${TODOIST_IMAGE_PREFIX:-ghcr.io/mtyrolski}/todoist-assistant-api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      API_KEY: ${API_KEY:-}
+      TODOIST_DATA_DIR: /data
+      TODOIST_CACHE_DIR: /data
+    volumes:
+      - todoist-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./todoist
+          target: /app/todoist
+        - action: sync+restart
+          path: ./configs
+          target: /app/configs
+        - action: rebuild
+          path: ./pyproject.toml
+        - action: rebuild
+          path: ./uv.lock
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    image: ${TODOIST_IMAGE_PREFIX:-ghcr.io/mtyrolski}/todoist-assistant-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      API_URL: http://api:8000
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  todoist-data:

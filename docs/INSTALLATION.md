@@ -17,6 +17,10 @@ This project ships a desktop app + dashboard on Windows/macOS, and a developer-o
 ### Linux
 - There is no packaged installer. Use the source checkout (see Developer setup below).
 
+### Docker (all platforms)
+- Run the API + dashboard in containers with Docker Compose.
+- See [docs/DOCKER.md](DOCKER.md) for build/run instructions.
+
 ## Developer setup (all platforms)
 
 ### Prerequisites

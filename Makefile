@@ -1,4 +1,4 @@
-.PHONY: init_local_env ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
+.PHONY: init_local_env ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -128,3 +128,21 @@ build_macos_app: ## Build macOS app bundle (requires macOS + PyInstaller)
 
 build_macos_dmg: ## Build macOS DMG from the app bundle
 	./scripts/build_macos_dmg.sh
+
+docker_build: ## Build API + frontend Docker images
+	docker compose build
+
+docker_up: ## Run API + frontend with Docker Compose
+	docker compose up
+
+docker_down: ## Stop Docker Compose services
+	docker compose down
+
+docker_logs: ## Tail Docker Compose logs
+	docker compose logs -f
+
+docker_pull: ## Pull published Docker images
+	docker compose pull
+
+docker_watch: ## Live-reload with Docker Compose watch (Compose 2.22+)
+	docker compose watch

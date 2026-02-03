@@ -1,0 +1,10 @@
+node_modules
+.next
+.turbo
+out
+coverage
+.env
+.env.*
+*.log
+npm-debug.log
+yarn-error.log
