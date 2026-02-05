@@ -119,6 +119,7 @@ The launcher sets:
 - The Start Menu/Desktop shortcut launches the API + Next.js dashboard and opens `http://127.0.0.1:3000`.
 - To skip the Desktop shortcut, install with `msiexec /i todoist-assistant-<version>.msi INSTALLDESKTOPSHORTCUT=0`.
 - Uninstall removes the installed files and the ProgramData folder used by the app.
+- Installer ACLs use WiX `WIX_ACCOUNT_USERS` to resolve the localized Built-in Users group; avoid hardcoding `BUILTIN\\Users` in WiX sources to keep non-English Windows installs working.
 
 ## macOS build notes
 

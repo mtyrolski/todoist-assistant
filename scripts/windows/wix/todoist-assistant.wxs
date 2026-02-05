@@ -10,6 +10,7 @@
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
     <MediaTemplate />
+    <PropertyRef Id="WIX_ACCOUNT_USERS" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">
@@ -74,7 +75,7 @@
     <DirectoryRef Id="APPDATADIR">
       <Component Id="AppDataPermissions" Guid="*">
         <CreateFolder>
-          <util:PermissionEx User="Users" GenericAll="yes" />
+          <util:PermissionEx User="[WIX_ACCOUNT_USERS]" GenericAll="yes" />
         </CreateFolder>
         <util:RemoveFolderEx Id="RemoveAppDataDir" On="uninstall" Property="APPDATADIR" />
         <RegistryValue

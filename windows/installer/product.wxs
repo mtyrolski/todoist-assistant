@@ -21,6 +21,7 @@
     <Property Id="SKIP_TELEMETRY_REGISTRY" Value="0" />
     <Property Id="REMOVE_APPDATA" Value="0" />
     <Property Id="MsiLogging" Value="voicewarmupx" />
+    <PropertyRef Id="WIX_ACCOUNT_USERS" />
     <Icon Id="TodoistAssistantIcon" SourceFile="windows/bootstrapper/todoist-assistant.ico" />
     <Property Id="ARPPRODUCTICON" Value="TodoistAssistantIcon" />
 

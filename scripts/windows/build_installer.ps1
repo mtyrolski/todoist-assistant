@@ -37,6 +37,22 @@ function Get-WixBin {
     throw "WiX Toolset not found. Install WiX v3.11+ and ensure candle.exe is on PATH."
 }
 
+function Assert-NoLocalizedAccounts {
+    param([string[]]$Paths)
+    $localized = @("Users", "Administrators", "Guests", "Power Users")
+    foreach ($path in $Paths) {
+        if (-not (Test-Path $path)) {
+            continue
+        }
+        foreach ($name in $localized) {
+            $pattern = "User=`"$name`""
+            if (Select-String -Path $path -Pattern $pattern -Quiet) {
+                throw "WiX source uses localized account name ($pattern) in $path. Use WIX_ACCOUNT_* properties instead."
+            }
+        }
+    }
+}
+
 $pythonCmd = Get-PythonCmd
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\\..")
 $distRoot = Join-Path $repoRoot "dist\\windows"
@@ -111,6 +127,9 @@ try {
     $nodeWxs = Join-Path $distRoot "node.wxs"
     $configWxs = Join-Path $distRoot "config.wxs"
     $mainWxs = Join-Path $repoRoot "scripts\\windows\\wix\\todoist-assistant.wxs"
+    $canonicalWxs = Join-Path $repoRoot "windows\\installer\\components.wxs"
+
+    Assert-NoLocalizedAccounts -Paths @($mainWxs, $canonicalWxs)
 
     & $heat dir $appStage -cg AppFiles -dr INSTALLFOLDER -var var.AppSource -ag -srd -sfrag -out $appWxs
     & $heat dir $frontendStage -cg FrontendFiles -dr FRONTENDDIR -var var.FrontendSource -ag -srd -sfrag -out $frontendWxs

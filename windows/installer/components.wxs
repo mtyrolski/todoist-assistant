@@ -74,7 +74,7 @@
     <DirectoryRef Id="APPDATADIR">
       <Component Id="AppDataPermissions" Guid="*" Win64="yes">
         <CreateFolder>
-          <util:PermissionEx User="Users" Domain="BUILTIN" GenericAll="yes" />
+          <util:PermissionEx User="[WIX_ACCOUNT_USERS]" GenericAll="yes" />
         </CreateFolder>
         <RegistryValue
           Root="HKLM"
@@ -119,7 +119,7 @@
     <DirectoryRef Id="LOGSDIR">
       <Component Id="LogsFolder" Guid="*" Win64="yes">
         <CreateFolder>
-          <util:PermissionEx User="Users" Domain="BUILTIN" GenericAll="yes" />
+          <util:PermissionEx User="[WIX_ACCOUNT_USERS]" GenericAll="yes" />
         </CreateFolder>
         <RegistryValue
           Root="HKLM"
