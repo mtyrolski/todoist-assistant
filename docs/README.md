@@ -6,6 +6,7 @@ This folder contains the long-form docs. Start here and jump into the section yo
 - Installation: [docs/INSTALLATION.md](INSTALLATION.md)
 - Usage (CLI, dashboard, automations): [docs/USAGE.md](USAGE.md)
 - Build & CI workflows: [docs/BUILDING.md](BUILDING.md)
+- Docker workflow: [docs/DOCKER.md](DOCKER.md)
 
 ## Windows installer details
 - MSI + bootstrapper guide: [docs/windows_installer.md](windows_installer.md)

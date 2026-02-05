@@ -18,6 +18,7 @@
           <a href="docs/INSTALLATION.md">Installation</a><br/>
           <a href="docs/USAGE.md">Usage</a><br/>
           <a href="docs/BUILDING.md">Build and CI</a><br/>
+          <a href="docs/DOCKER.md">Docker workflow</a><br/>
           <a href="docs/windows_installer.md">Windows installer</a><br/>
           <a href="docs/gmail_setup.md">Gmail setup</a>
         </p>
@@ -83,6 +84,14 @@ make run_dashboard
 ```
 Open:
 - Frontend: http://127.0.0.1:3000
+- API: http://127.0.0.1:8000
+
+## Quick start (Docker)
+```bash
+docker compose up --build
+```
+Open:
+- Dashboard: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
 
 ## Installation (end users)

@@ -1,0 +1,52 @@
+# VCS
+.git
+.gitignore
+.gitattributes
+.github
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+.venv/
+.uv/
+.pytest_cache/
+.mypy_cache/
+.pyright/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+frontend/out/
+
+# Local data & logs
+*.log
+*.sqlite
+*.db
+*.db-journal
+*.joblib
+activity.joblib
+automation.log
+automation_launches.joblib
+llm_breakdown_progress.joblib
+llm_chat_conversations.joblib
+llm_chat_queue.joblib
+observer_state.joblib
+processed_gmail_messages.joblib
+outputs/
+personal/
+
+# Secrets
+.env
+.env.*
+credentials.json
+gmail_credentials.json
+gmail_token.json
+
+# Build artifacts
+build/
+dist/
