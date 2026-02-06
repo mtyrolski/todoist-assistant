@@ -27,7 +27,7 @@
   </table>
 </div>
 
-<p><strong>Install v0.2.4 (CI artifacts)</strong><br/>
+<p><strong>Install v0.2.5 (CI artifacts)</strong><br/>
   <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21554592007#artifacts">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
   <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21554592007#artifacts">todoist-assistant-msi-install-log</a>: optional install logs (zip).
 </p>
