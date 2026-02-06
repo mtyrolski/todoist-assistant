@@ -1,6 +1,6 @@
 [project]
 name = "todoist-assistant"
-version = "0.2.4"
+version = "0.2.5"
 description = "Interactive Dashboard"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -63,3 +63,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["todoist", "todoist.*", "todoist_assistant", "todoist_assistant.*"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+# CPU-only torch wheels to avoid CUDA runtime deps in Docker/CI.
+url = "https://download.pytorch.org/whl/cpu"
