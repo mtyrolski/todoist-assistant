@@ -1,6 +1,6 @@
 [project]
 name = "todoist-assistant-core"
-version = "0.2.4"
+version = "0.2.5"
 description = "Core Todoist Assistant data + automation library (no dashboard/frontend)"
 readme = "README.md"
 requires-python = ">=3.11"
