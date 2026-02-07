@@ -28,8 +28,8 @@
 </div>
 
 <p><strong>Install v0.2.5 (CI artifacts)</strong><br/>
-  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21770204403/artifacts/5413896850">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
-  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21770204403/">CI run details</a>
+  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21771236303/artifacts/5414274196">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
+  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21771236303">CI run details</a>
 </p>
 
 ## Highlights
