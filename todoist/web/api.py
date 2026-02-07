@@ -36,19 +36,28 @@ from todoist.dashboard.plots import (
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
-    plot_most_popular_labels,
     plot_task_lifespans,
+    plot_weekly_completion_trend,
 )
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
-from todoist.automations.llm_breakdown.config import BASE_SYSTEM_PROMPT, coerce_model_config
+from todoist.automations.llm_breakdown.config import (
+    BASE_SYSTEM_PROMPT,
+    coerce_model_config,
+)
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import MessageRole, TransformersMistral3ChatModel
 from todoist.llm.llm_utils import _sanitize_text
-from todoist.utils import Cache, LocalStorageError, load_config, set_tqdm_progress_callback, get_tqdm_progress_callback
+from todoist.utils import (
+    Cache,
+    LocalStorageError,
+    load_config,
+    set_tqdm_progress_callback,
+    get_tqdm_progress_callback,
+)
 from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
@@ -89,7 +98,9 @@ def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
     previous_beg_range = beg_range - timespan
     previous_end_range = end_range - timespan
 
-    current_period_str = f"{beg_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
+    current_period_str = (
+        f"{beg_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
+    )
     previous_period_str = f"{previous_beg_range.strftime('%Y-%m-%d')} to {previous_end_range.strftime('%Y-%m-%d')}"
 
     return {
@@ -104,18 +115,30 @@ def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
 
 def _extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
     def _get_total_events(beg_, end_) -> int:
-        filtered_df = df_activity[(df_activity.index >= beg_) & (df_activity.index <= end_)]
+        filtered_df = df_activity[
+            (df_activity.index >= beg_) & (df_activity.index <= end_)
+        ]
         return len(filtered_df)
 
     def _get_total_tasks_by_type(beg_, end_, task_type: str) -> int:
-        filtered_df = df_activity[(df_activity.index >= beg_) & (df_activity.index <= end_)]
+        filtered_df = df_activity[
+            (df_activity.index >= beg_) & (df_activity.index <= end_)
+        ]
         return int((filtered_df["type"] == task_type).sum())
 
     metric_specs: list[tuple[str, Any, bool]] = [
         ("Events", _get_total_events, False),
-        ("Completed Tasks", lambda b, e: _get_total_tasks_by_type(b, e, "completed"), False),
+        (
+            "Completed Tasks",
+            lambda b, e: _get_total_tasks_by_type(b, e, "completed"),
+            False,
+        ),
         ("Added Tasks", lambda b, e: _get_total_tasks_by_type(b, e, "added"), False),
-        ("Rescheduled Tasks", lambda b, e: _get_total_tasks_by_type(b, e, "rescheduled"), True),
+        (
+            "Rescheduled Tasks",
+            lambda b, e: _get_total_tasks_by_type(b, e, "rescheduled"),
+            True,
+        ),
     ]
 
     metrics: list[dict[str, Any]] = []
@@ -123,7 +146,9 @@ def _extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str
         current_value = int(metric_func(periods["beg"], periods["end"]))
         previous_value = int(metric_func(periods["prevBeg"], periods["prevEnd"]))
         if previous_value:
-            delta_percent = round((current_value - previous_value) / previous_value * 100, 2)
+            delta_percent = round(
+                (current_value - previous_value) / previous_value * 100, 2
+            )
         else:
             delta_percent = None
         metrics.append(
@@ -150,7 +175,6 @@ class _DashboardState:
         self.df_activity: pd.DataFrame | None = None
         self.active_projects: list[Project] | None = None
         self.project_colors: dict[str, str] | None = None
-        self.label_colors: dict[str, str] | None = None
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
         self.demo_mode: bool = False
 
@@ -200,6 +224,7 @@ def _resolve_config_dir() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT / "configs"
+
 
 _DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
@@ -302,7 +327,11 @@ _JOBS: dict[str, _AdminJob] = {}
 
 # === LLM CHAT QUEUE =========================================================
 _CHAT_QUEUE_STATUSES = {"queued", "running", "done", "failed"}
-_CHAT_ROLES = {MessageRole.SYSTEM.value, MessageRole.USER.value, MessageRole.ASSISTANT.value}
+_CHAT_ROLES = {
+    MessageRole.SYSTEM.value,
+    MessageRole.USER.value,
+    MessageRole.ASSISTANT.value,
+}
 _CHAT_QUEUE_LIMIT = 200
 _LLM_CHAT_TIMEOUT_S = 60 * 60
 _CHAT_SYSTEM_PROMPT = (
@@ -406,14 +435,16 @@ def _build_tqdm_progress_callback():
         step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
         unit_suffix = f" {unit}" if unit else ""
         detail = f"{desc}: {current}/{total}{unit_suffix}"
-        _run_async_in_main_loop(_set_progress(
-            desc or "Working",
-            step=step,
-            total_steps=_PROGRESS_TOTAL_STEPS,
-            detail=detail,
-            sub_current=current,
-            sub_total=total,
-        ))
+        _run_async_in_main_loop(
+            _set_progress(
+                desc or "Working",
+                step=step,
+                total_steps=_PROGRESS_TOTAL_STEPS,
+                detail=detail,
+                sub_current=current,
+                sub_total=total,
+            )
+        )
 
     return _callback
 
@@ -428,12 +459,14 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
     error: str | None = None
     try:
-        _run_async_in_main_loop(_set_progress(
-            "Querying project data",
-            step=1,
-            total_steps=_PROGRESS_TOTAL_STEPS,
-            detail="Fetching projects and tasks",
-        ))
+        _run_async_in_main_loop(
+            _set_progress(
+                "Querying project data",
+                step=1,
+                total_steps=_PROGRESS_TOTAL_STEPS,
+                detail="Fetching projects and tasks",
+            )
+        )
         dbio = Database(".env")
         dbio.pull()
 
@@ -455,12 +488,16 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             if _should_backfill(cached_events):
                 try:
                     cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-                    activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                    activity_cfg = (
+                        cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                    )
                     nweeks = 10
                     early_stop = 2
                     if isinstance(activity_cfg, Mapping):
                         nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
-                        early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
+                        early_stop = int(
+                            activity_cfg.get("early_stop_after_n_windows", early_stop)
+                        )
                     logger.info(
                         "Activity cache looks short; backfilling history (window={}w, stop={}).",
                         nweeks,
@@ -480,12 +517,16 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         if not cached_events and _resolve_api_key():
             try:
                 cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-                activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                activity_cfg = (
+                    cfg.get("activity") if isinstance(cfg, DictConfig) else None
+                )
                 nweeks = 10
                 early_stop = 2
                 if isinstance(activity_cfg, Mapping):
                     nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
-                    early_stop = int(activity_cfg.get("early_stop_after_n_windows", early_stop))
+                    early_stop = int(
+                        activity_cfg.get("early_stop_after_n_windows", early_stop)
+                    )
                 logger.info(
                     "Activity cache empty; fetching full history (window={}w, stop={}).",
                     nweeks,
@@ -497,7 +538,9 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     events_already_fetched=set(),
                 )
                 if not events:
-                    logger.info("Adaptive fetch returned no events; attempting recent activity pages.")
+                    logger.info(
+                        "Adaptive fetch returned no events; attempting recent activity pages."
+                    )
                     events = dbio.fetch_activity(max_pages=2)
                 Cache().activity.save(set(events))
             except Exception as exc:  # pragma: no cover - network-dependent
@@ -505,32 +548,41 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             finally:
                 _activity_backfill_attempted = True
 
-        _run_async_in_main_loop(_set_progress(
-            "Building project hierarchy",
-            step=2,
-            total_steps=_PROGRESS_TOTAL_STEPS,
-            detail="Resolving roots across active and archived projects",
-        ))
+        _run_async_in_main_loop(
+            _set_progress(
+                "Building project hierarchy",
+                step=2,
+                total_steps=_PROGRESS_TOTAL_STEPS,
+                detail="Resolving roots across active and archived projects",
+            )
+        )
         try:
             df_activity = load_activity_data(dbio)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Failed to load activity data; using empty dataset: {}", exc)
             df_activity = _empty_activity_df()
 
-        _run_async_in_main_loop(_set_progress(
-            "Preparing dashboard data",
-            step=3,
-            total_steps=_PROGRESS_TOTAL_STEPS,
-            detail="Loading metadata and caches",
-        ))
+        _run_async_in_main_loop(
+            _set_progress(
+                "Preparing dashboard data",
+                step=3,
+                total_steps=_PROGRESS_TOTAL_STEPS,
+                detail="Loading metadata and caches",
+            )
+        )
         active_projects = dbio.fetch_projects(include_tasks=True)
 
         if demo_mode and not dbio.is_anonymized:
-            from todoist.database.demo import anonymize_label_names, anonymize_project_names
+            from todoist.database.demo import (
+                anonymize_label_names,
+                anonymize_project_names,
+            )
 
             project_ori2anonym = anonymize_project_names(df_activity)
             label_ori2anonym = anonymize_label_names(active_projects)
-            dbio.anonymize(project_mapping=project_ori2anonym, label_mapping=label_ori2anonym)
+            dbio.anonymize(
+                project_mapping=project_ori2anonym, label_mapping=label_ori2anonym
+            )
 
         if demo_mode:
             from todoist.database.demo import anonymize_activity_dates
@@ -538,13 +590,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             df_activity = anonymize_activity_dates(df_activity)
 
         project_colors = dbio.fetch_mapping_project_name_to_color()
-        label_colors = dbio.fetch_label_colors()
 
         _state.db = dbio
         _state.df_activity = df_activity
         _state.active_projects = active_projects
         _state.project_colors = project_colors
-        _state.label_colors = label_colors
         _state.last_refresh_s = time.time()
         _state.home_payload_cache = {}
         _state.demo_mode = demo_mode
@@ -577,13 +627,16 @@ def _stat_file(path: str) -> dict[str, Any] | None:
     try:
         mtime = os.path.getmtime(path)
         size = os.path.getsize(path)
-        return {"path": path, "mtime": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"), "size": size}
+        return {
+            "path": path,
+            "mtime": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
+            "size": size,
+        }
     except OSError:
         return {"path": path, "mtime": None, "size": None}
 
 
 def _service_statuses() -> list[dict[str, Any]]:
-
     api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file("activity.joblib")
     automation_log = _stat_file("automation.log")
@@ -609,9 +662,21 @@ def _service_statuses() -> list[dict[str, Any]]:
         observer_detail = "not detected"
 
     return [
-        {"name": "Todoist token", "status": "ok" if api_key_set else "warn", "detail": "API_KEY set" if api_key_set else "API_KEY missing"},
-        {"name": "Activity cache", "status": "ok" if cache_activity else "warn", "detail": cache_activity or "activity.joblib missing"},
-        {"name": "Automation log", "status": "ok" if automation_log else "warn", "detail": automation_log or "automation.log missing"},
+        {
+            "name": "Todoist token",
+            "status": "ok" if api_key_set else "warn",
+            "detail": "API_KEY set" if api_key_set else "API_KEY missing",
+        },
+        {
+            "name": "Activity cache",
+            "status": "ok" if cache_activity else "warn",
+            "detail": cache_activity or "activity.joblib missing",
+        },
+        {
+            "name": "Automation log",
+            "status": "ok" if automation_log else "warn",
+            "detail": automation_log or "automation.log missing",
+        },
         {"name": "Observer", "status": observer_status, "detail": observer_detail},
     ]
 
@@ -626,7 +691,9 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     return {
         "services": _service_statuses(),
         "apiCache": {
-            "lastRefresh": datetime.fromtimestamp(_state.last_refresh_s).isoformat(timespec="seconds")
+            "lastRefresh": datetime.fromtimestamp(_state.last_refresh_s).isoformat(
+                timespec="seconds"
+            )
             if _state.last_refresh_s
             else None
         },
@@ -716,7 +783,9 @@ def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     item_id = str(raw.get("id") or "").strip()
-    conversation_id = str(raw.get("conversation_id") or raw.get("conversationId") or "").strip()
+    conversation_id = str(
+        raw.get("conversation_id") or raw.get("conversationId") or ""
+    ).strip()
     content = _sanitize_text(raw.get("content"))
     if not item_id or not conversation_id or not content:
         return None
@@ -893,10 +962,14 @@ async def _load_llm_chat_model_task() -> None:
     await _maybe_start_llm_chat_worker()
 
 
-def _build_chat_messages(conversation: dict[str, Any], user_content: str) -> list[dict[str, str]]:
+def _build_chat_messages(
+    conversation: dict[str, Any], user_content: str
+) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     if _CHAT_SYSTEM_PROMPT:
-        messages.append({"role": MessageRole.SYSTEM.value, "content": _CHAT_SYSTEM_PROMPT})
+        messages.append(
+            {"role": MessageRole.SYSTEM.value, "content": _CHAT_SYSTEM_PROMPT}
+        )
     for msg in conversation.get("messages") or []:
         role = msg.get("role")
         content = msg.get("content")
@@ -918,7 +991,9 @@ def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
         return
 
     cache_path = os.getenv(EnvVar.AGENT_CACHE_PATH, str(_REPO_ROOT))
-    prefabs_dir = os.getenv(EnvVar.AGENT_INSTRUCTIONS_DIR, str(_REPO_ROOT / "configs/agent_instructions"))
+    prefabs_dir = os.getenv(
+        EnvVar.AGENT_INSTRUCTIONS_DIR, str(_REPO_ROOT / "configs/agent_instructions")
+    )
     max_tool_loops_env = os.getenv(EnvVar.AGENT_MAX_TOOL_LOOPS, "8").strip()
     try:
         max_tool_loops = max(1, int(max_tool_loops_env))
@@ -966,7 +1041,9 @@ async def _run_llm_chat_queue() -> None:
                 queue = _load_llm_chat_queue()
                 if _expire_llm_chat_queue(queue, datetime.now()):
                     _save_llm_chat_queue(queue)
-                next_item = next((item for item in queue if item.get("status") == "queued"), None)
+                next_item = next(
+                    (item for item in queue if item.get("status") == "queued"), None
+                )
                 if next_item is None:
                     return
                 next_item["status"] = "running"
@@ -974,7 +1051,11 @@ async def _run_llm_chat_queue() -> None:
                 _save_llm_chat_queue(queue)
                 conversations = _load_llm_chat_conversations()
                 conversation = next(
-                    (item for item in conversations if item.get("id") == next_item["conversation_id"]),
+                    (
+                        item
+                        for item in conversations
+                        if item.get("id") == next_item["conversation_id"]
+                    ),
                     None,
                 )
 
@@ -1001,17 +1082,36 @@ async def _run_llm_chat_queue() -> None:
                         if msg.get("role") and msg.get("content")
                     ]
                     state: Any = {
-                        "messages": [*base_messages, {"role": MessageRole.USER.value, "content": next_item["content"]}]
+                        "messages": [
+                            *base_messages,
+                            {
+                                "role": MessageRole.USER.value,
+                                "content": next_item["content"],
+                            },
+                        ]
                     }
                     result = await asyncio.to_thread(agent.invoke, state)
-                    messages = result.get("messages") if isinstance(result, dict) else None
+                    messages = (
+                        result.get("messages") if isinstance(result, dict) else None
+                    )
                     if not isinstance(messages, list):
                         raise ValueError("Agent returned invalid messages")
-                    new_messages = messages[len(base_messages):] if len(messages) >= len(base_messages) else messages
+                    new_messages = (
+                        messages[len(base_messages) :]
+                        if len(messages) >= len(base_messages)
+                        else messages
+                    )
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
-                        queue_item = next((item for item in queue if item.get("id") == next_item["id"]), None)
+                        queue_item = next(
+                            (
+                                item
+                                for item in queue
+                                if item.get("id") == next_item["id"]
+                            ),
+                            None,
+                        )
                         if queue_item is None or queue_item.get("status") != "running":
                             continue
                         queue_item["status"] = "done"
@@ -1048,8 +1148,18 @@ async def _run_llm_chat_queue() -> None:
                         # Mark as failed if response is empty
                         async with _LLM_CHAT_STORAGE_LOCK:
                             queue = _load_llm_chat_queue()
-                            queue_item = next((item for item in queue if item.get("id") == next_item["id"]), None)
-                            if queue_item is not None and queue_item.get("status") == "running":
+                            queue_item = next(
+                                (
+                                    item
+                                    for item in queue
+                                    if item.get("id") == next_item["id"]
+                                ),
+                                None,
+                            )
+                            if (
+                                queue_item is not None
+                                and queue_item.get("status") == "running"
+                            ):
                                 queue_item["status"] = "failed"
                                 queue_item["finished_at"] = _now_iso()
                                 queue_item["error"] = "Empty response from model"
@@ -1059,7 +1169,14 @@ async def _run_llm_chat_queue() -> None:
                     now = _now_iso()
                     async with _LLM_CHAT_STORAGE_LOCK:
                         queue = _load_llm_chat_queue()
-                        queue_item = next((item for item in queue if item.get("id") == next_item["id"]), None)
+                        queue_item = next(
+                            (
+                                item
+                                for item in queue
+                                if item.get("id") == next_item["id"]
+                            ),
+                            None,
+                        )
                         if queue_item is None or queue_item.get("status") != "running":
                             continue
                         queue_item["status"] = "done"
@@ -1157,7 +1274,9 @@ async def llm_chat_enable() -> dict[str, Any]:
 
 
 @app.post("/api/llm_chat/send", tags=["llm"])
-async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def llm_chat_send(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Queue a chat prompt for the local LLM."""
 
     message = _sanitize_text(payload.get("message"))
@@ -1166,16 +1285,24 @@ async def llm_chat_send(payload: dict[str, Any] = Body(default_factory=dict)) ->
 
     enabled, loading = await _llm_chat_model_status()
     if not (enabled or loading):
-        raise HTTPException(status_code=409, detail="Model not loaded. Click Enable in the dashboard first.")
+        raise HTTPException(
+            status_code=409,
+            detail="Model not loaded. Click Enable in the dashboard first.",
+        )
 
-    conversation_id = _sanitize_text(payload.get("conversationId") or payload.get("conversation_id"))
+    conversation_id = _sanitize_text(
+        payload.get("conversationId") or payload.get("conversation_id")
+    )
     now = _now_iso()
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
         conversation = None
         if conversation_id:
-            conversation = next((item for item in conversations if item.get("id") == conversation_id), None)
+            conversation = next(
+                (item for item in conversations if item.get("id") == conversation_id),
+                None,
+            )
             if conversation is None:
                 raise HTTPException(status_code=404, detail="Conversation not found")
         else:
@@ -1225,11 +1352,15 @@ async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     try:
         UUID(conversation_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid conversation ID format") from exc
+        raise HTTPException(
+            status_code=400, detail="Invalid conversation ID format"
+        ) from exc
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
-    conversation = next((item for item in conversations if item.get("id") == conversation_id), None)
+    conversation = next(
+        (item for item in conversations if item.get("id") == conversation_id), None
+    )
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {
@@ -1252,7 +1383,9 @@ def _parse_yyyy_mm_dd(value: str) -> datetime:
     try:
         return datetime.strptime(value, "%Y-%m-%d")
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD format") from exc
+        raise HTTPException(
+            status_code=400, detail="Dates must use YYYY-MM-DD format"
+        ) from exc
 
 
 def _safe_activity_anchor(df_activity) -> datetime:
@@ -1277,18 +1410,20 @@ def _safe_activity_anchor(df_activity) -> datetime:
 
 def _empty_activity_df() -> pd.DataFrame:
     df = pd.DataFrame(
-        columns=[
-            "id",
-            "title",
-            "type",
-            "parent_project_id",
-            "parent_project_name",
-            "root_project_id",
-            "root_project_name",
-            "parent_item_id",
-            "task_id",
-            "date",
-        ]
+        columns=pd.Index(
+            [
+                "id",
+                "title",
+                "type",
+                "parent_project_id",
+                "parent_project_name",
+                "root_project_id",
+                "root_project_name",
+                "parent_item_id",
+                "task_id",
+                "date",
+            ]
+        )
     )
     df["date"] = pd.to_datetime(df["date"])
     return df.set_index("date")
@@ -1302,7 +1437,9 @@ def _compute_plot_range(
     end: str | None,
 ) -> tuple[datetime, datetime]:
     if (beg is None) ^ (end is None):
-        raise HTTPException(status_code=400, detail="Provide both beg and end, or neither")
+        raise HTTPException(
+            status_code=400, detail="Provide both beg and end, or neither"
+        )
 
     if beg is not None and end is not None:
         beg_dt = _parse_yyyy_mm_dd(beg)
@@ -1311,7 +1448,9 @@ def _compute_plot_range(
         if end_dt <= beg_dt:
             raise HTTPException(status_code=400, detail="end must be after beg")
         if (end_dt - beg_dt) > timedelta(weeks=260):
-            raise HTTPException(status_code=400, detail="Date range must be <= 260 weeks")
+            raise HTTPException(
+                status_code=400, detail="Date range must be <= 260 weeks"
+            )
         return beg_dt, end_dt
 
     if weeks < 1 or weeks > 260:
@@ -1323,7 +1462,9 @@ def _compute_plot_range(
 
 
 def _last_completed_week_bounds(anchor: datetime) -> tuple[datetime, datetime, str]:
-    week_start = datetime.combine(anchor.date() - timedelta(days=anchor.weekday()), datetime.min.time())
+    week_start = datetime.combine(
+        anchor.date() - timedelta(days=anchor.weekday()), datetime.min.time()
+    )
     last_week_end = week_start
     last_week_start = last_week_end - timedelta(days=7)
     label = f"{last_week_start.strftime('%Y-%m-%d')} to {(last_week_end - timedelta(days=1)).strftime('%Y-%m-%d')}"
@@ -1343,12 +1484,20 @@ def _completed_share_leaderboard(
     df_completed = df_period[df_period["type"] == "completed"]
     total_completed = int(len(df_completed))
 
-    counts = df_completed[column].fillna("").replace("", "(unknown)").value_counts().head(limit)
+    counts = (
+        df_completed[column]
+        .fillna("")
+        .replace("", "(unknown)")
+        .value_counts()
+        .head(limit)
+    )
 
     items: list[dict[str, Any]] = []
     for name, completed in counts.items():
         completed_i = int(completed)
-        pct = round((completed_i / total_completed) * 100, 2) if total_completed else 0.0
+        pct = (
+            round((completed_i / total_completed) * 100, 2) if total_completed else 0.0
+        )
         items.append(
             {
                 "name": name,
@@ -1380,7 +1529,11 @@ def _completed_share_leaderboard(
         paper_bgcolor="#111318",
     )
 
-    return {"items": items, "totalCompleted": total_completed, "figure": _fig_to_dict(fig)}
+    return {
+        "items": items,
+        "totalCompleted": total_completed,
+        "figure": _fig_to_dict(fig),
+    }
 
 
 def _compute_insights(
@@ -1395,10 +1548,16 @@ def _compute_insights(
     df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
 
     # 1) Most active sub-project (completed tasks) in the completed week.
-    project_col = "parent_project_name" if "parent_project_name" in df_period.columns else "root_project_name"
+    project_col = (
+        "parent_project_name"
+        if "parent_project_name" in df_period.columns
+        else "root_project_name"
+    )
     df_completed = df_period[df_period["type"] == "completed"]
     if not df_completed.empty and project_col in df_completed.columns:
-        counts = df_completed[project_col].fillna("").replace("", "(unknown)").value_counts()
+        counts = (
+            df_completed[project_col].fillna("").replace("", "(unknown)").value_counts()
+        )
         if not counts.empty:
             name = str(counts.index[0])
             completed_i = int(counts.iloc[0])
@@ -1414,7 +1573,12 @@ def _compute_insights(
     # 2) Most rescheduled sub-project (proxy for churn).
     df_rescheduled = df_period[df_period["type"] == "rescheduled"]
     if not df_rescheduled.empty and project_col in df_rescheduled.columns:
-        counts = df_rescheduled[project_col].fillna("").replace("", "(unknown)").value_counts()
+        counts = (
+            df_rescheduled[project_col]
+            .fillna("")
+            .replace("", "(unknown)")
+            .value_counts()
+        )
         if not counts.empty:
             name = str(counts.index[0])
             rescheduled_i = int(counts.iloc[0])
@@ -1430,11 +1594,19 @@ def _compute_insights(
     # 3) Busiest day (all events).
     try:
         if not df_period.empty:
-            day_counts = pd.Series(pd.to_datetime(df_period.index).day_name()).value_counts()
+            day_counts = pd.Series(
+                pd.to_datetime(df_period.index).day_name()
+            ).value_counts()
             if not day_counts.empty:
                 day = str(day_counts.index[0])
                 cnt = int(day_counts.iloc[0])
-                insights.append({"title": "Busiest day", "value": day, "detail": f"{cnt} events (last week)"})
+                insights.append(
+                    {
+                        "title": "Busiest day",
+                        "value": day,
+                        "detail": f"{cnt} events (last week)",
+                    }
+                )
     except Exception as exc:
         logger.debug("Skipping busiest day insight: {}", exc)
 
@@ -1447,7 +1619,9 @@ def _compute_insights(
             {
                 "title": "Added vs completed",
                 "value": f"{added_i} / {completed_i}",
-                "detail": f"Completion/added ratio: {ratio}" if ratio is not None else "No added tasks (last week)",
+                "detail": f"Completion/added ratio: {ratio}"
+                if ratio is not None
+                else "No added tasks (last week)",
             }
         )
     except Exception as exc:
@@ -1456,7 +1630,9 @@ def _compute_insights(
     # 5) Peak hour (all events) in the completed week.
     try:
         if not df_period.empty:
-            hours = pd.to_datetime(df_period.index).to_series(index=df_period.index).dt.hour
+            hours = (
+                pd.to_datetime(df_period.index).to_series(index=df_period.index).dt.hour
+            )
             hour_counts = hours.value_counts()
             if not hour_counts.empty:
                 peak_hour_raw = hour_counts.index.to_list()[0]
@@ -1496,13 +1672,16 @@ async def dashboard_home(
     df_activity = _state.df_activity
     active_projects = _state.active_projects
     project_colors = _state.project_colors
-    label_colors = _state.label_colors
 
-    if df_activity is None or active_projects is None or project_colors is None or label_colors is None:
-        return {"error": "Dashboard data unavailable. Please ensure the database is configured and accessible."}
+    if df_activity is None or active_projects is None or project_colors is None:
+        return {
+            "error": "Dashboard data unavailable. Please ensure the database is configured and accessible."
+        }
 
     no_data = df_activity.empty
-    beg_range, end_range = _compute_plot_range(df_activity, weeks=weeks, beg=beg, end=end)
+    beg_range, end_range = _compute_plot_range(
+        df_activity, weeks=weeks, beg=beg, end=end
+    )
     beg_label = beg if beg is not None else beg_range.strftime("%Y-%m-%d")
     end_label = end if end is not None else end_range.strftime("%Y-%m-%d")
 
@@ -1526,7 +1705,9 @@ async def dashboard_home(
         return cached
 
     anchor_dt = _safe_activity_anchor(df_activity)
-    last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(anchor_dt)
+    last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(
+        anchor_dt
+    )
 
     if no_data:
         figures = {}
@@ -1534,18 +1715,28 @@ async def dashboard_home(
         root_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
     else:
         figures = {
-            "mostPopularLabels": _fig_to_dict(plot_most_popular_labels(active_projects, label_colors)),
+            "weeklyCompletionTrend": _fig_to_dict(
+                plot_weekly_completion_trend(df_activity, end_range)
+            ),
             "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
             "completedTasksPeriodically": _fig_to_dict(
-                plot_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
+                plot_completed_tasks_periodically(
+                    df_activity, beg_range, end_range, granularity, project_colors
+                )
             ),
             "cumsumCompletedTasksPeriodically": _fig_to_dict(
-                cumsum_completed_tasks_periodically(df_activity, beg_range, end_range, granularity, project_colors)
+                cumsum_completed_tasks_periodically(
+                    df_activity, beg_range, end_range, granularity, project_colors
+                )
             ),
             "heatmapEventsByDayHour": _fig_to_dict(
-                plot_heatmap_of_events_by_day_and_hour(df_activity, beg_range, end_range)
+                plot_heatmap_of_events_by_day_and_hour(
+                    df_activity, beg_range, end_range
+                )
             ),
-            "eventsOverTime": _fig_to_dict(plot_events_over_time(df_activity, beg_range, end_range, granularity)),
+            "eventsOverTime": _fig_to_dict(
+                plot_events_over_time(df_activity, beg_range, end_range, granularity)
+            ),
         }
         parent_completed_share = _completed_share_leaderboard(
             df_activity,
@@ -1580,7 +1771,12 @@ async def dashboard_home(
             "label": last_week_label,
             "items": []
             if no_data
-            else _compute_insights(df_activity, beg=last_week_beg, end=last_week_end, project_colors=project_colors),
+            else _compute_insights(
+                df_activity,
+                beg=last_week_beg,
+                end=last_week_end,
+                project_colors=project_colors,
+            ),
         },
         "leaderboards": {
             "lastCompletedWeek": {
@@ -1608,7 +1804,9 @@ def _serialize_dt(value: Any) -> str | None:
 
 def _load_automations() -> list[Automation]:
     config = load_config("automations", str(_CONFIG_DIR.resolve()))
-    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
+    automations: list[Automation] = hydra.utils.instantiate(
+        cast(DictConfig, config).automations
+    )
     return automations
 
 
@@ -1664,7 +1862,9 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
         ok, detail, labels_count = _validate_api_token(token)
         if not ok:
             status = 400 if detail and ("403" in detail or "401" in detail) else 502
-            raise HTTPException(status_code=status, detail=f"API token validation failed: {detail}")
+            raise HTTPException(
+                status_code=status, detail=f"API token validation failed: {detail}"
+            )
     env_path = _resolve_env_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), "API_KEY", token)
@@ -1679,7 +1879,9 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
 
 
 @app.post("/api/admin/api_token/validate", tags=["admin"])
-async def admin_validate_api_token(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def admin_validate_api_token(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     token = _normalize_api_key(payload.get("token")) or _resolve_api_key()
     if not token:
         return {"configured": False, "valid": False, "detail": "API token missing."}
@@ -1705,7 +1907,10 @@ async def admin_clear_api_token() -> dict[str, Any]:
 def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:
     output_stream = io.StringIO()
     started_at = datetime.now()
-    with contextlib.redirect_stdout(output_stream), contextlib.redirect_stderr(output_stream):
+    with (
+        contextlib.redirect_stdout(output_stream),
+        contextlib.redirect_stderr(output_stream),
+    ):
         loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
         try:
             task_delegations = automation.tick(dbio)
@@ -1738,7 +1943,9 @@ async def admin_run_automation(name: str, refresh: bool = False) -> dict[str, An
 
         dbio = Database(".env")
         dbio.pull()
-        result = await asyncio.to_thread(_run_automation_sync, automations[name], dbio=dbio)
+        result = await asyncio.to_thread(
+            _run_automation_sync, automations[name], dbio=dbio
+        )
         dbio.reset()
 
         if refresh:
@@ -1755,7 +1962,9 @@ async def admin_run_all_automations(refresh: bool = False) -> dict[str, Any]:
         dbio.pull()
         results: list[dict[str, Any]] = []
         for automation in _load_automations():
-            results.append(await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio))
+            results.append(
+                await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio)
+            )
             dbio.reset()
 
         if refresh:
@@ -1810,16 +2019,25 @@ async def _run_automation_job(*, job_id: str, name: str) -> None:
         async with _ADMIN_LOCK:
             automations = {a.name: a for a in _load_automations()}
             if name not in automations:
-                raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
+                raise HTTPException(
+                    status_code=404, detail=f"Unknown automation: {name}"
+                )
 
             dbio = Database(".env")
             dbio.pull()
-            result = await asyncio.to_thread(_run_automation_sync, automations[name], dbio=dbio)
+            result = await asyncio.to_thread(
+                _run_automation_sync, automations[name], dbio=dbio
+            )
             dbio.reset()
 
         await _update_job(job_id, status="done", finished_at=_now_iso(), result=result)
     except Exception as exc:  # pragma: no cover - defensive
-        await _update_job(job_id, status="failed", finished_at=_now_iso(), error=f"{type(exc).__name__}: {exc}")
+        await _update_job(
+            job_id,
+            status="failed",
+            finished_at=_now_iso(),
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
 
 async def _run_all_automations_job(*, job_id: str) -> None:
@@ -1830,12 +2048,21 @@ async def _run_all_automations_job(*, job_id: str) -> None:
             dbio.pull()
             results: list[dict[str, Any]] = []
             for automation in _load_automations():
-                results.append(await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio))
+                results.append(
+                    await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio)
+                )
                 dbio.reset()
 
-        await _update_job(job_id, status="done", finished_at=_now_iso(), result={"results": results})
+        await _update_job(
+            job_id, status="done", finished_at=_now_iso(), result={"results": results}
+        )
     except Exception as exc:  # pragma: no cover - defensive
-        await _update_job(job_id, status="failed", finished_at=_now_iso(), error=f"{type(exc).__name__}: {exc}")
+        await _update_job(
+            job_id,
+            status="failed",
+            finished_at=_now_iso(),
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
 
 @app.post("/api/admin/automations/run_async", tags=["admin"])
@@ -1893,10 +2120,16 @@ def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def _build_observer(db: Database) -> AutomationObserver:
     config = load_config("automations", str(_CONFIG_DIR.resolve()))
-    activity_automation: Activity = hydra.utils.instantiate(cast(DictConfig, config).activity)
-    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
+    activity_automation: Activity = hydra.utils.instantiate(
+        cast(DictConfig, config).activity
+    )
+    automations: list[Automation] = hydra.utils.instantiate(
+        cast(DictConfig, config).automations
+    )
     short_automations = [auto for auto in automations if not isinstance(auto, Activity)]
-    return AutomationObserver(db=db, automations=short_automations, activity=activity_automation)
+    return AutomationObserver(
+        db=db, automations=short_automations, activity=activity_automation
+    )
 
 
 @app.get("/api/admin/observer", tags=["admin"])
@@ -1949,7 +2182,9 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
             dbio.reset()
             finished_at = datetime.now()
             state["lastRunAt"] = finished_at.isoformat(timespec="seconds")
-            state["lastDurationSeconds"] = round((finished_at - started_at).total_seconds(), 3)
+            state["lastDurationSeconds"] = round(
+                (finished_at - started_at).total_seconds(), 3
+            )
             state["updatedAt"] = _now_iso()
             Cache().observer_state.save(state)
 
@@ -1975,15 +2210,20 @@ def _log_files() -> list[dict[str, Any]]:
             {
                 "path": str(rel_path),
                 "size": stat.st_size,
-                "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(
+                    timespec="seconds"
+                ),
             }
         )
     return sorted(log_files, key=lambda x: x["path"])
 
+
 def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
     candidate = (_DATA_DIR / rel_path).resolve()
     if _DATA_DIR not in candidate.parents and candidate != _DATA_DIR:
-        raise HTTPException(status_code=400, detail="Path must be within data directory")
+        raise HTTPException(
+            status_code=400, detail="Path must be within data directory"
+        )
     if suffix and candidate.suffix != suffix:
         raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
     return candidate
@@ -1999,7 +2239,9 @@ def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
     except OSError as exc:
-        raise HTTPException(status_code=404, detail=f"Unable to read log file: {exc}") from exc
+        raise HTTPException(
+            status_code=404, detail=f"Unable to read log file: {exc}"
+        ) from exc
 
     total_lines = len(lines)
     per_page = max(1, min(2000, int(tail_lines)))
@@ -2019,7 +2261,9 @@ def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
 
 
 @app.get("/api/admin/logs/read", tags=["admin"])
-async def admin_read_log(path: str, tail_lines: int = 40, page: int = 1) -> dict[str, Any]:
+async def admin_read_log(
+    path: str, tail_lines: int = 40, page: int = 1
+) -> dict[str, Any]:
     abs_path = _safe_data_path(path, suffix=".log")
     stat = abs_path.stat()
     payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
@@ -2050,7 +2294,9 @@ def _available_mapping_files() -> list[str]:
     return sorted(mapping_files) if mapping_files else ["archived_root_projects.py"]
 
 
-def _generate_adjustment_file_content(mappings: dict[str, str], archived_parents: list[str] | None = None) -> str:
+def _generate_adjustment_file_content(
+    mappings: dict[str, str], archived_parents: list[str] | None = None
+) -> str:
     archived_parents = archived_parents or []
     content = [
         "# Adjustments for archived root projects",
@@ -2092,17 +2338,25 @@ def _load_mapping_file(filename: str) -> tuple[dict[str, str], list[str]]:
     spec.loader.exec_module(module)
     mapping = getattr(module, ADJUSTMENTS_VARIABLE_NAME, {})
     archived_parents = getattr(module, "archived_parent_projects", [])
-    if not isinstance(archived_parents, list) or not all(isinstance(name, str) for name in archived_parents):
+    if not isinstance(archived_parents, list) or not all(
+        isinstance(name, str) for name in archived_parents
+    ):
         archived_parents = []
     return (mapping if isinstance(mapping, dict) else {}), archived_parents
 
 
-def _save_mapping_file(filename: str, mappings: dict[str, str], archived_parents: list[str]) -> None:
+def _save_mapping_file(
+    filename: str, mappings: dict[str, str], archived_parents: list[str]
+) -> None:
     target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
-    target.write_text(_generate_adjustment_file_content(mappings, archived_parents), encoding="utf-8")
+    target.write_text(
+        _generate_adjustment_file_content(mappings, archived_parents), encoding="utf-8"
+    )
 
 
-def _load_projects_for_adjustments_sync(refresh: bool) -> tuple[list[str], list[str], list[str]]:
+def _load_projects_for_adjustments_sync(
+    refresh: bool,
+) -> tuple[list[str], list[str], list[str]]:
     if not refresh and _state.db is not None:
         dbio = _state.db
     else:
@@ -2111,8 +2365,20 @@ def _load_projects_for_adjustments_sync(refresh: bool) -> tuple[list[str], list[
         raise RuntimeError("Database unavailable")
     active_projects = dbio.fetch_projects(include_tasks=False)
     archived_projects = dbio.fetch_archived_projects()
-    active_root = sorted({p.project_entry.name for p in active_projects if p.project_entry.parent_id is None})
-    archived_root = sorted({p.project_entry.name for p in archived_projects if p.project_entry.parent_id is None})
+    active_root = sorted(
+        {
+            p.project_entry.name
+            for p in active_projects
+            if p.project_entry.parent_id is None
+        }
+    )
+    archived_root = sorted(
+        {
+            p.project_entry.name
+            for p in archived_projects
+            if p.project_entry.parent_id is None
+        }
+    )
     archived_names = sorted({p.project_entry.name for p in archived_projects})
     return active_root, archived_root, archived_names
 
@@ -2120,12 +2386,16 @@ def _load_projects_for_adjustments_sync(refresh: bool) -> tuple[list[str], list[
 def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
     if not path.exists():
         if required:
-            raise HTTPException(status_code=404, detail=f"Missing config file: {path.name}")
+            raise HTTPException(
+                status_code=404, detail=f"Missing config file: {path.name}"
+            )
         return OmegaConf.create({})
     try:
         loaded = OmegaConf.load(path)
     except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail=f"Failed to read {path.name}: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Failed to read {path.name}: {exc}"
+        ) from exc
     if loaded is None:
         return OmegaConf.create({})
     return cast(DictConfig, loaded)
@@ -2135,7 +2405,9 @@ def _save_yaml_config(path: Path, config: DictConfig) -> None:
     try:
         OmegaConf.save(config, path, resolve=False)
     except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail=f"Failed to write {path.name}: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write {path.name}: {exc}"
+        ) from exc
 
 
 def _ensure_identifier(value: str, *, label: str) -> str:
@@ -2181,7 +2453,9 @@ def _normalize_template_node(raw: Mapping[str, Any]) -> dict[str, Any]:
         try:
             payload["due_date_days_difference"] = int(due_delta)
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="due_date_days_difference must be an integer") from exc
+            raise HTTPException(
+                status_code=400, detail="due_date_days_difference must be an integer"
+            ) from exc
     children = raw.get("children") or []
     if children:
         if not isinstance(children, list):
@@ -2200,12 +2474,18 @@ def _template_to_camel(raw: Mapping[str, Any]) -> dict[str, Any]:
         payload["dueDateDaysDifference"] = raw.get("due_date_days_difference")
     children = raw.get("children") or []
     if isinstance(children, list) and children:
-        payload["children"] = [_template_to_camel(child) for child in children if isinstance(child, Mapping)]
+        payload["children"] = [
+            _template_to_camel(child)
+            for child in children
+            if isinstance(child, Mapping)
+        ]
     return payload
 
 
 @app.get("/api/admin/project_adjustments", tags=["admin"])
-async def admin_project_adjustments(file: str | None = None, refresh: bool = False) -> dict[str, Any]:
+async def admin_project_adjustments(
+    file: str | None = None, refresh: bool = False
+) -> dict[str, Any]:
     """Return mapping files, current mapping content, and project lists for building adjustments."""
 
     selected = file or _available_mapping_files()[0]
@@ -2223,7 +2503,9 @@ async def admin_project_adjustments(file: str | None = None, refresh: bool = Fal
         archived_names = []
         warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
     unmapped_archived = [name for name in archived_names if name not in mappings]
-    archived_parents = sorted([name for name in archived_parents if name in archived_names])
+    archived_parents = sorted(
+        [name for name in archived_parents if name in archived_names]
+    )
 
     return {
         "files": _available_mapping_files(),
@@ -2255,16 +2537,30 @@ async def admin_save_project_adjustments(
         mappings = payload if isinstance(payload, dict) else {}
         archived_parents = []
 
-    if not isinstance(mappings, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in mappings.items()):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object of string->string mappings")
-    if not isinstance(archived_parents, list) or not all(isinstance(name, str) for name in archived_parents):
-        raise HTTPException(status_code=400, detail="archivedParents must be a list of strings")
+    if not isinstance(mappings, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in mappings.items()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Body must be a JSON object of string->string mappings",
+        )
+    if not isinstance(archived_parents, list) or not all(
+        isinstance(name, str) for name in archived_parents
+    ):
+        raise HTTPException(
+            status_code=400, detail="archivedParents must be a list of strings"
+        )
 
     async with _ADMIN_LOCK:
         _save_mapping_file(file, mappings, archived_parents)
         if refresh:
             await _ensure_state(refresh=True)
-    return {"saved": True, "file": file, "count": len(mappings), "archivedParents": len(archived_parents)}
+    return {
+        "saved": True,
+        "file": file,
+        "count": len(mappings),
+        "archivedParents": len(archived_parents),
+    }
 
 
 def _llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
@@ -2321,7 +2617,9 @@ async def admin_update_llm_breakdown_settings(
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be an integer"
+            ) from exc
 
     updates: dict[str, Any] = {}
     if "labelPrefix" in payload:
@@ -2333,9 +2631,13 @@ async def admin_update_llm_breakdown_settings(
     if "maxChildren" in payload:
         updates["max_children"] = _coerce_int(payload["maxChildren"], "maxChildren")
     if "maxTotalTasks" in payload:
-        updates["max_total_tasks"] = _coerce_int(payload["maxTotalTasks"], "maxTotalTasks")
+        updates["max_total_tasks"] = _coerce_int(
+            payload["maxTotalTasks"], "maxTotalTasks"
+        )
     if "maxQueueDepth" in payload:
-        updates["max_queue_depth"] = _coerce_int(payload["maxQueueDepth"], "maxQueueDepth")
+        updates["max_queue_depth"] = _coerce_int(
+            payload["maxQueueDepth"], "maxQueueDepth"
+        )
     if "autoQueueChildren" in payload:
         updates["auto_queue_children"] = bool(payload["autoQueueChildren"])
 
@@ -2346,15 +2648,23 @@ async def admin_update_llm_breakdown_settings(
         variants: dict[str, Any] = {}
         for key, value in variants_raw.items():
             if not isinstance(value, Mapping):
-                raise HTTPException(status_code=400, detail=f"Variant {key} must be an object")
+                raise HTTPException(
+                    status_code=400, detail=f"Variant {key} must be an object"
+                )
             instruction = str(value.get("instruction", "")).strip()
             variant_payload: dict[str, Any] = {"instruction": instruction}
             if "maxDepth" in value and value.get("maxDepth") not in (None, ""):
-                variant_payload["max_depth"] = _coerce_int(value.get("maxDepth"), "maxDepth")
+                variant_payload["max_depth"] = _coerce_int(
+                    value.get("maxDepth"), "maxDepth"
+                )
             if "maxChildren" in value and value.get("maxChildren") not in (None, ""):
-                variant_payload["max_children"] = _coerce_int(value.get("maxChildren"), "maxChildren")
+                variant_payload["max_children"] = _coerce_int(
+                    value.get("maxChildren"), "maxChildren"
+                )
             if "queueDepth" in value and value.get("queueDepth") not in (None, ""):
-                variant_payload["queue_depth"] = _coerce_int(value.get("queueDepth"), "queueDepth")
+                variant_payload["queue_depth"] = _coerce_int(
+                    value.get("queueDepth"), "queueDepth"
+                )
             variants[str(key).strip()] = variant_payload
         updates["variants"] = variants
 
@@ -2367,13 +2677,25 @@ async def admin_update_llm_breakdown_settings(
         lb_config = updates
 
     if "variants" in updates or "default_variant" in updates:
-        snapshot = OmegaConf.to_container(lb_config, resolve=False) if isinstance(lb_config, DictConfig) else lb_config
+        snapshot = (
+            OmegaConf.to_container(lb_config, resolve=False)
+            if isinstance(lb_config, DictConfig)
+            else lb_config
+        )
         default_variant = updates.get("default_variant") or (
             snapshot.get("default_variant") if isinstance(snapshot, Mapping) else None
         )
-        variants_value = updates.get("variants") or (snapshot.get("variants") if isinstance(snapshot, Mapping) else None)
-        if default_variant and isinstance(variants_value, Mapping) and default_variant not in variants_value:
-            raise HTTPException(status_code=400, detail="defaultVariant must exist in variants")
+        variants_value = updates.get("variants") or (
+            snapshot.get("variants") if isinstance(snapshot, Mapping) else None
+        )
+        if (
+            default_variant
+            and isinstance(variants_value, Mapping)
+            and default_variant not in variants_value
+        ):
+            raise HTTPException(
+                status_code=400, detail="defaultVariant must exist in variants"
+            )
 
     config["llm_breakdown"] = lb_config
     async with _ADMIN_LOCK:
@@ -2398,10 +2720,18 @@ def _multiplication_settings_payload(config: DictConfig) -> dict[str, Any]:
         config_data = {}
 
     return {
-        "flatLeafTemplate": config_data.get("flat_leaf_template", defaults.flat_leaf_template),
-        "deepLeafTemplate": config_data.get("deep_leaf_template", defaults.deep_leaf_template),
-        "flatLabelRegex": config_data.get("flat_label_regex", defaults.flat_label_regex),
-        "deepLabelRegex": config_data.get("deep_label_regex", defaults.deep_label_regex),
+        "flatLeafTemplate": config_data.get(
+            "flat_leaf_template", defaults.flat_leaf_template
+        ),
+        "deepLeafTemplate": config_data.get(
+            "deep_leaf_template", defaults.deep_leaf_template
+        ),
+        "flatLabelRegex": config_data.get(
+            "flat_label_regex", defaults.flat_label_regex
+        ),
+        "deepLabelRegex": config_data.get(
+            "deep_label_regex", defaults.deep_label_regex
+        ),
     }
 
 
@@ -2421,14 +2751,20 @@ async def admin_update_multiplication_settings(
     flat_template = str(payload.get("flatLeafTemplate", "")).strip()
     deep_template = str(payload.get("deepLeafTemplate", "")).strip()
     if not flat_template or not deep_template:
-        raise HTTPException(status_code=400, detail="flatLeafTemplate and deepLeafTemplate are required")
+        raise HTTPException(
+            status_code=400, detail="flatLeafTemplate and deepLeafTemplate are required"
+        )
 
     config = _read_yaml_config(_AUTOMATIONS_PATH)
     multiply_cfg = config.get("multiply") or {}
-    existing = OmegaConf.to_container(multiply_cfg, resolve=False) if multiply_cfg else {}
+    existing = (
+        OmegaConf.to_container(multiply_cfg, resolve=False) if multiply_cfg else {}
+    )
     if not isinstance(existing, dict):
         existing = {}
-    config_data = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    config_data = (
+        existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    )
     if not isinstance(config_data, Mapping):
         config_data = {}
     config_data = dict(config_data)
@@ -2529,7 +2865,11 @@ async def admin_create_template(
 
     automations_cfg = _read_yaml_config(_AUTOMATIONS_PATH)
     template_cfg = automations_cfg.get("template") or {}
-    task_templates = OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False) if template_cfg else {}
+    task_templates = (
+        OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False)
+        if template_cfg
+        else {}
+    )
     if not isinstance(task_templates, dict):
         task_templates = {}
     task_templates[name] = f"${{{category}.{name}}}"
@@ -2578,14 +2918,19 @@ async def admin_delete_template(category: str, name: str) -> dict[str, Any]:
     defaults = _load_defaults_list(templates_cfg)
     entry_key = _template_defaults_key(safe_category, safe_name)
     defaults = [
-        item for item in defaults
+        item
+        for item in defaults
         if not (isinstance(item, Mapping) and entry_key in item)
     ]
     templates_cfg["defaults"] = defaults
 
     automations_cfg = _read_yaml_config(_AUTOMATIONS_PATH)
     template_cfg = automations_cfg.get("template") or {}
-    task_templates = OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False) if template_cfg else {}
+    task_templates = (
+        OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False)
+        if template_cfg
+        else {}
+    )
     if isinstance(task_templates, dict) and safe_name in task_templates:
         del task_templates[safe_name]
     template_cfg["task_templates"] = task_templates

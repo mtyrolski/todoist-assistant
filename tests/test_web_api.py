@@ -1,6 +1,5 @@
 """Tests for FastAPI web dashboard endpoints."""
 
-
 import pandas as pd
 import plotly.graph_objects as go
 from fastapi.testclient import TestClient
@@ -11,19 +10,36 @@ import todoist.web.api as web_api
 
 
 def _stub_all_figures(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "plot_most_popular_labels", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_task_lifespans", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_completed_tasks_periodically", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "cumsum_completed_tasks_periodically", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_heatmap_of_events_by_day_and_hour", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_events_over_time", lambda *args, **kwargs: go.Figure())
+    monkeypatch.setattr(
+        web_api, "plot_weekly_completion_trend", lambda *args, **kwargs: go.Figure()
+    )
+    monkeypatch.setattr(
+        web_api, "plot_task_lifespans", lambda *args, **kwargs: go.Figure()
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_completed_tasks_periodically",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "cumsum_completed_tasks_periodically",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_heatmap_of_events_by_day_and_hour",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api, "plot_events_over_time", lambda *args, **kwargs: go.Figure()
+    )
 
 
 def _set_state_with_df(df: pd.DataFrame) -> None:
     web_api._state.df_activity = df
     web_api._state.active_projects = []
     web_api._state.project_colors = {}
-    web_api._state.label_colors = {}
     web_api._state.db = None
 
 
@@ -158,6 +174,8 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     payload = res.json()
 
     last_week = payload["leaderboards"]["lastCompletedWeek"]
+    assert "weeklyCompletionTrend" in payload["figures"]
+    assert "mostPopularLabels" not in payload["figures"]
     assert last_week["label"] == "2025-01-06 to 2025-01-12"
     parent_items = last_week["parentProjects"]["items"]
     assert last_week["parentProjects"]["totalCompleted"] == 3
@@ -334,6 +352,7 @@ def test_dashboard_progress_without_error() -> None:
 
 def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
+
     # Mock the model status to be disabled
     async def _mock_model_status():
         return False, False  # enabled, loading
@@ -382,6 +401,7 @@ def test_llm_chat_send_requires_message() -> None:
 
 def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
     """Test /api/llm_chat/send requires model to be loaded or loading."""
+
     # Mock the model status to be disabled
     async def _mock_model_status():
         return False, False  # enabled, loading
@@ -397,6 +417,7 @@ def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
 
 def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send creates a new conversation when no conversation_id provided."""
+
     # Mock the model status to be enabled
     async def _mock_model_status():
         return True, False  # enabled, loading
@@ -417,12 +438,15 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: [])
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
-    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
+    monkeypatch.setattr(
+        web_api, "_save_llm_chat_conversations", _mock_save_conversations
+    )
     monkeypatch.setattr(web_api, "_prune_queue", lambda q: q)
 
     # Mock worker start to do nothing
     async def _mock_start_worker():
         pass
+
     monkeypatch.setattr(web_api, "_maybe_start_llm_chat_worker", _mock_start_worker)
 
     client = TestClient(web_api.app)
@@ -454,6 +478,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
 
 def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send adds to existing conversation when conversation_id provided."""
+
     # Mock the model status to be enabled
     async def _mock_model_status():
         return True, False  # enabled, loading
@@ -483,18 +508,26 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
 
     monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
     monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: [])
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: existing_conversations[:])
+    monkeypatch.setattr(
+        web_api, "_load_llm_chat_conversations", lambda: existing_conversations[:]
+    )
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
-    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
+    monkeypatch.setattr(
+        web_api, "_save_llm_chat_conversations", _mock_save_conversations
+    )
     monkeypatch.setattr(web_api, "_prune_queue", lambda q: q)
 
     # Mock worker start to do nothing
     async def _mock_start_worker():
         pass
+
     monkeypatch.setattr(web_api, "_maybe_start_llm_chat_worker", _mock_start_worker)
 
     client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={"message": "Follow up", "conversationId": existing_conv_id})
+    res = client.post(
+        "/api/llm_chat/send",
+        json={"message": "Follow up", "conversationId": existing_conv_id},
+    )
     assert res.status_code == 200
     payload = res.json()
 
@@ -509,6 +542,7 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
 
 def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
     """Test /api/llm_chat/send returns 404 for non-existent conversation_id."""
+
     # Mock the model status to be enabled
     async def _mock_model_status():
         return True, False  # enabled, loading
@@ -518,10 +552,13 @@ def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
 
     client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={
-        "message": "Test",
-        "conversationId": "550e8400-e29b-41d4-a716-446655440000"  # Valid UUID format but doesn't exist
-    })
+    res = client.post(
+        "/api/llm_chat/send",
+        json={
+            "message": "Test",
+            "conversationId": "550e8400-e29b-41d4-a716-446655440000",  # Valid UUID format but doesn't exist
+        },
+    )
     assert res.status_code == 404
     payload = res.json()
     assert "Conversation not found" in payload["detail"]
@@ -572,7 +609,9 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
         }
     ]
 
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: mock_conversations)
+    monkeypatch.setattr(
+        web_api, "_load_llm_chat_conversations", lambda: mock_conversations
+    )
 
     client = TestClient(web_api.app)
     res = client.get(f"/api/llm_chat/conversations/{conv_id}")
@@ -598,6 +637,7 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
 
 def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     """Test /api/llm_chat/enable returns model status."""
+
     # Mock start load to do nothing
     async def _mock_start_load():
         pass
@@ -623,6 +663,7 @@ def test_llm_chat_enable_returns_status(monkeypatch) -> None:
 
 def test_llm_chat_send_starts_worker_when_loading(monkeypatch) -> None:
     """Test /api/llm_chat/send starts worker when model is loading."""
+
     # Mock the model status to be loading
     async def _mock_model_status():
         return False, True  # enabled=False, loading=True

@@ -254,9 +254,6 @@ class TodoistAPIClient:
                 wait_time = self._request_timestamps[0] + RATE_LIMIT_WINDOW_SECONDS - now
                 wait_time = max(wait_time, 0.05)
                 logger.debug(
-                    "Rate limit reached, delaying request",
-                    operation=operation_name,
-                    max_rpm=max_rpm,
-                    wait=f"{wait_time:.2f}s",
+                    f"Rate limit reached, delaying request {operation_name} for {wait_time:.2f} seconds"
                 )
                 self._rate_condition.wait(timeout=wait_time)

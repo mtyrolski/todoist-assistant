@@ -146,8 +146,8 @@ U = TypeVar('U')
 
 # Retry configuration constants
 RETRY_MAX_ATTEMPTS = 3
-RETRY_BACKOFF_MEAN = 10.0  # seconds
-RETRY_BACKOFF_STD = 3.0    # seconds
+RETRY_BACKOFF_MEAN = 6.0  # seconds
+RETRY_BACKOFF_STD = 2.0    # seconds
 
 # Rate limit configuration constants
 DEFAULT_MAX_REQUESTS_PER_MINUTE = 45
@@ -162,7 +162,7 @@ def get_max_concurrent_requests() -> int:
     Returns the max number of concurrent Todoist API requests used by thread pools.
     Override with EnvVar.MAX_CONCURRENT_REQUESTS env var.
     """
-    raw = getenv(EnvVar.MAX_CONCURRENT_REQUESTS)
+    raw = getenv(str(EnvVar.MAX_CONCURRENT_REQUESTS))
     if raw:
         try:
             value = int(raw)

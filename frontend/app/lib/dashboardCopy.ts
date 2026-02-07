@@ -41,8 +41,11 @@ export const DEFAULT_INSIGHT_HELP = `**Insight**
 Quick highlight computed from recent activity.`;
 
 export const PLOT_HELP = {
-  mostPopularLabels: `**Most Popular Labels**
-Ranks labels by completed tasks in the selected range.`,
+  weeklyCompletionTrend: `**Weekly completion trend**
+Normalized cumulative completion pace by weekday.
+
+- Use the 3w / 6w / 12w buttons to change the historical averaging window.
+- Current week is shown as raw cumulative completions with no forecast.`,
   taskLifespans: `**Task Lifespans**
 Distribution of time between task creation and completion.`,
   completedTasksPeriodically: `**Periodically Completed Tasks**

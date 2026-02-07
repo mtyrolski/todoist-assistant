@@ -143,7 +143,7 @@ export function DashboardView({
   const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
     { id: "insights", label: "Insights" },
-    { id: "labels-lifespans", label: "Labels + Lifespans" },
+    { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
     { id: "stats", label: "Stats" },
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
@@ -154,10 +154,10 @@ export function DashboardView({
   const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
   const labelPlots = [
     {
-      title: "Most Popular Labels",
-      figure: figures.mostPopularLabels,
+      title: "Weekly Completion Trend",
+      figure: figures.weeklyCompletionTrend,
       height: 420,
-      help: PLOT_HELP.mostPopularLabels
+      help: PLOT_HELP.weeklyCompletionTrend
     },
     {
       title: "Task Lifespans: Time to Completion",
@@ -403,7 +403,7 @@ export function DashboardView({
       ) : null}
 
       {!noData ? (
-        <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
+        <section id="weekly-trend-lifespans" className="grid2 jumpTarget" aria-label="Weekly trend and task lifespans">
           {labelPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
