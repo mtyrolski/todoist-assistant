@@ -1,4 +1,4 @@
-.PHONY: init_local_env ensure_frontend_deps update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -10,10 +10,26 @@ update_env: # updates history, fetches activity, do templates
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations
 
 ensure_frontend_deps: # installs frontend deps if missing
-	@if [ ! -x "$(FRONTEND_NEXT)" ]; then \
-		echo "Frontend dependencies missing; installing..."; \
+	@needs_install=0; \
+	if [ ! -x "$(FRONTEND_NEXT)" ]; then \
+		needs_install=1; \
+	else \
+		desired="$$(node -e "const pkg=require('./$(FRONTEND_DIR)/package.json'); const deps=pkg.dependencies||{}; const dev=pkg.devDependencies||{}; console.log(deps.next || dev.next || '');")"; \
+		installed="$$(node -e "try{const pkg=require('./$(FRONTEND_DIR)/node_modules/next/package.json'); console.log(pkg.version || '');}catch(e){console.log('');}")"; \
+		if [ -z \"$$desired\" ] || [ -z \"$$installed\" ] || [ \"$$desired\" != \"$$installed\" ]; then \
+			needs_install=1; \
+		fi; \
+	fi; \
+	if [ $$needs_install -eq 1 ]; then \
+		echo \"Frontend dependencies missing or out of date; installing...\"; \
 		npm --prefix $(FRONTEND_DIR) install; \
 	fi
+
+reinstall_frontend: # force reinstall frontend deps (clean node_modules)
+	rm -rf $(FRONTEND_DIR)/node_modules
+	npm --prefix $(FRONTEND_DIR) install
+
+reinstall: reinstall_frontend # convenience alias
 
 run_api:
 	uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
