@@ -352,6 +352,27 @@ def _weekly_completion_df() -> pd.DataFrame:
     return df
 
 
+def _weekly_completion_with_inactive_project_df() -> pd.DataFrame:
+    """Create data where one project has no completions in the selected window."""
+
+    base_date = datetime(2024, 6, 3, 12, 0, 0)  # Monday
+    data = {
+        "root_project_name": ["Project B", "Project A", "Project A"],
+        "root_project_id": ["proj_b", "proj_a", "proj_a"],
+        "type": ["completed", "completed", "completed"],
+        "parent_item_id": ["task3", "task1", "task2"],
+        "title": ["Task 3", "Task 1", "Task 2"],
+    }
+    dates = [
+        base_date - timedelta(days=10),  # B outside period
+        base_date + timedelta(days=0),  # A in period
+        base_date + timedelta(days=1),  # A in period
+    ]
+    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
+    df.index.name = "date"
+    return df
+
+
 def _weekly_completion_trend_df(*, total_weeks: int = 30) -> pd.DataFrame:
     base_monday = datetime(2024, 1, 1, 9, 0, 0)  # Monday
     rows: list[dict[str, str]] = []
@@ -448,6 +469,50 @@ def test_cumsum_completed_tasks_periodically_keeps_current_week():
     ]
     assert forecast_traces
     assert any(pd.to_datetime(x) > end_date for x in cast(Any, forecast_traces[0]).x)
+
+
+def test_plot_completed_tasks_periodically_hides_inactive_projects_in_range():
+    """Projects with zero completions in selected period should not produce zero lines."""
+
+    df = _weekly_completion_with_inactive_project_df()
+    beg_date = datetime(2024, 6, 1)
+    end_date = datetime(2024, 6, 5)
+
+    fig = plot_completed_tasks_periodically(
+        df,
+        beg_date,
+        end_date,
+        granularity="W-SUN",
+        project_colors={"Project A": "#123456", "Project B": "#654321"},
+    )
+
+    trace_names = [
+        str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)
+    ]
+    assert any(name.startswith("Project A") for name in trace_names)
+    assert not any(name.startswith("Project B") for name in trace_names)
+
+
+def test_cumsum_completed_tasks_periodically_hides_inactive_projects_in_range():
+    """Cumulative plot should also hide projects with no completions in selected period."""
+
+    df = _weekly_completion_with_inactive_project_df()
+    beg_date = datetime(2024, 6, 1)
+    end_date = datetime(2024, 6, 5)
+
+    fig = cumsum_completed_tasks_periodically(
+        df,
+        beg_date,
+        end_date,
+        granularity="W-SUN",
+        project_colors={"Project A": "#123456", "Project B": "#654321"},
+    )
+
+    trace_names = [
+        str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)
+    ]
+    assert any(name.startswith("Project A") for name in trace_names)
+    assert not any(name.startswith("Project B") for name in trace_names)
 
 
 def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows():

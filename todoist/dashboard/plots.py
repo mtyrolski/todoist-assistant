@@ -843,6 +843,20 @@ def _current_period_label(
     return fallback
 
 
+def _drop_projects_without_period_activity(df_periodic: pd.DataFrame) -> pd.DataFrame:
+    """Remove projects that have no completions within the selected period."""
+
+    if df_periodic.empty or not len(df_periodic.columns):
+        return df_periodic
+
+    active_columns = [
+        column
+        for column in df_periodic.columns
+        if float(cast(pd.Series, df_periodic[column]).fillna(0).sum()) > 0
+    ]
+    return cast(pd.DataFrame, df_periodic.loc[:, active_columns])
+
+
 def plot_completed_tasks_periodically(
     df: pd.DataFrame,
     beg_date: datetime,
@@ -873,9 +887,12 @@ def plot_completed_tasks_periodically(
     df_weekly_per_project = df_weekly_per_project[
         df_weekly_per_project.index >= beg_date
     ]
+    df_weekly_per_project = _drop_projects_without_period_activity(
+        df_weekly_per_project
+    )
 
     current_label = _current_period_label(
-        end_date, granularity, df_weekly_per_project.index
+        end_date, granularity, cast(pd.DatetimeIndex, df_weekly_per_project.index)
     )
     current_start: datetime | None = None
     current_end: datetime | None = None
@@ -915,16 +932,18 @@ def plot_completed_tasks_periodically(
 
     fig = go.Figure()
 
-    for root_project_name in df_weekly_per_project.columns:
-        project_series = df_weekly_per_project[root_project_name].fillna(0)
+    for root_project in df_weekly_per_project.columns:
+        root_project_name = str(root_project)
+        project_series = cast(pd.Series, df_weekly_per_project[root_project]).fillna(0)
         color = project_colors.get(root_project_name, "#808080")
 
         if show_forecast and current_label is not None:
-            historical = project_series[
-                project_series.index < pd.Timestamp(current_label)
-            ]
+            historical = cast(
+                pd.Series,
+                project_series[project_series.index < pd.Timestamp(current_label)],
+            )
         else:
-            historical = project_series
+            historical = cast(pd.Series, project_series)
 
         if not historical.empty:
             fig.add_trace(
@@ -945,12 +964,11 @@ def plot_completed_tasks_periodically(
             and current_start
             and current_end
         ):
-            history_totals = (
-                project_series[project_series.index < pd.Timestamp(current_label)]
-                .fillna(0)
-                .astype(float)
-                .tolist()
+            history_source = cast(
+                pd.Series,
+                project_series[project_series.index < pd.Timestamp(current_label)],
             )
+            history_totals = history_source.fillna(0).astype(float).tolist()
             actual_so_far = int(current_counts.get(root_project_name, 0))
 
             recently_active = actual_so_far > 0 or any(
@@ -1057,10 +1075,13 @@ def cumsum_completed_tasks_periodically(
     df_weekly_per_project = df_weekly_per_project[
         df_weekly_per_project.index >= beg_date
     ]
+    df_weekly_per_project = _drop_projects_without_period_activity(
+        df_weekly_per_project
+    )
     df_weekly_per_project = df_weekly_per_project.cumsum()
 
     current_label = _current_period_label(
-        end_date, granularity, df_weekly_per_project.index
+        end_date, granularity, cast(pd.DatetimeIndex, df_weekly_per_project.index)
     )
     current_start: datetime | None = None
     current_end: datetime | None = None
@@ -1099,24 +1120,29 @@ def cumsum_completed_tasks_periodically(
         )
 
     # Append 0 from the left (one day before the minimum date)
-    min_date = df_weekly_per_project.index.min() - timedelta(
-        days=7 if "W" in granularity else 14
-    )
-    df_weekly_per_project.loc[min_date] = 0
-    df_weekly_per_project = df_weekly_per_project.sort_index()
+    if not df_weekly_per_project.empty and len(df_weekly_per_project.columns):
+        min_date = df_weekly_per_project.index.min() - timedelta(
+            days=7 if "W" in granularity else 14
+        )
+        df_weekly_per_project.loc[min_date] = 0
+        df_weekly_per_project = df_weekly_per_project.sort_index()
 
     fig = go.Figure()
 
-    for root_project_name in df_weekly_per_project.columns:
-        project_series = df_weekly_per_project[root_project_name].ffill().fillna(0)
+    for root_project in df_weekly_per_project.columns:
+        root_project_name = str(root_project)
+        project_series = (
+            cast(pd.Series, df_weekly_per_project[root_project]).ffill().fillna(0)
+        )
         color = project_colors.get(root_project_name, "#808080")
 
         if show_forecast and current_label is not None:
-            historical = project_series[
-                project_series.index < pd.Timestamp(current_label)
-            ]
+            historical = cast(
+                pd.Series,
+                project_series[project_series.index < pd.Timestamp(current_label)],
+            )
         else:
-            historical = project_series
+            historical = cast(pd.Series, project_series)
 
         if not historical.empty:
             fig.add_trace(
@@ -1137,12 +1163,8 @@ def cumsum_completed_tasks_periodically(
             and current_start
             and current_end
         ):
-            history_totals = (
-                df_weekly_per_project[root_project_name]
-                .diff()
-                .fillna(df_weekly_per_project[root_project_name])
-                .fillna(0)
-            )
+            base_series = cast(pd.Series, df_weekly_per_project[root_project])
+            history_totals = base_series.diff().fillna(base_series).fillna(0)
             history_totals = (
                 history_totals[history_totals.index < pd.Timestamp(current_label)]
                 .astype(float)

@@ -6,12 +6,13 @@ from typing import Any, cast
 import pytest
 from unittest.mock import patch, MagicMock
 
+from tests.factories import make_project_entry, make_task_entry
 from todoist.api import EndpointCallResult, TodoistEndpoints
 from todoist.api.client import RequestSpec
 from todoist.database.db_tasks import DatabaseTasks
 from todoist.database.db_projects import DatabaseProjects
 from todoist.database.db_activity import DatabaseActivity
-from todoist.types import Task, TaskEntry, Project, ProjectEntry
+from todoist.types import Task, TaskEntry, Project
 
 
 @pytest.fixture
@@ -35,62 +36,13 @@ def db_activity():
 @pytest.fixture
 def sample_task_entry():
     """Create a sample TaskEntry for testing."""
-    return TaskEntry(
-        id="task123",
-        is_deleted=False,
-        added_at="2024-01-01T00:00:00Z",
-        child_order=1,
-        responsible_uid=None,
-        content="Test Task",
-        description="",
-        user_id="user123",
-        assigned_by_uid="user123",
-        project_id="project123",
-        section_id="section123",
-        sync_id=None,
-        collapsed=False,
-        due=None,
-        parent_id=None,
-        labels=[],
-        checked=False,
-        priority=1,
-        note_count=0,
-        added_by_uid="user123",
-        completed_at=None,
-        deadline=None,
-        duration=None,
-        updated_at="2024-01-01T00:00:00Z",
-        v2_id="v2_task123",
-        v2_parent_id=None,
-        v2_project_id="v2_project123",
-        v2_section_id="v2_section123",
-        day_order=None
-    )
+    return make_task_entry(task_id="task123", content="Test Task")
 
 
 @pytest.fixture
 def sample_project_entry():
     """Create a sample ProjectEntry for testing."""
-    return ProjectEntry(
-        id="12345",
-        name="Test Project",
-        color="blue",
-        parent_id=None,
-        child_order=1,
-        view_style="list",
-        is_favorite=False,
-        is_archived=False,
-        is_deleted=False,
-        is_frozen=False,
-        can_assign_tasks=True,
-        shared=False,
-        created_at="2024-01-01T00:00:00Z",
-        updated_at="2024-01-01T00:00:00Z",
-        v2_id="v2_12345",
-        v2_parent_id=None,
-        sync_id=None,
-        collapsed=False
-    )
+    return make_project_entry(project_id="12345", name="Test Project")
 
 
 @patch('todoist.database.db_tasks.TodoistAPIClient.request_json')

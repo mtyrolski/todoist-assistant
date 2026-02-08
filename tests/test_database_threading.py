@@ -1,76 +1,90 @@
-"""
-Tests for timeout and retry functionality in database threading operations.
-"""
-from unittest.mock import patch
+"""Behavior tests for threaded database helpers."""
+
+from concurrent.futures import Future
+
+from todoist.database.db_activity import DatabaseActivity
+from todoist.database.db_projects import DatabaseProjects
+from todoist.database.db_tasks import DatabaseTasks
 
 
-def test_timeout_parameter_is_applied():
-    """Test that timeout parameter is properly configured (60 seconds)."""
-    # This is more of a code inspection test
-    # We verify that the code structure includes timeout parameter
-    import inspect
-    from concurrent.futures import Future
-
-    # Check that Future.result accepts timeout parameter
-    sig = inspect.signature(Future.result)
-    assert 'timeout' in sig.parameters
+def test_fetch_activity_short_circuits_for_zero_pages():
+    db_activity = DatabaseActivity()
+    result = db_activity.fetch_activity(max_pages=0)
+    assert result == []
 
 
-def test_retry_count_is_three():
-    """Test that retry mechanism uses 3 attempts."""
-    from todoist.utils import try_n_times
+def test_fetch_projects_short_circuits_for_empty_project_list(monkeypatch):
+    db_projects = DatabaseProjects()
+    monkeypatch.setattr(db_projects, "_fetch_projects_data", lambda: [])
 
-    call_count = {'count': 0}
-
-    def failing_function():
-        call_count['count'] += 1
-        if call_count['count'] < 3:
-            raise RuntimeError("Simulated failure")
-        return "success"
-
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = try_n_times(failing_function, 3)
-
-    assert result == "success"
-    assert call_count['count'] == 3
+    result = db_projects.fetch_projects(include_tasks=True)
+    assert result == []
+    assert db_projects.projects_cache == []
 
 
-def test_retry_raises_on_failure():
-    """Test that retry wrapper raises exception instead of returning empty data when all retries fail."""
-    from todoist.utils import try_n_times
+def test_insert_tasks_returns_empty_dict_for_insert_errors(monkeypatch):
+    db_tasks = DatabaseTasks()
+    monkeypatch.setattr(db_tasks, "insert_task", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("todoist.utils.time.sleep", lambda _seconds: None)
 
-    def always_fails():
-        raise RuntimeError("Always fails")
-
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = try_n_times(always_fails, 3)
-
-    # try_n_times returns None on failure
-    assert result is None
-
-    # But our wrapper functions should raise RuntimeError
-    # This is tested implicitly through the integration tests
+    result = db_tasks.insert_tasks([{"content": "Task 1"}])
+    assert result == [{}]
 
 
-def test_try_n_times_returns_none_on_failure():
-    """Test that try_n_times returns None after all retries fail."""
-    from todoist.utils import try_n_times
+def test_insert_tasks_limits_max_workers_to_task_count(monkeypatch):
+    db_tasks = DatabaseTasks()
+    captured: dict[str, int] = {}
 
-    def always_fails():
-        raise RuntimeError("Always fails")
+    class InlineExecutor:
+        def __init__(self, max_workers: int):
+            captured["max_workers"] = max_workers
 
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = try_n_times(always_fails, 3)
+        def __enter__(self):
+            return self
 
-    assert result is None
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def submit(self, fn, *args, **kwargs):
+            fut: Future[dict[str, str]] = Future()
+            fut.set_result(fn(*args, **kwargs))
+            return fut
+
+    monkeypatch.setattr("todoist.database.db_tasks.ThreadPoolExecutor", InlineExecutor)
+    monkeypatch.setattr("todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable)
+    monkeypatch.setattr("todoist.database.db_tasks.get_max_concurrent_requests", lambda: 99)
+    monkeypatch.setattr(db_tasks, "insert_task", lambda **task: {"id": task["content"]})
+
+    result = db_tasks.insert_tasks([{"content": "Task 1"}, {"content": "Task 2"}])
+    assert captured["max_workers"] == 2
+    assert result == [{"id": "Task 1"}, {"id": "Task 2"}]
 
 
-def test_partial_import_available():
-    """Test that functools.partial is available for use in database modules."""
-    from functools import partial
+def test_insert_tasks_replaces_timed_out_futures_with_empty_dict(monkeypatch):
+    db_tasks = DatabaseTasks()
 
-    def sample_func(a, b):
-        return a + b
+    class InlineExecutor:
+        def __init__(self, max_workers: int):
+            self._max_workers = max_workers
 
-    partial_func = partial(sample_func, 5)
-    assert partial_func(3) == 8
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def submit(self, fn, *args, **kwargs):
+            fut: Future[dict[str, str]] = Future()
+            task_payload = args[0]
+            if task_payload.get("content") == "Task 2":
+                fut.set_exception(TimeoutError("simulated timeout"))
+            else:
+                fut.set_result(fn(*args, **kwargs))
+            return fut
+
+    monkeypatch.setattr("todoist.database.db_tasks.ThreadPoolExecutor", InlineExecutor)
+    monkeypatch.setattr("todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable)
+    monkeypatch.setattr(db_tasks, "insert_task", lambda **task: {"id": task["content"]})
+
+    result = db_tasks.insert_tasks([{"content": "Task 1"}, {"content": "Task 2"}])
+    assert result == [{"id": "Task 1"}, {}]
