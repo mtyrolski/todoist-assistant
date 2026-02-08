@@ -44,8 +44,9 @@ export const PLOT_HELP = {
   weeklyCompletionTrend: `**Weekly completion trend**
 Normalized cumulative completion pace by weekday.
 
-- Use the 3w / 6w / 12w buttons to change the historical averaging window.
-- Current week is shown as raw cumulative completions with no forecast.`,
+- Fixed view: current week + previous 3-week baseline.
+- Optional 6w / 12w / 24w baselines can be toggled in the legend.
+- Current week hover shows raw cumulative task counts (no forecast).`,
   taskLifespans: `**Task Lifespans**
 Distribution of time between task creation and completion.`,
   completedTasksPeriodically: `**Periodically Completed Tasks**

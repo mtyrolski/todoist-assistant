@@ -352,12 +352,12 @@ def _weekly_completion_df() -> pd.DataFrame:
     return df
 
 
-def _weekly_completion_trend_df() -> pd.DataFrame:
+def _weekly_completion_trend_df(*, total_weeks: int = 30) -> pd.DataFrame:
     base_monday = datetime(2024, 1, 1, 9, 0, 0)  # Monday
     rows: list[dict[str, str]] = []
     dates: list[datetime] = []
 
-    for week in range(14):
+    for week in range(total_weeks):
         week_start = base_monday + timedelta(weeks=week)
         daily_pattern = [
             1 + (week % 3),  # Monday
@@ -450,19 +450,42 @@ def test_cumsum_completed_tasks_periodically_keeps_current_week():
     assert any(pd.to_datetime(x) > end_date for x in cast(Any, forecast_traces[0]).x)
 
 
-def test_plot_weekly_completion_trend_has_lookback_buttons():
-    """Weekly completion trend should expose 3w/6w/12w in-plot controls."""
+def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows():
+    """Weekly trend should keep 3w/current fixed and expose 6w/12w/24w as legend toggles."""
 
     df = _weekly_completion_trend_df()
-    fig = plot_weekly_completion_trend(df, end_date=datetime(2024, 4, 17))
+    fig = plot_weekly_completion_trend(df, end_date=datetime(2024, 7, 24))
 
     assert isinstance(fig, go.Figure)
-    assert fig.layout.updatemenus is not None
-    assert len(fig.layout.updatemenus) == 1
+    assert not fig.layout.updatemenus
 
-    buttons = cast(Any, fig.layout.updatemenus[0]).buttons
-    labels = [cast(Any, button).label for button in buttons]
-    assert labels == ["3w", "6w", "12w"]
+    traces = cast(tuple[Any, ...], fig.data)
+    legend_traces = [trace for trace in traces if getattr(trace, "showlegend", False)]
+    legend_labels = [str(getattr(trace, "name", "")) for trace in legend_traces]
+
+    assert any("6w baseline" in label for label in legend_labels)
+    assert any("12w baseline" in label for label in legend_labels)
+    assert any("24w baseline" in label for label in legend_labels)
+
+    # Optional windows should be hidden by default but available via legend.
+    assert all(
+        getattr(trace, "visible", None) == "legendonly" for trace in legend_traces
+    )
+
+    # Fixed traces (current week + 3w baseline) stay visible and non-legend.
+    fixed_traces = [
+        trace
+        for trace in traces
+        if not getattr(trace, "showlegend", False)
+        and (
+            "current week" in str(getattr(trace, "name", "")).lower()
+            or "3w baseline" in str(getattr(trace, "name", "")).lower()
+        )
+    ]
+    assert fixed_traces
+    assert all(
+        getattr(trace, "visible", None) in (None, True) for trace in fixed_traces
+    )
 
 
 def test_plot_weekly_completion_trend_hides_future_days_for_current_week():
@@ -485,3 +508,19 @@ def test_plot_weekly_completion_trend_hides_future_days_for_current_week():
     assert len(y_values) == 7
     assert pd.isna(y_values[3])  # Thursday
     assert pd.isna(y_values[6])  # Sunday
+
+
+def test_plot_weekly_completion_trend_skips_unavailable_long_window():
+    """24w optional baseline should be omitted when fewer than 24 historical weeks exist."""
+
+    df = _weekly_completion_trend_df(total_weeks=14)
+    fig = plot_weekly_completion_trend(df, end_date=datetime(2024, 4, 17))
+
+    legend_labels = [
+        str(getattr(trace, "name", ""))
+        for trace in cast(tuple[Any, ...], fig.data)
+        if getattr(trace, "showlegend", False)
+    ]
+    assert any("6w baseline" in label for label in legend_labels)
+    assert any("12w baseline" in label for label in legend_labels)
+    assert not any("24w baseline" in label for label in legend_labels)

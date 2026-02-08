@@ -1,5 +1,6 @@
 # pylint: disable=too-many-lines
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
 
@@ -411,46 +412,59 @@ def plot_heatmap_of_events_by_day_and_hour(
     return _apply_dashboard_axes(fig)
 
 
-def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Figure:
-    """Plot normalized weekly completion trend with interactive 3w/6w/12w windows."""
+@dataclass(frozen=True)
+class _WeeklyTrendWindowStats:
+    """Computed baseline curve statistics for a lookback window."""
 
-    weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    lookbacks = [3, 6, 12]
-    end_ts = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize()
+    lookback_weeks: int
+    sample_size: int
+    avg_week_total: float
+    avg_curve: pd.Series
+    p25_curve: pd.Series
+    p75_curve: pd.Series
 
-    def _empty_figure(message: str) -> go.Figure:
-        fig = go.Figure()
-        fig.add_annotation(
-            text=message,
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=14, color="#e6e6e6"),
-        )
-        fig.update_layout(
-            template="plotly_dark",
-            title={
-                "text": "Weekly Completion Trend",
-                "x": 0.5,
-                "xanchor": "center",
-                "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
-            },
-            plot_bgcolor="#111318",
-            paper_bgcolor="#111318",
-            margin=dict(l=56, r=32, t=84, b=56),
-        )
-        fig.update_xaxes(visible=False)
-        fig.update_yaxes(visible=False)
-        return fig
+
+def _weekly_trend_empty_figure(message: str) -> go.Figure:
+    """Return a dashboard-styled empty figure with an explanatory message."""
+
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=14, color="#e6e6e6"),
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        title={
+            "text": "Weekly Completion Trend",
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
+        },
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
+        margin=dict(l=56, r=32, t=84, b=56),
+    )
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    return fig
+
+
+def _weekly_trend_prepare_weekly_counts(
+    df: pd.DataFrame, end_date: datetime
+) -> tuple[pd.DataFrame, pd.Timestamp] | None:
+    """Build a week x weekday matrix of completed-task counts up to ``end_date``."""
 
     if "type" not in df.columns:
-        return _empty_figure("Missing 'type' column in activity data.")
+        return None
 
-    df_completed = df[df["type"] == "completed"].loc[:end_date].copy()
+    df_completed = df[df["type"] == "completed"].loc[:end_date]
     if df_completed.empty:
-        return _empty_figure("No completed tasks available yet.")
+        return None
 
     completion_series = cast(
         pd.Series,
@@ -459,26 +473,30 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
     completion_days = cast(pd.Series, completion_series.dt.normalize())
     daily_counts = completion_days.groupby(completion_days).size().sort_index()
     if daily_counts.empty:
-        return _empty_figure("No completed tasks available yet.")
+        return None
 
+    end_ts = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize()
     all_days = pd.date_range(start=daily_counts.index.min(), end=end_ts, freq="D")
     daily_counts = daily_counts.reindex(all_days, fill_value=0).astype(float)
 
-    daily_frame = pd.DataFrame({"count": daily_counts.values}, index=daily_counts.index)
+    day_index = cast(pd.Index, daily_counts.index)
     day_numbers = cast(
         pd.Series,
-        pd.to_datetime(daily_frame.index)
-        .to_series(index=daily_frame.index)
-        .dt.dayofweek.astype(int),
+        pd.to_datetime(day_index).to_series(index=day_index).dt.dayofweek.astype(int),
     )
-    daily_frame["week_start"] = daily_frame.index - pd.to_timedelta(
-        day_numbers, unit="D"
+    week_starts = cast(pd.Series, day_index - pd.to_timedelta(day_numbers, unit="D"))
+    day_frame = pd.DataFrame(
+        {
+            "count": daily_counts.values,
+            "week_start": week_starts.values,
+            "weekday": day_numbers.values,
+        },
+        index=day_index,
     )
-    daily_frame["weekday"] = day_numbers
 
     weekly_counts = cast(
         pd.DataFrame,
-        daily_frame.pivot_table(
+        day_frame.pivot_table(
             index="week_start",
             columns="weekday",
             values="count",
@@ -488,159 +506,260 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
     )
     weekly_counts = weekly_counts.reindex(columns=range(7), fill_value=0.0).sort_index()
 
-    current_week_start = end_ts - pd.Timedelta(days=int(end_ts.dayofweek))
+    current_week_start = cast(
+        pd.Timestamp, end_ts - pd.Timedelta(days=int(end_ts.dayofweek))
+    )
+    if pd.isna(current_week_start):
+        return None
     if current_week_start not in weekly_counts.index:
         weekly_counts.loc[current_week_start] = 0.0
         weekly_counts = weekly_counts.sort_index()
 
+    return weekly_counts, current_week_start
+
+
+def _weekly_trend_window_stats(
+    historical_weeks: pd.DataFrame,
+    lookback_weeks: int,
+    *,
+    require_full_window: bool = False,
+) -> _WeeklyTrendWindowStats | None:
+    """Compute normalized baseline stats for the most recent ``lookback_weeks``."""
+
+    candidate_weeks = cast(pd.DataFrame, historical_weeks.tail(lookback_weeks))
+    if candidate_weeks.empty:
+        return None
+    if require_full_window and int(candidate_weeks.shape[0]) < lookback_weeks:
+        return None
+
+    week_totals = candidate_weeks.sum(axis=1)
+    valid_weeks = cast(pd.DataFrame, candidate_weeks[week_totals > 0])
+    if valid_weeks.empty:
+        return None
+
+    normalized = cast(
+        pd.DataFrame,
+        valid_weeks.cumsum(axis=1).div(valid_weeks.sum(axis=1), axis=0) * 100.0,
+    )
+    return _WeeklyTrendWindowStats(
+        lookback_weeks=lookback_weeks,
+        sample_size=int(valid_weeks.shape[0]),
+        avg_week_total=float(valid_weeks.sum(axis=1).mean()),
+        avg_curve=cast(pd.Series, normalized.mean(axis=0)),
+        p25_curve=cast(pd.Series, normalized.quantile(0.25, axis=0)),
+        p75_curve=cast(pd.Series, normalized.quantile(0.75, axis=0)),
+    )
+
+
+def _weekly_trend_current_week_curves(
+    weekly_counts: pd.DataFrame,
+    current_week_start: pd.Timestamp,
+    *,
+    end_date: datetime,
+    normalize_by_total: float,
+) -> tuple[pd.Series, list[int | None]]:
+    """Return current-week cumulative curve (%), plus raw cumulative values for hover."""
+
+    end_ts = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize()
     current_day_idx = int(end_ts.dayofweek)
+
     current_week_counts = cast(
         pd.Series, weekly_counts.loc[current_week_start].astype(float)
     )
-    current_week_cumsum = current_week_counts.cumsum()
+    raw_cumulative = current_week_counts.cumsum()
     for day_idx in range(current_day_idx + 1, 7):
-        current_week_cumsum.loc[day_idx] = float("nan")
+        raw_cumulative.loc[day_idx] = float("nan")
 
+    denominator = max(1e-6, float(normalize_by_total))
+    normalized_cumulative = raw_cumulative / denominator * 100.0
+    raw_hover_values = [
+        None if pd.isna(value) else int(round(float(value)))
+        for value in raw_cumulative.tolist()
+    ]
+    return cast(pd.Series, normalized_cumulative), raw_hover_values
+
+
+def _weekly_trend_add_window_traces(
+    fig: go.Figure,
+    *,
+    weekday_labels: list[str],
+    stats: _WeeklyTrendWindowStats,
+    color: str,
+    visible: bool | str,
+    show_in_legend: bool,
+) -> None:
+    """Add one baseline window (IQR band + average line) to the figure."""
+
+    legend_group = f"window-{stats.lookback_weeks}"
+    label = f"{stats.lookback_weeks}w baseline (n={stats.sample_size}, avg={stats.avg_week_total:.1f} tasks/w)"
+
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=stats.p25_curve.values,
+            mode="lines",
+            line=dict(width=0),
+            legendgroup=legend_group,
+            showlegend=False,
+            hoverinfo="skip",
+            visible=visible,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=stats.p75_curve.values,
+            mode="lines",
+            fill="tonexty",
+            fillcolor=color.replace("rgb", "rgba").replace(")", ", 0.14)"),
+            line=dict(width=0),
+            legendgroup=legend_group,
+            showlegend=False,
+            hovertemplate=(
+                f"<b>{stats.lookback_weeks}w interquartile range</b><br>"
+                "%{x}: %{y:.1f}%<extra></extra>"
+            ),
+            visible=visible,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=stats.avg_curve.values,
+            mode="lines+markers",
+            line=dict(color=color, width=3),
+            marker=dict(size=7, color=color),
+            name=label,
+            legendgroup=legend_group,
+            showlegend=show_in_legend,
+            visible=visible,
+            hovertemplate=(
+                f"<b>{stats.lookback_weeks}w average pace</b><br>"
+                "%{x}: %{y:.1f}% cumulative<br>"
+                f"Weeks used: {stats.sample_size}<br>"
+                f"Avg completed/week: {stats.avg_week_total:.1f}<extra></extra>"
+            ),
+        )
+    )
+
+
+def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Figure:
+    """
+    Plot cumulative weekly completion trend.
+
+    Design:
+    - Always visible (and fixed): current week + previous 3-week baseline.
+    - Optional overlays: 6w/12w/24w baselines, toggled independently via legend.
+    - All curves are normalized to percentage progression across weekdays.
+    """
+
+    prepared = _weekly_trend_prepare_weekly_counts(df, end_date)
+    if prepared is None:
+        message = (
+            "Missing 'type' column in activity data."
+            if "type" not in df.columns
+            else "No completed tasks available yet."
+        )
+        return _weekly_trend_empty_figure(message)
+
+    weekly_counts, current_week_start = prepared
+    weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     historical_weeks = cast(
         pd.DataFrame, weekly_counts[weekly_counts.index < current_week_start]
     )
-    fig = go.Figure()
-    trace_groups: list[tuple[int, int, int, int]] = []
 
-    for lookback in lookbacks:
-        window_weeks = cast(pd.DataFrame, historical_weeks.tail(lookback))
-        week_totals = window_weeks.sum(axis=1)
-        valid_weeks = cast(pd.DataFrame, window_weeks[week_totals > 0])
-        sample_size = int(valid_weeks.shape[0])
-
-        if sample_size > 0:
-            normalized = cast(
-                pd.DataFrame,
-                valid_weeks.cumsum(axis=1).div(valid_weeks.sum(axis=1), axis=0) * 100.0,
-            )
-            avg_curve = cast(pd.Series, normalized.mean(axis=0))
-            p25_curve = cast(pd.Series, normalized.quantile(0.25, axis=0))
-            p75_curve = cast(pd.Series, normalized.quantile(0.75, axis=0))
-            average_week_total = float(valid_weeks.sum(axis=1).mean())
-        else:
-            avg_curve = pd.Series(0.0, index=range(7), dtype=float)
-            p25_curve = pd.Series(0.0, index=range(7), dtype=float)
-            p75_curve = pd.Series(0.0, index=range(7), dtype=float)
-            average_week_total = 1.0
-
-        current_percent_vs_avg = (
-            (current_week_cumsum / average_week_total) * 100.0
-            if average_week_total > 0
-            else (current_week_cumsum * 0.0)
+    fixed_baseline = _weekly_trend_window_stats(historical_weeks, lookback_weeks=3)
+    if fixed_baseline is None:
+        return _weekly_trend_empty_figure(
+            "Not enough finished-week data for baseline trend."
         )
-        current_hover_raw = [
-            None if pd.isna(v) else int(round(float(v)))
-            for v in current_week_cumsum.tolist()
-        ]
 
-        start = len(cast(tuple[Any, ...], fig.data))
-        fig.add_trace(
-            go.Scatter(
-                x=weekday_labels,
-                y=p25_curve.values,
-                mode="lines",
-                line=dict(width=0),
-                name=f"Last {lookback}w IQR (25-75%)",
-                legendgroup=f"w{lookback}",
-                showlegend=False,
-                hoverinfo="skip",
-                visible=False,
+    optional_windows = [6, 12, 24]
+    optional_stats = [
+        stats
+        for window in optional_windows
+        if (
+            stats := _weekly_trend_window_stats(
+                historical_weeks,
+                lookback_weeks=window,
+                require_full_window=True,
             )
         )
-        fig.add_trace(
-            go.Scatter(
-                x=weekday_labels,
-                y=p75_curve.values,
-                mode="lines",
-                fill="tonexty",
-                fillcolor="rgba(100, 181, 246, 0.18)",
-                line=dict(width=0),
-                name=f"Last {lookback}w IQR (25-75%)",
-                legendgroup=f"w{lookback}",
-                showlegend=True,
-                hovertemplate="<b>IQR band</b><br>%{x}: %{y:.1f}%<extra></extra>",
-                visible=False,
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=weekday_labels,
-                y=avg_curve.values,
-                mode="lines+markers",
-                line=dict(color="#6CCFF6", width=3),
-                marker=dict(size=7, color="#6CCFF6"),
-                name=f"Avg pace (last {lookback} full weeks)",
-                legendgroup=f"w{lookback}",
-                hovertemplate=(
-                    f"<b>Avg pace ({lookback}w)</b><br>"
-                    "%{x}: %{y:.1f}% cumulative<br>"
-                    f"Weeks used: {sample_size}<extra></extra>"
-                ),
-                visible=False,
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=weekday_labels,
-                y=current_percent_vs_avg.values,
-                customdata=current_hover_raw,
-                mode="lines+markers",
-                line=dict(color="#FFB703", width=3, dash="dash"),
-                marker=dict(size=8, color="#FFB703"),
-                name="Current week (raw cumulative, no forecast)",
-                legendgroup=f"w{lookback}",
-                hovertemplate=(
-                    "<b>Current week</b><br>"
-                    "%{x}: %{customdata} tasks cumulative<br>"
-                    "%{y:.1f}% of selected average weekly volume<extra></extra>"
-                ),
-                visible=False,
-            )
-        )
-        trace_groups.append(
-            (lookback, sample_size, start, len(cast(tuple[Any, ...], fig.data)))
-        )
+        is not None
+    ]
 
-    if not trace_groups:
-        return _empty_figure("Not enough history to build completion trend.")
-
-    default_idx = next(
-        (idx for idx, (_, samples, _, _) in enumerate(trace_groups) if samples > 0), 0
+    current_curve, current_hover_raw = _weekly_trend_current_week_curves(
+        weekly_counts,
+        current_week_start,
+        end_date=end_date,
+        normalize_by_total=fixed_baseline.avg_week_total,
     )
-    for idx in range(*trace_groups[default_idx][2:4]):
-        fig.data[idx].visible = True
+    current_total = (
+        max(value or 0 for value in current_hover_raw if value is not None)
+        if current_hover_raw
+        else 0
+    )
 
-    buttons = []
-    for lookback, samples, start, end in trace_groups:
-        visibility = [False] * len(cast(tuple[Any, ...], fig.data))
-        for idx in range(start, end):
-            visibility[idx] = True
-        title_suffix = (
-            f"{lookback}w baseline (n={samples})"
-            if samples > 0
-            else f"{lookback}w baseline (n=0)"
-        )
-        buttons.append(
-            dict(
-                label=f"{lookback}w",
-                method="update",
-                args=[
-                    {"visible": visibility},
-                    {"title.text": f"Weekly Completion Trend · {title_suffix}"},
-                ],
-            )
+    fig = go.Figure()
+    color_map = {
+        3: "rgb(108, 207, 246)",
+        6: "rgb(144, 190, 109)",
+        12: "rgb(249, 132, 74)",
+        24: "rgb(168, 104, 255)",
+    }
+
+    _weekly_trend_add_window_traces(
+        fig,
+        weekday_labels=weekday_labels,
+        stats=fixed_baseline,
+        color=color_map[3],
+        visible=True,
+        show_in_legend=False,  # Fixed default baseline: not user-togglable.
+    )
+
+    for stats in optional_stats:
+        _weekly_trend_add_window_traces(
+            fig,
+            weekday_labels=weekday_labels,
+            stats=stats,
+            color=color_map.get(stats.lookback_weeks, "rgb(190, 190, 190)"),
+            visible="legendonly",
+            show_in_legend=True,
         )
 
-    active_lookback, active_samples, _, _ = trace_groups[default_idx]
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=current_curve.values,
+            customdata=current_hover_raw,
+            mode="lines+markers",
+            line=dict(color="#FFB703", width=3, dash="dash"),
+            marker=dict(size=8, color="#FFB703"),
+            name=(
+                f"Current week (raw: {current_total} tasks so far, "
+                f"normalized vs 3w avg={fixed_baseline.avg_week_total:.1f})"
+            ),
+            showlegend=False,  # Current week stays fixed and always visible.
+            hovertemplate=(
+                "<b>Current week</b><br>"
+                "%{x}: %{customdata} cumulative tasks<br>"
+                "%{y:.1f}% vs 3-week average volume<extra></extra>"
+            ),
+        )
+    )
+
+    optional_suffix = (
+        "Toggle optional 6w/12w/24w baselines in legend."
+        if optional_stats
+        else "No optional 6w/12w/24w baselines available yet."
+    )
     fig.update_layout(
         template="plotly_dark",
         title={
-            "text": f"Weekly Completion Trend · {active_lookback}w baseline (n={active_samples})",
+            "text": (
+                f"Weekly Completion Trend · Fixed 3w baseline (n={fixed_baseline.sample_size})<br>"
+                f"<sup>{optional_suffix}</sup>"
+            ),
             "x": 0.5,
             "xanchor": "center",
             "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
@@ -656,7 +775,7 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
         },
         yaxis={
             "title": {
-                "text": "Cumulative completions (% of weekly average)",
+                "text": "Cumulative completions (% progression)",
                 "font": {"size": 14, "color": "#ffffff"},
             },
             "tickfont": {"size": 12, "color": "#e6e6e6"},
@@ -666,31 +785,16 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
             "linecolor": "rgba(255,255,255,0.24)",
             "rangemode": "tozero",
         },
-        updatemenus=[
-            dict(
-                type="buttons",
-                direction="right",
-                x=0.99,
-                xanchor="right",
-                y=1.18,
-                yanchor="top",
-                showactive=True,
-                active=default_idx,
-                font=dict(size=11, color="#ffffff"),
-                bgcolor="rgba(17,19,24,0.9)",
-                bordercolor="rgba(255,255,255,0.24)",
-                borderwidth=1,
-                buttons=buttons,
-            )
-        ],
         legend={
             "orientation": "h",
             "yanchor": "bottom",
             "y": 1.02,
             "xanchor": "left",
             "x": 0.01,
+            "groupclick": "togglegroup",
             "font": {"size": 11, "color": "#e6e6e6"},
             "bgcolor": "rgba(17,19,24,0.75)",
+            "title": {"text": "Optional windows"},
         },
         plot_bgcolor="#111318",
         paper_bgcolor="#111318",
