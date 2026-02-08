@@ -8,11 +8,12 @@ from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
 from todoist.database.base import Database
+from todoist.utils import automation_log_path
 
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
-    logger.add("automation.log", rotation="500 MB")
+    logger.add(automation_log_path(), rotation="500 MB")
     db = Database('.env')
 
     # Instantiate activity automation explicitly to avoid cross-instantiation.

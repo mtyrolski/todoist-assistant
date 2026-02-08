@@ -515,6 +515,80 @@ def test_cumsum_completed_tasks_periodically_hides_inactive_projects_in_range():
     assert not any(name.startswith("Project B") for name in trace_names)
 
 
+def test_plot_completed_tasks_periodically_adds_total_overlay_on_primary_axis():
+    """Periodic plot should include all-project totals on the primary y-axis."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 5)
+
+    fig = plot_completed_tasks_periodically(
+        df,
+        beg_date,
+        end_date,
+        granularity="W-SUN",
+        project_colors={"Project A": "#123456"},
+    )
+
+    traces = cast(tuple[Any, ...], fig.data)
+    total_traces = [
+        trace
+        for trace in traces
+        if "all projects (total)" in str(getattr(trace, "name", "")).lower()
+    ]
+    assert total_traces
+    assert getattr(cast(Any, total_traces[0]), "yaxis", None) in (None, "y")
+    assert getattr(cast(Any, fig.layout), "yaxis2", None) is None
+
+
+def test_cumsum_completed_tasks_periodically_adds_total_overlay_on_primary_axis():
+    """Cumulative plot should include all-project totals on the primary y-axis."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 5)
+
+    fig = cumsum_completed_tasks_periodically(
+        df,
+        beg_date,
+        end_date,
+        granularity="W-SUN",
+        project_colors={"Project A": "#123456"},
+    )
+
+    traces = cast(tuple[Any, ...], fig.data)
+    total_traces = [
+        trace
+        for trace in traces
+        if "all projects (total cumulative)" in str(getattr(trace, "name", "")).lower()
+    ]
+    assert total_traces
+    assert getattr(cast(Any, total_traces[0]), "yaxis", None) in (None, "y")
+    assert getattr(cast(Any, fig.layout), "yaxis2", None) is None
+
+
+def test_plot_completed_tasks_periodically_can_disable_total_overlay():
+    """Secondary-axis total line should be optional and hideable via function flag."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 5)
+
+    fig = plot_completed_tasks_periodically(
+        df,
+        beg_date,
+        end_date,
+        granularity="W-SUN",
+        project_colors={"Project A": "#123456"},
+        include_total_overlay=False,
+    )
+
+    trace_names = [
+        str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)
+    ]
+    assert not any("all projects" in name.lower() for name in trace_names)
+
+
 def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows():
     """Weekly trend should keep 3w/current fixed and expose 6w/12w/24w as legend toggles."""
 

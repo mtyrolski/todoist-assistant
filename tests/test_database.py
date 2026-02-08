@@ -6,7 +6,7 @@ from typing import Any, cast
 import pytest
 from unittest.mock import patch, MagicMock
 
-from tests.factories import make_project_entry, make_task_entry
+from tests.factories import make_project, make_project_entry, make_task_entry
 from todoist.api import EndpointCallResult, TodoistEndpoints
 from todoist.api.client import RequestSpec
 from todoist.database.db_tasks import DatabaseTasks
@@ -278,6 +278,79 @@ def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projec
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.endpoint == TodoistEndpoints.GET_PROJECT_DATA
     assert spec_arg.data == {"project_id": "12345"}
+
+
+def test_fetch_mapping_project_id_to_root_uses_in_memory_parent_links(db_projects):
+    root = make_project(project_id="root", project_entry=make_project_entry(project_id="root", parent_id=None))
+    child = make_project(project_id="child", project_entry=make_project_entry(project_id="child", parent_id="root"))
+    grandchild = make_project(
+        project_id="grandchild",
+        project_entry=make_project_entry(project_id="grandchild", parent_id="child"),
+    )
+    archived_root = make_project(
+        project_id="archived_root",
+        project_entry=make_project_entry(project_id="archived_root", parent_id=None, is_archived=True),
+        is_archived=True,
+    )
+    archived_child = make_project(
+        project_id="archived_child",
+        project_entry=make_project_entry(project_id="archived_child", parent_id="archived_root", is_archived=True),
+        is_archived=True,
+    )
+
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[root, child, grandchild]) as mock_fetch_projects,
+        patch.object(db_projects, "fetch_archived_projects", return_value=[archived_root, archived_child]) as mock_fetch_archived,
+        patch.object(db_projects, "fetch_project_by_id") as mock_fetch_project_by_id,
+    ):
+        mapping = db_projects.fetch_mapping_project_id_to_root()
+
+    assert mapping["root"].id == "root"
+    assert mapping["child"].id == "root"
+    assert mapping["grandchild"].id == "root"
+    assert mapping["archived_root"].id == "archived_root"
+    assert mapping["archived_child"].id == "archived_root"
+    mock_fetch_projects.assert_called_once_with(include_tasks=False)
+    mock_fetch_archived.assert_called_once()
+    mock_fetch_project_by_id.assert_not_called()
+
+
+def test_fetch_mapping_project_id_to_root_uses_cache_after_first_call(db_projects):
+    root = make_project(project_id="root", project_entry=make_project_entry(project_id="root", parent_id=None))
+    child = make_project(project_id="child", project_entry=make_project_entry(project_id="child", parent_id="root"))
+
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[root, child]) as mock_fetch_projects,
+        patch.object(db_projects, "fetch_archived_projects", return_value=[]) as mock_fetch_archived,
+    ):
+        mapping_first = db_projects.fetch_mapping_project_id_to_root()
+        mapping_second = db_projects.fetch_mapping_project_id_to_root()
+
+    assert mapping_first["child"].id == "root"
+    assert mapping_second["child"].id == "root"
+    mock_fetch_projects.assert_called_once_with(include_tasks=False)
+    mock_fetch_archived.assert_called_once()
+
+
+def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(db_projects):
+    orphan = make_project(
+        project_id="orphan",
+        project_entry=make_project_entry(project_id="orphan", parent_id="missing_parent"),
+    )
+    fetched_root = make_project(
+        project_id="remote_root",
+        project_entry=make_project_entry(project_id="remote_root", parent_id=None),
+    )
+
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[orphan]),
+        patch.object(db_projects, "fetch_archived_projects", return_value=[]),
+        patch.object(db_projects, "fetch_project_by_id", return_value=fetched_root) as mock_fetch_project_by_id,
+    ):
+        mapping = db_projects.fetch_mapping_project_id_to_root()
+
+    assert mapping["orphan"].id == "remote_root"
+    mock_fetch_project_by_id.assert_called_once_with("missing_parent", True)
 
 
 @patch('todoist.database.db_activity.logger')

@@ -69,6 +69,8 @@ def _seed_config_dir(config_dir: Path, install_dir: Path) -> None:
 def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | None = None) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = data_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = data_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,11 +86,11 @@ def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | 
                 break
 
     os.environ[EnvVar.CONFIG_DIR] = str(config_dir)
-    os.environ[EnvVar.CACHE_DIR] = str(data_dir)
+    os.environ[EnvVar.CACHE_DIR] = str(cache_dir)
     os.environ.setdefault(EnvVar.DATA_DIR, str(data_dir))
     os.environ.setdefault(EnvVar.LOGS_DIR, str(logs_dir))
     os.environ.setdefault(EnvVar.PERSONAL_DIR, str(data_dir / "personal"))
-    os.environ[EnvVar.AGENT_CACHE_PATH] = str(data_dir)
+    os.environ[EnvVar.AGENT_CACHE_PATH] = str(cache_dir)
     os.environ[EnvVar.AGENT_INSTRUCTIONS_DIR] = str(config_dir / "agent_instructions")
 
 

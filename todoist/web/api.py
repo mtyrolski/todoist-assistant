@@ -54,6 +54,7 @@ from todoist.llm.llm_utils import _sanitize_text
 from todoist.utils import (
     Cache,
     LocalStorageError,
+    automation_log_path,
     load_config,
     set_tqdm_progress_callback,
     get_tqdm_progress_callback,
@@ -178,6 +179,14 @@ class _DashboardState:
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
         self.demo_mode: bool = False
 
+    def is_ready_for(self, *, demo_mode: bool) -> bool:
+        return (
+            self.df_activity is not None
+            and self.active_projects is not None
+            and self.project_colors is not None
+            and self.demo_mode == demo_mode
+        )
+
 
 @dataclass
 class _ProgressState:
@@ -202,6 +211,7 @@ _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
+_DASHBOARD_STATE_SCHEMA_VERSION = 1
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
     "Querying project data": 1,
@@ -449,6 +459,87 @@ def _build_tqdm_progress_callback():
     return _callback
 
 
+def _activity_cache_signature() -> dict[str, int] | None:
+    activity_path = Path(Cache().activity.path)
+    if not activity_path.exists():
+        return None
+    try:
+        stat = activity_path.stat()
+    except OSError:
+        return None
+    return {"mtime_ns": int(stat.st_mtime_ns), "size": int(stat.st_size)}
+
+
+def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
+    df_activity = _state.df_activity
+    active_projects = _state.active_projects
+    project_colors = _state.project_colors
+    if (
+        df_activity is None
+        or active_projects is None
+        or project_colors is None
+    ):
+        return
+
+    payload: dict[str, Any] = {
+        "version": _DASHBOARD_STATE_SCHEMA_VERSION,
+        "created_at": _now_iso(),
+        "last_refresh_s": float(_state.last_refresh_s),
+        "demo_mode": bool(demo_mode),
+        "activity_cache_signature": _activity_cache_signature(),
+        "df_activity": df_activity,
+        "active_projects": active_projects,
+        "project_colors": project_colors,
+    }
+    try:
+        Cache().dashboard_state.save(payload)
+    except (LocalStorageError, OSError, TypeError) as exc:
+        logger.warning("Failed to persist dashboard state cache: {}", exc)
+
+
+def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
+    try:
+        payload = Cache().dashboard_state.load()
+    except LocalStorageError:
+        return False
+
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("version") != _DASHBOARD_STATE_SCHEMA_VERSION:
+        return False
+    if bool(payload.get("demo_mode", False)) != demo_mode:
+        return False
+
+    payload_signature = payload.get("activity_cache_signature")
+    current_signature = _activity_cache_signature()
+    if payload_signature != current_signature:
+        return False
+
+    df_activity = payload.get("df_activity")
+    active_projects = payload.get("active_projects")
+    project_colors = payload.get("project_colors")
+    if not isinstance(df_activity, pd.DataFrame):
+        return False
+    if not isinstance(active_projects, list):
+        return False
+    if not isinstance(project_colors, dict):
+        return False
+
+    _state.db = None
+    _state.df_activity = df_activity
+    _state.active_projects = active_projects
+    _state.project_colors = {str(k): str(v) for k, v in project_colors.items()}
+    _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
+    _state.home_payload_cache = {}
+    _state.demo_mode = demo_mode
+    logger.info(
+        "Loaded dashboard state cache from disk (events={}, projects={})",
+        len(df_activity),
+        len(active_projects),
+    )
+    return True
+
+
 def _refresh_state_sync(*, demo_mode: bool) -> None:
     global _activity_backfill_attempted
     # Reset progress state to clear any stale information from previous failed refreshes
@@ -598,6 +689,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.last_refresh_s = time.time()
         _state.home_payload_cache = {}
         _state.demo_mode = demo_mode
+        _persist_state_to_disk_cache(demo_mode=demo_mode)
     except Exception as exc:  # pragma: no cover - defensive
         error = f"{type(exc).__name__}: {exc}"
         raise
@@ -609,37 +701,43 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
     global _main_loop
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-    if not refresh and _state.db is not None and _state.demo_mode == desired_demo:
+    if not refresh and _state.is_ready_for(demo_mode=desired_demo):
         return
 
     async with _STATE_LOCK:
         desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-        if not refresh and _state.db is not None and _state.demo_mode == desired_demo:
+        if not refresh and _state.is_ready_for(demo_mode=desired_demo):
+            return
+        if not refresh and _load_state_from_disk_cache(demo_mode=desired_demo):
             return
         # Store the main event loop for worker threads to use
         _main_loop = asyncio.get_running_loop()
         await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
 
 
-def _stat_file(path: str) -> dict[str, Any] | None:
-    if not os.path.exists(path):
+def _cache_runtime_path(filename: str) -> Path:
+    return Path(Cache().path) / filename
+
+
+def _stat_file(path: str | Path) -> dict[str, Any] | None:
+    path_obj = Path(path).expanduser().resolve()
+    if not path_obj.exists():
         return None
     try:
-        mtime = os.path.getmtime(path)
-        size = os.path.getsize(path)
+        stat = path_obj.stat()
         return {
-            "path": path,
-            "mtime": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
-            "size": size,
+            "path": str(path_obj),
+            "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            "size": stat.st_size,
         }
     except OSError:
-        return {"path": path, "mtime": None, "size": None}
+        return {"path": str(path_obj), "mtime": None, "size": None}
 
 
 def _service_statuses() -> list[dict[str, Any]]:
     api_key_set = bool(_resolve_api_key())
-    cache_activity = _stat_file("activity.joblib")
-    automation_log = _stat_file("automation.log")
+    cache_activity = _stat_file(_cache_runtime_path("activity.joblib"))
+    automation_log = _stat_file(automation_log_path())
     observer_state = _load_observer_state()
     observer_enabled = bool(observer_state.get("enabled", True))
 
@@ -697,7 +795,7 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
             if _state.last_refresh_s
             else None
         },
-        "activityCache": _stat_file("activity.joblib"),
+        "activityCache": _stat_file(_cache_runtime_path("activity.joblib")),
         "now": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -2193,36 +2291,50 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
 
 def _log_files() -> list[dict[str, Any]]:
     log_files: list[dict[str, Any]] = []
-    for log_path in _DATA_DIR.rglob("*.log"):
-        if not log_path.is_file():
-            continue
-        try:
-            stat = log_path.stat()
-        except OSError:
-            continue
-        if stat.st_size <= 0:
-            continue
-        try:
-            rel_path = log_path.relative_to(_DATA_DIR)
-        except ValueError:
-            rel_path = log_path.name
-        log_files.append(
-            {
-                "path": str(rel_path),
-                "size": stat.st_size,
-                "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(
-                    timespec="seconds"
-                ),
-            }
-        )
+    search_roots: list[Path] = []
+    for root in (_DATA_DIR.resolve(), Path(Cache().path).resolve()):
+        if root.exists() and root not in search_roots:
+            search_roots.append(root)
+
+    seen_paths: set[Path] = set()
+    for root in search_roots:
+        for log_path in root.rglob("*.log"):
+            resolved = log_path.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+            if not log_path.is_file():
+                continue
+            try:
+                stat = log_path.stat()
+            except OSError:
+                continue
+            if stat.st_size <= 0:
+                continue
+            try:
+                rel_path = resolved.relative_to(_DATA_DIR.resolve())
+            except ValueError:
+                rel_path = resolved
+            log_files.append(
+                {
+                    "path": str(rel_path),
+                    "size": stat.st_size,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(
+                        timespec="seconds"
+                    ),
+                }
+            )
     return sorted(log_files, key=lambda x: x["path"])
 
 
 def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
-    candidate = (_DATA_DIR / rel_path).resolve()
-    if _DATA_DIR not in candidate.parents and candidate != _DATA_DIR:
+    raw = Path(rel_path).expanduser()
+    candidate = raw.resolve() if raw.is_absolute() else (_DATA_DIR / raw).resolve()
+
+    allowed_roots = {_DATA_DIR.resolve(), Path(Cache().path).resolve()}
+    if not any(candidate == root or root in candidate.parents for root in allowed_roots):
         raise HTTPException(
-            status_code=400, detail="Path must be within data directory"
+            status_code=400, detail="Path must be within data or cache directory"
         )
     if suffix and candidate.suffix != suffix:
         raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
@@ -2267,8 +2379,15 @@ async def admin_read_log(
     abs_path = _safe_data_path(path, suffix=".log")
     stat = abs_path.stat()
     payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
+    try:
+        display_path = abs_path.relative_to(_DATA_DIR.resolve())
+    except ValueError:
+        try:
+            display_path = abs_path.relative_to(Path(Cache().path).resolve())
+        except ValueError:
+            display_path = abs_path
     return {
-        "path": str(abs_path.relative_to(_DATA_DIR)),
+        "path": str(display_path),
         "size": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         **payload,

@@ -24,6 +24,7 @@ class DatabaseProjects:
         self._api_client = TodoistAPIClient()
         self.archived_projects_cache: dict[str, Project] | None = None    # Not initialized yet
         self.projects_cache: list[Project] | None = None    # Not initialized yet
+        self.mapping_project_id_to_root_cache: dict[str, Project] | None = None    # Not initialized yet
         self.mapping_project_name_to_color: dict[str, str] | None = None    # Not initialized yet
 
     def pull(self):
@@ -33,6 +34,7 @@ class DatabaseProjects:
     def reset(self):
         self.archived_projects_cache = None
         self.projects_cache = None
+        self.mapping_project_id_to_root_cache = None
         self.pull()
 
     @property
@@ -202,47 +204,50 @@ class DatabaseProjects:
         return mapping
 
     def fetch_mapping_project_id_to_root(self) -> dict[str, "Project"]:
+        if self.mapping_project_id_to_root_cache is not None:
+            return self.mapping_project_id_to_root_cache
+
         archived_projects = {project.id: project for project in self.fetch_archived_projects()}
         projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}
-        mapping_project_id_to_root: dict[str, "Project"] = {}
+        all_projects = {**archived_projects, **projects}
+        mapping_project_id_to_root: dict[str, Project] = {}
 
-        def get_root_project_with_retry(project_id: str) -> Optional[Project]:
-            """Get root project with built-in retry logic."""
-            return with_retry(
-                partial(self._get_root_project, project_id),
-                operation_name=f"resolve hierarchy for project {project_id}",
-                max_attempts=RETRY_MAX_ATTEMPTS
+        logger.info("Building project hierarchy (active + archived) in memory")
+        if not all_projects:
+            self.mapping_project_id_to_root_cache = {}
+            return self.mapping_project_id_to_root_cache
+
+        # Project id -> root project id memoization to avoid repeated parent-chain traversals.
+        root_id_cache: dict[str, str | None] = {}
+        # Fallback roots resolved from API when parent chains reference unknown ids.
+        fallback_root_cache: dict[str, Project | None] = {}
+
+        all_project_ids = list(all_projects.keys())
+        total_projects = len(all_project_ids)
+        for completed, project_id in enumerate(
+            tqdm(all_project_ids, total=total_projects, desc='Building project hierarchy', unit='project'),
+            start=1,
+        ):
+            root_id = self._resolve_root_project_id_in_memory(
+                project_id=project_id,
+                all_projects=all_projects,
+                root_id_cache=root_id_cache,
+                fallback_root_cache=fallback_root_cache,
             )
-
-        logger.info("Building project hierarchy (active + archived) with thread pool")
-        all_projects_seq: list[Project] = list(projects.values()) + list(archived_projects.values())
-        if not all_projects_seq:
-            return mapping_project_id_to_root
-
-        max_workers = min(get_max_concurrent_requests(), len(all_projects_seq))
-        total_projects = len(all_projects_seq)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_pid = {executor.submit(get_root_project_with_retry, p.id): p.id for p in all_projects_seq}
-            for completed, future in enumerate(
-                tqdm(
-                    as_completed(future_to_pid),
-                    total=total_projects,
-                    desc='Building project hierarchy',
-                    unit='project',
-                ),
-                start=1,
-            ):
-                pid = future_to_pid[future]
-                try:
-                    root = future.result(timeout=60)
-                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover
-                    logger.error(f"Hierarchy resolution failed for project {pid}: {e.__class__.__name__}: {e}")
-                    continue
-                if root is not None:
-                    mapping_project_id_to_root[pid] = root
+            if root_id is None:
                 report_tqdm_progress("Building project hierarchy", completed, total_projects, "project")
+                continue
 
-        return mapping_project_id_to_root
+            root_project = all_projects.get(root_id)
+            if root_project is None:
+                root_project = fallback_root_cache.get(root_id)
+            if root_project is not None:
+                mapping_project_id_to_root[project_id] = root_project
+
+            report_tqdm_progress("Building project hierarchy", completed, total_projects, "project")
+
+        self.mapping_project_id_to_root_cache = mapping_project_id_to_root
+        return self.mapping_project_id_to_root_cache
 
     def fetch_mapping_project_id_to_color(self) -> dict[str, str]:
         """
@@ -291,6 +296,57 @@ class DatabaseProjects:
             return project
         # Recurse up
         return self._get_root_project(parent_id)
+
+    def _resolve_root_project_id_in_memory(
+        self,
+        *,
+        project_id: str,
+        all_projects: dict[str, Project],
+        root_id_cache: dict[str, str | None],
+        fallback_root_cache: dict[str, Project | None],
+    ) -> str | None:
+        """
+        Resolve root project id using local project metadata first, with memoized API fallback.
+        """
+        if project_id in root_id_cache:
+            return root_id_cache[project_id]
+
+        traversal_path: list[str] = []
+        traversal_seen: set[str] = set()
+        current_id = project_id
+        while True:
+            if current_id in root_id_cache:
+                resolved_root_id = root_id_cache[current_id]
+                break
+
+            if current_id in traversal_seen:
+                logger.warning(f"Detected project hierarchy cycle while resolving root for {project_id}")
+                resolved_root_id = current_id
+                break
+
+            traversal_path.append(current_id)
+            traversal_seen.add(current_id)
+            current_project = all_projects.get(current_id)
+            if current_project is None:
+                fallback_root = fallback_root_cache.get(current_id)
+                if current_id not in fallback_root_cache:
+                    fallback_root = try_n_times(partial(self.fetch_project_by_id, current_id, True), 3)
+                    fallback_root_cache[current_id] = fallback_root
+                    if fallback_root is not None:
+                        fallback_root_cache[fallback_root.id] = fallback_root
+
+                resolved_root_id = fallback_root.id if fallback_root is not None else None
+                break
+
+            parent_id = current_project.project_entry.parent_id
+            if parent_id is None:
+                resolved_root_id = current_id
+                break
+            current_id = parent_id
+
+        for seen_project_id in traversal_path:
+            root_id_cache[seen_project_id] = resolved_root_id
+        return resolved_root_id
 
     def _fetch_projects_data(self) -> list[ProjectEntry]:
         spec = RequestSpec(

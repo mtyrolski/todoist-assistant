@@ -4,6 +4,7 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, KeysView
 from unittest.mock import MagicMock, patch
 
@@ -11,7 +12,9 @@ import pytest
 
 from todoist.env import EnvVar
 from todoist.utils import (
+    DEFAULT_CACHE_SUBDIR,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
+    MIGRATION_BACKUP_DIRNAME,
     RETRY_BACKOFF_MEAN,
     RETRY_BACKOFF_STD,
     RETRY_MAX_ATTEMPTS,
@@ -253,6 +256,7 @@ def test_cache_initialization_creates_expected_storages(tmp_path):
         "integration_launches": "integration_launches.joblib",
         "automation_launches": "automation_launches.joblib",
         "processed_gmail_messages": "processed_gmail_messages.joblib",
+        "dashboard_state": "dashboard_state.joblib",
         "llm_breakdown_progress": "llm_breakdown_progress.joblib",
         "llm_breakdown_queue": "llm_breakdown_queue.joblib",
         "llm_chat_queue": "llm_chat_queue.joblib",
@@ -264,10 +268,40 @@ def test_cache_initialization_creates_expected_storages(tmp_path):
         assert storage.path == str(tmp_path / filename)
 
 
-def test_cache_uses_env_path_by_default(tmp_path):
+def test_cache_uses_env_path_by_default(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     with patch.dict(os.environ, {EnvVar.CACHE_DIR: str(tmp_path)}, clear=True):
         cache = Cache()
     assert cache.path == str(tmp_path)
+
+
+def test_cache_uses_dot_cache_default_when_env_missing(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    with patch.dict(os.environ, {}, clear=True):
+        cache = Cache()
+    assert Path(cache.path) == (tmp_path / DEFAULT_CACHE_SUBDIR).resolve()
+
+
+def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    legacy_activity = tmp_path / "activity.joblib"
+    legacy_log = tmp_path / "automation.log"
+    LocalStorage(str(legacy_activity), set).save({"event1"})
+    legacy_log.write_text("legacy-log", encoding="utf-8")
+
+    with patch.dict(os.environ, {}, clear=True):
+        cache = Cache()
+
+    cache_root = Path(cache.path)
+    backup_root = tmp_path / MIGRATION_BACKUP_DIRNAME
+
+    assert cache.activity.load() == {"event1"}
+    assert (cache_root / "activity.joblib").exists()
+    assert (cache_root / "automation.log").exists()
+    assert (backup_root / "activity.joblib").exists()
+    assert (backup_root / "automation.log").exists()
+    assert not legacy_activity.exists()
+    assert not legacy_log.exists()
 
 
 @pytest.mark.parametrize(

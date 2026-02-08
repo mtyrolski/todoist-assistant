@@ -41,6 +41,116 @@ def _set_state_with_df(df: pd.DataFrame) -> None:
     web_api._state.active_projects = []
     web_api._state.project_colors = {}
     web_api._state.db = None
+    web_api._state.home_payload_cache = {}
+
+
+def _clear_dashboard_state() -> None:
+    web_api._state.df_activity = None
+    web_api._state.active_projects = None
+    web_api._state.project_colors = None
+    web_api._state.db = None
+    web_api._state.demo_mode = False
+    web_api._state.home_payload_cache = {}
+
+
+def _single_event_df() -> pd.DataFrame:
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-15",
+                "id": "e1",
+                "title": "t1",
+                "type": "completed",
+                "parent_project_name": "A",
+                "root_project_name": "A",
+                "task_id": "1",
+            }
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
+def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    df = _single_event_df()
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": False,
+            "activity_cache_signature": web_api._activity_cache_signature(),
+            "df_activity": df,
+            "active_projects": [],
+            "project_colors": {"A": "#123456"},
+        }
+    )
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=False)
+    assert loaded is True
+    assert web_api._state.df_activity is not None
+    assert len(web_api._state.df_activity) == 1
+    assert web_api._state.project_colors == {"A": "#123456"}
+    assert web_api._state.active_projects == []
+
+
+def test_load_state_from_disk_cache_rejects_stale_activity_signature(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    original_signature = web_api._activity_cache_signature()
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": False,
+            "activity_cache_signature": original_signature,
+            "df_activity": _single_event_df(),
+            "active_projects": [],
+            "project_colors": {},
+        }
+    )
+
+    # Mutate activity cache so signature no longer matches cached dashboard snapshot.
+    cache.activity.save({"new-event"})
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=False)
+    assert loaded is False
+
+
+def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) -> None:
+    _stub_all_figures(monkeypatch)
+    _clear_dashboard_state()
+
+    def _fake_load_state_from_disk_cache(*, demo_mode: bool) -> bool:
+        _ = demo_mode
+        _set_state_with_df(_single_event_df())
+        web_api._state.demo_mode = False
+        return True
+
+    def _unexpected_refresh(*, demo_mode: bool) -> None:
+        _ = demo_mode
+        raise AssertionError("_refresh_state_sync should not run when disk cache is ready")
+
+    monkeypatch.setattr(web_api, "_load_state_from_disk_cache", _fake_load_state_from_disk_cache)
+    monkeypatch.setattr(web_api, "_refresh_state_sync", _unexpected_refresh)
+    monkeypatch.setattr(web_api, "_env_demo_mode", lambda: False)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    assert res.status_code == 200
 
 
 def test_dashboard_home_validates_weeks(monkeypatch) -> None:
@@ -196,15 +306,17 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     _stub_all_figures(monkeypatch)
 
     df = pd.DataFrame(
-        columns=[
-            "date",
-            "id",
-            "title",
-            "type",
-            "parent_project_name",
-            "root_project_name",
-            "task_id",
-        ]
+        columns=pd.Index(
+            [
+                "date",
+                "id",
+                "title",
+                "type",
+                "parent_project_name",
+                "root_project_name",
+                "task_id",
+            ]
+        )
     )
     df["date"] = pd.to_datetime(df["date"])
     df.set_index("date", inplace=True)

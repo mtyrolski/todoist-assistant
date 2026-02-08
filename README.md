@@ -86,6 +86,13 @@ Open:
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
 
+## Cache and logs
+- Runtime cache files now live in `./.cache/todoist-assistant/` by default.
+- You can override cache location with `TODOIST_CACHE_DIR`.
+- Automation logs are written to `<cache-dir>/automation.log`.
+- On startup, legacy runtime files found in old locations are migrated to the cache dir and backed up in `.cache-migration-backup/`.
+- Migration backups are temporary and are planned for removal in `v0.3.0`.
+
 ## Quick start (Docker)
 ```bash
 docker compose up --build

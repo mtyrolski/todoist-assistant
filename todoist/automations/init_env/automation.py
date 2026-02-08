@@ -4,14 +4,14 @@ from tqdm import tqdm
 from omegaconf import DictConfig
 from todoist.automations.base import Automation
 from todoist.database.base import Database
-from todoist.utils import try_n_times
+from todoist.utils import automation_log_path, try_n_times
 from functools import partial
 from todoist.automations.activity import Activity
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
     # Setup logging to a file with rotation
-    logger.add("automation.log", rotation="500 MB")
+    logger.add(automation_log_path(), rotation="500 MB")
 
     dbio = Database('.env')
     automations: list[Automation] = hydra.utils.instantiate(config.automations)
