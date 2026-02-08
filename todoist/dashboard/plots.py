@@ -102,7 +102,6 @@ def plot_events_over_time(
     df_filtered = df.loc[beg_date:end_date].copy()
 
     # Define activity types and colors with high contrast
-    activity_types = ["added", "completed", "updated", "deleted", "rescheduled"]
     activity_colors = {
         "added": "#2E8B57",  # Sea Green - for creation
         "completed": "#4169E1",  # Royal Blue - for accomplishment
