@@ -8,8 +8,37 @@ from pandas import DataFrame
 from todoist.constants import EventExtraField, EventType
 
 
+def _normalize_access(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return None
+        return {"visibility": stripped}
+    return None
+
+
+def _normalize_day_order(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
 @dataclass
-class _ProjectEntry_API_V9:
+class _ProjectEntry_V1:
     id: str
     name: str
     color: str
@@ -24,26 +53,36 @@ class _ProjectEntry_API_V9:
     shared: bool
     created_at: str
     updated_at: str
-    v2_id: str
-    v2_parent_id: str | None
-    sync_id: str | None
-    collapsed: bool
+    # Todoist API v1 fields
+    is_shared: bool | None = None
+    is_collapsed: bool | None = None
+    creator_uid: str | None = None
+    public_key: str | None = None
+    role: str | None = None
+    # Legacy pre-v1 compatibility fields
+    v2_id: str | None = None
+    v2_parent_id: str | None = None
+    sync_id: str | None = None
+    collapsed: bool | None = None
     inbox_project: bool = False
     description: str = ''
     default_order: int | None = None
     public_access: bool = False
-    access: str | None = None
+    access: dict[str, Any] | None = None
     new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
+    def __post_init__(self):
+        self.access = _normalize_access(self.access)
+
     def __repr__(self):
-        return f'Project {self.name}'
+        return f"Project {self.name}"
 
     def __str__(self):
-        return f'Project {self.name}'
+        return f"Project {self.name}"
 
 
 @dataclass
-class _Event_API_V9:
+class _Event_V1:
     id: str
     object_type: str
     object_id: str
@@ -54,20 +93,23 @@ class _Event_API_V9:
     initiator_id: str | None
     extra_data: dict[str, Any]
     extra_data_id: str | None
-    v2_object_id: str | None
-    v2_parent_item_id: str | None
-    v2_parent_project_id: str | None
+    # Todoist API v1 fields
+    source: str | None = None
+    # Legacy pre-v1 compatibility fields
+    v2_object_id: str | None = None
+    v2_parent_item_id: str | None = None
+    v2_parent_project_id: str | None = None
     new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
     def __repr__(self):
-        return f'Event {self.object_type} {self.event_type}'
+        return f"Event {self.object_type} {self.event_type}"
 
     def __str__(self):
-        return f'Event {self.object_type} {self.event_type}'
+        return f"Event {self.object_type} {self.event_type}"
 
 
 @dataclass
-class _Task_API_V9:
+class _Task_V1:
     id: str
     is_deleted: bool
     added_at: str
@@ -92,18 +134,25 @@ class _Task_API_V9:
     deadline: str | None
     duration: dict[str, str | int] | None
     updated_at: str
-    v2_id: str | None
-    v2_parent_id: str | None
-    v2_project_id: str | None
-    v2_section_id: str | None
-    day_order: str | None
+    # Todoist API v1 fields
+    is_collapsed: bool | None = None
+    completed_by_uid: str | None = None
+    # Legacy pre-v1 compatibility fields
+    v2_id: str | None = None
+    v2_parent_id: str | None = None
+    v2_project_id: str | None = None
+    v2_section_id: str | None = None
+    day_order: str | int | None = None
     new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
+    def __post_init__(self):
+        self.day_order = _normalize_day_order(self.day_order)
+
     def __repr__(self):
-        return f'Task {self.content}'
+        return f"Task {self.content}"
 
     def __str__(self):
-        return f'Task {self.content}'
+        return f"Task {self.content}"
 
     @property
     def kwargs(self) -> dict[str, Any]:
@@ -137,9 +186,9 @@ class _Task_API_V9:
                 return None
 
 
-ProjectEntry = _ProjectEntry_API_V9
-TaskEntry = _Task_API_V9
-EventEntry = _Event_API_V9
+ProjectEntry = _ProjectEntry_V1
+TaskEntry = _Task_V1
+EventEntry = _Event_V1
 
 
 def is_recurring_task(task: 'Task'):
@@ -313,9 +362,8 @@ def events_to_dataframe(
         mapping_data['parent_project_id'].append(parent_project_id)
         mapping_data['parent_project_name'].append(project_id_to_name.get(parent_project_id, ''))
         mapping_data['parent_item_id'].append(event.event_entry.parent_item_id)
-        # Compute robust task identifier
         ee = event.event_entry
-        task_id = ee.parent_item_id or ee.object_id or ee.v2_parent_item_id or ee.v2_object_id
+        task_id = ee.parent_item_id or ee.object_id
         mapping_data['task_id'].append(task_id)
 
     logger.info(f'Processed {len(mapping_data["id"])} events')

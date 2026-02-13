@@ -1,14 +1,16 @@
 # pylint: disable=too-many-lines
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Final, cast
+from typing import Any, cast
 
 import pandas as pd
 import plotly.graph_objects as go
-from todoist.types import Project
 
 _DASHBOARD_GRID_COLOR = "rgba(255,255,255,0.03)"
 _DASHBOARD_AXIS_LINE_COLOR = "rgba(255,255,255,0.18)"
+_ALL_TASKS_TOTAL_COLOR = "#F4D35E"
+_ALL_TASKS_TOTAL_ACCENT = "#EE964B"
 
 
 def _apply_dashboard_axes(fig: go.Figure) -> go.Figure:
@@ -80,28 +82,9 @@ def _forecast_period_total(
     return max(int(actual_so_far), int(round(forecast)))
 
 
-def plot_event_distribution_by_type(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                    _granularity: str) -> go.Figure:
-    """
-    Plots the distribution of event types as a pie chart within the specified date range.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
-
-    Returns:
-    go.Figure: Plotly figure object representing the event distribution by type.
-    """
-    df_filtered = df.loc[beg_date:end_date]
-    event_counts = df_filtered['type'].value_counts()
-    fig = go.Figure(data=[go.Pie(labels=event_counts.index, values=event_counts.values, hole=.3)])
-    fig.update_layout(title_text='Event Distribution by Type')
-    return fig
-
-
-def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: datetime, _granularity: str) -> go.Figure:
+def plot_events_over_time(
+    df: pd.DataFrame, beg_date: datetime, end_date: datetime, _granularity: str
+) -> go.Figure:
     """
     Plots the number of events over time as a stacked area chart with daily data points
     and 7-day rolling averages, segmented by activity type.
@@ -119,27 +102,28 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     df_filtered = df.loc[beg_date:end_date].copy()
 
     # Define activity types and colors with high contrast
-    activity_types = ['added', 'completed', 'updated', 'deleted', 'rescheduled']
     activity_colors = {
-        'added': '#2E8B57',      # Sea Green - for creation
-        'completed': '#4169E1',   # Royal Blue - for accomplishment
-        'updated': '#FF8C00',     # Dark Orange - for modification
-        'deleted': '#DC143C',     # Crimson - for removal
-        'rescheduled': '#9370DB'  # Medium Purple - for rescheduling
+        "added": "#2E8B57",  # Sea Green - for creation
+        "completed": "#4169E1",  # Royal Blue - for accomplishment
+        "updated": "#FF8C00",  # Dark Orange - for modification
+        "deleted": "#DC143C",  # Crimson - for removal
+        "rescheduled": "#9370DB",  # Medium Purple - for rescheduling
     }
 
     # Resample to daily granularity and count events by type
     # Create daily counts for each activity type, avoiding the deprecation warning
     daily_counts_dict = {}
-    activity_types = ['added', 'completed', 'updated', 'deleted', 'rescheduled']
+    activity_types = ["added", "completed", "updated", "deleted", "rescheduled"]
 
     for activity_type in activity_types:
-        type_data = df_filtered[df_filtered['type'] == activity_type]
+        type_data = df_filtered[df_filtered["type"] == activity_type]
         if len(type_data) > 0:
-            daily_counts_dict[activity_type] = type_data.resample('D').size()
+            daily_counts_dict[activity_type] = type_data.resample("D").size()
         else:
             # Create empty series for this activity type
-            date_range = pd.date_range(start=beg_date.date(), end=end_date.date(), freq='D')
+            date_range = pd.date_range(
+                start=beg_date.date(), end=end_date.date(), freq="D"
+            )
             daily_counts_dict[activity_type] = pd.Series(0, index=date_range)
 
     # Combine into a single DataFrame
@@ -154,15 +138,17 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     daily_counts = cast(pd.DataFrame, daily_counts[activity_types])
 
     # Calculate 7-day rolling averages for each activity type
-    rolling_averages = cast(pd.DataFrame, daily_counts.rolling(window=7, min_periods=1).mean())
+    rolling_averages = cast(
+        pd.DataFrame, daily_counts.rolling(window=7, min_periods=1).mean()
+    )
 
     # Helper to convert HEX to RGBA with alpha (for nicer area fills on dark bg)
     def hex_to_rgba(hex_color: str, alpha: float) -> str:
-        hex_color = hex_color.lstrip('#')
+        hex_color = hex_color.lstrip("#")
         r = int(hex_color[0:2], 16)
         g = int(hex_color[2:4], 16)
         b = int(hex_color[4:6], 16)
-        return f'rgba({r},{g},{b},{alpha})'
+        return f"rgba({r},{g},{b},{alpha})"
 
     # Create the figure (dark-friendly template)
     fig = go.Figure()
@@ -170,197 +156,77 @@ def plot_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: dateti
     # Add traces for each activity type (stacked area chart)
     for i, activity_type in enumerate(activity_types):
         if activity_type in rolling_averages.columns:
-            fig.add_trace(go.Scatter(
-                x=rolling_averages.index,
-                y=rolling_averages[activity_type],
-                mode='lines',
-                name=activity_type.capitalize(),
-                fill='tonexty' if i > 0 else 'tozeroy',
-                line=dict(
-                    color=activity_colors.get(activity_type, '#808080'),
-                    width=2
-                ),
-                # Use semi-transparent fill while keeping solid line for readability on dark bg
-                fillcolor=hex_to_rgba(activity_colors.get(activity_type, '#9e9e9e'), 0.28),
-                hovertemplate=(
-                    f'<b>{activity_type.capitalize()}</b><br>' +
-                    'Date: %{x}<br>' +
-                    'Average: %{y:.1f} events/day<br>' +
-                    '<extra></extra>'
+            fig.add_trace(
+                go.Scatter(
+                    x=rolling_averages.index,
+                    y=rolling_averages[activity_type],
+                    mode="lines",
+                    name=activity_type.capitalize(),
+                    fill="tonexty" if i > 0 else "tozeroy",
+                    line=dict(
+                        color=activity_colors.get(activity_type, "#808080"), width=2
+                    ),
+                    # Use semi-transparent fill while keeping solid line for readability on dark bg
+                    fillcolor=hex_to_rgba(
+                        activity_colors.get(activity_type, "#9e9e9e"), 0.28
+                    ),
+                    hovertemplate=(
+                        f"<b>{activity_type.capitalize()}</b><br>"
+                        + "Date: %{x}<br>"
+                        + "Average: %{y:.1f} events/day<br>"
+                        + "<extra></extra>"
+                    ),
                 )
-            ))
+            )
 
     # Update layout with improved styling
     fig.update_layout(
-        template='plotly_dark',
+        template="plotly_dark",
         title={
-            'text': 'Events Over Time (7-Day Rolling Average by Activity Type)',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
+            "text": "Events Over Time (7-Day Rolling Average by Activity Type)",
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
         },
         xaxis={
-            'title': {'text': 'Date', 'font': {'color': '#ffffff'}},
-            'showline': True,
-            'linewidth': 1,
-            'linecolor': 'rgba(255,255,255,0.24)',
-            'tickfont': {'size': 12, 'color': '#e6e6e6'}
+            "title": {"text": "Date", "font": {"color": "#ffffff"}},
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": "rgba(255,255,255,0.24)",
+            "tickfont": {"size": 12, "color": "#e6e6e6"},
         },
         yaxis={
-            'title': {'text': 'Average Number of Events per Day', 'font': {'color': '#ffffff'}},
-            'showline': True,
-            'linewidth': 1,
-            'linecolor': 'rgba(255,255,255,0.24)',
-            'tickfont': {'size': 12, 'color': '#e6e6e6'}
+            "title": {
+                "text": "Average Number of Events per Day",
+                "font": {"color": "#ffffff"},
+            },
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": "rgba(255,255,255,0.24)",
+            "tickfont": {"size": 12, "color": "#e6e6e6"},
         },
-        plot_bgcolor='#111318',
-        paper_bgcolor='#111318',
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
         legend={
-            'orientation': 'h',
-            'yanchor': 'bottom',
-            'y': 1.02,
-            'xanchor': 'right',
-            'x': 1,
-            'font': {'size': 12, 'color': '#e6e6e6'}
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+            "font": {"size": 12, "color": "#e6e6e6"},
         },
         margin=dict(l=50, r=50, t=80, b=50),
-        hovermode='x unified',
-        hoverlabel=dict(bgcolor='#1e1e1e', bordercolor='#444', font=dict(color='#ffffff'))
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#1e1e1e", bordercolor="#444", font=dict(color="#ffffff")
+        ),
     )
     return _apply_dashboard_axes(fig)
 
 
-def plot_most_popular_labels(projects: list[Project], label_colors: dict[str, str]) -> go.Figure:
-    """
-    Plots the most popular labels as pie chart.
-
-    Parameters:
-    projects (list[Project]): List of projects.
-
-    Returns:
-    go.Figure: Plotly figure object representing the most popular labels.
-    """
-
-    labels_counter = {}
-    for project in projects:
-        for task in project.tasks:
-            for label in task.task_entry.labels:
-                labels_counter[label] = labels_counter.get(label, 0) + 1
-
-    N: Final[int] = 10    # constant for now
-    top_n_labels = dict(sorted(labels_counter.items(), key=lambda item: item[1], reverse=True)[:N])
-
-    fig = go.Figure(data=[go.Pie(labels=list(top_n_labels.keys()), values=list(top_n_labels.values()), hole=.3)])
-    fig.update_traces(hoverinfo='label+percent',
-                      textinfo='value',
-                      textfont_size=20,
-                      marker=dict(colors=[label_colors.get(label, '#808080') for label in top_n_labels.keys()],
-                                  line=dict(color='#000000', width=2)))
-    fig.update_layout(title_text='Most Popular Labels')
-    return fig
-
-
-def current_tasks_types(projects: list[Project]) -> go.Figure:
-    # count overude, today+tomorrow, this week, later+nodate tasks
-    # make  pie plot as above
-    today = datetime.now().date()
-    tomorrow = today + timedelta(days=1)
-    week_end = today + timedelta(days=7)
-    overdue = 0
-    today_tomorrow = 0
-    this_week = 0
-    later_nodate = 0
-    for project in projects:
-        for task in project.tasks:
-            if task.task_entry.due_datetime is None:
-                later_nodate += 1
-                continue
-            task_due_date = task.task_entry.due_datetime.date()
-
-            if task_due_date < today:
-                overdue += 1
-            elif task_due_date >= today and task_due_date <= tomorrow:
-                today_tomorrow += 1
-            elif task_due_date <= week_end:
-                this_week += 1
-            else:
-                later_nodate += 1
-
-    fig = go.Figure(data=[
-        go.Pie(labels=['Overdue', 'Today/Tomorrow', 'This Week', 'Later/No Date'],
-               values=[overdue, today_tomorrow, this_week, later_nodate],
-               hole=.3)
-    ])
-    fig.update_traces(hoverinfo='label+percent',
-                      textinfo='value',
-                      textfont_size=20,
-                      marker=dict(line=dict(color='#000000', width=2)))
-
-    fig.update_layout(title_text='Current Tasks Types')
-    return fig
-
-
-def plot_top_projects_by_events(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                project_colors: dict[str, str]) -> go.Figure:
-    """
-    Plots the top projects by the number of events as a bar chart within the specified date range.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
-
-    Returns:
-    go.Figure: Plotly figure object representing the top projects by number of events.
-    """
-    df_filtered = df.loc[beg_date:end_date]
-    project_counts = df_filtered['root_project_name'].value_counts().head(10)
-
-    fig = go.Figure(data=[
-        go.Bar(x=project_counts.index,
-               y=project_counts.values,
-               marker_color=[project_colors.get(project, '#808080') for project in project_counts.index])
-    ])
-    fig.update_layout(title_text='Top Projects by Number of Events',
-                      xaxis_title='Projects',
-                      yaxis_title='Number of Events')
-    return fig
-
-
-def plot_event_distribution_by_root_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                            project_colors: dict[str, str]) -> go.Figure:
-    """
-    Plots the distribution of event types by root project as a stacked bar chart within the specified date range.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
-
-    Returns:
-    go.Figure: Plotly figure object representing the event distribution by root project.
-    """
-    df_filtered = df.loc[beg_date:end_date]
-    event_counts = df_filtered.groupby('root_project_name')['type'].value_counts().unstack().fillna(0)
-    fig = go.Figure()
-
-    for col in event_counts.columns:
-        fig.add_trace(
-            go.Bar(name=col,
-                   x=event_counts.index,
-                   y=event_counts[col],
-                   marker_color=[project_colors.get(project, '#808080') for project in event_counts.index],
-                   showlegend=False))
-    fig.update_layout(barmode='stack',
-                      title_text='Event Distribution by Root Project',
-                      xaxis_title='Root Projects',
-                      yaxis_title='Number of Events')
-    return fig
-
-
-def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
+def plot_heatmap_of_events_by_day_and_hour(
+    df: pd.DataFrame, beg_date: datetime, end_date: datetime
+) -> go.Figure:
     """
     Plots a heatmap of events by day of the week and hour of the day within the specified date range.
     Enhanced version with dark mode support and improved informativeness.
@@ -379,24 +245,26 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     if df_filtered.empty:
         fig = go.Figure()
         fig.update_layout(
-            template='plotly_dark',
+            template="plotly_dark",
             title={
-                'text': 'Heatmap of Events by Day and Hour (No Data)',
-                'x': 0.5,
-                'xanchor': 'center',
-                'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
+                "text": "Heatmap of Events by Day and Hour (No Data)",
+                "x": 0.5,
+                "xanchor": "center",
+                "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
             },
-            paper_bgcolor='#111318',
-            plot_bgcolor='#111318'
+            paper_bgcolor="#111318",
+            plot_bgcolor="#111318",
         )
         return fig
 
     dt_series = pd.to_datetime(df_filtered.index).to_series(index=df_filtered.index)
-    df_filtered['hour'] = dt_series.dt.hour.astype(int)
-    df_filtered['day_of_week'] = dt_series.dt.dayofweek.astype(int)
+    df_filtered["hour"] = dt_series.dt.hour.astype(int)
+    df_filtered["day_of_week"] = dt_series.dt.dayofweek.astype(int)
 
     # Create heatmap data with proper indexing
-    heatmap_data = df_filtered.groupby(['day_of_week', 'hour']).size().unstack(fill_value=0)
+    heatmap_data = (
+        df_filtered.groupby(["day_of_week", "hour"]).size().unstack(fill_value=0)
+    )
 
     # Ensure all hours (0-23) and all days (0-6) are represented
     all_hours = list(range(24))
@@ -404,7 +272,15 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
     heatmap_data = heatmap_data.reindex(index=all_days, columns=all_hours, fill_value=0)
 
     # Day names for better readability
-    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    day_names = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
 
     nonzero_counts = heatmap_data.stack()
     nonzero_counts = nonzero_counts[nonzero_counts > 0]
@@ -444,81 +320,72 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
         hover_text.append(hover_row)
 
     # Create the heatmap using plotly graph objects for better control
-    fig = go.Figure(data=go.Heatmap(
-        z=heatmap_data.values,
-        x=all_hours,
-        y=day_names,
-        zmin=0,
-        zmax=zmax,
-        colorscale=[
-            [0.0, '#0d1b2a'],      # Dark blue for low activity
-            [0.1, '#1b263b'],      # Slightly lighter blue
-            [0.2, '#2d4f7c'],      # Medium blue
-            [0.3, '#415a77'],      # Blue-gray
-            [0.4, '#778da9'],      # Light blue-gray
-            [0.5, '#a8dadc'],      # Light blue
-            [0.6, '#f1faee'],      # Very light blue/white
-            [0.7, '#ffeaa7'],      # Light yellow
-            [0.8, '#fdcb6e'],      # Orange-yellow
-            [0.9, '#e17055'],      # Orange-red
-            [1.0, '#d63031']       # Red for high activity
-        ],
-        hovertemplate='%{customdata}<extra></extra>',
-        customdata=hover_text,
-        showscale=True,
-        colorbar=dict(
-            title=dict(
-                text="Events Count",
-                font=dict(size=14, color='#ffffff')
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=heatmap_data.values,
+            x=all_hours,
+            y=day_names,
+            zmin=0,
+            zmax=zmax,
+            colorscale=[
+                [0.0, "#0d1b2a"],  # Dark blue for low activity
+                [0.1, "#1b263b"],  # Slightly lighter blue
+                [0.2, "#2d4f7c"],  # Medium blue
+                [0.3, "#415a77"],  # Blue-gray
+                [0.4, "#778da9"],  # Light blue-gray
+                [0.5, "#a8dadc"],  # Light blue
+                [0.6, "#f1faee"],  # Very light blue/white
+                [0.7, "#ffeaa7"],  # Light yellow
+                [0.8, "#fdcb6e"],  # Orange-yellow
+                [0.9, "#e17055"],  # Orange-red
+                [1.0, "#d63031"],  # Red for high activity
+            ],
+            hovertemplate="%{customdata}<extra></extra>",
+            customdata=hover_text,
+            showscale=True,
+            colorbar=dict(
+                title=dict(text="Events Count", font=dict(size=14, color="#ffffff")),
+                tickfont=dict(size=12, color="#e6e6e6"),
+                bgcolor="#111318",
+                bordercolor="rgba(255,255,255,0.24)",
+                borderwidth=1,
             ),
-            tickfont=dict(size=12, color='#e6e6e6'),
-            bgcolor='#111318',
-            bordercolor='rgba(255,255,255,0.24)',
-            borderwidth=1
         )
-    ))
+    )
 
     # Update layout with dark theme and enhanced styling
     fig.update_layout(
-        template='plotly_dark',
+        template="plotly_dark",
         title={
-            'text': 'Activity Heatmap: Events by Day and Hour',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#ffffff'}
+            "text": "Activity Heatmap: Events by Day and Hour",
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
         },
         xaxis={
-            'title': {
-                'text': 'Hour of Day',
-                'font': {'size': 14, 'color': '#ffffff'}
-            },
-            'tickmode': 'array',
-            'tickvals': list(range(0, 24, 2)),  # Show every 2 hours for readability
-            'ticktext': [f'{h}:00' for h in range(0, 24, 2)],
-            'tickfont': {'size': 11, 'color': '#e6e6e6'},
-            'showline': True,
-            'linewidth': 1,
-            'linecolor': 'rgba(255,255,255,0.24)'
+            "title": {"text": "Hour of Day", "font": {"size": 14, "color": "#ffffff"}},
+            "tickmode": "array",
+            "tickvals": list(range(0, 24, 2)),  # Show every 2 hours for readability
+            "ticktext": [f"{h}:00" for h in range(0, 24, 2)],
+            "tickfont": {"size": 11, "color": "#e6e6e6"},
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": "rgba(255,255,255,0.24)",
         },
         yaxis={
-            'title': {
-            'text': 'Day of Week',
-            'font': {'size': 14, 'color': '#ffffff'}
-            },
-            'tickfont': {'size': 11, 'color': '#e6e6e6'},
-            'showline': True,
-            'linewidth': 1,
-            'linecolor': 'rgba(255,255,255,0.24)'
+            "title": {"text": "Day of Week", "font": {"size": 14, "color": "#ffffff"}},
+            "tickfont": {"size": 11, "color": "#e6e6e6"},
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": "rgba(255,255,255,0.24)",
         },
-        plot_bgcolor='#111318',
-        paper_bgcolor='#111318',
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
         margin=dict(l=80, r=100, t=80, b=60),
-        font=dict(color='#ffffff'),
+        font=dict(color="#ffffff"),
         hoverlabel=dict(
-            bgcolor='#1e1e1e',
-            bordercolor='#444',
-            font=dict(color='#ffffff', size=12)
-        )
+            bgcolor="#1e1e1e", bordercolor="#444", font=dict(color="#ffffff", size=12)
+        ),
     )
 
     # Add subtle annotations for peak activity times if there's data
@@ -541,37 +408,409 @@ def plot_heatmap_of_events_by_day_and_hour(df: pd.DataFrame, beg_date: datetime,
                 font=dict(color="#ffffff", size=10),
                 bgcolor="rgba(0,0,0,0.7)",
                 bordercolor="#ffffff",
-                borderwidth=1
+                borderwidth=1,
             )
     return _apply_dashboard_axes(fig)
 
 
-def plot_event_types_by_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime) -> go.Figure:
-    """
-    Plots the distribution of event types by project as a grouped bar chart within the specified date range.
+@dataclass(frozen=True)
+class _WeeklyTrendWindowStats:
+    """Computed baseline curve statistics for a lookback window."""
 
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
+    lookback_weeks: int
+    sample_size: int
+    avg_week_total: float
+    avg_curve: pd.Series
+    p25_curve: pd.Series
+    p75_curve: pd.Series
 
-    Returns:
-    go.Figure: Plotly figure object representing the event types by project.
-    """
-    df_filtered = df.loc[beg_date:end_date]
-    event_counts = df_filtered.groupby(['root_project_name', 'type']).size().unstack().fillna(0).head(10)
+
+def _weekly_trend_empty_figure(message: str) -> go.Figure:
+    """Return a dashboard-styled empty figure with an explanatory message."""
+
     fig = go.Figure()
-    for col in event_counts.columns:
-        fig.add_trace(go.Bar(name=col, x=event_counts.index, y=event_counts[col]))
-    fig.update_layout(barmode='group',
-                      title_text='Event Types by Project',
-                      xaxis_title='Projects',
-                      yaxis_title='Number of Events')
+    fig.add_annotation(
+        text=message,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=14, color="#e6e6e6"),
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        title={
+            "text": "Weekly Completion Trend",
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
+        },
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
+        margin=dict(l=56, r=32, t=84, b=56),
+    )
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
     return fig
 
 
-def _current_period_label(end_date: datetime, granularity: str, index: pd.DatetimeIndex | None = None) -> datetime | None:
+def _weekly_trend_prepare_weekly_counts(
+    df: pd.DataFrame, end_date: datetime
+) -> tuple[pd.DataFrame, pd.Timestamp] | None:
+    """Build a week x weekday matrix of completed-task counts up to ``end_date``."""
+
+    if "type" not in df.columns:
+        return None
+
+    df_completed = df[df["type"] == "completed"].loc[:end_date]
+    if df_completed.empty:
+        return None
+
+    completion_series = cast(
+        pd.Series,
+        pd.to_datetime(df_completed.index).to_series(index=df_completed.index),
+    )
+    completion_days = cast(pd.Series, completion_series.dt.normalize())
+    daily_counts = completion_days.groupby(completion_days).size().sort_index()
+    if daily_counts.empty:
+        return None
+
+    end_ts = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize()
+    all_days = pd.date_range(start=daily_counts.index.min(), end=end_ts, freq="D")
+    daily_counts = daily_counts.reindex(all_days, fill_value=0).astype(float)
+
+    day_index = cast(pd.Index, daily_counts.index)
+    day_numbers = cast(
+        pd.Series,
+        pd.to_datetime(day_index).to_series(index=day_index).dt.dayofweek.astype(int),
+    )
+    week_starts = cast(pd.Series, day_index - pd.to_timedelta(day_numbers, unit="D"))
+    day_frame = pd.DataFrame(
+        {
+            "count": daily_counts.values,
+            "week_start": week_starts.values,
+            "weekday": day_numbers.values,
+        },
+        index=day_index,
+    )
+
+    weekly_counts = cast(
+        pd.DataFrame,
+        day_frame.pivot_table(
+            index="week_start",
+            columns="weekday",
+            values="count",
+            aggfunc="sum",
+            fill_value=0.0,
+        ),
+    )
+    weekly_counts = weekly_counts.reindex(columns=range(7), fill_value=0.0).sort_index()
+
+    current_week_start = cast(
+        pd.Timestamp, end_ts - pd.Timedelta(days=int(end_ts.dayofweek))
+    )
+    if pd.isna(current_week_start):
+        return None
+    if current_week_start not in weekly_counts.index:
+        weekly_counts.loc[current_week_start] = 0.0
+        weekly_counts = weekly_counts.sort_index()
+
+    return weekly_counts, current_week_start
+
+
+def _weekly_trend_window_stats(
+    historical_weeks: pd.DataFrame,
+    lookback_weeks: int,
+    *,
+    require_full_window: bool = False,
+) -> _WeeklyTrendWindowStats | None:
+    """Compute normalized baseline stats for the most recent ``lookback_weeks``."""
+
+    candidate_weeks = cast(pd.DataFrame, historical_weeks.tail(lookback_weeks))
+    if candidate_weeks.empty:
+        return None
+    if require_full_window and int(candidate_weeks.shape[0]) < lookback_weeks:
+        return None
+
+    week_totals = candidate_weeks.sum(axis=1)
+    valid_weeks = cast(pd.DataFrame, candidate_weeks[week_totals > 0])
+    if valid_weeks.empty:
+        return None
+
+    normalized = cast(
+        pd.DataFrame,
+        valid_weeks.cumsum(axis=1).div(valid_weeks.sum(axis=1), axis=0) * 100.0,
+    )
+    return _WeeklyTrendWindowStats(
+        lookback_weeks=lookback_weeks,
+        sample_size=int(valid_weeks.shape[0]),
+        avg_week_total=float(valid_weeks.sum(axis=1).mean()),
+        avg_curve=cast(pd.Series, normalized.mean(axis=0)),
+        p25_curve=cast(pd.Series, normalized.quantile(0.25, axis=0)),
+        p75_curve=cast(pd.Series, normalized.quantile(0.75, axis=0)),
+    )
+
+
+def _weekly_trend_current_week_curves(
+    weekly_counts: pd.DataFrame,
+    current_week_start: pd.Timestamp,
+    *,
+    end_date: datetime,
+    normalize_by_total: float,
+) -> tuple[pd.Series, list[int | None]]:
+    """Return current-week cumulative curve (%), plus raw cumulative values for hover."""
+
+    end_ts = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize()
+    current_day_idx = int(end_ts.dayofweek)
+
+    current_week_counts = cast(
+        pd.Series, weekly_counts.loc[current_week_start].astype(float)
+    )
+    raw_cumulative = current_week_counts.cumsum()
+    for day_idx in range(current_day_idx + 1, 7):
+        raw_cumulative.loc[day_idx] = float("nan")
+
+    denominator = max(1e-6, float(normalize_by_total))
+    normalized_cumulative = raw_cumulative / denominator * 100.0
+    raw_hover_values = [
+        None if pd.isna(value) else int(round(float(value)))
+        for value in raw_cumulative.tolist()
+    ]
+    return cast(pd.Series, normalized_cumulative), raw_hover_values
+
+
+def _weekly_trend_add_window_traces(
+    fig: go.Figure,
+    *,
+    weekday_labels: list[str],
+    stats: _WeeklyTrendWindowStats,
+    color: str,
+    visible: bool | str,
+    show_in_legend: bool,
+) -> None:
+    """Add one baseline window (IQR band + average line) to the figure."""
+
+    legend_group = f"window-{stats.lookback_weeks}"
+    label = f"{stats.lookback_weeks}w baseline (n={stats.sample_size}, avg={stats.avg_week_total:.1f} tasks/w)"
+
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=stats.p25_curve.values,
+            mode="lines",
+            line=dict(width=0),
+            legendgroup=legend_group,
+            showlegend=False,
+            hoverinfo="skip",
+            visible=visible,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=stats.p75_curve.values,
+            mode="lines",
+            fill="tonexty",
+            fillcolor=color.replace("rgb", "rgba").replace(")", ", 0.14)"),
+            line=dict(width=0),
+            legendgroup=legend_group,
+            showlegend=False,
+            hovertemplate=(
+                f"<b>{stats.lookback_weeks}w interquartile range</b><br>"
+                "%{x}: %{y:.1f}%<extra></extra>"
+            ),
+            visible=visible,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=stats.avg_curve.values,
+            mode="lines+markers",
+            line=dict(color=color, width=3),
+            marker=dict(size=7, color=color),
+            name=label,
+            legendgroup=legend_group,
+            showlegend=show_in_legend,
+            visible=visible,
+            hovertemplate=(
+                f"<b>{stats.lookback_weeks}w average pace</b><br>"
+                "%{x}: %{y:.1f}% cumulative<br>"
+                f"Weeks used: {stats.sample_size}<br>"
+                f"Avg completed/week: {stats.avg_week_total:.1f}<extra></extra>"
+            ),
+        )
+    )
+
+
+def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Figure:
+    """
+    Plot cumulative weekly completion trend.
+
+    Design:
+    - Always visible (and fixed): current week + previous 3-week baseline.
+    - Optional overlays: 6w/12w/24w baselines, toggled independently via legend.
+    - All curves are normalized to percentage progression across weekdays.
+    """
+
+    prepared = _weekly_trend_prepare_weekly_counts(df, end_date)
+    if prepared is None:
+        message = (
+            "Missing 'type' column in activity data."
+            if "type" not in df.columns
+            else "No completed tasks available yet."
+        )
+        return _weekly_trend_empty_figure(message)
+
+    weekly_counts, current_week_start = prepared
+    weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    historical_weeks = cast(
+        pd.DataFrame, weekly_counts[weekly_counts.index < current_week_start]
+    )
+
+    fixed_baseline = _weekly_trend_window_stats(historical_weeks, lookback_weeks=3)
+    if fixed_baseline is None:
+        return _weekly_trend_empty_figure(
+            "Not enough finished-week data for baseline trend."
+        )
+
+    optional_windows = [6, 12, 24]
+    optional_stats = [
+        stats
+        for window in optional_windows
+        if (
+            stats := _weekly_trend_window_stats(
+                historical_weeks,
+                lookback_weeks=window,
+                require_full_window=True,
+            )
+        )
+        is not None
+    ]
+
+    current_curve, current_hover_raw = _weekly_trend_current_week_curves(
+        weekly_counts,
+        current_week_start,
+        end_date=end_date,
+        normalize_by_total=fixed_baseline.avg_week_total,
+    )
+    current_total = (
+        max(value or 0 for value in current_hover_raw if value is not None)
+        if current_hover_raw
+        else 0
+    )
+
+    fig = go.Figure()
+    color_map = {
+        3: "rgb(108, 207, 246)",
+        6: "rgb(144, 190, 109)",
+        12: "rgb(249, 132, 74)",
+        24: "rgb(168, 104, 255)",
+    }
+
+    _weekly_trend_add_window_traces(
+        fig,
+        weekday_labels=weekday_labels,
+        stats=fixed_baseline,
+        color=color_map[3],
+        visible=True,
+        show_in_legend=False,  # Fixed default baseline: not user-togglable.
+    )
+
+    for stats in optional_stats:
+        _weekly_trend_add_window_traces(
+            fig,
+            weekday_labels=weekday_labels,
+            stats=stats,
+            color=color_map.get(stats.lookback_weeks, "rgb(190, 190, 190)"),
+            visible="legendonly",
+            show_in_legend=True,
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=weekday_labels,
+            y=current_curve.values,
+            customdata=current_hover_raw,
+            mode="lines+markers",
+            line=dict(color="#FFB703", width=3, dash="dash"),
+            marker=dict(size=8, color="#FFB703"),
+            name=(
+                f"Current week (raw: {current_total} tasks so far, "
+                f"normalized vs 3w avg={fixed_baseline.avg_week_total:.1f})"
+            ),
+            showlegend=False,  # Current week stays fixed and always visible.
+            hovertemplate=(
+                "<b>Current week</b><br>"
+                "%{x}: %{customdata} cumulative tasks<br>"
+                "%{y:.1f}% vs 3-week average volume<extra></extra>"
+            ),
+        )
+    )
+
+    optional_suffix = (
+        "Toggle optional 6w/12w/24w baselines in legend."
+        if optional_stats
+        else "No optional 6w/12w/24w baselines available yet."
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        title={
+            "text": (
+                f"Weekly Completion Trend · Fixed 3w baseline (n={fixed_baseline.sample_size})<br>"
+                f"<sup>{optional_suffix}</sup>"
+            ),
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
+        },
+        xaxis={
+            "title": {"text": "Day of week", "font": {"size": 14, "color": "#ffffff"}},
+            "categoryorder": "array",
+            "categoryarray": weekday_labels,
+            "tickfont": {"size": 12, "color": "#e6e6e6"},
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": "rgba(255,255,255,0.24)",
+        },
+        yaxis={
+            "title": {
+                "text": "Cumulative completions (% progression)",
+                "font": {"size": 14, "color": "#ffffff"},
+            },
+            "tickfont": {"size": 12, "color": "#e6e6e6"},
+            "ticksuffix": "%",
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": "rgba(255,255,255,0.24)",
+            "rangemode": "tozero",
+        },
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "left",
+            "x": 0.01,
+            "groupclick": "togglegroup",
+            "font": {"size": 11, "color": "#e6e6e6"},
+            "bgcolor": "rgba(17,19,24,0.75)",
+            "title": {"text": "Optional windows"},
+        },
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
+        margin=dict(l=56, r=32, t=106, b=56),
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#1e1e1e", bordercolor="#444", font=dict(color="#ffffff")
+        ),
+    )
+    return _apply_dashboard_axes(fig)
+
+
+def _current_period_label(
+    end_date: datetime, granularity: str, index: pd.DatetimeIndex | None = None
+) -> datetime | None:
     """Return the resample label that contains ``end_date``.
 
     Prefer an existing label from ``index`` to stay aligned with previously
@@ -605,129 +844,364 @@ def _current_period_label(end_date: datetime, granularity: str, index: pd.Dateti
     return fallback
 
 
-def _split_completed_vs_current(series: pd.Series, current_label: datetime | None
-                                 ) -> tuple[pd.Series, pd.Series | None]:
-    """Split a time series into historical points and the current in-progress point."""
+def _drop_projects_without_period_activity(df_periodic: pd.DataFrame) -> pd.DataFrame:
+    """Remove projects that have no completions within the selected period."""
 
-    if current_label is None or series.empty or current_label not in series.index:
-        return series, None
+    if df_periodic.empty or not len(df_periodic.columns):
+        return df_periodic
 
-    historical = series.loc[series.index < current_label]
-    current = series.loc[[current_label]]
-    return historical, current
-
-
-def _ensure_current_point(series: pd.Series, current_label: datetime | None, *, strategy: str = 'zero') -> pd.Series:
-    """Guarantee ``series`` contains ``current_label`` so dotted traces can be drawn."""
-
-    if current_label is None:
-        return series
-
-    timestamp = pd.Timestamp(current_label)
-    if timestamp in series.index:
-        return series
-
-    series = series.copy()
-    if strategy == 'last' and not series.empty:
-        fill_value = series.iloc[-1]
-    else:
-        fill_value = 0
-
-    series.loc[timestamp] = fill_value
-    return series.sort_index()
+    active_columns = [
+        column
+        for column in df_periodic.columns
+        if float(cast(pd.Series, df_periodic[column]).fillna(0).sum()) > 0
+    ]
+    return cast(pd.DataFrame, df_periodic.loc[:, active_columns])
 
 
-def plot_cumulative_events_over_time(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                                     granularity: str) -> go.Figure:
-    """
-    Plots the cumulative number of events over time as a line chart within the specified date range.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
-
-    Returns:
-    go.Figure: Plotly figure object representing the cumulative events over time.
-    """
-    df_filtered = df.loc[:end_date]
-    cumulative_events = df_filtered.resample(granularity, label='right', closed='right').size().cumsum()
-    cumulative_events = cumulative_events[cumulative_events.index >= beg_date]
-
-    current_label = _current_period_label(end_date, granularity, cumulative_events.index)
-    cumulative_events = _ensure_current_point(cumulative_events, current_label, strategy='last')
-    completed, current = _split_completed_vs_current(cumulative_events, current_label)
-
-    fig = go.Figure()
-
-    if not completed.empty:
-        fig.add_trace(go.Scatter(x=completed.index, y=completed.values, mode='lines', name='Events'))
-
-    if current is not None:
-        connector = pd.concat([completed.tail(1), current]) if not completed.empty else current
-        fig.add_trace(go.Scatter(
-            x=connector.index,
-            y=connector.values,
-            mode='lines+markers',
-            line=dict(dash='dot'),
-            name='Events (current period)',
-            showlegend=False,
-        ))
-
-    fig.update_layout(title_text='Cumulative Events Over Time',
-                      xaxis_title='Date',
-                      yaxis_title='Cumulative Number of Events')
-    return fig
+@dataclass(frozen=True)
+class _PeriodicForecastContext:
+    current_label: datetime | None
+    current_start: datetime | None
+    current_end: datetime | None
+    as_of: datetime
+    show_forecast: bool
 
 
-def cumsum_plot_per_project(df: pd.DataFrame, beg_date: datetime, end_date: datetime,
-                            project_colors: dict[str, str]) -> go.Figure:
-    """
-    Plots the cumulative number of completed tasks per project over time as a line chart within the specified date range.
+def _prepare_completed_periodic_frame(
+    df: pd.DataFrame,
+    *,
+    beg_date: datetime,
+    end_date: datetime,
+    granularity: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build period x project completion counts for the selected range."""
 
-    Parameters:
-    df (pd.DataFrame): DataFrame containing event data.
-    beg_date (datetime): Start date for filtering events.
-    end_date (datetime): End date for filtering events.
-    granularity (str): Resampling granularity for the data.
+    df_completed = df[df["type"] == "completed"].loc[:end_date].copy()
+    df_completed.index = pd.to_datetime(df_completed.index)
+    df_periodic = cast(
+        pd.DataFrame,
+        df_completed.groupby([_period_grouper(granularity), "root_project_name"])
+        .size()
+        .unstack("root_project_name")
+        .sort_index(),
+    )
+    df_periodic = cast(pd.DataFrame, df_periodic[df_periodic.index >= beg_date])
+    return df_completed, _drop_projects_without_period_activity(df_periodic)
 
-    Returns:
-    go.Figure: Plotly figure object representing the cumulative number of completed tasks per project over time.
-    """
-    completed_tasks: pd.DataFrame = df[df['type'] == 'completed'].groupby(
-        ['root_project_name', 'root_project_id', 'date']).size().groupby('root_project_name').cumsum().reset_index()
-    completed_tasks = completed_tasks.rename(columns={0: 'completed'})
-    completed_tasks = cast(pd.DataFrame, completed_tasks[completed_tasks['date'] >= beg_date])
-    completed_tasks = cast(pd.DataFrame, completed_tasks[completed_tasks['date'] <= end_date])
-    fig = go.Figure()
 
-    for root_project_name in completed_tasks['root_project_name'].unique():
-        data = completed_tasks[completed_tasks['root_project_name'] == root_project_name]
-        fig.add_trace(
-            go.Scatter(
-                x=data['date'],
-                y=data['completed'],
-                line=dict(width=3, color=project_colors.get(root_project_name, '#808080')),
-                name=root_project_name,
-                line_shape='spline',
-            ))
+def _period_bounds_for_granularity(
+    end_date: datetime, granularity: str
+) -> tuple[datetime | None, datetime | None]:
+    """Return start/end boundaries of the period containing ``end_date``."""
 
-    # Update x-axis
-    fig.update_xaxes(
-        title_text='Date',
-        type='date',
-        showline=True,
-        showgrid=True,
+    try:
+        period = cast(Any, pd.Period(end_date, freq=granularity))
+        start = period.start_time
+        end = period.end_time
+        if pd.isna(start) or pd.isna(end):
+            return None, None
+        return (
+            cast(datetime, cast(Any, start).to_pydatetime(warn=False)),
+            cast(datetime, cast(Any, end).to_pydatetime(warn=False)),
+        )
+    except Exception:  # pragma: no cover - defensive fallback for unusual freqs
+        return None, None
+
+
+def _build_periodic_forecast_context(
+    *,
+    end_date: datetime,
+    granularity: str,
+    period_index: pd.Index,
+) -> _PeriodicForecastContext:
+    """Collect shared "current period" state used by periodic plots."""
+
+    normalized_index = cast(pd.DatetimeIndex, pd.DatetimeIndex(period_index))
+    current_label = _current_period_label(end_date, granularity, normalized_index)
+    current_start: datetime | None = None
+    current_end: datetime | None = None
+    if current_label is not None:
+        current_start, current_end = _period_bounds_for_granularity(
+            end_date, granularity
+        )
+
+    as_of = min(end_date, datetime.now())
+    show_forecast = bool(
+        current_label and current_start and current_end and current_label > as_of
+    )
+    return _PeriodicForecastContext(
+        current_label=current_label,
+        current_start=current_start,
+        current_end=current_end,
+        as_of=as_of,
+        show_forecast=show_forecast,
     )
 
-    # Update y-axis
-    fig.update_yaxes(title_text='Number of Completed Tasks')
-    return fig
+
+def _current_period_project_counts(
+    df_completed: pd.DataFrame, *, context: _PeriodicForecastContext
+) -> dict[str, int]:
+    """Return current-period task counts by project up to ``context.as_of``."""
+
+    if (
+        not context.show_forecast
+        or context.current_start is None
+        or df_completed.empty
+        or context.as_of < context.current_start
+    ):
+        return {}
+
+    df_current = df_completed[
+        (df_completed.index >= context.current_start)
+        & (df_completed.index <= context.as_of)
+    ]
+    if df_current.empty:
+        return {}
+    return df_current.groupby("root_project_name").size().astype(int).to_dict()
 
 
-def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str,
-                                      project_colors: dict[str, str]) -> go.Figure:
+def _total_tasks_series(df_periodic: pd.DataFrame) -> pd.Series:
+    """Sum all projects into a single total-count series."""
+
+    if df_periodic.empty or not len(df_periodic.columns):
+        return pd.Series(dtype=float)
+
+    totals = cast(pd.Series, df_periodic.fillna(0).sum(axis=1).astype(float))
+    if float(totals.fillna(0).sum()) <= 0:
+        return pd.Series(dtype=float)
+    return totals
+
+
+def _add_total_overlay_periodic_traces(
+    fig: go.Figure,
+    *,
+    total_series: pd.Series,
+    context: _PeriodicForecastContext,
+    total_actual_so_far: int,
+) -> None:
+    """Add all-project period totals and optional forecast markers."""
+
+    if total_series.empty:
+        return
+
+    if context.show_forecast and context.current_label is not None:
+        historical = cast(
+            pd.Series, total_series[total_series.index < pd.Timestamp(context.current_label)]
+        )
+    else:
+        historical = cast(pd.Series, total_series)
+
+    if not historical.empty:
+        historical_values = historical.astype(float).tolist()
+        fig.add_trace(
+            go.Scatter(
+                x=historical.index,
+                y=historical_values,
+                name="All Projects (total)",
+                legendgroup="all-projects-total",
+                line_shape="spline",
+                mode="lines+markers",
+                line=dict(color=_ALL_TASKS_TOTAL_COLOR, width=3),
+                marker=dict(size=8, symbol="diamond", color=_ALL_TASKS_TOTAL_COLOR),
+                hovertemplate="<b>All projects</b><br>%{x}: %{y:.0f} tasks<extra></extra>",
+            )
+        )
+
+    if (
+        not context.show_forecast
+        or context.current_label is None
+        or context.current_start is None
+        or context.current_end is None
+    ):
+        return
+
+    history_totals = cast(
+        pd.Series, total_series[total_series.index < pd.Timestamp(context.current_label)]
+    ).fillna(0)
+    history_values = history_totals.astype(float).tolist()
+    recently_active = total_actual_so_far > 0 or any(v > 0 for v in history_values[-4:])
+    if not recently_active:
+        return
+
+    forecast_total = _forecast_period_total(
+        actual_so_far=int(total_actual_so_far),
+        history_totals=history_values,
+        period_start=context.current_start,
+        period_end=context.current_end,
+        as_of=context.as_of,
+    )
+
+    if not historical.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=[historical.index[-1], context.current_label],
+                y=[float(historical.iloc[-1]), float(forecast_total)],
+                mode="lines",
+                line=dict(color=_ALL_TASKS_TOTAL_COLOR, dash="dash", width=2),
+                name="All Projects (forecast line)",
+                legendgroup="all-projects-total",
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=[context.current_label],
+            y=[float(total_actual_so_far)],
+            mode="markers",
+            marker=dict(
+                symbol="circle-open",
+                size=10,
+                line=dict(width=2, color=_ALL_TASKS_TOTAL_COLOR),
+            ),
+            name="All Projects (so far)",
+            legendgroup="all-projects-total",
+            showlegend=False,
+            hovertemplate="<b>All projects</b><br>So far: %{y:.0f} tasks<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[context.current_label],
+            y=[float(forecast_total)],
+            mode="markers",
+            marker=dict(
+                symbol="circle",
+                size=14,
+                color=_ALL_TASKS_TOTAL_ACCENT,
+                opacity=0.95,
+            ),
+            name="All Projects (forecast)",
+            legendgroup="all-projects-total",
+            showlegend=False,
+            hovertemplate="<b>All projects</b><br>Forecast: %{y:.0f} tasks<extra></extra>",
+        )
+    )
+
+
+def _add_total_overlay_cumulative_traces(
+    fig: go.Figure,
+    *,
+    total_cumulative_series: pd.Series,
+    context: _PeriodicForecastContext,
+    total_actual_so_far: int,
+) -> None:
+    """Add all-project cumulative totals and optional forecast markers."""
+
+    if total_cumulative_series.empty:
+        return
+
+    if context.show_forecast and context.current_label is not None:
+        historical = cast(
+            pd.Series,
+            total_cumulative_series[
+                total_cumulative_series.index < pd.Timestamp(context.current_label)
+            ],
+        )
+    else:
+        historical = cast(pd.Series, total_cumulative_series)
+
+    if not historical.empty:
+        historical_values = historical.astype(float).tolist()
+        fig.add_trace(
+            go.Scatter(
+                x=historical.index,
+                y=historical_values,
+                name="All Projects (total cumulative)",
+                legendgroup="all-projects-total",
+                line_shape="spline",
+                mode="lines+markers",
+                line=dict(color=_ALL_TASKS_TOTAL_COLOR, width=3),
+                marker=dict(size=8, symbol="diamond", color=_ALL_TASKS_TOTAL_COLOR),
+                hovertemplate="<b>All projects</b><br>%{x}: %{y:.0f} cumulative tasks<extra></extra>",
+            )
+        )
+
+    if (
+        not context.show_forecast
+        or context.current_label is None
+        or context.current_start is None
+        or context.current_end is None
+    ):
+        return
+
+    period_totals = total_cumulative_series.diff().fillna(total_cumulative_series).fillna(0)
+    history_values = cast(
+        pd.Series, period_totals[period_totals.index < pd.Timestamp(context.current_label)]
+    ).astype(float).tolist()
+    recently_active = total_actual_so_far > 0 or any(v > 0 for v in history_values[-4:])
+    if not recently_active:
+        return
+
+    forecast_total = _forecast_period_total(
+        actual_so_far=int(total_actual_so_far),
+        history_totals=history_values,
+        period_start=context.current_start,
+        period_end=context.current_end,
+        as_of=context.as_of,
+    )
+    base_total = float(historical.iloc[-1]) if not historical.empty else 0.0
+    actual_cumulative = float(base_total + total_actual_so_far)
+    forecast_cumulative = float(base_total + forecast_total)
+
+    if not historical.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=[historical.index[-1], context.current_label],
+                y=[float(base_total), float(forecast_cumulative)],
+                mode="lines",
+                line=dict(color=_ALL_TASKS_TOTAL_COLOR, dash="dash", width=2),
+                name="All Projects (forecast line)",
+                legendgroup="all-projects-total",
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=[context.current_label],
+            y=[float(actual_cumulative)],
+            mode="markers",
+            marker=dict(
+                symbol="circle-open",
+                size=10,
+                line=dict(width=2, color=_ALL_TASKS_TOTAL_COLOR),
+            ),
+            name="All Projects (so far)",
+            legendgroup="all-projects-total",
+            showlegend=False,
+            hovertemplate="<b>All projects</b><br>So far (cumulative): %{y:.0f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[context.current_label],
+            y=[float(forecast_cumulative)],
+            mode="markers",
+            marker=dict(
+                symbol="circle",
+                size=14,
+                color=_ALL_TASKS_TOTAL_ACCENT,
+                opacity=0.95,
+            ),
+            name="All Projects (forecast)",
+            legendgroup="all-projects-total",
+            showlegend=False,
+            hovertemplate="<b>All projects</b><br>Forecast (cumulative): %{y:.0f}<extra></extra>",
+        )
+    )
+
+
+def plot_completed_tasks_periodically(
+    df: pd.DataFrame,
+    beg_date: datetime,
+    end_date: datetime,
+    granularity: str,
+    project_colors: dict[str, str],
+    include_total_overlay: bool = True,
+) -> go.Figure:
     """
     Plots the number of completed tasks per project over time as a line chart with markers within the specified date range.
 
@@ -740,51 +1214,40 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
     Returns:
     go.Figure: Plotly figure object representing the number of completed tasks per project over time.
     """
-    df_completed = df[df['type'] == 'completed'].loc[:end_date].copy()
-    df_completed.index = pd.to_datetime(df_completed.index)
-    df_weekly_per_project = (
-        df_completed
-        .groupby([_period_grouper(granularity), 'root_project_name'])
-        .size()
-        .unstack('root_project_name')
-        .sort_index()
+    df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
+        df,
+        beg_date=beg_date,
+        end_date=end_date,
+        granularity=granularity,
     )
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
-
-    current_label = _current_period_label(end_date, granularity, df_weekly_per_project.index)
-    current_start: datetime | None = None
-    current_end: datetime | None = None
-    if current_label is not None:
-        try:
-            period = cast(Any, pd.Period(end_date, freq=granularity))
-            start = period.start_time
-            end = period.end_time
-            if not pd.isna(start) and not pd.isna(end):
-                current_start = cast(datetime, cast(Any, start).to_pydatetime(warn=False))
-                current_end = cast(datetime, cast(Any, end).to_pydatetime(warn=False))
-        except Exception:  # pragma: no cover
-            current_start = None
-            current_end = None
-
-    now = datetime.now()
-    as_of = min(end_date, now)
-    show_forecast = bool(current_label and current_start and current_end and current_label > as_of)
-
-    current_counts: dict[str, int] = {}
-    if show_forecast and current_start and not df_completed.empty and as_of >= current_start:
-        df_current = df_completed[(df_completed.index >= current_start) & (df_completed.index <= as_of)]
-        current_counts = df_current.groupby("root_project_name").size().astype(int).to_dict()
+    forecast_context = _build_periodic_forecast_context(
+        end_date=end_date,
+        granularity=granularity,
+        period_index=df_weekly_per_project.index,
+    )
+    current_counts = _current_period_project_counts(
+        df_completed, context=forecast_context
+    )
 
     fig = go.Figure()
 
-    for root_project_name in df_weekly_per_project.columns:
-        project_series = df_weekly_per_project[root_project_name].fillna(0)
+    for root_project in df_weekly_per_project.columns:
+        root_project_name = str(root_project)
+        project_series = cast(pd.Series, df_weekly_per_project[root_project]).fillna(0)
         color = project_colors.get(root_project_name, "#808080")
 
-        if show_forecast and current_label is not None:
-            historical = project_series[project_series.index < pd.Timestamp(current_label)]
+        if (
+            forecast_context.show_forecast
+            and forecast_context.current_label is not None
+        ):
+            historical = cast(
+                pd.Series,
+                project_series[
+                    project_series.index < pd.Timestamp(forecast_context.current_label)
+                ],
+            )
         else:
-            historical = project_series
+            historical = cast(pd.Series, project_series)
 
         if not historical.empty:
             fig.add_trace(
@@ -799,28 +1262,39 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
                 )
             )
 
-        if show_forecast and current_label is not None and current_start and current_end:
-            history_totals = (
-                project_series[project_series.index < pd.Timestamp(current_label)].fillna(0).astype(float).tolist()
+        if (
+            forecast_context.show_forecast
+            and forecast_context.current_label is not None
+            and forecast_context.current_start
+            and forecast_context.current_end
+        ):
+            history_source = cast(
+                pd.Series,
+                project_series[
+                    project_series.index < pd.Timestamp(forecast_context.current_label)
+                ],
             )
+            history_totals = history_source.fillna(0).astype(float).tolist()
             actual_so_far = int(current_counts.get(root_project_name, 0))
 
-            recently_active = actual_so_far > 0 or any(v > 0 for v in history_totals[-4:])
+            recently_active = actual_so_far > 0 or any(
+                v > 0 for v in history_totals[-4:]
+            )
             if not recently_active:
                 continue
 
             forecast_total = _forecast_period_total(
                 actual_so_far=actual_so_far,
                 history_totals=history_totals,
-                period_start=current_start,
-                period_end=current_end,
-                as_of=as_of,
+                period_start=forecast_context.current_start,
+                period_end=forecast_context.current_end,
+                as_of=forecast_context.as_of,
             )
 
             if not historical.empty:
                 fig.add_trace(
                     go.Scatter(
-                        x=[historical.index[-1], current_label],
+                        x=[historical.index[-1], forecast_context.current_label],
                         y=[float(historical.iloc[-1]), float(forecast_total)],
                         mode="lines",
                         line=dict(color=color, dash="dash", width=2),
@@ -833,10 +1307,12 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
 
             fig.add_trace(
                 go.Scatter(
-                    x=[current_label],
+                    x=[forecast_context.current_label],
                     y=[actual_so_far],
                     mode="markers",
-                    marker=dict(symbol="circle-open", size=10, line=dict(width=2, color=color)),
+                    marker=dict(
+                        symbol="circle-open", size=10, line=dict(width=2, color=color)
+                    ),
                     name=f"{root_project_name} (so far)",
                     legendgroup=root_project_name,
                     showlegend=False,
@@ -845,7 +1321,7 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
             )
             fig.add_trace(
                 go.Scatter(
-                    x=[current_label],
+                    x=[forecast_context.current_label],
                     y=[forecast_total],
                     mode="markers",
                     marker=dict(symbol="circle", size=16, color=color, opacity=0.92),
@@ -856,25 +1332,56 @@ def plot_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_
                 )
             )
 
+    if include_total_overlay:
+        total_series = _total_tasks_series(df_weekly_per_project)
+        _add_total_overlay_periodic_traces(
+            fig,
+            total_series=total_series,
+            context=forecast_context,
+            total_actual_so_far=sum(current_counts.values()),
+        )
+
     # Update x-axis
     fig.update_xaxes(
-        title_text='Date',
-        type='date',
+        title_text="Date",
+        title_standoff=14,
+        type="date",
         showline=True,
         showgrid=True,
     )
 
-    # Update y-axis
-    fig.update_yaxes(title_text='Number of Completed Tasks')
-
-    fig.update_layout(title_text=f'{granularity} Completed Tasks Per Project',
-                      yaxis=dict(autorange=True, fixedrange=False))
+    fig.update_layout(
+        title_text=f"{granularity} Completed Tasks Per Project",
+        yaxis=dict(
+            title=dict(text="Completed Tasks per Project", standoff=16),
+            autorange=True,
+            fixedrange=False,
+            rangemode="tozero",
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="left",
+            x=0.0,
+            tracegroupgap=12,
+            bgcolor="rgba(17,19,24,0.72)",
+            font=dict(size=11, color="#e6e6e6"),
+        ),
+        margin=dict(l=56, r=86, t=84, b=60),
+    )
 
     return _apply_dashboard_axes(fig)
 
 
-def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, end_date: datetime, granularity: str,
-                                        project_colors: dict[str, str]) -> go.Figure:
+def cumsum_completed_tasks_periodically(
+    df: pd.DataFrame,
+    beg_date: datetime,
+    end_date: datetime,
+    granularity: str,
+    project_colors: dict[str, str],
+    include_total_overlay: bool = True,
+) -> go.Figure:
     """
     Plots the cumulative number of completed tasks per project over time as a line chart with markers within the specified date range.
 
@@ -887,57 +1394,52 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
     Returns:
     go.Figure: Plotly figure object representing the cumulative number of completed tasks per project over time.
     """
-    df_completed = df[df['type'] == 'completed'].loc[:end_date].copy()
-    df_completed.index = pd.to_datetime(df_completed.index)
-    df_weekly_per_project = (
-        df_completed
-        .groupby([_period_grouper(granularity), 'root_project_name'])
-        .size()
-        .unstack('root_project_name')
-        .sort_index()
+    df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
+        df,
+        beg_date=beg_date,
+        end_date=end_date,
+        granularity=granularity,
     )
-    df_weekly_per_project = df_weekly_per_project[df_weekly_per_project.index >= beg_date]
     df_weekly_per_project = df_weekly_per_project.cumsum()
 
-    current_label = _current_period_label(end_date, granularity, df_weekly_per_project.index)
-    current_start: datetime | None = None
-    current_end: datetime | None = None
-    if current_label is not None:
-        try:
-            period = cast(Any, pd.Period(end_date, freq=granularity))
-            start = period.start_time
-            end = period.end_time
-            if not pd.isna(start) and not pd.isna(end):
-                current_start = cast(datetime, cast(Any, start).to_pydatetime(warn=False))
-                current_end = cast(datetime, cast(Any, end).to_pydatetime(warn=False))
-        except Exception:  # pragma: no cover
-            current_start = None
-            current_end = None
-
-    now = datetime.now()
-    as_of = min(end_date, now)
-    show_forecast = bool(current_label and current_start and current_end and current_label > as_of)
-
-    current_counts: dict[str, int] = {}
-    if show_forecast and current_start and not df_completed.empty and as_of >= current_start:
-        df_current = df_completed[(df_completed.index >= current_start) & (df_completed.index <= as_of)]
-        current_counts = df_current.groupby("root_project_name").size().astype(int).to_dict()
-
     # Append 0 from the left (one day before the minimum date)
-    min_date = df_weekly_per_project.index.min() - timedelta(days=7 if 'W' in granularity else 14)
-    df_weekly_per_project.loc[min_date] = 0
-    df_weekly_per_project = df_weekly_per_project.sort_index()
+    if not df_weekly_per_project.empty and len(df_weekly_per_project.columns):
+        min_date = df_weekly_per_project.index.min() - timedelta(
+            days=7 if "W" in granularity else 14
+        )
+        df_weekly_per_project.loc[min_date] = 0
+        df_weekly_per_project = df_weekly_per_project.sort_index()
+
+    forecast_context = _build_periodic_forecast_context(
+        end_date=end_date,
+        granularity=granularity,
+        period_index=df_weekly_per_project.index,
+    )
+    current_counts = _current_period_project_counts(
+        df_completed, context=forecast_context
+    )
 
     fig = go.Figure()
 
-    for root_project_name in df_weekly_per_project.columns:
-        project_series = df_weekly_per_project[root_project_name].ffill().fillna(0)
+    for root_project in df_weekly_per_project.columns:
+        root_project_name = str(root_project)
+        project_series = (
+            cast(pd.Series, df_weekly_per_project[root_project]).ffill().fillna(0)
+        )
         color = project_colors.get(root_project_name, "#808080")
 
-        if show_forecast and current_label is not None:
-            historical = project_series[project_series.index < pd.Timestamp(current_label)]
+        if (
+            forecast_context.show_forecast
+            and forecast_context.current_label is not None
+        ):
+            historical = cast(
+                pd.Series,
+                project_series[
+                    project_series.index < pd.Timestamp(forecast_context.current_label)
+                ],
+            )
         else:
-            historical = project_series
+            historical = cast(pd.Series, project_series)
 
         if not historical.empty:
             fig.add_trace(
@@ -952,26 +1454,35 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
                 )
             )
 
-        if show_forecast and current_label is not None and current_start and current_end:
+        if (
+            forecast_context.show_forecast
+            and forecast_context.current_label is not None
+            and forecast_context.current_start
+            and forecast_context.current_end
+        ):
+            base_series = cast(pd.Series, df_weekly_per_project[root_project])
+            history_totals = base_series.diff().fillna(base_series).fillna(0)
             history_totals = (
-                df_weekly_per_project[root_project_name]
-                .diff()
-                .fillna(df_weekly_per_project[root_project_name])
-                .fillna(0)
+                history_totals[
+                    history_totals.index < pd.Timestamp(forecast_context.current_label)
+                ]
+                .astype(float)
+                .tolist()
             )
-            history_totals = history_totals[history_totals.index < pd.Timestamp(current_label)].astype(float).tolist()
             actual_so_far = int(current_counts.get(root_project_name, 0))
 
-            recently_active = actual_so_far > 0 or any(v > 0 for v in history_totals[-4:])
+            recently_active = actual_so_far > 0 or any(
+                v > 0 for v in history_totals[-4:]
+            )
             if not recently_active:
                 continue
 
             forecast_total = _forecast_period_total(
                 actual_so_far=actual_so_far,
                 history_totals=history_totals,
-                period_start=current_start,
-                period_end=current_end,
-                as_of=as_of,
+                period_start=forecast_context.current_start,
+                period_end=forecast_context.current_end,
+                as_of=forecast_context.as_of,
             )
 
             base = float(historical.iloc[-1]) if not historical.empty else 0.0
@@ -981,7 +1492,7 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
             if not historical.empty:
                 fig.add_trace(
                     go.Scatter(
-                        x=[historical.index[-1], current_label],
+                        x=[historical.index[-1], forecast_context.current_label],
                         y=[float(base), float(forecast_cumsum)],
                         mode="lines",
                         line=dict(color=color, dash="dash", width=2),
@@ -994,10 +1505,12 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
 
             fig.add_trace(
                 go.Scatter(
-                    x=[current_label],
+                    x=[forecast_context.current_label],
                     y=[actual_cumsum],
                     mode="markers",
-                    marker=dict(symbol="circle-open", size=10, line=dict(width=2, color=color)),
+                    marker=dict(
+                        symbol="circle-open", size=10, line=dict(width=2, color=color)
+                    ),
                     name=f"{root_project_name} (so far)",
                     legendgroup=root_project_name,
                     showlegend=False,
@@ -1006,7 +1519,7 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
             )
             fig.add_trace(
                 go.Scatter(
-                    x=[current_label],
+                    x=[forecast_context.current_label],
                     y=[forecast_cumsum],
                     mode="markers",
                     marker=dict(symbol="circle", size=16, color=color, opacity=0.92),
@@ -1017,19 +1530,44 @@ def cumsum_completed_tasks_periodically(df: pd.DataFrame, beg_date: datetime, en
                 )
             )
 
+    if include_total_overlay:
+        total_cumulative_series = _total_tasks_series(df_weekly_per_project)
+        _add_total_overlay_cumulative_traces(
+            fig,
+            total_cumulative_series=total_cumulative_series,
+            context=forecast_context,
+            total_actual_so_far=sum(current_counts.values()),
+        )
+
     # Update x-axis
     fig.update_xaxes(
-        title_text='Date',
-        type='date',
+        title_text="Date",
+        title_standoff=14,
+        type="date",
         showline=True,
         showgrid=True,
     )
 
-    # Update y-axis
-    fig.update_yaxes(title_text='Number of Completed Tasks')
-
-    fig.update_layout(title_text=f'Cumulative {granularity} Completed Tasks Per Project',
-                      yaxis=dict(autorange=True, fixedrange=False))
+    fig.update_layout(
+        title_text=f"Cumulative {granularity} Completed Tasks Per Project",
+        yaxis=dict(
+            title=dict(text="Cumulative Tasks per Project", standoff=16),
+            autorange=True,
+            fixedrange=False,
+            rangemode="tozero",
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="left",
+            x=0.0,
+            tracegroupgap=12,
+            bgcolor="rgba(17,19,24,0.72)",
+            font=dict(size=11, color="#e6e6e6"),
+        ),
+        margin=dict(l=56, r=86, t=84, b=60),
+    )
 
     return _apply_dashboard_axes(fig)
 
@@ -1101,7 +1639,9 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     def _empty_figure(message: str) -> go.Figure:
         fig = go.Figure()
-        return _apply_common_layout(fig, title_text=f"Task Lifespans ({message})", x_title="Time to Completion")
+        return _apply_common_layout(
+            fig, title_text=f"Task Lifespans ({message})", x_title="Time to Completion"
+        )
 
     def _build_time_ticks(
         *,
@@ -1137,7 +1677,12 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                 selected = selected[-max_ticks:]
         if not selected:
             target = max(min_seconds, 1e-6)
-            selected = [min(candidates, key=lambda item: abs(math.log10(item[0]) - math.log10(target)))]
+            selected = [
+                min(
+                    candidates,
+                    key=lambda item: abs(math.log10(item[0]) - math.log10(target)),
+                )
+            ]
         if len(selected) > max_ticks:
             step = max(1, math.ceil((len(selected) - 1) / (max_ticks - 1)))
             trimmed = [selected[0]]
@@ -1145,7 +1690,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             trimmed.append(selected[-1])
             selected = trimmed
             if len(selected) > max_ticks:
-                selected = selected[:max_ticks - 1] + [selected[-1]]
+                selected = selected[: max_ticks - 1] + [selected[-1]]
         tickvals = [sec / axis_unit_seconds for sec, _ in selected]
         ticktext = [label for _, label in selected]
         return tickvals, ticktext
@@ -1218,18 +1763,29 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         for value, label in highlights:
             if not np.isfinite(value) or value <= 0:
                 continue
-            if any(abs(math.log10(value) - math.log10(v)) < 0.03 for v in tickvals if v > 0):
+            if any(
+                abs(math.log10(value) - math.log10(v)) < 0.03 for v in tickvals if v > 0
+            ):
                 continue
             pairs.append((value, label))
         pairs.sort(key=lambda item: item[0])
         return [value for value, _ in pairs], [label for _, label in pairs]
+
     if "type" not in df.columns:
         logger.error("DataFrame missing required 'type' column")
         return _empty_figure("Invalid data structure")
 
-    identifier = "task_id" if "task_id" in df.columns else "parent_item_id" if "parent_item_id" in df.columns else None
+    identifier = (
+        "task_id"
+        if "task_id" in df.columns
+        else "parent_item_id"
+        if "parent_item_id" in df.columns
+        else None
+    )
     if identifier is None:
-        logger.error("DataFrame missing task identifier column ('task_id' or 'parent_item_id')")
+        logger.error(
+            "DataFrame missing task identifier column ('task_id' or 'parent_item_id')"
+        )
         return _empty_figure("Invalid data structure")
 
     event_mask = cast(pd.Series, df["type"].isin(["added", "completed"]))
@@ -1241,15 +1797,23 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     timestamps = pd.to_datetime(df.index[event_mask])
     events["timestamp"] = timestamps
 
-    added_times = events.loc[events["type"] == "added"].groupby(identifier)["timestamp"].min()
-    completed_times = events.loc[events["type"] == "completed"].groupby(identifier)["timestamp"].max()
+    added_times = (
+        events.loc[events["type"] == "added"].groupby(identifier)["timestamp"].min()
+    )
+    completed_times = (
+        events.loc[events["type"] == "completed"].groupby(identifier)["timestamp"].max()
+    )
 
     common_ids = added_times.index.intersection(completed_times.index)
     if common_ids.empty:
         logger.info("No tasks have both added and completed events")
         return _empty_figure("No Tasks with Both Added and Completed Events")
 
-    durations = (completed_times.loc[common_ids] - added_times.loc[common_ids]).dt.total_seconds().to_numpy(dtype=float)
+    durations = (
+        (completed_times.loc[common_ids] - added_times.loc[common_ids])
+        .dt.total_seconds()
+        .to_numpy(dtype=float)
+    )
     durations = durations[durations > 0]
     if durations.size == 0:
         logger.info("All computed durations are non-positive; nothing to plot")
@@ -1363,7 +1927,9 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                     mode="lines",
                     line=dict(color="#1ABC9C", width=3),
                     name="Smoothed frequency",
-                    hovertemplate="Duration: %{x:.4g} " + unit_label + "<br>Frequency: %{y:.2f}<extra></extra>",
+                    hovertemplate="Duration: %{x:.4g} "
+                    + unit_label
+                    + "<br>Frequency: %{y:.2f}<extra></extra>",
                 )
             )
         else:
@@ -1392,8 +1958,14 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         tickvals,
         ticktext,
         [
-            (highlight_low, f"15%<br>{_format_duration_compact(highlight_low * axis_unit_seconds)}"),
-            (highlight_high, f"85%<br>{_format_duration_compact(highlight_high * axis_unit_seconds)}"),
+            (
+                highlight_low,
+                f"15%<br>{_format_duration_compact(highlight_low * axis_unit_seconds)}",
+            ),
+            (
+                highlight_high,
+                f"85%<br>{_format_duration_compact(highlight_high * axis_unit_seconds)}",
+            ),
         ],
     )
 

@@ -51,7 +51,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
     logger.info("Running LLM Breakdown automation")
     projects = db.fetch_projects(include_tasks=True)
     all_tasks: list[Task] = [task for project in projects for task in project.tasks]
-    logger.debug("Found {} tasks in total", len(all_tasks))
+    logger.debug(f"Found {len(all_tasks)} tasks in total")
 
     children_by_parent = build_children_by_parent(all_tasks)
     tasks_by_id = build_task_lookup(all_tasks)
@@ -65,7 +65,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
         try:
             payload = db.fetch_task_by_id(task_id)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to fetch task {} for context: {}", task_id, exc)
+            logger.warning(f"Failed to fetch task {task_id} for context: {exc}")
             return cached
         task_obj = _task_from_api_payload(payload)
         if task_obj is None:
@@ -73,11 +73,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
         task_id_str = str(task_obj.id)
         fetched_tasks[task_id_str] = task_obj
         tasks_by_id[task_id_str] = task_obj
-        v2_id = task_obj.task_entry.v2_id
-        if v2_id is not None:
-            v2_id_str = str(v2_id)
-            fetched_tasks.setdefault(v2_id_str, task_obj)
-            tasks_by_id.setdefault(v2_id_str, task_obj)
         return task_obj
 
     processed_ids: set[str] = set()
@@ -137,7 +132,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
     try:
         llm = automation.get_llm()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Failed to initialize LLM: {}", exc)
+        logger.error(f"Failed to initialize LLM: {exc}")
         mark_progress_failed(
             progress,
             error=f"{type(exc).__name__}: {exc}",
@@ -201,7 +196,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
         try:
             breakdown = llm.structured_chat(messages, TaskBreakdown)
         except ValueError as exc:
-            logger.error("LLM breakdown failed for task {}: {}", task.id, exc)
+            logger.error(f"LLM breakdown failed for task {task.id}: {exc}")
             failed += 1
             processed_ids.add(task.id)
             append_progress_result(
@@ -229,7 +224,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
         nodes = breakdown.children
         created_count = 0
         if not nodes:
-            logger.info("LLM returned no subtasks for task {}", task.id)
+            logger.info(f"LLM returned no subtasks for task {task.id}")
             if automation.remove_label_after_processing and source == "label":
                 automation.update_root_labels(db, task, label)
             completed += 1
@@ -344,7 +339,7 @@ def collect_candidates(
             drop_queue_ids.add(task_id)
             continue
         if not automation.allow_existing_children and children_by_parent.get(task.id):
-            logger.info("Skipping queued task {} (already has children)", task.id)
+            logger.info(f"Skipping queued task {task.id} (already has children)")
             drop_queue_ids.add(task_id)
             continue
         if task.id in processed_ids:
@@ -368,7 +363,7 @@ def collect_candidates(
         if llm_label is None:
             continue
         if not automation.allow_existing_children and children_by_parent.get(task.id):
-            logger.info("Skipping task {} (already has children)", task.id)
+            logger.info(f"Skipping task {task.id} (already has children)")
             continue
         if task.id in processed_ids:
             continue
@@ -447,10 +442,6 @@ def build_task_lookup(tasks: Iterable[Task]) -> dict[str, Task]:
     lookup: dict[str, Task] = {}
     for task in tasks:
         lookup[str(task.id)] = task
-        v2_id = task.task_entry.v2_id
-        if v2_id is not None:
-            v2_id_str = str(v2_id)
-            lookup.setdefault(v2_id_str, task)
     return lookup
 
 

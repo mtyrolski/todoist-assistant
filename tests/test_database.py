@@ -6,12 +6,13 @@ from typing import Any, cast
 import pytest
 from unittest.mock import patch, MagicMock
 
+from tests.factories import make_project, make_project_entry, make_task_entry
 from todoist.api import EndpointCallResult, TodoistEndpoints
 from todoist.api.client import RequestSpec
 from todoist.database.db_tasks import DatabaseTasks
 from todoist.database.db_projects import DatabaseProjects
 from todoist.database.db_activity import DatabaseActivity
-from todoist.types import Task, TaskEntry, Project, ProjectEntry
+from todoist.types import Task, TaskEntry, Project
 
 
 @pytest.fixture
@@ -35,62 +36,13 @@ def db_activity():
 @pytest.fixture
 def sample_task_entry():
     """Create a sample TaskEntry for testing."""
-    return TaskEntry(
-        id="task123",
-        is_deleted=False,
-        added_at="2024-01-01T00:00:00Z",
-        child_order=1,
-        responsible_uid=None,
-        content="Test Task",
-        description="",
-        user_id="user123",
-        assigned_by_uid="user123",
-        project_id="project123",
-        section_id="section123",
-        sync_id=None,
-        collapsed=False,
-        due=None,
-        parent_id=None,
-        labels=[],
-        checked=False,
-        priority=1,
-        note_count=0,
-        added_by_uid="user123",
-        completed_at=None,
-        deadline=None,
-        duration=None,
-        updated_at="2024-01-01T00:00:00Z",
-        v2_id="v2_task123",
-        v2_parent_id=None,
-        v2_project_id="v2_project123",
-        v2_section_id="v2_section123",
-        day_order=None
-    )
+    return make_task_entry(task_id="task123", content="Test Task")
 
 
 @pytest.fixture
 def sample_project_entry():
     """Create a sample ProjectEntry for testing."""
-    return ProjectEntry(
-        id="12345",
-        name="Test Project",
-        color="blue",
-        parent_id=None,
-        child_order=1,
-        view_style="list",
-        is_favorite=False,
-        is_archived=False,
-        is_deleted=False,
-        is_frozen=False,
-        can_assign_tasks=True,
-        shared=False,
-        created_at="2024-01-01T00:00:00Z",
-        updated_at="2024-01-01T00:00:00Z",
-        v2_id="v2_12345",
-        v2_parent_id=None,
-        sync_id=None,
-        collapsed=False
-    )
+    return make_project_entry(project_id="12345", name="Test Project")
 
 
 @patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
@@ -230,26 +182,29 @@ def test_database_projects_initialization(db_projects):
 @patch('todoist.database.db_projects.TodoistAPIClient.request_json')
 def test_fetch_archived_projects_caching(mock_request_json, db_projects):
     """Test fetch_archived_projects with caching behavior."""
-    mock_request_json.return_value = [{
-        "id": "12345",
-        "name": "Archived Project",
-        "color": "blue",
-        "parent_id": None,
-        "child_order": 1,
-        "view_style": "list",
-        "is_favorite": False,
-        "is_archived": True,
-        "is_deleted": False,
-        "is_frozen": False,
-        "can_assign_tasks": True,
-        "shared": False,
-        "created_at": "2024-01-01T00:00:00Z",
-        "updated_at": "2024-01-01T00:00:00Z",
-        "v2_id": "v2_12345",
-        "v2_parent_id": None,
-        "sync_id": None,
-        "collapsed": False
-    }]
+    mock_request_json.return_value = {
+        "results": [{
+            "id": "12345",
+            "name": "Archived Project",
+            "color": "blue",
+            "parent_id": None,
+            "child_order": 1,
+            "view_style": "list",
+            "is_favorite": False,
+            "is_archived": True,
+            "is_deleted": False,
+            "is_frozen": False,
+            "can_assign_tasks": True,
+            "shared": False,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "v2_id": "v2_12345",
+            "v2_parent_id": None,
+            "sync_id": None,
+            "collapsed": False
+        }],
+        "next_cursor": None,
+    }
 
     result1 = db_projects.fetch_archived_projects()
     assert len(result1) == 1
@@ -288,26 +243,24 @@ def test_reset_clears_caches(db_projects):
 def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projects):
     """Test fetching a single project by ID."""
     mock_request_json.return_value = {
-        "project": {
-            "id": "12345",
-            "name": "Test Project",
-            "color": "blue",
-            "parent_id": None,
-            "child_order": 1,
-            "view_style": "list",
-            "is_favorite": False,
-            "is_archived": False,
-            "is_deleted": False,
-            "is_frozen": False,
-            "can_assign_tasks": True,
-            "shared": False,
-            "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z",
-            "v2_id": "v2_12345",
-            "v2_parent_id": None,
-            "sync_id": None,
-            "collapsed": False
-        }
+        "id": "12345",
+        "name": "Test Project",
+        "color": "blue",
+        "parent_id": None,
+        "child_order": 1,
+        "view_style": "list",
+        "is_favorite": False,
+        "is_archived": False,
+        "is_deleted": False,
+        "is_frozen": False,
+        "can_assign_tasks": True,
+        "shared": False,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "v2_id": "v2_12345",
+        "v2_parent_id": None,
+        "sync_id": None,
+        "collapsed": False
     }
 
     mock_project_entry = MagicMock()
@@ -324,16 +277,88 @@ def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projec
     mock_request_json.assert_called_once()
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
-    assert spec_arg.endpoint == TodoistEndpoints.GET_PROJECT_DATA
-    assert spec_arg.data == {"project_id": "12345"}
+    assert spec_arg.endpoint == TodoistEndpoints.GET_PROJECT.format(project_id="12345")
+
+
+def test_fetch_mapping_project_id_to_root_uses_in_memory_parent_links(db_projects):
+    root = make_project(project_id="root", project_entry=make_project_entry(project_id="root", parent_id=None))
+    child = make_project(project_id="child", project_entry=make_project_entry(project_id="child", parent_id="root"))
+    grandchild = make_project(
+        project_id="grandchild",
+        project_entry=make_project_entry(project_id="grandchild", parent_id="child"),
+    )
+    archived_root = make_project(
+        project_id="archived_root",
+        project_entry=make_project_entry(project_id="archived_root", parent_id=None, is_archived=True),
+        is_archived=True,
+    )
+    archived_child = make_project(
+        project_id="archived_child",
+        project_entry=make_project_entry(project_id="archived_child", parent_id="archived_root", is_archived=True),
+        is_archived=True,
+    )
+
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[root, child, grandchild]) as mock_fetch_projects,
+        patch.object(db_projects, "fetch_archived_projects", return_value=[archived_root, archived_child]) as mock_fetch_archived,
+        patch.object(db_projects, "fetch_project_by_id") as mock_fetch_project_by_id,
+    ):
+        mapping = db_projects.fetch_mapping_project_id_to_root()
+
+    assert mapping["root"].id == "root"
+    assert mapping["child"].id == "root"
+    assert mapping["grandchild"].id == "root"
+    assert mapping["archived_root"].id == "archived_root"
+    assert mapping["archived_child"].id == "archived_root"
+    mock_fetch_projects.assert_called_once_with(include_tasks=False)
+    mock_fetch_archived.assert_called_once()
+    mock_fetch_project_by_id.assert_not_called()
+
+
+def test_fetch_mapping_project_id_to_root_uses_cache_after_first_call(db_projects):
+    root = make_project(project_id="root", project_entry=make_project_entry(project_id="root", parent_id=None))
+    child = make_project(project_id="child", project_entry=make_project_entry(project_id="child", parent_id="root"))
+
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[root, child]) as mock_fetch_projects,
+        patch.object(db_projects, "fetch_archived_projects", return_value=[]) as mock_fetch_archived,
+    ):
+        mapping_first = db_projects.fetch_mapping_project_id_to_root()
+        mapping_second = db_projects.fetch_mapping_project_id_to_root()
+
+    assert mapping_first["child"].id == "root"
+    assert mapping_second["child"].id == "root"
+    mock_fetch_projects.assert_called_once_with(include_tasks=False)
+    mock_fetch_archived.assert_called_once()
+
+
+def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(db_projects):
+    orphan = make_project(
+        project_id="orphan",
+        project_entry=make_project_entry(project_id="orphan", parent_id="missing_parent"),
+    )
+    fetched_root = make_project(
+        project_id="remote_root",
+        project_entry=make_project_entry(project_id="remote_root", parent_id=None),
+    )
+
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[orphan]),
+        patch.object(db_projects, "fetch_archived_projects", return_value=[]),
+        patch.object(db_projects, "fetch_project_by_id", return_value=fetched_root) as mock_fetch_project_by_id,
+    ):
+        mapping = db_projects.fetch_mapping_project_id_to_root()
+
+    assert mapping["orphan"].id == "remote_root"
+    mock_fetch_project_by_id.assert_called_once_with("missing_parent", True)
 
 
 @patch('todoist.database.db_activity.logger')
 def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
     """Test adaptive fetching stops after empty windows."""
-    with patch.object(db_activity, 'fetch_activity') as mock_fetch:
+    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
         # Simulate empty responses
-        mock_fetch.return_value = []
+        mock_fetch_window.side_effect = [[], []]
 
         # Test with early stop after 2 empty windows
         result = db_activity.fetch_activity_adaptively(
@@ -343,7 +368,22 @@ def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
 
         # Should stop after 2 empty windows
         assert len(result) == 0
-        assert mock_fetch.call_count == 2
+        assert mock_fetch_window.call_count == 2
+
+
+@patch('todoist.database.db_activity.logger')
+def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(_mock_logger, db_activity):
+    """Adaptive windows should not be implicitly capped to nweeks_window_size pages."""
+    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+        mock_fetch_window.side_effect = [[], []]
+
+        db_activity.fetch_activity_adaptively(
+            nweeks_window_size=10,
+            early_stop_after_n_windows=2,
+        )
+
+        first_call_kwargs = mock_fetch_window.call_args_list[0].kwargs
+        assert first_call_kwargs["max_pages"] is None
 
 
 @patch('todoist.database.db_activity.logger')
@@ -367,9 +407,9 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
-    with patch.object(db_activity, 'fetch_activity') as mock_fetch:
+    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
         # First call returns events, second returns empty
-        mock_fetch.side_effect = [[event1], []]
+        mock_fetch_window.side_effect = [[event1], []]
 
         result = db_activity.fetch_activity_adaptively(
             nweeks_window_size=1,
@@ -379,7 +419,7 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
         # Should get the event from first call, then stop after 1 empty window
         assert len(result) == 1
         assert result[0].id == "event1"
-        assert mock_fetch.call_count == 2
+        assert mock_fetch_window.call_count == 2
 
 
 def test_fetch_activity_signature(db_activity):

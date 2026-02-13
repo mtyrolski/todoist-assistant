@@ -206,7 +206,7 @@ class DatabaseTasks:
     ) -> dict[str, Any]:
         """Update an existing task via the Todoist REST API.
 
-        Note: Todoist REST `POST /rest/v2/tasks/{task_id}` may return either:
+        Note: Todoist `POST /api/v1/tasks/{task_id}` may return either:
         - `204 No Content` (common; empty body)
         - `200 OK` with a JSON task payload
 

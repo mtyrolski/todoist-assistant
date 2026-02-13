@@ -611,6 +611,100 @@ h1 {
   box-shadow: 0 0 0 4px rgba(106, 227, 255, 0.12);
 }
 
+.controlCustomRange {
+  gap: 8px;
+}
+
+.customRangePanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(106, 227, 255, 0.18);
+  background: linear-gradient(145deg, rgba(106, 227, 255, 0.08), rgba(140, 123, 255, 0.06), rgba(0, 0, 0, 0.16));
+}
+
+.customRangePanelInvalid {
+  border-color: rgba(255, 123, 123, 0.5);
+  box-shadow: 0 0 0 3px rgba(255, 123, 123, 0.12);
+}
+
+.customRangeQuick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customRangeChip {
+  border: 1px solid rgba(106, 227, 255, 0.32);
+  background: rgba(106, 227, 255, 0.12);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.customRangeChip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 227, 255, 0.62);
+  background: rgba(106, 227, 255, 0.2);
+}
+
+.customRangeChip:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.65);
+  outline-offset: 2px;
+}
+
+.customRangeChipGhost {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.customRangeFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.customRangeField {
+  display: grid;
+  gap: 6px;
+}
+
+.customRangeFieldLabel {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.customRangeDivider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(232, 236, 242, 0.9);
+}
+
+.customRangeMeta {
+  margin: 0;
+  font-size: 11px;
+  color: #b8c4d6;
+}
+
+.customRangeMetaWarn {
+  color: #ffc7c7;
+}
+
 .textInput {
   width: 100%;
   min-height: 44px;
@@ -1850,6 +1944,14 @@ textarea.textInput {
 
   .dateRow {
     grid-template-columns: 1fr;
+  }
+
+  .customRangeFields {
+    grid-template-columns: 1fr;
+  }
+
+  .customRangeDivider {
+    display: none;
   }
 
   .chatLayout {

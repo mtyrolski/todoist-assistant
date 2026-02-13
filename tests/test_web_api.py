@@ -1,6 +1,5 @@
 """Tests for FastAPI web dashboard endpoints."""
 
-
 import pandas as pd
 import plotly.graph_objects as go
 from fastapi.testclient import TestClient
@@ -11,20 +10,147 @@ import todoist.web.api as web_api
 
 
 def _stub_all_figures(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "plot_most_popular_labels", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_task_lifespans", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_completed_tasks_periodically", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "cumsum_completed_tasks_periodically", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_heatmap_of_events_by_day_and_hour", lambda *args, **kwargs: go.Figure())
-    monkeypatch.setattr(web_api, "plot_events_over_time", lambda *args, **kwargs: go.Figure())
+    monkeypatch.setattr(
+        web_api, "plot_weekly_completion_trend", lambda *args, **kwargs: go.Figure()
+    )
+    monkeypatch.setattr(
+        web_api, "plot_task_lifespans", lambda *args, **kwargs: go.Figure()
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_completed_tasks_periodically",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "cumsum_completed_tasks_periodically",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_heatmap_of_events_by_day_and_hour",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api, "plot_events_over_time", lambda *args, **kwargs: go.Figure()
+    )
 
 
 def _set_state_with_df(df: pd.DataFrame) -> None:
     web_api._state.df_activity = df
     web_api._state.active_projects = []
     web_api._state.project_colors = {}
-    web_api._state.label_colors = {}
     web_api._state.db = None
+    web_api._state.home_payload_cache = {}
+
+
+def _clear_dashboard_state() -> None:
+    web_api._state.df_activity = None
+    web_api._state.active_projects = None
+    web_api._state.project_colors = None
+    web_api._state.db = None
+    web_api._state.demo_mode = False
+    web_api._state.home_payload_cache = {}
+
+
+def _single_event_df() -> pd.DataFrame:
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-15",
+                "id": "e1",
+                "title": "t1",
+                "type": "completed",
+                "parent_project_name": "A",
+                "root_project_name": "A",
+                "task_id": "1",
+            }
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
+def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    df = _single_event_df()
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": False,
+            "activity_cache_signature": web_api._activity_cache_signature(),
+            "df_activity": df,
+            "active_projects": [],
+            "project_colors": {"A": "#123456"},
+        }
+    )
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=False)
+    assert loaded is True
+    assert web_api._state.df_activity is not None
+    assert len(web_api._state.df_activity) == 1
+    assert web_api._state.project_colors == {"A": "#123456"}
+    assert web_api._state.active_projects == []
+
+
+def test_load_state_from_disk_cache_rejects_stale_activity_signature(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    original_signature = web_api._activity_cache_signature()
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": False,
+            "activity_cache_signature": original_signature,
+            "df_activity": _single_event_df(),
+            "active_projects": [],
+            "project_colors": {},
+        }
+    )
+
+    # Mutate activity cache so signature no longer matches cached dashboard snapshot.
+    cache.activity.save({"new-event"})
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=False)
+    assert loaded is False
+
+
+def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) -> None:
+    _stub_all_figures(monkeypatch)
+    _clear_dashboard_state()
+
+    def _fake_load_state_from_disk_cache(*, demo_mode: bool) -> bool:
+        _ = demo_mode
+        _set_state_with_df(_single_event_df())
+        web_api._state.demo_mode = False
+        return True
+
+    def _unexpected_refresh(*, demo_mode: bool) -> None:
+        _ = demo_mode
+        raise AssertionError("_refresh_state_sync should not run when disk cache is ready")
+
+    monkeypatch.setattr(web_api, "_load_state_from_disk_cache", _fake_load_state_from_disk_cache)
+    monkeypatch.setattr(web_api, "_refresh_state_sync", _unexpected_refresh)
+    monkeypatch.setattr(web_api, "_env_demo_mode", lambda: False)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    assert res.status_code == 200
 
 
 def test_dashboard_home_validates_weeks(monkeypatch) -> None:
@@ -158,6 +284,8 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     payload = res.json()
 
     last_week = payload["leaderboards"]["lastCompletedWeek"]
+    assert "weeklyCompletionTrend" in payload["figures"]
+    assert "mostPopularLabels" not in payload["figures"]
     assert last_week["label"] == "2025-01-06 to 2025-01-12"
     parent_items = last_week["parentProjects"]["items"]
     assert last_week["parentProjects"]["totalCompleted"] == 3
@@ -178,15 +306,17 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     _stub_all_figures(monkeypatch)
 
     df = pd.DataFrame(
-        columns=[
-            "date",
-            "id",
-            "title",
-            "type",
-            "parent_project_name",
-            "root_project_name",
-            "task_id",
-        ]
+        columns=pd.Index(
+            [
+                "date",
+                "id",
+                "title",
+                "type",
+                "parent_project_name",
+                "root_project_name",
+                "task_id",
+            ]
+        )
     )
     df["date"] = pd.to_datetime(df["date"])
     df.set_index("date", inplace=True)
@@ -208,6 +338,79 @@ def test_dashboard_status_returns_services() -> None:
     payload = res.json()
     assert isinstance(payload.get("services"), list)
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
+
+
+def test_admin_timezone_status_uses_system_timezone_when_not_configured(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(web_api.EnvVar.TIMEZONE), raising=False)
+    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/timezone")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["configured"] is False
+    assert payload["timezone"] == "UTC"
+    assert payload["source"] == "system"
+    assert payload["override"] is None
+    assert payload["overrideValid"] is True
+
+
+def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+
+    client = TestClient(web_api.app)
+
+    set_response = client.post(
+        "/api/admin/timezone",
+        json={"timezone": "Europe/Warsaw"},
+    )
+    assert set_response.status_code == 200
+    set_payload = set_response.json()
+    assert set_payload["configured"] is True
+    assert set_payload["timezone"] == "Europe/Warsaw"
+    assert set_payload["source"] == "env"
+    assert set_payload["override"] == "Europe/Warsaw"
+    assert set_payload["overrideValid"] is True
+    assert web_api.os.getenv(str(web_api.EnvVar.TIMEZONE)) == "Europe/Warsaw"
+
+    env_path = tmp_path / ".env"
+    assert env_path.exists()
+    env_text = env_path.read_text(encoding="utf-8")
+    assert "TODOIST_TIMEZONE" in env_text
+    assert "Europe/Warsaw" in env_text
+
+    clear_response = client.delete("/api/admin/timezone")
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.json()
+    assert clear_payload["configured"] is False
+    assert clear_payload["timezone"] == "UTC"
+    assert clear_payload["source"] == "system"
+    assert clear_payload["override"] is None
+    assert web_api.os.getenv(str(web_api.EnvVar.TIMEZONE)) is None
+
+    env_text_after_clear = env_path.read_text(encoding="utf-8")
+    assert "TODOIST_TIMEZONE" not in env_text_after_clear
+
+
+def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+
+    client = TestClient(web_api.app)
+    response = client.post(
+        "/api/admin/timezone",
+        json={"timezone": "Invalid/Timezone"},
+    )
+    assert response.status_code == 400
+    payload = response.json()
+    assert "Invalid timezone" in payload["detail"]
 
 
 def test_openapi_includes_app_version() -> None:
@@ -334,6 +537,7 @@ def test_dashboard_progress_without_error() -> None:
 
 def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
+
     # Mock the model status to be disabled
     async def _mock_model_status():
         return False, False  # enabled, loading
@@ -382,6 +586,7 @@ def test_llm_chat_send_requires_message() -> None:
 
 def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
     """Test /api/llm_chat/send requires model to be loaded or loading."""
+
     # Mock the model status to be disabled
     async def _mock_model_status():
         return False, False  # enabled, loading
@@ -397,6 +602,7 @@ def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
 
 def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send creates a new conversation when no conversation_id provided."""
+
     # Mock the model status to be enabled
     async def _mock_model_status():
         return True, False  # enabled, loading
@@ -417,12 +623,15 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: [])
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
-    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
+    monkeypatch.setattr(
+        web_api, "_save_llm_chat_conversations", _mock_save_conversations
+    )
     monkeypatch.setattr(web_api, "_prune_queue", lambda q: q)
 
     # Mock worker start to do nothing
     async def _mock_start_worker():
         pass
+
     monkeypatch.setattr(web_api, "_maybe_start_llm_chat_worker", _mock_start_worker)
 
     client = TestClient(web_api.app)
@@ -454,6 +663,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
 
 def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send adds to existing conversation when conversation_id provided."""
+
     # Mock the model status to be enabled
     async def _mock_model_status():
         return True, False  # enabled, loading
@@ -483,18 +693,26 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
 
     monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
     monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: [])
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: existing_conversations[:])
+    monkeypatch.setattr(
+        web_api, "_load_llm_chat_conversations", lambda: existing_conversations[:]
+    )
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
-    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
+    monkeypatch.setattr(
+        web_api, "_save_llm_chat_conversations", _mock_save_conversations
+    )
     monkeypatch.setattr(web_api, "_prune_queue", lambda q: q)
 
     # Mock worker start to do nothing
     async def _mock_start_worker():
         pass
+
     monkeypatch.setattr(web_api, "_maybe_start_llm_chat_worker", _mock_start_worker)
 
     client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={"message": "Follow up", "conversationId": existing_conv_id})
+    res = client.post(
+        "/api/llm_chat/send",
+        json={"message": "Follow up", "conversationId": existing_conv_id},
+    )
     assert res.status_code == 200
     payload = res.json()
 
@@ -509,6 +727,7 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
 
 def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
     """Test /api/llm_chat/send returns 404 for non-existent conversation_id."""
+
     # Mock the model status to be enabled
     async def _mock_model_status():
         return True, False  # enabled, loading
@@ -518,10 +737,13 @@ def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
 
     client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={
-        "message": "Test",
-        "conversationId": "550e8400-e29b-41d4-a716-446655440000"  # Valid UUID format but doesn't exist
-    })
+    res = client.post(
+        "/api/llm_chat/send",
+        json={
+            "message": "Test",
+            "conversationId": "550e8400-e29b-41d4-a716-446655440000",  # Valid UUID format but doesn't exist
+        },
+    )
     assert res.status_code == 404
     payload = res.json()
     assert "Conversation not found" in payload["detail"]
@@ -572,7 +794,9 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
         }
     ]
 
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: mock_conversations)
+    monkeypatch.setattr(
+        web_api, "_load_llm_chat_conversations", lambda: mock_conversations
+    )
 
     client = TestClient(web_api.app)
     res = client.get(f"/api/llm_chat/conversations/{conv_id}")
@@ -598,6 +822,7 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
 
 def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     """Test /api/llm_chat/enable returns model status."""
+
     # Mock start load to do nothing
     async def _mock_start_load():
         pass
@@ -623,6 +848,7 @@ def test_llm_chat_enable_returns_status(monkeypatch) -> None:
 
 def test_llm_chat_send_starts_worker_when_loading(monkeypatch) -> None:
     """Test /api/llm_chat/send starts worker when model is loading."""
+
     # Mock the model status to be loading
     async def _mock_model_status():
         return False, True  # enabled=False, loading=True

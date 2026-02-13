@@ -9,7 +9,7 @@ from loguru import logger
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.database.base import Database
-from todoist.utils import Cache, LocalStorageError
+from todoist.utils import Cache
 
 POLL_INTERVAL_SECONDS = 30.0
 RECENT_ACTIVITY_PAGES = 1
@@ -68,10 +68,6 @@ class AutomationObserver:
             automation.tick(self._db)
         return len(new_events)
 
-    def _run_once(self) -> None:
-        # Backwards-compatible wrapper for tests/internals expecting the old name.
-        _ = self.run_once()
-
     def _refresh_activity_cache(self) -> set:
         events, stats = self._activity.fetch_recent_events(self._db, max_pages=RECENT_ACTIVITY_PAGES)
         if stats.get("total"):
@@ -79,10 +75,7 @@ class AutomationObserver:
         if not events:
             return set()
 
-        try:
-            cached_events: set = Cache().activity.load()
-        except LocalStorageError:
-            cached_events = set()
+        cached_events: set = Cache().activity.load()
 
         new_events = {event for event in events if event not in cached_events}
         if not new_events:
@@ -96,10 +89,7 @@ class AutomationObserver:
         return new_events
 
     def _is_enabled(self) -> bool:
-        try:
-            payload = Cache().observer_state.load()
-        except LocalStorageError:
-            return True
+        payload = Cache().observer_state.load()
         if not isinstance(payload, dict):
             return True
         return bool(payload.get("enabled", True))

@@ -1,18 +1,15 @@
-"""
-Practical tests for dashboard utilities and multiplication label helpers.
-"""
+"""Practical tests for dashboard utilities and multiplication-label helpers."""
 
-import pytest
 import pandas as pd
+import pytest
 
 from todoist.automations.multiplicate import extract_multiplication_factor, is_multiplication_label
 from todoist.dashboard.utils import extract_metrics, get_badges
-from todoist.types import Project, ProjectEntry, Task, TaskEntry
 
 
 @pytest.fixture
 def activity_df_two_weeks() -> pd.DataFrame:
-    """Craft a two-week slice so we can assert concrete metric deltas."""
+    """Craft a two-week slice so metric deltas can be asserted precisely."""
     records = [
         # Current week (end date is 2024-03-14)
         {"date": "2024-03-14", "id": "e1", "title": "t1", "type": "completed"},
@@ -36,74 +33,11 @@ def activity_df_two_weeks() -> pd.DataFrame:
     return df.set_index("date").sort_index()
 
 
-@pytest.fixture
-def project_entry() -> ProjectEntry:
-    return ProjectEntry(
-        id="project123",
-        name="Test Project",
-        color="blue",
-        parent_id=None,
-        child_order=1,
-        view_style="list",
-        is_favorite=False,
-        is_archived=False,
-        is_deleted=False,
-        is_frozen=False,
-        can_assign_tasks=True,
-        shared=False,
-        created_at="2024-01-01T00:00:00Z",
-        updated_at="2024-01-01T00:00:00Z",
-        v2_id="v2_project123",
-        v2_parent_id=None,
-        sync_id=None,
-        collapsed=False,
-    )
-
-
-@pytest.fixture
-def task_entry_factory():
-    def _build(task_id: str, priority: int) -> TaskEntry:
-        return TaskEntry(
-            id=task_id,
-            is_deleted=False,
-            added_at="2024-01-01T00:00:00Z",
-            child_order=1,
-            responsible_uid=None,
-            content=f"Task {task_id}",
-            description="",
-            user_id="user123",
-            assigned_by_uid="user123",
-            project_id="project123",
-            section_id="section123",
-            sync_id=None,
-            collapsed=False,
-            due=None,
-            parent_id=None,
-            labels=[],
-            checked=False,
-            priority=priority,
-            note_count=0,
-            added_by_uid="user123",
-            completed_at=None,
-            deadline=None,
-            duration=None,
-            updated_at="2024-01-01T00:00:00Z",
-            v2_id=f"v2_{task_id}",
-            v2_parent_id=None,
-            v2_project_id="v2_project123",
-            v2_section_id="v2_section123",
-            day_order=None,
-        )
-
-    return _build
-
-
 def test_extract_metrics_reports_counts_and_deltas(activity_df_two_weeks: pd.DataFrame):
-    """Ensure the dashboard shows real counts and meaningful deltas."""
     metrics, current_period, previous_period = extract_metrics(activity_df_two_weeks, "W")
-
     metrics_by_name = {name: (value, delta, inverse) for name, value, delta, inverse in metrics}
-    # Window uses inclusive bounds, so the boundary day (2024-03-07) is counted in both periods
+
+    # The boundary day (2024-03-07) is included in both windows by design.
     assert metrics_by_name == {
         "Events": ("6", "-14.29%", False),
         "Completed Tasks": ("2", "-33.33%", False),
@@ -121,57 +55,48 @@ def test_extract_metrics_rejects_unknown_granularity(activity_df_two_weeks: pd.D
         extract_metrics(activity_df_two_weeks, "quarterly")
 
 
-def test_get_badges_aggregates_priorities(project_entry, task_entry_factory):
-    """Badge counts should reflect totals across projects, not per-project fragments."""
-    another_project_entry = ProjectEntry(
-        id="project456",
-        name="Project 2",
-        color="red",
-        parent_id=None,
-        child_order=2,
-        view_style="list",
-        is_favorite=False,
-        is_archived=False,
-        is_deleted=False,
-        is_frozen=False,
-        can_assign_tasks=True,
-        shared=False,
-        created_at="2024-01-01T00:00:00Z",
-        updated_at="2024-01-01T00:00:00Z",
-        v2_id="v2_project456",
-        v2_parent_id=None,
-        sync_id=None,
-        collapsed=False,
+def test_extract_metrics_uses_inf_delta_when_previous_period_has_zero_events():
+    df = pd.DataFrame(
+        [
+            {"date": "2024-03-14", "id": "e1", "title": "t1", "type": "completed"},
+            {"date": "2024-03-13", "id": "e2", "title": "t2", "type": "added"},
+        ]
     )
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
 
+    metrics, *_ = extract_metrics(df, "W")
+    metrics_by_name = {name: delta for name, _value, delta, _inverse in metrics}
+    assert metrics_by_name["Events"] == "inf%"
+    assert metrics_by_name["Completed Tasks"] == "inf%"
+
+
+def test_get_badges_aggregates_priorities(project_factory, project_entry_factory, task_factory):
     projects = [
-        Project(
-            id="proj1",
-            project_entry=project_entry,
+        project_factory(
+            project_id="proj1",
+            project_entry=project_entry_factory(project_id="project123", name="Project 1"),
             tasks=[
-                Task(id="t1", task_entry=task_entry_factory("t1", priority=4)),
-                Task(id="t2", task_entry=task_entry_factory("t2", priority=3)),
+                task_factory("t1", priority=4),
+                task_factory("t2", priority=3),
             ],
-            is_archived=False,
         ),
-        Project(
-            id="proj2",
-            project_entry=another_project_entry,
+        project_factory(
+            project_id="proj2",
+            project_entry=project_entry_factory(project_id="project456", name="Project 2", color="red"),
             tasks=[
-                Task(id="t3", task_entry=task_entry_factory("t3", priority=4)),
-                Task(id="t4", task_entry=task_entry_factory("t4", priority=2)),
-                Task(id="t5", task_entry=task_entry_factory("t5", priority=1)),
+                task_factory("t3", priority=4),
+                task_factory("t4", priority=2),
+                task_factory("t5", priority=1),
             ],
-            is_archived=False,
         ),
     ]
 
     badge = get_badges(projects)
-
-    assert "P1 tasks 2" in badge  # priority 4
-    assert "P2 tasks 1" in badge  # priority 3
-    assert "P3 tasks 1" in badge  # priority 2
-    assert "P4 tasks 1" in badge  # priority 1
+    assert "P1 tasks 2" in badge
+    assert "P2 tasks 1" in badge
+    assert "P3 tasks 1" in badge
+    assert "P4 tasks 1" in badge
 
 
 def test_get_badges_handles_empty_projects():

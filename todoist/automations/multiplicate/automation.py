@@ -76,7 +76,7 @@ def _filter_out_multiplier_labels(
 
 
 def _task_parent_id(task: Task) -> str | None:
-    return task.task_entry.parent_id or task.task_entry.v2_parent_id
+    return task.task_entry.parent_id
 
 
 def _build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:

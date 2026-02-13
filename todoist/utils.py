@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
+from dataclasses import MISSING
 import time
 import random
 import os
+import shutil
 from lzma import LZMAError
 from os import getenv
 from os.path import exists, join
+from pathlib import Path
 from pickle import HIGHEST_PROTOCOL, UnpicklingError
 from typing import Any, Callable, Generic, KeysView, Type, TypeVar, cast
 from zlib import error as ZlibError
@@ -19,6 +22,26 @@ from todoist.env import EnvVar
 T = TypeVar('T')
 LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
                             OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
+DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
+MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
+MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.0"
+RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
+    "activity.joblib",
+    "observer_state.joblib",
+    "integration_launches.joblib",
+    "automation_launches.joblib",
+    "processed_gmail_messages.joblib",
+    "dashboard_state.joblib",
+    "llm_breakdown_progress.joblib",
+    "llm_breakdown_queue.joblib",
+    "llm_chat_queue.joblib",
+    "llm_chat_conversations.joblib",
+)
+RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
+RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
+_MIGRATION_WARNING_LOGGED = False
+_MIGRATED_CACHE_DIRS: set[str] = set()
+_MISSING_REQUIRED_FIELD_WARNINGS: set[tuple[str, str]] = set()
 
 TqdmProgressCallback = Callable[[str, int, int, str | None], None]
 _TQDM_PROGRESS_CALLBACK: TqdmProgressCallback | None = None
@@ -40,7 +63,109 @@ def report_tqdm_progress(desc: str, current: int, total: int, unit: str | None =
     try:
         callback(desc, current, total, unit)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("Progress callback failed: {}", exc)
+        logger.debug(f"Progress callback failed: {exc}")
+
+
+def resolve_cache_dir(path: str | None = None) -> str:
+    if path:
+        return str(Path(path).expanduser().resolve())
+
+    env_path = getenv(str(EnvVar.CACHE_DIR))
+    if env_path:
+        return str(Path(env_path).expanduser().resolve())
+
+    return str((Path.cwd() / DEFAULT_CACHE_SUBDIR).resolve())
+
+
+def runtime_file_path(filename: str, cache_dir: str | None = None) -> str:
+    cache_root = Path(resolve_cache_dir(cache_dir))
+    return str(cache_root / filename)
+
+
+def automation_log_path(cache_dir: str | None = None) -> str:
+    resolved_cache_dir = resolve_cache_dir(cache_dir)
+    Path(resolved_cache_dir).mkdir(parents=True, exist_ok=True)
+    migrate_legacy_runtime_files(resolved_cache_dir)
+    return runtime_file_path("automation.log", cache_dir=resolved_cache_dir)
+
+
+def _migration_backup_path(legacy_root: Path, filename: str) -> Path:
+    backup_dir = legacy_root / MIGRATION_BACKUP_DIRNAME
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = backup_dir / filename
+    if not backup_path.exists():
+        return backup_path
+
+    timestamp = int(time.time())
+    return backup_dir / f"{filename}.{timestamp}.bak"
+
+
+def _legacy_cache_roots(cache_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    data_dir = getenv(str(EnvVar.DATA_DIR))
+    if data_dir:
+        candidates.append(Path(data_dir).expanduser().resolve())
+    candidates.append(Path.cwd().resolve())
+
+    roots: list[Path] = []
+    for candidate in candidates:
+        if candidate == cache_root:
+            continue
+        if candidate in roots:
+            continue
+        roots.append(candidate)
+    return roots
+
+
+def migrate_legacy_runtime_files(cache_dir: str | None = None) -> None:
+    global _MIGRATION_WARNING_LOGGED
+    cache_root = Path(resolve_cache_dir(cache_dir))
+    cache_root.mkdir(parents=True, exist_ok=True)
+
+    cache_root_key = str(cache_root)
+    if cache_root_key in _MIGRATED_CACHE_DIRS:
+        return
+    _MIGRATED_CACHE_DIRS.add(cache_root_key)
+
+    for legacy_root in _legacy_cache_roots(cache_root):
+        for filename in RUNTIME_MIGRATABLE_FILENAMES:
+            legacy_path = legacy_root / filename
+            if not legacy_path.exists() or not legacy_path.is_file():
+                continue
+
+            try:
+                target_path = cache_root / filename
+                copied = False
+                if not target_path.exists():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(legacy_path, target_path)
+                    copied = True
+
+                backup_path = _migration_backup_path(legacy_root, filename)
+                shutil.move(str(legacy_path), str(backup_path))
+
+                if copied:
+                    logger.warning(
+                        f"Migrated legacy runtime file '{legacy_path}' -> '{target_path}' "
+                        f"(backup: '{backup_path}')"
+                    )
+                else:
+                    logger.warning(
+                        f"Found legacy runtime file '{legacy_path}' with existing target '{target_path}'. "
+                        f"Skipped copy to avoid overwrite and moved legacy file to backup '{backup_path}'"
+                    )
+
+                if not _MIGRATION_WARNING_LOGGED:
+                    logger.warning(
+                        f"Legacy cache migration backups are temporary and will be removed in "
+                        f"{MIGRATION_BACKUP_REMOVAL_VERSION}."
+                    )
+                    _MIGRATION_WARNING_LOGGED = True
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to migrate legacy runtime file '{legacy_path}' into cache "
+                    f"'{cache_root}': {exc}"
+                )
 
 
 def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
@@ -52,14 +177,56 @@ def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
 
 def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     """Safely instantiates a class by writing unexpected (i.e now in todoist api) field to kwargs parameter"""
+    # pylint: disable=global-statement
+    global _MISSING_REQUIRED_FIELD_WARNINGS
     class_fields = get_all_fields_of_dataclass(cls)
-    unexpected_fields = set(entry_kwargs.keys()) - set(class_fields)
+    class_field_set = set(class_fields)
+    normalized_kwargs = dict(entry_kwargs)
+    missing_required_fields: list[str] = []
+
+    if "access" in class_field_set and "access" in normalized_kwargs:
+        access_value = normalized_kwargs["access"]
+        if isinstance(access_value, str):
+            normalized_kwargs["access"] = {"visibility": access_value}
+
+    if "day_order" in class_field_set and "day_order" in normalized_kwargs:
+        day_order_value = normalized_kwargs["day_order"]
+        if isinstance(day_order_value, str):
+            stripped_value = day_order_value.strip()
+            if stripped_value == "":
+                normalized_kwargs["day_order"] = None
+            else:
+                try:
+                    normalized_kwargs["day_order"] = int(stripped_value)
+                except ValueError:
+                    normalized_kwargs["day_order"] = None
+
+    # Keep dataclass instantiation resilient if API omits some required fields.
+    for field_name, field_def in cls.__dataclass_fields__.items():
+        if field_name == "new_api_kwargs" or field_name in normalized_kwargs:
+            continue
+        if field_def.default is MISSING and field_def.default_factory is MISSING:
+            normalized_kwargs[field_name] = None
+            missing_required_fields.append(field_name)
+
+    if missing_required_fields:
+        for field_name in missing_required_fields:
+            warning_key = (cls.__name__, field_name)
+            if warning_key in _MISSING_REQUIRED_FIELD_WARNINGS:
+                continue
+            logger.warning(
+                f"{cls.__name__}: missing required field '{field_name}' in API payload; "
+                "defaulting to None for compatibility."
+            )
+            _MISSING_REQUIRED_FIELD_WARNINGS.add(warning_key)
+
+    unexpected_fields = set(normalized_kwargs.keys()) - class_field_set
 
     assert 'new_api_kwargs' in class_fields, f"kwargs field is not in {cls.__name__} class"
 
     # write unexpected fields to kwargs
-    filtered_kwargs = {k: v for k, v in entry_kwargs.items() if k in class_fields}
-    unexpected_kwargs = {k: v for k, v in entry_kwargs.items() if k in unexpected_fields}
+    filtered_kwargs = {k: v for k, v in normalized_kwargs.items() if k in class_fields}
+    unexpected_kwargs = {k: v for k, v in normalized_kwargs.items() if k in unexpected_fields}
     return cls(**filtered_kwargs, new_api_kwargs=unexpected_kwargs)
 
 
@@ -78,14 +245,34 @@ class LocalStorage(Generic[T]):
         self.path = path
         self.resource_class = resource_class
 
-    def load(self) -> T:
+    def _default_value(self) -> T:
+        return cast(T, self.resource_class())
+
+    def _recreate_after_load_failure(self) -> T:
+        default_value = self._default_value()
+        path_obj = Path(self.path)
         try:
-            if exists(self.path):
-                return cast(T, load(self.path))
-            default_value = self.resource_class()
-            return cast(T, default_value)
-        except LOCAL_STORAGE_EXCEPTIONS as e:
-            raise LocalStorageError(f"Failed to load data from {self.path}: {type(e)}. {e}") from e
+            path_obj.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning(f"Failed to remove corrupted cache file {self.path}: {exc}")
+        try:
+            self.save(default_value)
+        except LocalStorageError as exc:
+            logger.error(f"Failed to recreate cache file {self.path}: {exc}")
+        return default_value
+
+    def load(self) -> T:
+        if not exists(self.path):
+            return self._default_value()
+
+        try:
+            return cast(T, load(self.path))
+        except LOCAL_STORAGE_EXCEPTIONS as exc:
+            logger.warning(
+                f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
+                "Removing and recreating cache."
+            )
+            return self._recreate_after_load_failure()
 
     def save(self, data: T) -> None:
         try:
@@ -96,14 +283,17 @@ class LocalStorage(Generic[T]):
 
 class Cache:
     def __init__(self, path: str | None = None):
-        if path is None:
-            path = os.getenv(EnvVar.CACHE_DIR, "./")
-        self.path = path
+        explicit_path = path is not None
+        self.path = resolve_cache_dir(path)
+        if not explicit_path:
+            migrate_legacy_runtime_files(self.path)
+        Path(self.path).mkdir(parents=True, exist_ok=True)
         self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
         self.observer_state = LocalStorage(join(self.path, 'observer_state.joblib'), dict)
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
         self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)
+        self.dashboard_state = LocalStorage(join(self.path, 'dashboard_state.joblib'), dict)
         self.llm_breakdown_progress = LocalStorage(join(self.path, 'llm_breakdown_progress.joblib'), dict)
         self.llm_breakdown_queue = LocalStorage(join(self.path, 'llm_breakdown_queue.joblib'), dict)
         self.llm_chat_queue = LocalStorage(join(self.path, 'llm_chat_queue.joblib'), list)
@@ -146,8 +336,8 @@ U = TypeVar('U')
 
 # Retry configuration constants
 RETRY_MAX_ATTEMPTS = 3
-RETRY_BACKOFF_MEAN = 10.0  # seconds
-RETRY_BACKOFF_STD = 3.0    # seconds
+RETRY_BACKOFF_MEAN = 10.0  # seconds (conservative default to avoid burst retries)
+RETRY_BACKOFF_STD = 3.0  # seconds
 
 # Rate limit configuration constants
 DEFAULT_MAX_REQUESTS_PER_MINUTE = 45
@@ -162,14 +352,14 @@ def get_max_concurrent_requests() -> int:
     Returns the max number of concurrent Todoist API requests used by thread pools.
     Override with EnvVar.MAX_CONCURRENT_REQUESTS env var.
     """
-    raw = getenv(EnvVar.MAX_CONCURRENT_REQUESTS)
+    raw = getenv(str(EnvVar.MAX_CONCURRENT_REQUESTS))
     if raw:
         try:
             value = int(raw)
             if value > 0:
                 return value
         except ValueError:
-            logger.warning("Invalid {} value: {}", EnvVar.MAX_CONCURRENT_REQUESTS, raw)
+            logger.warning(f"Invalid {EnvVar.MAX_CONCURRENT_REQUESTS} value: {raw}")
     return DEFAULT_MAX_CONCURRENT_REQUESTS
 
 

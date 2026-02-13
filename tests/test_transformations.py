@@ -402,16 +402,16 @@ def test_dataframe_column_types(event1, event2, project1, project2):
 
     df = events_to_dataframe(activity, project_id_to_name, project_id_to_root)
 
-    # Check that id columns are strings
-    assert df['id'].dtype == 'object'
-    assert df['parent_project_id'].dtype == 'object'
-    assert df['root_project_id'].dtype == 'object'
+    # Check that id columns are string-typed regardless of pandas storage backend
+    assert pd.api.types.is_string_dtype(df['id'])
+    assert pd.api.types.is_string_dtype(df['parent_project_id'])
+    assert pd.api.types.is_string_dtype(df['root_project_id'])
 
     # Check that date column contains datetime objects
     assert all(isinstance(d, dt.datetime) for d in df['date'])
 
-    # Check that string columns are strings
-    assert df['title'].dtype == 'object'
-    assert df['type'].dtype == 'object'
-    assert df['parent_project_name'].dtype == 'object'
-    assert df['root_project_name'].dtype == 'object'
+    # Check that text columns are string-typed regardless of pandas storage backend
+    assert pd.api.types.is_string_dtype(df['title'])
+    assert pd.api.types.is_string_dtype(df['type'])
+    assert pd.api.types.is_string_dtype(df['parent_project_name'])
+    assert pd.api.types.is_string_dtype(df['root_project_name'])

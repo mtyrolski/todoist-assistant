@@ -65,6 +65,17 @@ type ApiTokenStatus = {
   envPath: string;
 };
 
+type TimezoneStatus = {
+  configured: boolean;
+  timezone: string;
+  source: "system" | "env";
+  override: string | null;
+  overrideValid: boolean;
+  system: string;
+  envPath: string;
+  invalidOverride?: string;
+};
+
 function formatLaunchMeta(a: AutomationInfo): string {
   const last = a.lastLaunch ? `last: ${a.lastLaunch}` : "never run";
   const freq = `freq: ${a.frequencyMinutes}m`;
@@ -93,6 +104,11 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenNotice, setTokenNotice] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [timezoneStatus, setTimezoneStatus] = useState<TimezoneStatus | null>(null);
+  const [timezoneDraft, setTimezoneDraft] = useState<string>("");
+  const [timezoneSaving, setTimezoneSaving] = useState(false);
+  const [timezoneError, setTimezoneError] = useState<string | null>(null);
+  const [timezoneNotice, setTimezoneNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const loadAutomations = async () => {
@@ -143,8 +159,24 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     }
   };
 
+  const loadTimezone = async () => {
+    try {
+      const res = await fetch("/api/admin/timezone");
+      const payload = (await res.json()) as TimezoneStatus;
+      if (!res.ok) throw new Error("timezone");
+      setTimezoneStatus(payload);
+      setTimezoneDraft(payload.override ?? "");
+    } catch {
+      setTimezoneStatus(null);
+    }
+  };
+
   useEffect(() => {
     loadApiToken();
+  }, []);
+
+  useEffect(() => {
+    loadTimezone();
   }, []);
 
   const waitForJob = async (jobId: string): Promise<AdminJob> => {
@@ -295,6 +327,54 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setTokenError(e instanceof Error ? e.message : "Failed to clear token");
     } finally {
       setTokenSaving(false);
+    }
+  };
+
+  const saveTimezone = async () => {
+    if (!timezoneDraft.trim()) {
+      setTimezoneError("Provide an IANA timezone (example: Europe/Warsaw).");
+      return;
+    }
+    try {
+      setTimezoneSaving(true);
+      setTimezoneError(null);
+      setTimezoneNotice(null);
+      const res = await fetch("/api/admin/timezone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timezone: timezoneDraft.trim() })
+      });
+      const payload = (await res.json()) as TimezoneStatus & { detail?: string };
+      if (!res.ok) {
+        throw new Error(payload.detail ?? "Failed to save timezone");
+      }
+      setTimezoneStatus(payload);
+      setTimezoneDraft(payload.override ?? "");
+      setTimezoneNotice("Timezone override saved.");
+      onAfterMutation();
+    } catch (e) {
+      setTimezoneError(e instanceof Error ? e.message : "Failed to save timezone");
+    } finally {
+      setTimezoneSaving(false);
+    }
+  };
+
+  const clearTimezone = async () => {
+    try {
+      setTimezoneSaving(true);
+      setTimezoneError(null);
+      setTimezoneNotice(null);
+      const res = await fetch("/api/admin/timezone", { method: "DELETE" });
+      const payload = (await res.json()) as TimezoneStatus;
+      if (!res.ok) throw new Error("clear_timezone");
+      setTimezoneStatus(payload);
+      setTimezoneDraft("");
+      setTimezoneNotice("Timezone override removed (using system timezone).");
+      onAfterMutation();
+    } catch (e) {
+      setTimezoneError(e instanceof Error ? e.message : "Failed to clear timezone");
+    } finally {
+      setTimezoneSaving(false);
     }
   };
 
@@ -501,6 +581,65 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
               </div>
               {tokenError ? <p className="pill pill-warn">{tokenError}</p> : null}
               {tokenNotice ? <p className="pill">{tokenNotice}</p> : null}
+            </div>
+          </div>
+
+          <div className="card cardInner">
+            <header className="cardHeader">
+              <h3>Timezone Override</h3>
+            </header>
+            <div className="stack">
+              <p className="muted tiny" style={{ margin: 0 }}>
+                The app uses system timezone by default. Set an IANA timezone in .env to override it.
+              </p>
+              <div className="adminRow">
+                <span className={`pill ${timezoneStatus?.source === "env" ? "pill-good" : "pill"}`}>
+                  {timezoneStatus ? `${timezoneStatus.timezone} (${timezoneStatus.source})` : "Timezone unavailable"}
+                </span>
+                {timezoneStatus?.envPath ? (
+                  <span className="muted tiny" style={{ marginLeft: 8 }}>
+                    {timezoneStatus.envPath}
+                  </span>
+                ) : null}
+              </div>
+              {timezoneStatus && !timezoneStatus.overrideValid ? (
+                <p className="pill pill-warn">
+                  Invalid override in .env ({timezoneStatus.invalidOverride}). Falling back to system timezone.
+                </p>
+              ) : null}
+              <div className="adminRow">
+                <span className="muted tiny">
+                  System timezone: {timezoneStatus?.system ?? "unknown"}
+                </span>
+              </div>
+              <div className="control">
+                <label className="muted tiny" htmlFor="timezone-input">
+                  Timezone (IANA name)
+                </label>
+                <input
+                  id="timezone-input"
+                  className="dateInput"
+                  type="text"
+                  placeholder="Europe/Warsaw"
+                  value={timezoneDraft}
+                  onChange={(e) => setTimezoneDraft(e.target.value)}
+                />
+              </div>
+              <div className="adminRow">
+                <div className="adminRowRight">
+                  <button className="button buttonSmall" type="button" onClick={saveTimezone} disabled={timezoneSaving}>
+                    {timezoneSaving ? "Saving…" : "Save timezone"}
+                  </button>
+                  <button className="button buttonSmall" type="button" onClick={clearTimezone} disabled={timezoneSaving}>
+                    Use system timezone
+                  </button>
+                  <button className="button buttonSmall" type="button" onClick={loadTimezone} disabled={timezoneSaving}>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              {timezoneError ? <p className="pill pill-warn">{timezoneError}</p> : null}
+              {timezoneNotice ? <p className="pill">{timezoneNotice}</p> : null}
             </div>
           </div>
         </div>

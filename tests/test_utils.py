@@ -1,37 +1,40 @@
-"""
-Tests for utility functions in todoist.utils module.
-"""
+"""Tests for utility functions in ``todoist.utils``."""
+
 # pylint: disable=protected-access
 
 import os
-import tempfile
 from dataclasses import dataclass
-from typing import KeysView
-from unittest.mock import patch, MagicMock
+from pathlib import Path
+from typing import Any, KeysView
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from todoist.env import EnvVar
 from todoist.utils import (
-    MaxRetriesExceeded,
-    get_all_fields_of_dataclass,
-    safe_instantiate_entry,
-    last_n_years_in_weeks,
-    get_api_key,
-    try_n_times,
-    load_config,
+    DEFAULT_CACHE_SUBDIR,
+    DEFAULT_MAX_CONCURRENT_REQUESTS,
+    MIGRATION_BACKUP_DIRNAME,
+    RETRY_BACKOFF_MEAN,
+    RETRY_BACKOFF_STD,
+    RETRY_MAX_ATTEMPTS,
+    Anonymizable,
+    Cache,
     LocalStorage,
     LocalStorageError,
-    Cache,
-    Anonymizable,
+    MaxRetriesExceeded,
+    get_all_fields_of_dataclass,
+    get_api_key,
+    get_max_concurrent_requests,
+    last_n_years_in_weeks,
+    load_config,
     retry_with_backoff,
+    safe_instantiate_entry,
+    try_n_times,
     with_retry,
-    RETRY_MAX_ATTEMPTS,
-    RETRY_BACKOFF_MEAN,
-    RETRY_BACKOFF_STD
 )
 
 
-# Test get_all_fields_of_dataclass
 @dataclass
 class SampleDataclass:
     field1: str
@@ -39,584 +42,568 @@ class SampleDataclass:
     field3: bool = False
 
 
-def test_get_all_fields_of_dataclass():
-    """Test that get_all_fields_of_dataclass returns all field names."""
-    fields = get_all_fields_of_dataclass(SampleDataclass)
-    assert isinstance(fields, KeysView)
-    field_list = list(fields)
-    assert 'field1' in field_list
-    assert 'field2' in field_list
-    assert 'field3' in field_list
-    assert len(field_list) == 3
-
-
-def test_get_all_fields_of_dataclass_empty():
-    """Test get_all_fields_of_dataclass with empty dataclass."""
-    @dataclass
-    class EmptyDataclass:
-        pass
-
-    fields = get_all_fields_of_dataclass(EmptyDataclass)
-    assert len(list(fields)) == 0
-
-
-# Test safe_instantiate_entry
 @dataclass
 class DataclassWithKwargs:
     known_field: str
     another_field: int = 0
-    new_api_kwargs: dict | None = None
+    new_api_kwargs: dict[str, Any] | None = None
 
 
-def test_safe_instantiate_entry_no_unexpected_fields():
-    """Test safe_instantiate_entry with only known fields."""
-    result = safe_instantiate_entry(
-        DataclassWithKwargs,
-        known_field="test",
-        another_field=42
-    )
-    assert result.known_field == "test"
-    assert result.another_field == 42
-    assert result.new_api_kwargs == {}
+def _eventually_successful(failures_before_success: int, error_message: str = "Not yet"):
+    state = {"count": 0}
+
+    def _fn() -> str:
+        state["count"] += 1
+        if state["count"] <= failures_before_success:
+            raise ValueError(error_message)
+        return "success"
+
+    return _fn, state
 
 
-def test_safe_instantiate_entry_with_unexpected_fields():
-    """Test safe_instantiate_entry with unexpected fields."""
-    result = safe_instantiate_entry(
-        DataclassWithKwargs,
-        known_field="test",
-        another_field=42,
-        unexpected_field="value",
-        another_unexpected=123
-    )
-    assert result.known_field == "test"
-    assert result.another_field == 42
-    assert result.new_api_kwargs == {
-        "unexpected_field": "value",
-        "another_unexpected": 123
-    }
+def test_get_all_fields_of_dataclass_returns_all_fields():
+    fields = get_all_fields_of_dataclass(SampleDataclass)
+    assert isinstance(fields, KeysView)
+    assert list(fields) == ["field1", "field2", "field3"]
 
 
-def test_safe_instantiate_entry_only_unexpected_fields():
-    """Test safe_instantiate_entry with only unexpected fields."""
-    result = safe_instantiate_entry(
-        DataclassWithKwargs,
-        known_field="test",
-        unexpected1="value1",
-        unexpected2="value2"
-    )
-    assert result.known_field == "test"
-    assert result.new_api_kwargs == {
-        "unexpected1": "value1",
-        "unexpected2": "value2"
-    }
+def test_get_all_fields_of_dataclass_empty():
+    @dataclass
+    class EmptyDataclass:
+        pass
+
+    assert list(get_all_fields_of_dataclass(EmptyDataclass)) == []
 
 
-def test_safe_instantiate_entry_missing_kwargs_field():
-    """Test safe_instantiate_entry raises AssertionError when new_api_kwargs field is missing."""
+@pytest.mark.parametrize(
+    ("entry_kwargs", "expected_known_field", "expected_another_field", "expected_unexpected"),
+    [
+        ({"known_field": "test", "another_field": 42}, "test", 42, {}),
+        (
+            {
+                "known_field": "test",
+                "another_field": 42,
+                "unexpected_field": "value",
+                "another_unexpected": 123,
+            },
+            "test",
+            42,
+            {"unexpected_field": "value", "another_unexpected": 123},
+        ),
+        (
+            {
+                "known_field": "test",
+                "unexpected1": "value1",
+                "unexpected2": "value2",
+            },
+            "test",
+            0,
+            {"unexpected1": "value1", "unexpected2": "value2"},
+        ),
+    ],
+)
+def test_safe_instantiate_entry_collects_unexpected_fields(
+    entry_kwargs: dict[str, Any],
+    expected_known_field: str,
+    expected_another_field: int,
+    expected_unexpected: dict[str, Any],
+):
+    result = safe_instantiate_entry(DataclassWithKwargs, **entry_kwargs)
+    assert result.known_field == expected_known_field
+    assert result.another_field == expected_another_field
+    assert result.new_api_kwargs == expected_unexpected
+
+
+def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
+    # pylint: disable=protected-access
+    import todoist.utils as utils
+
+    @dataclass
+    class DataclassWithRequiredAndKwargs:
+        required_field: str
+        new_api_kwargs: dict[str, Any] | None = None
+
+    utils._MISSING_REQUIRED_FIELD_WARNINGS.clear()
+    with patch("todoist.utils.logger.warning") as mock_warning:
+        first = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
+        second = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
+
+    assert first.required_field is None
+    assert second.required_field is None
+    assert mock_warning.call_count == 1
+    warning_message = mock_warning.call_args.args[0]
+    assert "missing required field 'required_field'" in warning_message
+
+
+def test_safe_instantiate_entry_requires_kwargs_field():
     @dataclass
     class DataclassWithoutKwargs:
         field1: str
 
-    with pytest.raises(AssertionError) as exc_info:
+    with pytest.raises(AssertionError, match="kwargs field"):
         safe_instantiate_entry(DataclassWithoutKwargs, field1="test", extra="field")
-    # The assertion message says "kwargs field is not in..."
-    assert "kwargs" in str(exc_info.value).lower()
 
 
-# Test last_n_years_in_weeks
-def test_last_n_years_in_weeks_one_year():
-    """Test last_n_years_in_weeks for 1 year."""
-    result = last_n_years_in_weeks(1)
-    expected = int(365.25 / 7)  # ~52 weeks
-    assert result == expected
-    assert result == 52
+def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
+    from todoist.types import EventEntry, ProjectEntry, TaskEntry
+
+    project_payload = {
+        "id": "proj1",
+        "name": "Project 1",
+        "color": "blue",
+        "parent_id": None,
+        "child_order": 1,
+        "view_style": "list",
+        "is_favorite": False,
+        "is_archived": False,
+        "is_deleted": False,
+        "is_frozen": False,
+        "can_assign_tasks": True,
+        "is_shared": True,
+        "access": "team",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-02T00:00:00Z",
+        "is_collapsed": False,
+    }
+    project_entry = safe_instantiate_entry(ProjectEntry, **project_payload)
+    assert project_entry.shared is None
+    assert project_entry.collapsed is None
+    assert project_entry.v2_id is None
+    assert project_entry.is_shared is True
+    assert project_entry.is_collapsed is False
+    assert project_entry.access == {"visibility": "team"}
+    assert project_entry.new_api_kwargs is not None
+    assert project_entry.new_api_kwargs == {}
+
+    task_payload = {
+        "id": "task1",
+        "user_id": "user1",
+        "project_id": "proj1",
+        "section_id": None,
+        "parent_id": None,
+        "added_by_uid": "user1",
+        "assigned_by_uid": None,
+        "responsible_uid": None,
+        "labels": [],
+        "deadline": None,
+        "duration": None,
+        "checked": False,
+        "is_deleted": False,
+        "added_at": "2024-01-01T00:00:00Z",
+        "completed_at": None,
+        "updated_at": "2024-01-01T00:00:00Z",
+        "due": None,
+        "priority": 1,
+        "child_order": 1,
+        "content": "Task 1",
+        "description": "",
+        "note_count": 0,
+        "day_order": "0",
+        "is_collapsed": False,
+    }
+    task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
+    assert task_entry.collapsed is None
+    assert task_entry.v2_id is None
+    assert task_entry.v2_project_id is None
+    assert task_entry.is_collapsed is False
+    assert task_entry.day_order == 0
+    assert task_entry.new_api_kwargs is not None
+    assert task_entry.new_api_kwargs == {}
+
+    event_payload = {
+        "id": "event1",
+        "object_type": "item",
+        "object_id": "task1",
+        "event_type": "added",
+        "event_date": "2024-01-01T00:00:00Z",
+        "parent_project_id": "proj1",
+        "parent_item_id": None,
+        "initiator_id": "user1",
+        "extra_data": {"content": "Task 1"},
+        "extra_data_id": None,
+        "source": "api",
+    }
+    event_entry = safe_instantiate_entry(EventEntry, **event_payload)
+    assert event_entry.v2_object_id is None
+    assert event_entry.v2_parent_project_id is None
+    assert event_entry.source == "api"
 
 
-def test_last_n_years_in_weeks_multiple_years():
-    """Test last_n_years_in_weeks for multiple years."""
-    result = last_n_years_in_weeks(2)
-    expected = int(365.25 * 2 / 7)  # ~104 weeks
-    assert result == expected
-    assert result == 104
+@pytest.mark.parametrize(
+    ("years", "expected_weeks"),
+    [
+        (0, 0),
+        (1, 52),
+        (2, 104),
+        (5, 260),
+        (-1, -52),
+    ],
+)
+def test_last_n_years_in_weeks(years: int, expected_weeks: int):
+    assert last_n_years_in_weeks(years) == expected_weeks
 
 
-def test_last_n_years_in_weeks_zero():
-    """Test last_n_years_in_weeks for 0 years."""
-    result = last_n_years_in_weeks(0)
-    assert result == 0
+@pytest.mark.parametrize(
+    ("env_payload", "expected"),
+    [
+        ({"API_KEY": "test_api_key_12345"}, "test_api_key_12345"),
+        ({}, ""),
+        ({"API_KEY": ""}, ""),
+    ],
+)
+def test_get_api_key(env_payload: dict[str, str], expected: str):
+    with patch.dict(os.environ, env_payload, clear=True):
+        assert get_api_key() == expected
 
 
-def test_last_n_years_in_weeks_fractional():
-    """Test last_n_years_in_weeks for fractional years (should truncate)."""
-    result = last_n_years_in_weeks(5)
-    expected = int(365.25 * 5 / 7)
-    assert result == expected
-    assert result == 260  # int(1826.25 / 7) = int(260.89...) = 260
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        (None, DEFAULT_MAX_CONCURRENT_REQUESTS),
+        ("8", 8),
+        ("0", DEFAULT_MAX_CONCURRENT_REQUESTS),
+        ("-4", DEFAULT_MAX_CONCURRENT_REQUESTS),
+        ("not-an-int", DEFAULT_MAX_CONCURRENT_REQUESTS),
+    ],
+)
+def test_get_max_concurrent_requests_parses_env_value(env_value: str | None, expected: int):
+    if env_value is None:
+        payload: dict[str, str] = {}
+    else:
+        payload = {EnvVar.MAX_CONCURRENT_REQUESTS: env_value}
+    with patch.dict(os.environ, payload, clear=True):
+        assert get_max_concurrent_requests() == expected
 
 
-# Test get_api_key
-def test_get_api_key_with_env_variable():
-    """Test get_api_key when API_KEY environment variable is set."""
-    with patch.dict(os.environ, {'API_KEY': 'test_api_key_12345'}):
-        result = get_api_key()
-        assert result == 'test_api_key_12345'
-
-
-def test_get_api_key_without_env_variable():
-    """Test get_api_key when API_KEY environment variable is not set."""
-    with patch.dict(os.environ, {}, clear=True):
-        result = get_api_key()
-        assert result == ""
-
-
-def test_get_api_key_empty_env_variable():
-    """Test get_api_key when API_KEY environment variable is empty."""
-    with patch.dict(os.environ, {'API_KEY': ''}):
-        result = get_api_key()
-        assert result == ""
-
-
-# Test try_n_times
 def test_try_n_times_success_first_attempt():
-    """Test try_n_times when function succeeds on first attempt."""
-    def successful_function():
-        return "success"
-
-    result = try_n_times(successful_function, 3)
-    assert result == "success"
+    assert try_n_times(lambda: "success", 3) == "success"
 
 
 def test_try_n_times_success_after_failures():
-    """Test try_n_times when function succeeds after some failures."""
-    call_count = {'count': 0}
-
-    def eventually_successful():
-        call_count['count'] += 1
-        if call_count['count'] < 3:
-            raise ValueError("Not yet")
-        return "success"
-
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = try_n_times(eventually_successful, 5)
-
+    fn, state = _eventually_successful(failures_before_success=2)
+    with patch("todoist.utils.time.sleep"):
+        result = try_n_times(fn, 5)
     assert result == "success"
-    assert call_count['count'] == 3
+    assert state["count"] == 3
 
 
-def test_try_n_times_all_failures():
-    """Test try_n_times when function fails all attempts."""
-    def always_fails():
+def test_try_n_times_all_failures_returns_none():
+    call_count = {"count": 0}
+
+    def _always_fail():
+        call_count["count"] += 1
         raise RuntimeError("Always fails")
 
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = try_n_times(always_fails, 3)
-
+    with patch("todoist.utils.time.sleep"):
+        result = try_n_times(_always_fail, 3)
     assert result is None
+    assert call_count["count"] == 3
 
 
 def test_try_n_times_exponential_backoff():
-    """Test try_n_times uses exponential backoff between retries."""
-    def always_fails():
-        raise ValueError("Fail")
-
-    with patch('todoist.utils.time.sleep') as mock_sleep:
-        try_n_times(always_fails, 4)
-
-        # Verify exponential backoff: 2^(0+3)=8, 2^(1+3)=16, 2^(2+3)=32
-        calls = mock_sleep.call_args_list
-        assert len(calls) == 3  # n-1 sleeps for n attempts
-        assert calls[0][0][0] == 8
-        assert calls[1][0][0] == 16
-        assert calls[2][0][0] == 32
+    with patch("todoist.utils.time.sleep") as mock_sleep:
+        try_n_times(lambda: (_ for _ in ()).throw(ValueError("Fail")), 4)
+    assert [call.args[0] for call in mock_sleep.call_args_list] == [8, 16, 32]
 
 
-def test_try_n_times_single_attempt():
-    """Test try_n_times with only 1 attempt (no retries)."""
-    def fails_once():
-        raise ValueError("Fail")
+def test_try_n_times_zero_attempts_does_not_call_function():
+    called = {"count": 0}
 
-    with patch('todoist.utils.time.sleep') as mock_sleep:
-        result = try_n_times(fails_once, 1)
+    def _fn():
+        called["count"] += 1
+        return "ok"
 
-    assert result is None
-    mock_sleep.assert_not_called()  # No sleep for single attempt
-
-
-def test_try_n_times_returns_correct_value():
-    """Test try_n_times returns the actual function return value."""
-    def returns_dict():
-        return {"key": "value", "number": 42}
-
-    result = try_n_times(returns_dict, 3)
-    assert result == {"key": "value", "number": 42}
+    assert try_n_times(_fn, 0) is None
+    assert called["count"] == 0
 
 
-# Test LocalStorage class
-def test_local_storage_save_and_load():
-    """Test LocalStorage save and load operations."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, "test_data.joblib")
-        storage = LocalStorage(filepath, set)
-
-        # Save data
-        test_data = {"item1", "item2", "item3"}
-        storage.save(test_data)
-
-        # Load data
-        loaded_data = storage.load()
-        assert loaded_data == test_data
+@pytest.mark.parametrize(
+    ("resource_class", "payload"),
+    [
+        (set, {"item1", "item2", "item3"}),
+        (dict, {"key1": "value1", "key2": 42}),
+        (list, [1, 2, 3]),
+    ],
+)
+def test_local_storage_save_and_load_roundtrip(tmp_path, resource_class, payload):
+    storage = LocalStorage(str(tmp_path / "data.joblib"), resource_class)
+    storage.save(payload)
+    assert storage.load() == payload
 
 
-def test_local_storage_load_nonexistent_file():
-    """Test LocalStorage load returns default value when file doesn't exist."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, "nonexistent.joblib")
-        storage = LocalStorage(filepath, set)
-
-        # Load should return empty set (default value)
-        loaded_data = storage.load()
-        assert loaded_data == set()
-        assert isinstance(loaded_data, set)
+@pytest.mark.parametrize("resource_class, expected_default", [(set, set()), (dict, {}), (list, [])])
+def test_local_storage_load_nonexistent_returns_default(tmp_path, resource_class, expected_default):
+    storage = LocalStorage(str(tmp_path / "missing.joblib"), resource_class)
+    loaded_data = storage.load()
+    assert loaded_data == expected_default
+    assert isinstance(loaded_data, type(expected_default))
 
 
-def test_local_storage_load_with_dict_default():
-    """Test LocalStorage load with dict as default resource class."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, "test_dict.joblib")
-        storage = LocalStorage(filepath, dict)
-
-        # Load non-existent file should return empty dict
-        loaded_data = storage.load()
-        assert loaded_data == {}
-        assert isinstance(loaded_data, dict)
+def test_local_storage_corrupted_file_is_recreated(tmp_path):
+    file_path = tmp_path / "corrupted.joblib"
+    file_path.write_text("This is not valid joblib data", encoding="utf-8")
+    storage = LocalStorage(str(file_path), set)
+    loaded_data = storage.load()
+    assert loaded_data == set()
+    assert storage.load() == set()
 
 
-def test_local_storage_save_and_load_dict():
-    """Test LocalStorage with dictionary data."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, "test_dict.joblib")
-        storage = LocalStorage(filepath, dict)
-
-        # Save dict
-        test_dict = {"key1": "value1", "key2": 42, "key3": [1, 2, 3]}
-        storage.save(test_dict)
-
-        # Load dict
-        loaded_dict = storage.load()
-        assert loaded_dict == test_dict
-
-
-def test_local_storage_error_on_corrupted_file():
-    """Test LocalStorage raises LocalStorageError on corrupted file."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, "corrupted.joblib")
-
-        # Create a corrupted file
-        with open(filepath, 'w') as f:
-            f.write("This is not valid joblib data")
-
-        storage = LocalStorage(filepath, set)
-
-        with pytest.raises(LocalStorageError) as exc_info:
-            storage.load()
-
-        assert "Failed to load data" in str(exc_info.value)
-        assert filepath in str(exc_info.value)
-
-
-def test_local_storage_error_on_invalid_path():
-    """Test LocalStorage raises LocalStorageError on invalid save path."""
-    # Use an invalid path (directory that doesn't exist and can't be created)
-    invalid_path = "/nonexistent_directory/subdir/file.joblib"
-    storage = LocalStorage(invalid_path, set)
-
-    with pytest.raises(LocalStorageError) as exc_info:
+def test_local_storage_error_on_invalid_save_path(tmp_path):
+    invalid_path = tmp_path / "missing_dir" / "nested" / "file.joblib"
+    storage = LocalStorage(str(invalid_path), set)
+    with pytest.raises(LocalStorageError, match="Failed to save data"):
         storage.save({"data"})
 
-    assert "Failed to save data" in str(exc_info.value)
+
+def test_cache_initialization_creates_expected_storages(tmp_path):
+    cache = Cache(str(tmp_path))
+    expected_files = {
+        "activity": "activity.joblib",
+        "observer_state": "observer_state.joblib",
+        "integration_launches": "integration_launches.joblib",
+        "automation_launches": "automation_launches.joblib",
+        "processed_gmail_messages": "processed_gmail_messages.joblib",
+        "dashboard_state": "dashboard_state.joblib",
+        "llm_breakdown_progress": "llm_breakdown_progress.joblib",
+        "llm_breakdown_queue": "llm_breakdown_queue.joblib",
+        "llm_chat_queue": "llm_chat_queue.joblib",
+        "llm_chat_conversations": "llm_chat_conversations.joblib",
+    }
+    for attr_name, filename in expected_files.items():
+        storage = getattr(cache, attr_name)
+        assert isinstance(storage, LocalStorage)
+        assert storage.path == str(tmp_path / filename)
 
 
-# Test Cache class
-def test_cache_initialization():
-    """Test Cache class initialization creates all storage instances."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cache = Cache(tmpdir)
-
-        assert isinstance(cache.activity, LocalStorage)
-        assert isinstance(cache.integration_launches, LocalStorage)
-        assert isinstance(cache.automation_launches, LocalStorage)
-        assert isinstance(cache.processed_gmail_messages, LocalStorage)
-
-        # Verify paths
-        assert cache.activity.path == os.path.join(tmpdir, 'activity.joblib')
-        assert cache.integration_launches.path == os.path.join(tmpdir, 'integration_launches.joblib')
-        assert cache.automation_launches.path == os.path.join(tmpdir, 'automation_launches.joblib')
-        assert cache.processed_gmail_messages.path == os.path.join(tmpdir, 'processed_gmail_messages.joblib')
+def test_cache_uses_env_path_by_default(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    with patch.dict(os.environ, {EnvVar.CACHE_DIR: str(tmp_path)}, clear=True):
+        cache = Cache()
+    assert cache.path == str(tmp_path)
 
 
-def test_cache_default_path():
-    """Test Cache uses default path when not specified."""
-    cache = Cache()
-    assert cache.path == './'
+def test_cache_uses_dot_cache_default_when_env_missing(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    with patch.dict(os.environ, {}, clear=True):
+        cache = Cache()
+    assert Path(cache.path) == (tmp_path / DEFAULT_CACHE_SUBDIR).resolve()
 
 
-def test_cache_activity_storage():
-    """Test Cache activity storage can save and load."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cache = Cache(tmpdir)
+def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    legacy_activity = tmp_path / "activity.joblib"
+    legacy_log = tmp_path / "automation.log"
+    LocalStorage(str(legacy_activity), set).save({"event1"})
+    legacy_log.write_text("legacy-log", encoding="utf-8")
 
-        # Save activity data
-        activity_data = {"event1", "event2", "event3"}
-        cache.activity.save(activity_data)
+    with patch.dict(os.environ, {}, clear=True):
+        cache = Cache()
 
-        # Load activity data
-        loaded = cache.activity.load()
-        assert loaded == activity_data
+    cache_root = Path(cache.path)
+    backup_root = tmp_path / MIGRATION_BACKUP_DIRNAME
 
-
-def test_cache_integration_launches_storage():
-    """Test Cache integration_launches storage can save and load."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cache = Cache(tmpdir)
-
-        # Save integration launches data
-        launches_data = {"integration1": 5, "integration2": 10}
-        cache.integration_launches.save(launches_data)
-
-        # Load integration launches data
-        loaded = cache.integration_launches.load()
-        assert loaded == launches_data
+    assert cache.activity.load() == {"event1"}
+    assert (cache_root / "activity.joblib").exists()
+    assert (cache_root / "automation.log").exists()
+    assert (backup_root / "activity.joblib").exists()
+    assert (backup_root / "automation.log").exists()
+    assert not legacy_activity.exists()
+    assert not legacy_log.exists()
 
 
-# Test Anonymizable class
+@pytest.mark.parametrize(
+    ("storage_attr", "payload"),
+    [
+        ("activity", {"event1", "event2"}),
+        ("integration_launches", {"integration1": 5}),
+        ("automation_launches", {"automation1": 2}),
+        ("processed_gmail_messages", {"msg1"}),
+    ],
+)
+def test_cache_storage_roundtrip(tmp_path, storage_attr: str, payload):
+    cache = Cache(str(tmp_path))
+    storage = getattr(cache, storage_attr)
+    storage.save(payload)
+    assert storage.load() == payload
+
+
 class ConcreteAnonymizable(Anonymizable):
-    """Concrete implementation of Anonymizable for testing."""
+    """Concrete Anonymizable implementation for tests."""
+
     def __init__(self):
         super().__init__()
         self.data = "original"
 
     def _anonymize(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
-        self.data = "anonymized"
+        self.data = f"{project_mapping.get('proj1')}::{label_mapping.get('label1')}"
 
 
-def test_anonymizable_initialization():
-    """Test Anonymizable initialization sets is_anonymized to False."""
+def test_anonymizable_initialization_sets_flag_false():
+    assert ConcreteAnonymizable().is_anonymized is False
+
+
+def test_anonymizable_first_call_applies_anonymization():
     obj = ConcreteAnonymizable()
-    assert obj.is_anonymized is False
-
-
-def test_anonymizable_anonymize_first_time():
-    """Test Anonymizable anonymize method works on first call."""
-    obj = ConcreteAnonymizable()
-
-    project_mapping = {"proj1": "anon_proj1"}
-    label_mapping = {"label1": "anon_label1"}
-
-    obj.anonymize(project_mapping, label_mapping)
-
+    obj.anonymize({"proj1": "anon_proj1"}, {"label1": "anon_label1"})
     assert obj.is_anonymized is True
-    assert obj.data == "anonymized"
+    assert obj.data == "anon_proj1::anon_label1"
 
 
-def test_anonymizable_anonymize_idempotent():
-    """Test Anonymizable anonymize is idempotent (won't re-anonymize)."""
+def test_anonymizable_is_idempotent():
     obj = ConcreteAnonymizable()
-
     project_mapping = {"proj1": "anon_proj1"}
     label_mapping = {"label1": "anon_label1"}
-
-    # First anonymization
     obj.anonymize(project_mapping, label_mapping)
-    assert obj.data == "anonymized"
-
-    # Modify data to test idempotency
     obj.data = "modified"
-
-    # Second anonymization should skip
     obj.anonymize(project_mapping, label_mapping)
-    assert obj.data == "modified"  # Should not be re-anonymized
+    assert obj.data == "modified"
 
 
-def test_anonymizable_calls_abstract_method():
-    """Test that Anonymizable calls the _anonymize abstract method."""
+def test_anonymizable_calls_abstract_method_once():
     obj = ConcreteAnonymizable()
-
-    with patch.object(obj, '_anonymize', wraps=obj._anonymize) as mock_anonymize:
-        project_mapping = {"proj1": "anon_proj1"}
-        label_mapping = {"label1": "anon_label1"}
-
-        obj.anonymize(project_mapping, label_mapping)
-
-        mock_anonymize.assert_called_once_with(project_mapping, label_mapping)
+    with patch.object(obj, "_anonymize", wraps=obj._anonymize) as mock_anonymize:
+        obj.anonymize({"proj1": "anon_proj1"}, {"label1": "anon_label1"})
+    mock_anonymize.assert_called_once_with({"proj1": "anon_proj1"}, {"label1": "anon_label1"})
 
 
-# Test load_config
-def test_load_config_basic():
-    """Test load_config loads configuration correctly."""
-    # This test requires actual config files to exist
-    # We'll test with mocked Hydra components
-    with patch('todoist.utils.GlobalHydra') as mock_global_hydra, \
-         patch('todoist.utils.initialize') as mock_initialize, \
-         patch('todoist.utils.compose') as mock_compose:
-
-        # Setup mocks
+def test_load_config_with_relative_path():
+    with (
+        patch("todoist.utils.GlobalHydra") as mock_global_hydra,
+        patch("todoist.utils.initialize") as mock_initialize,
+        patch("todoist.utils.initialize_config_dir") as mock_initialize_config_dir,
+        patch("todoist.utils.compose") as mock_compose,
+    ):
         mock_instance = MagicMock()
         mock_global_hydra.instance.return_value = mock_instance
-        mock_config = MagicMock()
-        mock_compose.return_value = mock_config
+        expected_config = MagicMock()
+        mock_compose.return_value = expected_config
 
-        # Call load_config
         result = load_config("test_config", "../config")
 
-        # Verify calls
         mock_instance.clear.assert_called_once()
         mock_initialize.assert_called_once_with(config_path="../config")
+        mock_initialize_config_dir.assert_not_called()
         mock_compose.assert_called_once_with(config_name="test_config")
-        assert result == mock_config
+        assert result == expected_config
 
 
-def test_load_config_clears_global_hydra():
-    """Test load_config clears GlobalHydra before initializing."""
-    with patch('todoist.utils.GlobalHydra') as mock_global_hydra, \
-         patch('todoist.utils.initialize'), \
-         patch('todoist.utils.compose') as mock_compose:
-
+def test_load_config_with_absolute_path():
+    with (
+        patch("todoist.utils.GlobalHydra") as mock_global_hydra,
+        patch("todoist.utils.initialize") as mock_initialize,
+        patch("todoist.utils.initialize_config_dir") as mock_initialize_config_dir,
+        patch("todoist.utils.compose") as mock_compose,
+    ):
         mock_instance = MagicMock()
         mock_global_hydra.instance.return_value = mock_instance
         mock_compose.return_value = MagicMock()
 
-        load_config("config", "path")
+        load_config("config", "/tmp/todoist-config")
 
-        # Verify clear is called before other operations
         mock_instance.clear.assert_called_once()
+        mock_initialize.assert_not_called()
+        mock_initialize_config_dir.assert_called_once_with(config_dir="/tmp/todoist-config")
 
 
-# Test retry_with_backoff
 def test_retry_with_backoff_success_first_attempt():
-    """Test retry_with_backoff when function succeeds on first attempt."""
-    def successful_function():
-        return "success"
-
-    result = retry_with_backoff(successful_function, max_attempts=3)
-    assert result == "success"
+    assert retry_with_backoff(lambda: "success", max_attempts=3) == "success"
 
 
 def test_retry_with_backoff_success_after_failures():
-    """Test retry_with_backoff when function succeeds after some failures."""
-    call_count = {'count': 0}
-
-    def eventually_successful():
-        call_count['count'] += 1
-        if call_count['count'] < 3:
-            raise ValueError("Not yet")
-        return "success"
-
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = retry_with_backoff(eventually_successful, max_attempts=5)
-
+    fn, state = _eventually_successful(failures_before_success=2)
+    with patch("todoist.utils.time.sleep"):
+        result = retry_with_backoff(fn, max_attempts=5)
     assert result == "success"
-    assert call_count['count'] == 3
+    assert state["count"] == 3
 
 
-def test_retry_with_backoff_all_failures():
-    """Test retry_with_backoff when function fails all attempts."""
-    def always_fails():
-        raise RuntimeError("Always fails")
-
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        result = retry_with_backoff(always_fails, max_attempts=3)
-
+def test_retry_with_backoff_all_failures_returns_none():
+    with patch("todoist.utils.time.sleep"):
+        result = retry_with_backoff(lambda: (_ for _ in ()).throw(RuntimeError("Always fails")), max_attempts=3)
     assert result is None
 
 
-def test_retry_with_backoff_uses_gaussian_backoff():
-    """Test retry_with_backoff uses Gaussian backoff between retries."""
-    def always_fails():
-        raise ValueError("Fail")
+def test_retry_with_backoff_uses_gaussian_values_for_sleep():
+    with (
+        patch("todoist.utils.time.sleep") as mock_sleep,
+        patch("todoist.utils.random.gauss", side_effect=[5.5, 12.3, 8.9]) as mock_gauss,
+    ):
+        retry_with_backoff(
+            lambda: (_ for _ in ()).throw(ValueError("Fail")),
+            max_attempts=4,
+            backoff_mean=10.0,
+            backoff_std=3.0,
+        )
 
-    with patch('todoist.utils.time.sleep') as mock_sleep, \
-         patch('todoist.utils.random.gauss') as mock_gauss:
-        # Mock Gaussian to return predictable values
-        mock_gauss.side_effect = [5.5, 12.3, 8.9]
-
-        retry_with_backoff(always_fails, max_attempts=4, backoff_mean=10.0, backoff_std=3.0)
-
-        # Verify Gaussian was called with correct parameters
-        assert mock_gauss.call_count == 3  # n-1 sleeps for n attempts
-        for call in mock_gauss.call_args_list:
-            assert call[0] == (10.0, 3.0)
-
-        # Verify sleep was called with Gaussian values
-        assert mock_sleep.call_count == 3
-        assert mock_sleep.call_args_list[0][0][0] == 5.5
-        assert mock_sleep.call_args_list[1][0][0] == 12.3
-        assert mock_sleep.call_args_list[2][0][0] == 8.9
+    assert mock_gauss.call_count == 3
+    for call in mock_gauss.call_args_list:
+        assert call.args == (10.0, 3.0)
+    assert [call.args[0] for call in mock_sleep.call_args_list] == [5.5, 12.3, 8.9]
 
 
-def test_retry_with_backoff_minimum_wait_time():
-    """Test retry_with_backoff enforces minimum wait time of 0.1s."""
-    def always_fails():
-        raise ValueError("Fail")
+def test_retry_with_backoff_enforces_minimum_wait_time():
+    with (
+        patch("todoist.utils.time.sleep") as mock_sleep,
+        patch("todoist.utils.random.gauss", side_effect=[-5.0, -2.0, 0.05]),
+    ):
+        retry_with_backoff(lambda: (_ for _ in ()).throw(ValueError("Fail")), max_attempts=4)
 
-    with patch('todoist.utils.time.sleep') as mock_sleep, \
-         patch('todoist.utils.random.gauss') as mock_gauss:
-        # Mock Gaussian to return negative values
-        mock_gauss.side_effect = [-5.0, -2.0, 0.05]
-
-        retry_with_backoff(always_fails, max_attempts=4)
-
-        # Verify minimum wait time is enforced
-        for call in mock_sleep.call_args_list:
-            assert call[0][0] >= 0.1
+    assert [call.args[0] for call in mock_sleep.call_args_list] == [0.1, 0.1, 0.1]
 
 
-def test_retry_with_backoff_constants():
-    """Test that retry constants are defined and have reasonable values."""
+def test_retry_with_backoff_zero_attempts_does_not_call_function():
+    call_count = {"count": 0}
+
+    def _fn():
+        call_count["count"] += 1
+        return "success"
+
+    assert retry_with_backoff(_fn, max_attempts=0) is None
+    assert call_count["count"] == 0
+
+
+def test_retry_constants_have_positive_values():
     assert RETRY_MAX_ATTEMPTS > 0
     assert RETRY_BACKOFF_MEAN > 0
     assert RETRY_BACKOFF_STD > 0
 
 
-# Test with_retry
 def test_with_retry_success():
-    """Test with_retry succeeds and returns result."""
-    def successful_function():
-        return "success"
-
-    result = with_retry(successful_function, operation_name="test op")
-    assert result == "success"
+    assert with_retry(lambda: "success", operation_name="test op") == "success"
 
 
 def test_with_retry_raises_on_failure():
-    """Test with_retry raises RuntimeError when all attempts fail."""
-    def always_fails():
-        raise RuntimeError("Always fails")
-
-    with patch('todoist.utils.time.sleep'):  # Mock sleep to speed up test
-        with pytest.raises(MaxRetriesExceeded) as exc_info:
-            with_retry(always_fails, operation_name="test operation", max_attempts=3)
-        assert "Failed to execute test operation after 3 retry attempts" in str(exc_info.value)
+    with patch("todoist.utils.time.sleep"):
+        with pytest.raises(MaxRetriesExceeded, match="Failed to execute test operation after 3 retry attempts"):
+            with_retry(
+                lambda: (_ for _ in ()).throw(RuntimeError("Always fails")),
+                operation_name="test operation",
+                max_attempts=3,
+            )
 
 
 def test_with_retry_uses_custom_parameters():
-    """Test with_retry passes custom parameters to retry_with_backoff."""
-    call_count = {'count': 0}
+    call_count = {"count": 0}
 
     def eventually_successful():
-        call_count['count'] += 1
-        if call_count['count'] < 4:
+        call_count["count"] += 1
+        if call_count["count"] < 4:
             raise ValueError("Not yet")
         return "success"
 
-    with patch('todoist.utils.time.sleep'):
+    with patch("todoist.utils.time.sleep"):
         result = with_retry(
             eventually_successful,
             operation_name="custom op",
             max_attempts=5,
             backoff_mean=15.0,
-            backoff_std=5.0
+            backoff_std=5.0,
         )
 
     assert result == "success"
-    assert call_count['count'] == 4
+    assert call_count["count"] == 4
+
+
+def test_with_retry_zero_attempts_raises_immediately():
+    with pytest.raises(MaxRetriesExceeded, match="after 0 retry attempts"):
+        with_retry(lambda: "success", operation_name="zero attempts", max_attempts=0)

@@ -32,6 +32,13 @@ import {
 
 const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
 
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function DashboardView({
   setupActive = false,
   tokenReady = false,
@@ -100,6 +107,32 @@ export function DashboardView({
     if (!dashboard) return null;
     return `${dashboard.range.beg} -> ${dashboard.range.end}`;
   }, [dashboard]);
+  const customRangeInvalid = Boolean(customBeg && customEnd && customBeg > customEnd);
+  const customRangeSummary = useMemo(() => {
+    if (!customBeg && !customEnd) return "Pick a start and end date.";
+    if (!customBeg || !customEnd) return "Select both dates to apply custom range.";
+    if (customRangeInvalid) return "Start date should be before end date.";
+    const start = new Date(`${customBeg}T00:00:00`);
+    const end = new Date(`${customEnd}T00:00:00`);
+    const msInDay = 24 * 60 * 60 * 1000;
+    const days = Math.round((end.getTime() - start.getTime()) / msInDay) + 1;
+    return `${days} day${days === 1 ? "" : "s"} selected.`;
+  }, [customBeg, customEnd, customRangeInvalid]);
+  const refreshDisabled = loadingDashboard || (rangeMode === "custom" && customRangeInvalid);
+
+  const applyCustomPreset = (days: number) => {
+    const end = new Date();
+    const beg = new Date(end);
+    beg.setDate(end.getDate() - (days - 1));
+    setRangeMode("custom");
+    setCustomBeg(toDateInputValue(beg));
+    setCustomEnd(toDateInputValue(end));
+  };
+
+  const clearCustomRange = () => {
+    setCustomBeg("");
+    setCustomEnd("");
+  };
 
   useEffect(() => {
     if (!status || activityRecoveryAttempted) return;
@@ -143,7 +176,7 @@ export function DashboardView({
   const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
     { id: "insights", label: "Insights" },
-    { id: "labels-lifespans", label: "Labels + Lifespans" },
+    { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
     { id: "stats", label: "Stats" },
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
@@ -154,10 +187,10 @@ export function DashboardView({
   const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
   const labelPlots = [
     {
-      title: "Most Popular Labels",
-      figure: figures.mostPopularLabels,
+      title: "Weekly Completion Trend",
+      figure: figures.weeklyCompletionTrend,
       height: 420,
-      help: PLOT_HELP.mostPopularLabels
+      help: PLOT_HELP.weeklyCompletionTrend
     },
     {
       title: "Task Lifespans: Time to Completion",
@@ -318,29 +351,58 @@ export function DashboardView({
               </select>
             </div>
           ) : (
-            <div className="control">
+            <div className="control controlCustomRange">
               <label className="muted tiny" htmlFor="beg-input">
-                Beg / End
+                Custom range
               </label>
-              <div className="dateRow">
-                <input
-                  id="beg-input"
-                  className="dateInput"
-                  type="date"
-                  value={customBeg}
-                  onChange={(e) => setCustomBeg(e.target.value)}
-                />
-                <input
-                  id="end-input"
-                  className="dateInput"
-                  type="date"
-                  value={customEnd}
-                  onChange={(e) => setCustomEnd(e.target.value)}
-                />
+              <div className={`customRangePanel ${customRangeInvalid ? "customRangePanelInvalid" : ""}`}>
+                <div className="customRangeQuick">
+                  {[7, 14, 30, 90].map((days) => (
+                    <button
+                      key={days}
+                      type="button"
+                      className="customRangeChip"
+                      onClick={() => applyCustomPreset(days)}
+                    >
+                      Last {days}d
+                    </button>
+                  ))}
+                  <button type="button" className="customRangeChip customRangeChipGhost" onClick={clearCustomRange}>
+                    Clear
+                  </button>
+                </div>
+                <div className="customRangeFields">
+                  <label className="customRangeField" htmlFor="beg-input">
+                    <span className="customRangeFieldLabel">From</span>
+                    <input
+                      id="beg-input"
+                      className="dateInput"
+                      type="date"
+                      value={customBeg}
+                      onChange={(e) => setCustomBeg(e.target.value)}
+                    />
+                  </label>
+                  <span className="customRangeDivider" aria-hidden>
+                    →
+                  </span>
+                  <label className="customRangeField" htmlFor="end-input">
+                    <span className="customRangeFieldLabel">To</span>
+                    <input
+                      id="end-input"
+                      className="dateInput"
+                      type="date"
+                      value={customEnd}
+                      onChange={(e) => setCustomEnd(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <p className={`customRangeMeta ${customRangeInvalid ? "customRangeMetaWarn" : ""}`}>
+                  {customRangeSummary}
+                </p>
               </div>
             </div>
           )}
-          <button className="button" onClick={refresh} disabled={loadingDashboard}>
+          <button className="button" onClick={refresh} disabled={refreshDisabled}>
             {loadingDashboard ? "Loading..." : "Refresh"}
           </button>
           {dashboard?.refreshedAt && <p className="muted tiny">Updated {dashboard.refreshedAt}</p>}
@@ -403,7 +465,7 @@ export function DashboardView({
       ) : null}
 
       {!noData ? (
-        <section id="labels-lifespans" className="grid2 jumpTarget" aria-label="Labels and task lifespans">
+        <section id="weekly-trend-lifespans" className="grid2 jumpTarget" aria-label="Weekly trend and task lifespans">
           {labelPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}

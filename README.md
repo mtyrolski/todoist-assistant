@@ -27,9 +27,9 @@
   </table>
 </div>
 
-<p><strong>Install v0.2.5 (CI artifacts)</strong><br/>
-  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21771236303/artifacts/5414274196">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
-  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21771236303">CI run details</a>
+<p><strong>Install v0.2.6 (CI artifacts)</strong><br/>
+  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21770204403/artifacts/5413896850">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
+  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21770204403/">CI run details</a>
 </p>
 
 ## Highlights
@@ -85,6 +85,13 @@ make run_dashboard
 Open:
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
+
+## Cache and logs
+- Runtime cache files now live in `./.cache/todoist-assistant/` by default.
+- You can override cache location with `TODOIST_CACHE_DIR`.
+- Automation logs are written to `<cache-dir>/automation.log`.
+- On startup, legacy runtime files found in old locations are migrated to the cache dir and backed up in `.cache-migration-backup/`.
+- Migration backups are temporary and are planned for removal in `v0.3.0`.
 
 ## Quick start (Docker)
 ```bash

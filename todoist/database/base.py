@@ -41,9 +41,4 @@ class Database(Anonymizable, DatabaseActivity, DatabaseProjects, DatabaseTasks, 
         for bs in self.anonimizable_subdatabases:
             logger.debug(f'Anonymizing {bs.__name__}...')
             assert hasattr(bs, 'anonymize_sub_db'), f'{bs.__name__} is not anonymizable'
-            # Call the mixin method on self; signature may accept label_mapping optionally
-            try:
-                bs.anonymize_sub_db(self, project_mapping, label_mapping=label_mapping)  # type: ignore[arg-type]
-            except TypeError:
-                # Backward compatibility for methods that accept only project_mapping
-                bs.anonymize_sub_db(self, project_mapping)  # type: ignore[misc]
+            bs.anonymize_sub_db(self, project_mapping, label_mapping=label_mapping)  # type: ignore[arg-type]

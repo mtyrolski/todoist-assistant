@@ -41,15 +41,48 @@ class DatabaseLabels:
         """
         Fetches label data from the Todoist API and populates local attributes.
         """
-        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS, rate_limited=True)
-        labels = self._api_client.request_json(spec, operation_name="list labels")
-        if not isinstance(labels, list):
-            logger.error("Unexpected payload returned when fetching labels")
-            return
+        labels = self._fetch_all_labels()
 
         self._labels = labels
-        self._mapping_label_name_to_color = {label['name']: label['color'] for label in labels}
+        self._mapping_label_name_to_color = {label["name"]: label["color"] for label in labels}
         logger.info(f"Fetched {len(labels)} labels.")
+
+    def _fetch_all_labels(self) -> list[dict]:
+        labels: list[dict] = []
+        cursor: str | None = None
+
+        while True:
+            params: dict[str, str | int] = {"limit": 200}
+            if cursor:
+                params["cursor"] = cursor
+            spec = RequestSpec(
+                endpoint=TodoistEndpoints.LIST_LABELS,
+                params=params,
+                rate_limited=True,
+            )
+            payload = self._api_client.request_json(spec, operation_name="list labels")
+            page_labels, next_cursor = self._extract_results_page(payload, operation_name="list labels")
+            labels.extend(page_labels)
+            if not next_cursor:
+                break
+            cursor = next_cursor
+
+        return labels
+
+    @staticmethod
+    def _extract_results_page(payload: object, *, operation_name: str) -> tuple[list[dict], str | None]:
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Unexpected payload type returned from {operation_name}: {type(payload).__name__}")
+
+        results = payload.get("results")
+        if not isinstance(results, list):
+            raise RuntimeError(f"Unexpected results payload returned from {operation_name}")
+
+        typed_results = [item for item in results if isinstance(item, dict)]
+        if len(typed_results) != len(results):
+            raise RuntimeError(f"Unexpected non-object label record in {operation_name} response")
+        next_cursor = payload.get("next_cursor")
+        return typed_results, str(next_cursor) if isinstance(next_cursor, str) else None
 
     def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
         if not self._labels:
@@ -60,9 +93,9 @@ class DatabaseLabels:
             logger.info(f"Anonymizing label '{ori_name}' to '{anonym_name}'")
             self._mapping_label_name_to_color[anonym_name] = self._mapping_label_name_to_color[ori_name]
 
-            local_label = next((label for label in self._labels if label['name'] == ori_name), None)
+            local_label = next((label for label in self._labels if label["name"] == ori_name), None)
             if local_label:
-                local_label['name'] = anonym_name
+                local_label["name"] = anonym_name
             else:
                 logger.warning(f"Label '{ori_name}' not found in local data.")
 

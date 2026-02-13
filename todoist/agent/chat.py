@@ -14,6 +14,7 @@ from todoist.env import EnvVar
 from todoist.agent.graph import AgentState, build_agent_graph
 from todoist.llm import DType, Device, LocalChatConfig, MessageRole, TransformersMistral3ChatModel
 from todoist.agent.repl_tool import SafePythonReplTool
+from todoist.utils import resolve_cache_dir
 
 
 app = typer.Typer(add_completion=False)
@@ -50,7 +51,7 @@ def chat(
         help="Transformers model id or local path (e.g. mistralai/Ministral-3-3B-Instruct-2512)",
     ),
     cache_path: Path = typer.Option(
-        ".",
+        Path(resolve_cache_dir()),
         envvar=EnvVar.AGENT_CACHE_PATH,
         help="Directory containing local caches like activity.joblib",
     ),

@@ -30,6 +30,8 @@ token.json
 outputs/
 *.log
 todoist/scripts/*.log
+.cache/
+.cache-migration-backup/
 # Screenshots added temporarily
 *.png
 
