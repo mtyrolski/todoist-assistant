@@ -41,6 +41,7 @@ RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
 _MIGRATION_WARNING_LOGGED = False
 _MIGRATED_CACHE_DIRS: set[str] = set()
+_MISSING_REQUIRED_FIELD_WARNINGS: set[tuple[str, str]] = set()
 
 TqdmProgressCallback = Callable[[str, int, int, str | None], None]
 _TQDM_PROGRESS_CALLBACK: TqdmProgressCallback | None = None
@@ -145,31 +146,25 @@ def migrate_legacy_runtime_files(cache_dir: str | None = None) -> None:
 
                 if copied:
                     logger.warning(
-                        "Migrated legacy runtime file '{}' -> '{}' (backup: '{}')",
-                        legacy_path,
-                        target_path,
-                        backup_path,
+                        f"Migrated legacy runtime file '{legacy_path}' -> '{target_path}' "
+                        f"(backup: '{backup_path}')"
                     )
                 else:
                     logger.warning(
-                        "Found legacy runtime file '{}' (target exists at '{}'); moved legacy file to backup '{}'",
-                        legacy_path,
-                        target_path,
-                        backup_path,
+                        f"Found legacy runtime file '{legacy_path}' with existing target '{target_path}'. "
+                        f"Skipped copy to avoid overwrite and moved legacy file to backup '{backup_path}'"
                     )
 
                 if not _MIGRATION_WARNING_LOGGED:
                     logger.warning(
-                        "Legacy cache migration backups are temporary and will be removed in {}.",
-                        MIGRATION_BACKUP_REMOVAL_VERSION,
+                        f"Legacy cache migration backups are temporary and will be removed in "
+                        f"{MIGRATION_BACKUP_REMOVAL_VERSION}."
                     )
                     _MIGRATION_WARNING_LOGGED = True
             except OSError as exc:
                 logger.warning(
-                    "Failed to migrate legacy runtime file '{}' into cache '{}': {}",
-                    legacy_path,
-                    cache_root,
-                    exc,
+                    f"Failed to migrate legacy runtime file '{legacy_path}' into cache "
+                    f"'{cache_root}': {exc}"
                 )
 
 
@@ -182,9 +177,29 @@ def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
 
 def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     """Safely instantiates a class by writing unexpected (i.e now in todoist api) field to kwargs parameter"""
+    # pylint: disable=global-statement
+    global _MISSING_REQUIRED_FIELD_WARNINGS
     class_fields = get_all_fields_of_dataclass(cls)
     class_field_set = set(class_fields)
     normalized_kwargs = dict(entry_kwargs)
+    missing_required_fields: list[str] = []
+
+    if "access" in class_field_set and "access" in normalized_kwargs:
+        access_value = normalized_kwargs["access"]
+        if isinstance(access_value, str):
+            normalized_kwargs["access"] = {"visibility": access_value}
+
+    if "day_order" in class_field_set and "day_order" in normalized_kwargs:
+        day_order_value = normalized_kwargs["day_order"]
+        if isinstance(day_order_value, str):
+            stripped_value = day_order_value.strip()
+            if stripped_value == "":
+                normalized_kwargs["day_order"] = None
+            else:
+                try:
+                    normalized_kwargs["day_order"] = int(stripped_value)
+                except ValueError:
+                    normalized_kwargs["day_order"] = None
 
     # Keep dataclass instantiation resilient if API omits some required fields.
     for field_name, field_def in cls.__dataclass_fields__.items():
@@ -192,6 +207,18 @@ def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
             continue
         if field_def.default is MISSING and field_def.default_factory is MISSING:
             normalized_kwargs[field_name] = None
+            missing_required_fields.append(field_name)
+
+    if missing_required_fields:
+        for field_name in missing_required_fields:
+            warning_key = (cls.__name__, field_name)
+            if warning_key in _MISSING_REQUIRED_FIELD_WARNINGS:
+                continue
+            logger.warning(
+                f"{cls.__name__}: missing required field '{field_name}' in API payload; "
+                "defaulting to None for compatibility."
+            )
+            _MISSING_REQUIRED_FIELD_WARNINGS.add(warning_key)
 
     unexpected_fields = set(normalized_kwargs.keys()) - class_field_set
 
@@ -309,8 +336,8 @@ U = TypeVar('U')
 
 # Retry configuration constants
 RETRY_MAX_ATTEMPTS = 3
-RETRY_BACKOFF_MEAN = 6.0  # seconds
-RETRY_BACKOFF_STD = 2.0    # seconds
+RETRY_BACKOFF_MEAN = 10.0  # seconds (conservative default to avoid burst retries)
+RETRY_BACKOFF_STD = 3.0  # seconds
 
 # Rate limit configuration constants
 DEFAULT_MAX_REQUESTS_PER_MINUTE = 45

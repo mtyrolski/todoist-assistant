@@ -8,6 +8,35 @@ from pandas import DataFrame
 from todoist.constants import EventExtraField, EventType
 
 
+def _normalize_access(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return None
+        return {"visibility": stripped}
+    return None
+
+
+def _normalize_day_order(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
 @dataclass
 class _ProjectEntry_V1:
     id: str
@@ -42,11 +71,14 @@ class _ProjectEntry_V1:
     access: dict[str, Any] | None = None
     new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
+    def __post_init__(self):
+        self.access = _normalize_access(self.access)
+
     def __repr__(self):
-        return 'Project ' + self.name
+        return f"Project {self.name}"
 
     def __str__(self):
-        return 'Project ' + self.name
+        return f"Project {self.name}"
 
 
 @dataclass
@@ -70,10 +102,10 @@ class _Event_V1:
     new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
     def __repr__(self):
-        return 'Event ' + self.object_type + ' ' + self.event_type
+        return f"Event {self.object_type} {self.event_type}"
 
     def __str__(self):
-        return 'Event ' + self.object_type + ' ' + self.event_type
+        return f"Event {self.object_type} {self.event_type}"
 
 
 @dataclass
@@ -113,11 +145,14 @@ class _Task_V1:
     day_order: str | int | None = None
     new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
 
+    def __post_init__(self):
+        self.day_order = _normalize_day_order(self.day_order)
+
     def __repr__(self):
-        return 'Task ' + self.content
+        return f"Task {self.content}"
 
     def __str__(self):
-        return 'Task ' + self.content
+        return f"Task {self.content}"
 
     @property
     def kwargs(self) -> dict[str, Any]:

@@ -114,6 +114,27 @@ def test_safe_instantiate_entry_collects_unexpected_fields(
     assert result.new_api_kwargs == expected_unexpected
 
 
+def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
+    # pylint: disable=protected-access
+    import todoist.utils as utils
+
+    @dataclass
+    class DataclassWithRequiredAndKwargs:
+        required_field: str
+        new_api_kwargs: dict[str, Any] | None = None
+
+    utils._MISSING_REQUIRED_FIELD_WARNINGS.clear()
+    with patch("todoist.utils.logger.warning") as mock_warning:
+        first = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
+        second = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
+
+    assert first.required_field is None
+    assert second.required_field is None
+    assert mock_warning.call_count == 1
+    warning_message = mock_warning.call_args.args[0]
+    assert "missing required field 'required_field'" in warning_message
+
+
 def test_safe_instantiate_entry_requires_kwargs_field():
     @dataclass
     class DataclassWithoutKwargs:
@@ -139,6 +160,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
         "is_frozen": False,
         "can_assign_tasks": True,
         "is_shared": True,
+        "access": "team",
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-02T00:00:00Z",
         "is_collapsed": False,
@@ -149,6 +171,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
     assert project_entry.v2_id is None
     assert project_entry.is_shared is True
     assert project_entry.is_collapsed is False
+    assert project_entry.access == {"visibility": "team"}
     assert project_entry.new_api_kwargs is not None
     assert project_entry.new_api_kwargs == {}
 
@@ -175,7 +198,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
         "content": "Task 1",
         "description": "",
         "note_count": 0,
-        "day_order": 0,
+        "day_order": "0",
         "is_collapsed": False,
     }
     task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
@@ -183,6 +206,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
     assert task_entry.v2_id is None
     assert task_entry.v2_project_id is None
     assert task_entry.is_collapsed is False
+    assert task_entry.day_order == 0
     assert task_entry.new_api_kwargs is not None
     assert task_entry.new_api_kwargs == {}
 
