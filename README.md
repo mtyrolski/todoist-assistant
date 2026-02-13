@@ -27,9 +27,11 @@
   </table>
 </div>
 
-<p><strong>Install v0.2.6 (CI artifacts)</strong><br/>
-  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21770204403/artifacts/5413896850">todoist-assistant-windows-installers</a>: download, unzip, then run <code>TodoistAssistantSetup.exe</code> (or the <code>.msi</code>).<br/>
-  <a href="https://github.com/mtyrolski/todoist-assistant/actions/runs/21770204403/">CI run details</a>
+<p><strong>Download the latest release</strong><br/>
+  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases">GitHub Releases</a>, open the newest release, and download the file you need:<br/>
+  - Windows installer: <code>TodoistAssistantSetup.exe</code> or the <code>.msi</code>.<br/>
+  - macOS app: <code>.dmg</code> (full app) or <code>.pkg</code> (CLI-only).<br/>
+  - Linux: source distribution (see docs for setup).
 </p>
 
 ## Highlights
