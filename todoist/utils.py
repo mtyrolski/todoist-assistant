@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import MISSING
 import time
 import random
 import os
@@ -61,7 +62,7 @@ def report_tqdm_progress(desc: str, current: int, total: int, unit: str | None =
     try:
         callback(desc, current, total, unit)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("Progress callback failed: {}", exc)
+        logger.debug(f"Progress callback failed: {exc}")
 
 
 def resolve_cache_dir(path: str | None = None) -> str:
@@ -182,13 +183,23 @@ def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
 def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     """Safely instantiates a class by writing unexpected (i.e now in todoist api) field to kwargs parameter"""
     class_fields = get_all_fields_of_dataclass(cls)
-    unexpected_fields = set(entry_kwargs.keys()) - set(class_fields)
+    class_field_set = set(class_fields)
+    normalized_kwargs = dict(entry_kwargs)
+
+    # Keep dataclass instantiation resilient if API omits some required fields.
+    for field_name, field_def in cls.__dataclass_fields__.items():
+        if field_name == "new_api_kwargs" or field_name in normalized_kwargs:
+            continue
+        if field_def.default is MISSING and field_def.default_factory is MISSING:
+            normalized_kwargs[field_name] = None
+
+    unexpected_fields = set(normalized_kwargs.keys()) - class_field_set
 
     assert 'new_api_kwargs' in class_fields, f"kwargs field is not in {cls.__name__} class"
 
     # write unexpected fields to kwargs
-    filtered_kwargs = {k: v for k, v in entry_kwargs.items() if k in class_fields}
-    unexpected_kwargs = {k: v for k, v in entry_kwargs.items() if k in unexpected_fields}
+    filtered_kwargs = {k: v for k, v in normalized_kwargs.items() if k in class_fields}
+    unexpected_kwargs = {k: v for k, v in normalized_kwargs.items() if k in unexpected_fields}
     return cls(**filtered_kwargs, new_api_kwargs=unexpected_kwargs)
 
 
@@ -207,14 +218,34 @@ class LocalStorage(Generic[T]):
         self.path = path
         self.resource_class = resource_class
 
-    def load(self) -> T:
+    def _default_value(self) -> T:
+        return cast(T, self.resource_class())
+
+    def _recreate_after_load_failure(self) -> T:
+        default_value = self._default_value()
+        path_obj = Path(self.path)
         try:
-            if exists(self.path):
-                return cast(T, load(self.path))
-            default_value = self.resource_class()
-            return cast(T, default_value)
-        except LOCAL_STORAGE_EXCEPTIONS as e:
-            raise LocalStorageError(f"Failed to load data from {self.path}: {type(e)}. {e}") from e
+            path_obj.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning(f"Failed to remove corrupted cache file {self.path}: {exc}")
+        try:
+            self.save(default_value)
+        except LocalStorageError as exc:
+            logger.error(f"Failed to recreate cache file {self.path}: {exc}")
+        return default_value
+
+    def load(self) -> T:
+        if not exists(self.path):
+            return self._default_value()
+
+        try:
+            return cast(T, load(self.path))
+        except LOCAL_STORAGE_EXCEPTIONS as exc:
+            logger.warning(
+                f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
+                "Removing and recreating cache."
+            )
+            return self._recreate_after_load_failure()
 
     def save(self, data: T) -> None:
         try:
@@ -301,7 +332,7 @@ def get_max_concurrent_requests() -> int:
             if value > 0:
                 return value
         except ValueError:
-            logger.warning("Invalid {} value: {}", EnvVar.MAX_CONCURRENT_REQUESTS, raw)
+            logger.warning(f"Invalid {EnvVar.MAX_CONCURRENT_REQUESTS} value: {raw}")
     return DEFAULT_MAX_CONCURRENT_REQUESTS
 
 

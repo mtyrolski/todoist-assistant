@@ -340,6 +340,79 @@ def test_dashboard_status_returns_services() -> None:
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
 
 
+def test_admin_timezone_status_uses_system_timezone_when_not_configured(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(web_api.EnvVar.TIMEZONE), raising=False)
+    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/timezone")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["configured"] is False
+    assert payload["timezone"] == "UTC"
+    assert payload["source"] == "system"
+    assert payload["override"] is None
+    assert payload["overrideValid"] is True
+
+
+def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+
+    client = TestClient(web_api.app)
+
+    set_response = client.post(
+        "/api/admin/timezone",
+        json={"timezone": "Europe/Warsaw"},
+    )
+    assert set_response.status_code == 200
+    set_payload = set_response.json()
+    assert set_payload["configured"] is True
+    assert set_payload["timezone"] == "Europe/Warsaw"
+    assert set_payload["source"] == "env"
+    assert set_payload["override"] == "Europe/Warsaw"
+    assert set_payload["overrideValid"] is True
+    assert web_api.os.getenv(str(web_api.EnvVar.TIMEZONE)) == "Europe/Warsaw"
+
+    env_path = tmp_path / ".env"
+    assert env_path.exists()
+    env_text = env_path.read_text(encoding="utf-8")
+    assert "TODOIST_TIMEZONE" in env_text
+    assert "Europe/Warsaw" in env_text
+
+    clear_response = client.delete("/api/admin/timezone")
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.json()
+    assert clear_payload["configured"] is False
+    assert clear_payload["timezone"] == "UTC"
+    assert clear_payload["source"] == "system"
+    assert clear_payload["override"] is None
+    assert web_api.os.getenv(str(web_api.EnvVar.TIMEZONE)) is None
+
+    env_text_after_clear = env_path.read_text(encoding="utf-8")
+    assert "TODOIST_TIMEZONE" not in env_text_after_clear
+
+
+def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+
+    client = TestClient(web_api.app)
+    response = client.post(
+        "/api/admin/timezone",
+        json={"timezone": "Invalid/Timezone"},
+    )
+    assert response.status_code == 400
+    payload = response.json()
+    assert "Invalid timezone" in payload["detail"]
+
+
 def test_openapi_includes_app_version() -> None:
     client = TestClient(web_api.app)
     res = client.get("/openapi.json")

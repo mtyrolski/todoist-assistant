@@ -21,22 +21,25 @@ class Endpoint:
 class TodoistEndpoints:
     """Central registry of Todoist HTTP endpoints."""
 
-    REST_BASE = "https://api.todoist.com/rest/v2"
-    SYNC_BASE = "https://api.todoist.com/sync/v9"
+    API_BASE = "https://api.todoist.com/api/v1"
 
     # Tasks
-    CREATE_TASK = Endpoint("create_task", "POST", f"{REST_BASE}/tasks")
-    GET_TASK = Endpoint("get_task", "GET", f"{REST_BASE}/tasks/{{task_id}}")
-    UPDATE_TASK = Endpoint("update_task", "POST", f"{REST_BASE}/tasks/{{task_id}}")
-    DELETE_TASK = Endpoint("delete_task", "DELETE", f"{REST_BASE}/tasks/{{task_id}}")
+    CREATE_TASK = Endpoint("create_task", "POST", f"{API_BASE}/tasks")
+    GET_TASK = Endpoint("get_task", "GET", f"{API_BASE}/tasks/{{task_id}}")
+    UPDATE_TASK = Endpoint("update_task", "POST", f"{API_BASE}/tasks/{{task_id}}")
+    DELETE_TASK = Endpoint("delete_task", "DELETE", f"{API_BASE}/tasks/{{task_id}}")
 
     # Labels
-    LIST_LABELS = Endpoint("list_labels", "GET", f"{REST_BASE}/labels")
+    LIST_LABELS = Endpoint("list_labels", "GET", f"{API_BASE}/labels")
 
     # Activity
-    LIST_ACTIVITY = Endpoint("list_activity", "GET", f"{SYNC_BASE}/activity/get")
+    LIST_ACTIVITY = Endpoint("list_activity", "GET", f"{API_BASE}/activities")
 
     # Projects
-    LIST_ARCHIVED_PROJECTS = Endpoint("list_archived_projects", "GET", f"{SYNC_BASE}/projects/get_archived")
-    GET_PROJECT_DATA = Endpoint("get_project_data", "POST", f"{SYNC_BASE}/projects/get_data")
-    SYNC_PROJECTS = Endpoint("sync_projects", "POST", f"{SYNC_BASE}/sync")
+    LIST_PROJECTS = Endpoint("list_projects", "GET", f"{API_BASE}/projects")
+    LIST_ARCHIVED_PROJECTS = Endpoint("list_archived_projects", "GET", f"{API_BASE}/projects/archived")
+    GET_PROJECT = Endpoint("get_project", "GET", f"{API_BASE}/projects/{{project_id}}")
+    GET_PROJECT_FULL = Endpoint("get_project_full", "GET", f"{API_BASE}/projects/{{project_id}}/full")
+
+    # Sync
+    SYNC = Endpoint("sync", "POST", f"{API_BASE}/sync")

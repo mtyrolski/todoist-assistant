@@ -153,10 +153,10 @@ class TodoistAPIClient:
                 response.raise_for_status()
             except requests.HTTPError as exc:
                 logger.error(
-                    "Todoist endpoint returned error",
-                    endpoint=spec.endpoint.name,
-                    status=response.status_code,
-                    body=response.text,
+                    "Todoist endpoint returned error\n" \
+                    f"endpoint={spec.endpoint.name}, " \
+                    f"status={response.status_code}, " \
+                    f"body={response.text}"
                 )
                 raise RuntimeError(
                     f"Failed calling {spec.endpoint.name}: {response.status_code}"

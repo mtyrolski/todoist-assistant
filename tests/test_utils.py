@@ -123,6 +123,88 @@ def test_safe_instantiate_entry_requires_kwargs_field():
         safe_instantiate_entry(DataclassWithoutKwargs, field1="test", extra="field")
 
 
+def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
+    from todoist.types import EventEntry, ProjectEntry, TaskEntry
+
+    project_payload = {
+        "id": "proj1",
+        "name": "Project 1",
+        "color": "blue",
+        "parent_id": None,
+        "child_order": 1,
+        "view_style": "list",
+        "is_favorite": False,
+        "is_archived": False,
+        "is_deleted": False,
+        "is_frozen": False,
+        "can_assign_tasks": True,
+        "is_shared": True,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-02T00:00:00Z",
+        "is_collapsed": False,
+    }
+    project_entry = safe_instantiate_entry(ProjectEntry, **project_payload)
+    assert project_entry.shared is None
+    assert project_entry.collapsed is None
+    assert project_entry.v2_id is None
+    assert project_entry.is_shared is True
+    assert project_entry.is_collapsed is False
+    assert project_entry.new_api_kwargs is not None
+    assert project_entry.new_api_kwargs == {}
+
+    task_payload = {
+        "id": "task1",
+        "user_id": "user1",
+        "project_id": "proj1",
+        "section_id": None,
+        "parent_id": None,
+        "added_by_uid": "user1",
+        "assigned_by_uid": None,
+        "responsible_uid": None,
+        "labels": [],
+        "deadline": None,
+        "duration": None,
+        "checked": False,
+        "is_deleted": False,
+        "added_at": "2024-01-01T00:00:00Z",
+        "completed_at": None,
+        "updated_at": "2024-01-01T00:00:00Z",
+        "due": None,
+        "priority": 1,
+        "child_order": 1,
+        "content": "Task 1",
+        "description": "",
+        "note_count": 0,
+        "day_order": 0,
+        "is_collapsed": False,
+    }
+    task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
+    assert task_entry.collapsed is None
+    assert task_entry.v2_id is None
+    assert task_entry.v2_project_id is None
+    assert task_entry.is_collapsed is False
+    assert task_entry.new_api_kwargs is not None
+    assert task_entry.new_api_kwargs == {}
+
+    event_payload = {
+        "id": "event1",
+        "object_type": "item",
+        "object_id": "task1",
+        "event_type": "added",
+        "event_date": "2024-01-01T00:00:00Z",
+        "parent_project_id": "proj1",
+        "parent_item_id": None,
+        "initiator_id": "user1",
+        "extra_data": {"content": "Task 1"},
+        "extra_data_id": None,
+        "source": "api",
+    }
+    event_entry = safe_instantiate_entry(EventEntry, **event_payload)
+    assert event_entry.v2_object_id is None
+    assert event_entry.v2_parent_project_id is None
+    assert event_entry.source == "api"
+
+
 @pytest.mark.parametrize(
     ("years", "expected_weeks"),
     [
@@ -233,12 +315,13 @@ def test_local_storage_load_nonexistent_returns_default(tmp_path, resource_class
     assert isinstance(loaded_data, type(expected_default))
 
 
-def test_local_storage_error_on_corrupted_file(tmp_path):
+def test_local_storage_corrupted_file_is_recreated(tmp_path):
     file_path = tmp_path / "corrupted.joblib"
     file_path.write_text("This is not valid joblib data", encoding="utf-8")
     storage = LocalStorage(str(file_path), set)
-    with pytest.raises(LocalStorageError, match="Failed to load data"):
-        storage.load()
+    loaded_data = storage.load()
+    assert loaded_data == set()
+    assert storage.load() == set()
 
 
 def test_local_storage_error_on_invalid_save_path(tmp_path):

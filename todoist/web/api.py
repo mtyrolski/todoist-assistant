@@ -14,6 +14,7 @@ import json
 import os
 import re
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import time
 
@@ -297,6 +298,76 @@ def _resolve_api_key() -> str:
     return ""
 
 
+def _normalize_timezone(raw: Any) -> str:
+    if raw is None:
+        return ""
+    return str(raw).strip().strip("'\"")
+
+
+def _is_valid_timezone_name(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError:
+        return False
+    except Exception:
+        return False
+    return True
+
+
+def _detect_system_timezone() -> str:
+    local_timezone = datetime.now().astimezone().tzinfo
+    if local_timezone is None:
+        return "UTC"
+
+    key = getattr(local_timezone, "key", None)
+    if isinstance(key, str) and key.strip():
+        return key
+
+    timezone_name = local_timezone.tzname(None)
+    if isinstance(timezone_name, str) and timezone_name.strip():
+        return timezone_name
+
+    return "UTC"
+
+
+def _resolve_timezone_status() -> dict[str, Any]:
+    env_path = _resolve_env_path()
+    timezone_key = str(EnvVar.TIMEZONE)
+    system_timezone = _detect_system_timezone()
+
+    override = _normalize_timezone(os.getenv(timezone_key))
+    if not override and env_path.exists():
+        data = dotenv_values(env_path)
+        override = _normalize_timezone(data.get(timezone_key))
+        if override:
+            os.environ[timezone_key] = override
+
+    payload: dict[str, Any] = {
+        "configured": False,
+        "timezone": system_timezone,
+        "source": "system",
+        "override": None,
+        "overrideValid": True,
+        "system": system_timezone,
+        "envPath": str(env_path),
+    }
+    if not override:
+        return payload
+
+    payload["override"] = override
+    if _is_valid_timezone_name(override):
+        payload["configured"] = True
+        payload["timezone"] = override
+        payload["source"] = "env"
+        return payload
+
+    payload["overrideValid"] = False
+    payload["invalidOverride"] = override
+    return payload
+
+
 def _mask_api_key(value: str) -> str:
     if not value:
         return ""
@@ -317,8 +388,13 @@ def _validate_api_token(token: str) -> tuple[bool, str | None, int | None]:
         payload = client.request_json(spec, operation_name="validate_api_token")
     except Exception as exc:  # pragma: no cover - network dependent
         return False, f"{type(exc).__name__}: {exc}", None
-    label_count = len(payload) if isinstance(payload, list) else None
-    return True, None, label_count
+
+    if not isinstance(payload, dict):
+        return False, f"Unexpected payload type: {type(payload).__name__}", None
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return False, "Unexpected labels response payload", None
+    return True, None, len(results)
 
 
 @dataclass
@@ -494,7 +570,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
     try:
         Cache().dashboard_state.save(payload)
     except (LocalStorageError, OSError, TypeError) as exc:
-        logger.warning("Failed to persist dashboard state cache: {}", exc)
+        logger.warning(f"Failed to persist dashboard state cache: {exc}")
 
 
 def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
@@ -533,9 +609,8 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     _state.home_payload_cache = {}
     _state.demo_mode = demo_mode
     logger.info(
-        "Loaded dashboard state cache from disk (events={}, projects={})",
-        len(df_activity),
-        len(active_projects),
+        f"Loaded dashboard state cache from disk (events={len(df_activity)}, "
+        f"projects={len(active_projects)})"
     )
     return True
 
@@ -590,9 +665,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                             activity_cfg.get("early_stop_after_n_windows", early_stop)
                         )
                     logger.info(
-                        "Activity cache looks short; backfilling history (window={}w, stop={}).",
-                        nweeks,
-                        early_stop,
+                        f"Activity cache looks short; backfilling history "
+                        f"(window={nweeks}w, stop={early_stop})."
                     )
                     events = dbio.fetch_activity_adaptively(
                         nweeks_window_size=nweeks,
@@ -601,7 +675,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     )
                     Cache().activity.save(set(events))
                 except Exception as exc:  # pragma: no cover - network-dependent
-                    logger.warning("Failed to backfill activity cache: {}", exc)
+                    logger.warning(f"Failed to backfill activity cache: {exc}")
                 finally:
                     _activity_backfill_attempted = True
 
@@ -619,9 +693,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                         activity_cfg.get("early_stop_after_n_windows", early_stop)
                     )
                 logger.info(
-                    "Activity cache empty; fetching full history (window={}w, stop={}).",
-                    nweeks,
-                    early_stop,
+                    f"Activity cache empty; fetching full history (window={nweeks}w, stop={early_stop})."
                 )
                 events = dbio.fetch_activity_adaptively(
                     nweeks_window_size=nweeks,
@@ -635,7 +707,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     events = dbio.fetch_activity(max_pages=2)
                 Cache().activity.save(set(events))
             except Exception as exc:  # pragma: no cover - network-dependent
-                logger.warning("Failed to seed activity cache: {}", exc)
+                logger.warning(f"Failed to seed activity cache: {exc}")
             finally:
                 _activity_backfill_attempted = True
 
@@ -650,7 +722,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         try:
             df_activity = load_activity_data(dbio)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to load activity data; using empty dataset: {}", exc)
+            logger.warning(f"Failed to load activity data; using empty dataset: {exc}")
             df_activity = _empty_activity_df()
 
         _run_async_in_main_loop(
@@ -907,7 +979,7 @@ def _load_llm_chat_conversations() -> list[dict[str, Any]]:
     try:
         payload = Cache().llm_chat_conversations.load()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to load LLM chat conversations: {}", exc)
+        logger.warning(f"Failed to load LLM chat conversations: {exc}")
         return []
     if not isinstance(payload, list):
         return []
@@ -923,14 +995,14 @@ def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
     try:
         Cache().llm_chat_conversations.save(conversations)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to save LLM chat conversations: {}", exc)
+        logger.warning(f"Failed to save LLM chat conversations: {exc}")
 
 
 def _load_llm_chat_queue() -> list[dict[str, Any]]:
     try:
         payload = Cache().llm_chat_queue.load()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to load LLM chat queue: {}", exc)
+        logger.warning(f"Failed to load LLM chat queue: {exc}")
         return []
     if not isinstance(payload, list):
         return []
@@ -946,7 +1018,7 @@ def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
     try:
         Cache().llm_chat_queue.save(items)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to save LLM chat queue: {}", exc)
+        logger.warning(f"Failed to save LLM chat queue: {exc}")
 
 
 def _truncate_text(value: str, limit: int = 120) -> str:
@@ -1053,7 +1125,7 @@ async def _load_llm_chat_model_task() -> None:
             _LLM_CHAT_MODEL = model
         await asyncio.to_thread(_build_llm_chat_agent_sync, model)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Failed to load LLM chat model: {}", exc)
+        logger.error(f"Failed to load LLM chat model: {exc}")
     finally:
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL_LOADING = False
@@ -1085,7 +1157,7 @@ def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
         from todoist.agent.graph import build_agent_graph
         from todoist.agent.repl_tool import SafePythonReplTool
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("LLM chat agent unavailable: {}", exc)
+        logger.warning(f"LLM chat agent unavailable: {exc}")
         return
 
     cache_path = os.getenv(EnvVar.AGENT_CACHE_PATH, str(_REPO_ROOT))
@@ -1492,7 +1564,7 @@ def _safe_activity_anchor(df_activity) -> datetime:
     try:
         max_value = pd.to_datetime(df_activity.index).max()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("Failed to resolve activity anchor; defaulting to now: {}", exc)
+        logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
         return datetime.now()
     if pd.isna(max_value):
         return datetime.now()
@@ -1706,7 +1778,7 @@ def _compute_insights(
                     }
                 )
     except Exception as exc:
-        logger.debug("Skipping busiest day insight: {}", exc)
+        logger.debug(f"Skipping busiest day insight: {exc}")
 
     # 4) Added vs completed (throughput).
     try:
@@ -1723,7 +1795,7 @@ def _compute_insights(
             }
         )
     except Exception as exc:
-        logger.debug("Skipping added vs completed insight: {}", exc)
+        logger.debug(f"Skipping added vs completed insight: {exc}")
 
     # 5) Peak hour (all events) in the completed week.
     try:
@@ -1743,7 +1815,7 @@ def _compute_insights(
                     }
                 )
     except Exception as exc:
-        logger.debug("Skipping peak hour insight: {}", exc)
+        logger.debug(f"Skipping peak hour insight: {exc}")
 
     return insights[:4]
 
@@ -1928,7 +2000,7 @@ async def admin_automations() -> dict[str, Any]:
     try:
         automations = _load_automations()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to load automations: {}", exc)
+        logger.warning(f"Failed to load automations: {exc}")
         return {"automations": [], "error": f"{type(exc).__name__}: {exc}"}
     return {"automations": [_automation_launch_metadata(a) for a in automations]}
 
@@ -2000,6 +2072,40 @@ async def admin_clear_api_token() -> dict[str, Any]:
         unset_key(str(env_path), "API_KEY")
     os.environ.pop("API_KEY", None)
     return {"configured": False, "masked": "", "envPath": str(env_path)}
+
+
+@app.get("/api/admin/timezone", tags=["admin"])
+async def admin_timezone_status() -> dict[str, Any]:
+    return _resolve_timezone_status()
+
+
+@app.post("/api/admin/timezone", tags=["admin"])
+async def admin_set_timezone(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    timezone_name = _normalize_timezone(payload.get("timezone"))
+    if not timezone_name:
+        raise HTTPException(status_code=400, detail="Timezone is required.")
+    if not _is_valid_timezone_name(timezone_name):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid timezone. Use a valid IANA timezone name "
+                "(example: Europe/Warsaw)."
+            ),
+        )
+    env_path = _resolve_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    set_key(str(env_path), str(EnvVar.TIMEZONE), timezone_name)
+    os.environ[str(EnvVar.TIMEZONE)] = timezone_name
+    return _resolve_timezone_status()
+
+
+@app.delete("/api/admin/timezone", tags=["admin"])
+async def admin_clear_timezone() -> dict[str, Any]:
+    env_path = _resolve_env_path()
+    if env_path.exists():
+        unset_key(str(env_path), str(EnvVar.TIMEZONE))
+    os.environ.pop(str(EnvVar.TIMEZONE), None)
+    return _resolve_timezone_status()
 
 
 def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:
@@ -2616,7 +2722,7 @@ async def admin_project_adjustments(
             refresh,
         )
     except Exception as exc:  # pragma: no cover - network safety
-        logger.warning("Failed loading project lists for adjustments: {}", exc)
+        logger.warning(f"Failed loading project lists for adjustments: {exc}")
         active_root = []
         archived_root = []
         archived_names = []

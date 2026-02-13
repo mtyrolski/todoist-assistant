@@ -19,8 +19,6 @@ class _AncestorTaskEntry:
     project_id: str = ""
     labels: list[str] = field(default_factory=list)
     parent_id: str | None = None
-    v2_parent_id: str | None = None
-    v2_id: str | None = None
 
 
 def _sanitize_text(value: str | None) -> str | None:
@@ -31,7 +29,7 @@ def _sanitize_text(value: str | None) -> str | None:
 
 
 def _get_parent_id(task: Task) -> str | None:
-    parent_id = task.task_entry.parent_id or task.task_entry.v2_parent_id
+    parent_id = task.task_entry.parent_id
     if parent_id is None:
         return None
     return str(parent_id)
@@ -51,16 +49,12 @@ def _task_from_api_payload(payload: Mapping[str, Any] | None) -> Task | None:
     if isinstance(labels_raw, list):
         labels = [str(label) for label in labels_raw if label is not None]
     parent_id = payload.get("parent_id")
-    v2_parent_id = payload.get("v2_parent_id")
-    v2_id = payload.get("v2_id")
     entry = _AncestorTaskEntry(
         content=content,
         description=description,
         project_id=project_id,
         labels=labels,
         parent_id=str(parent_id) if parent_id is not None else None,
-        v2_parent_id=str(v2_parent_id) if v2_parent_id is not None else None,
-        v2_id=str(v2_id) if v2_id is not None else None,
     )
     return Task(id=str(task_id), task_entry=cast(TaskEntry, entry))
 
@@ -99,7 +93,7 @@ def _build_ancestor_context(
     parent_id = _get_parent_id(task)
     while parent_id:
         if parent_id in seen:
-            logger.warning("Detected cycle in task ancestry for task {}", task.id)
+            logger.warning(f"Detected cycle in task ancestry for task {task.id}")
             break
         seen.add(parent_id)
         parent = tasks_by_id.get(parent_id)

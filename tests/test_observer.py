@@ -68,7 +68,7 @@ def test_observer_runs_automations_on_new_events(tmp_path: Path, monkeypatch):
     automation = _StubAutomation("Auto")
 
     observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
-    observer._run_once()
+    observer.run_once()
 
     assert db.reset_calls == 1
     assert len(automation.tick_calls) == 1
@@ -78,7 +78,7 @@ def test_observer_runs_automations_on_new_events(tmp_path: Path, monkeypatch):
     assert len(cached) == 1
 
     # Running again with the same events should not trigger automations
-    observer._run_once()
+    observer.run_once()
     assert db.reset_calls == 1  # unchanged
     assert len(automation.tick_calls) == 1
 
@@ -90,32 +90,19 @@ def test_observer_no_new_events_noop(tmp_path: Path, monkeypatch):
     automation = _StubAutomation("Auto")
 
     observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
-    observer._run_once()
+    observer.run_once()
 
     assert db.reset_calls == 0
     assert len(automation.tick_calls) == 0
 
 
 def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
-    from todoist.utils import LocalStorageError
-
     monkeypatch.chdir(tmp_path)
-
-    class _BrokenStorage:
-        def __init__(self):
-            self.saved = None
-
-        def load(self):
-            raise LocalStorageError("corrupted")
-
-        def save(self, data):
-            self.saved = data
-
-    class _FakeCache:
-        def __init__(self):
-            self.activity = _BrokenStorage()
-
-    monkeypatch.setattr("todoist.automations.observer.automation.Cache", _FakeCache)
+    (tmp_path / ".cache" / "todoist-assistant").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".cache" / "todoist-assistant" / "activity.joblib").write_text(
+        "corrupted-cache",
+        encoding="utf-8",
+    )
 
     events = [_event("99", "added")]
     db = _StubDb()
@@ -123,7 +110,7 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
     automation = _StubAutomation("Auto")
 
     observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
-    observer._run_once()
+    observer.run_once()
 
     # Should still process despite corrupted cache
     assert db.reset_calls == 1

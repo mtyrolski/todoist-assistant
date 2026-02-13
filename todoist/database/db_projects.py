@@ -47,15 +47,13 @@ class DatabaseProjects:
         if self.archived_projects_cache is not None:
             return list(self.archived_projects_cache.values())
 
-        spec = RequestSpec(endpoint=TodoistEndpoints.LIST_ARCHIVED_PROJECTS, rate_limited=True)
         try:
-            data_dicts = self._api_client.request_json(spec, operation_name="list archived projects")
+            data_dicts = self._fetch_paginated_results(
+                endpoint=TodoistEndpoints.LIST_ARCHIVED_PROJECTS,
+                operation_name="list archived projects",
+            )
         except Exception as exc:  # pragma: no cover - network safety
-            logger.warning("Failed fetching archived projects: {}", exc)
-            self.archived_projects_cache = {}
-            return []
-        if not isinstance(data_dicts, list):
-            logger.error("Unexpected payload returned when fetching archived projects")
+            logger.warning(f"Failed fetching archived projects: {exc}")
             self.archived_projects_cache = {}
             return []
         entries = map(lambda raw_dict: safe_instantiate_entry(ProjectEntry, **raw_dict), data_dicts)
@@ -69,30 +67,30 @@ class DatabaseProjects:
         Does not include tasks. Falls back to the archived projects if the project is not found
         """
         spec = RequestSpec(
-            endpoint=TodoistEndpoints.GET_PROJECT_DATA,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={"project_id": project_id},
+            endpoint=TodoistEndpoints.GET_PROJECT.format(project_id=project_id),
             rate_limited=True,
         )
 
-        result_dict = self._api_client.request_json(
-            spec, operation_name=f"get project {project_id}"
-        )
-        if not isinstance(result_dict, dict):
-            logger.error("Unexpected payload returned when fetching project", project_id=project_id)
-            raise RuntimeError(f"Todoist API returned invalid data for project {project_id}")
-
-        if 'project' not in result_dict:
-            logger.error(
-                f"Error fetching project with id {project_id}. If it is archived, use include_archived_in_search=True")
+        try:
+            result_dict = self._api_client.request_json(
+                spec, operation_name=f"get project {project_id}"
+            )
+        except Exception:
             if include_archived_in_search:
                 if self.archived_projects_cache is None:
                     logger.info("Fetching archived projects")
                     archived = self.fetch_archived_projects()
                     self.archived_projects_cache = {project.id: project for project in archived}
-                return self.archived_projects_cache[project_id]
+                archived_project = self.archived_projects_cache.get(project_id, None)
+                if archived_project is not None:
+                    return archived_project
+            raise
 
-        project = safe_instantiate_entry(ProjectEntry, **result_dict['project'])
+        if not isinstance(result_dict, dict):
+            logger.error(f"Unexpected payload returned when fetching project {project_id}")
+            raise RuntimeError(f"Todoist API returned invalid data for project {project_id}")
+
+        project = safe_instantiate_entry(ProjectEntry, **result_dict)
         return Project(id=project.id, project_entry=project, tasks=[], is_archived=False)
 
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
@@ -168,9 +166,7 @@ class DatabaseProjects:
 
     def fetch_project_tasks(self, project_id: str) -> list[TaskEntry]:
         spec = RequestSpec(
-            endpoint=TodoistEndpoints.GET_PROJECT_DATA,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={"project_id": project_id},
+            endpoint=TodoistEndpoints.GET_PROJECT_FULL.format(project_id=project_id),
             rate_limited=True,
         )
 
@@ -178,11 +174,16 @@ class DatabaseProjects:
             spec, operation_name=f"get project tasks {project_id}"
         )
         if not isinstance(result_dict, dict):
-            logger.error("Unexpected payload returned when fetching project tasks", project_id=project_id)
-            return []
+            raise RuntimeError(f"Unexpected payload returned when fetching project tasks {project_id}")
 
-        tasks = []
-        for task in result_dict['items']:
+        tasks_data = result_dict.get("tasks")
+        if not isinstance(tasks_data, list):
+            raise RuntimeError(f"Unexpected tasks payload returned when fetching project tasks {project_id}")
+
+        tasks: list[TaskEntry] = []
+        for task in tasks_data:
+            if not isinstance(task, dict):
+                raise RuntimeError(f"Unexpected task record returned when fetching project tasks {project_id}")
             tasks.append(safe_instantiate_entry(TaskEntry, **task))
 
         return tasks
@@ -349,26 +350,59 @@ class DatabaseProjects:
         return resolved_root_id
 
     def _fetch_projects_data(self) -> list[ProjectEntry]:
-        spec = RequestSpec(
-            endpoint=TodoistEndpoints.SYNC_PROJECTS,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                'sync_token': '*',
-                'resource_types': '["projects"]',
-            },
-            rate_limited=True,
+        data_dicts = self._fetch_paginated_results(
+            endpoint=TodoistEndpoints.LIST_PROJECTS,
+            operation_name="list projects",
         )
 
-        result_dict = self._api_client.request_json(spec, operation_name="sync projects")
-        if not isinstance(result_dict, dict):
-            logger.error("Unexpected payload returned when syncing projects")
-            return []
-
-        projects = []
-        for project in result_dict['projects']:
+        projects: list[ProjectEntry] = []
+        for project in data_dicts:
             projects.append(safe_instantiate_entry(ProjectEntry, **project))
 
         return projects
+
+    def _fetch_paginated_results(
+        self,
+        *,
+        endpoint,
+        operation_name: str,
+        limit: int = 200,
+    ) -> list[dict]:
+        cursor: str | None = None
+        results: list[dict] = []
+
+        while True:
+            params: dict[str, str | int] = {"limit": limit}
+            if cursor:
+                params["cursor"] = cursor
+            spec = RequestSpec(
+                endpoint=endpoint,
+                params=params,
+                rate_limited=True,
+            )
+            payload = self._api_client.request_json(spec, operation_name=operation_name)
+            page_results, next_cursor = self._extract_results_page(payload, operation_name=operation_name)
+            results.extend(page_results)
+            if not next_cursor:
+                break
+            cursor = next_cursor
+
+        return results
+
+    @staticmethod
+    def _extract_results_page(payload: object, *, operation_name: str) -> tuple[list[dict], str | None]:
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Unexpected payload type returned from {operation_name}: {type(payload).__name__}")
+
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, list):
+            raise RuntimeError(f"Unexpected results payload returned from {operation_name}")
+
+        page_results = [item for item in raw_results if isinstance(item, dict)]
+        if len(page_results) != len(raw_results):
+            raise RuntimeError(f"Unexpected non-object project record in {operation_name} response")
+        next_cursor = payload.get("next_cursor")
+        return page_results, str(next_cursor) if isinstance(next_cursor, str) else None
 
     def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str] | None = None):
         logger.debug("Anonymizing projects in DatabaseProjects")

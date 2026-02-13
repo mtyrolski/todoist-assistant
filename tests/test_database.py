@@ -182,26 +182,29 @@ def test_database_projects_initialization(db_projects):
 @patch('todoist.database.db_projects.TodoistAPIClient.request_json')
 def test_fetch_archived_projects_caching(mock_request_json, db_projects):
     """Test fetch_archived_projects with caching behavior."""
-    mock_request_json.return_value = [{
-        "id": "12345",
-        "name": "Archived Project",
-        "color": "blue",
-        "parent_id": None,
-        "child_order": 1,
-        "view_style": "list",
-        "is_favorite": False,
-        "is_archived": True,
-        "is_deleted": False,
-        "is_frozen": False,
-        "can_assign_tasks": True,
-        "shared": False,
-        "created_at": "2024-01-01T00:00:00Z",
-        "updated_at": "2024-01-01T00:00:00Z",
-        "v2_id": "v2_12345",
-        "v2_parent_id": None,
-        "sync_id": None,
-        "collapsed": False
-    }]
+    mock_request_json.return_value = {
+        "results": [{
+            "id": "12345",
+            "name": "Archived Project",
+            "color": "blue",
+            "parent_id": None,
+            "child_order": 1,
+            "view_style": "list",
+            "is_favorite": False,
+            "is_archived": True,
+            "is_deleted": False,
+            "is_frozen": False,
+            "can_assign_tasks": True,
+            "shared": False,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "v2_id": "v2_12345",
+            "v2_parent_id": None,
+            "sync_id": None,
+            "collapsed": False
+        }],
+        "next_cursor": None,
+    }
 
     result1 = db_projects.fetch_archived_projects()
     assert len(result1) == 1
@@ -240,26 +243,24 @@ def test_reset_clears_caches(db_projects):
 def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projects):
     """Test fetching a single project by ID."""
     mock_request_json.return_value = {
-        "project": {
-            "id": "12345",
-            "name": "Test Project",
-            "color": "blue",
-            "parent_id": None,
-            "child_order": 1,
-            "view_style": "list",
-            "is_favorite": False,
-            "is_archived": False,
-            "is_deleted": False,
-            "is_frozen": False,
-            "can_assign_tasks": True,
-            "shared": False,
-            "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z",
-            "v2_id": "v2_12345",
-            "v2_parent_id": None,
-            "sync_id": None,
-            "collapsed": False
-        }
+        "id": "12345",
+        "name": "Test Project",
+        "color": "blue",
+        "parent_id": None,
+        "child_order": 1,
+        "view_style": "list",
+        "is_favorite": False,
+        "is_archived": False,
+        "is_deleted": False,
+        "is_frozen": False,
+        "can_assign_tasks": True,
+        "shared": False,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "v2_id": "v2_12345",
+        "v2_parent_id": None,
+        "sync_id": None,
+        "collapsed": False
     }
 
     mock_project_entry = MagicMock()
@@ -276,8 +277,7 @@ def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projec
     mock_request_json.assert_called_once()
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
-    assert spec_arg.endpoint == TodoistEndpoints.GET_PROJECT_DATA
-    assert spec_arg.data == {"project_id": "12345"}
+    assert spec_arg.endpoint == TodoistEndpoints.GET_PROJECT.format(project_id="12345")
 
 
 def test_fetch_mapping_project_id_to_root_uses_in_memory_parent_links(db_projects):
@@ -356,9 +356,9 @@ def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(db_
 @patch('todoist.database.db_activity.logger')
 def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
     """Test adaptive fetching stops after empty windows."""
-    with patch.object(db_activity, 'fetch_activity') as mock_fetch:
+    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
         # Simulate empty responses
-        mock_fetch.return_value = []
+        mock_fetch_window.side_effect = [[], []]
 
         # Test with early stop after 2 empty windows
         result = db_activity.fetch_activity_adaptively(
@@ -368,7 +368,22 @@ def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
 
         # Should stop after 2 empty windows
         assert len(result) == 0
-        assert mock_fetch.call_count == 2
+        assert mock_fetch_window.call_count == 2
+
+
+@patch('todoist.database.db_activity.logger')
+def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(_mock_logger, db_activity):
+    """Adaptive windows should not be implicitly capped to nweeks_window_size pages."""
+    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+        mock_fetch_window.side_effect = [[], []]
+
+        db_activity.fetch_activity_adaptively(
+            nweeks_window_size=10,
+            early_stop_after_n_windows=2,
+        )
+
+        first_call_kwargs = mock_fetch_window.call_args_list[0].kwargs
+        assert first_call_kwargs["max_pages"] is None
 
 
 @patch('todoist.database.db_activity.logger')
@@ -392,9 +407,9 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
         date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
-    with patch.object(db_activity, 'fetch_activity') as mock_fetch:
+    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
         # First call returns events, second returns empty
-        mock_fetch.side_effect = [[event1], []]
+        mock_fetch_window.side_effect = [[event1], []]
 
         result = db_activity.fetch_activity_adaptively(
             nweeks_window_size=1,
@@ -404,7 +419,7 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
         # Should get the event from first call, then stop after 1 empty window
         assert len(result) == 1
         assert result[0].id == "event1"
-        assert mock_fetch.call_count == 2
+        assert mock_fetch_window.call_count == 2
 
 
 def test_fetch_activity_signature(db_activity):
