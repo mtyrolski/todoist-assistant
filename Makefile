@@ -141,14 +141,6 @@ validate: typecheck lint ## Run typecheck + lint
 
 check: validate test ## Run validate + tests
 
-TODOIST_AGENT_MODEL_ID ?= mistralai/Ministral-3-3B-Instruct-2512
-override TODOIST_AGENT_DEVICE := cpu
-TODOIST_AGENT_ARGS ?=
-
-chat_agent: ## Chat with local agent (Transformers; read-only)
-	@echo "Starting agent with TODOIST_AGENT_MODEL_ID=$(TODOIST_AGENT_MODEL_ID)"
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python -m todoist.agent.chat --model-id "$(TODOIST_AGENT_MODEL_ID)" $(TODOIST_AGENT_ARGS) --device "$(TODOIST_AGENT_DEVICE)"
-
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
 	uv run python3 -m scripts.build_windows
 

@@ -2,8 +2,16 @@
 
 # pylint: disable=protected-access
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
+
+from google.auth.exceptions import RefreshError
 from todoist.automations.gmail_tasks import GmailTasksAutomation
+
+
+def _request(payload):
+    req = Mock()
+    req.execute.return_value = payload
+    return req
 
 
 def test_initialization():
@@ -96,6 +104,17 @@ def test_extract_task_content_email_prefix_removal():
         assert result['content'] == expected_content
 
 
+def test_extract_task_content_repeated_prefixes_and_empty_subject_fallback():
+    """Repeated prefixes are stripped and empty subjects fall back to snippet text."""
+    automation = GmailTasksAutomation()
+
+    repeated = automation._extract_task_content("Re: Fwd: Action required", "", "test@example.com")
+    assert repeated['content'] == "Action required"
+
+    fallback = automation._extract_task_content("Re: ", "   Follow up with vendor tomorrow   ", "test@example.com")
+    assert fallback['content'] == "Follow up with vendor tomorrow"
+
+
 def test_get_existing_task_contents():
     """Test fetching existing task contents for duplicate detection."""
     automation = GmailTasksAutomation()
@@ -153,6 +172,48 @@ def test_authenticate_gmail_no_credentials(mock_exists):
     assert result is None
 
 
+@patch('builtins.open', new_callable=mock_open)
+@patch('todoist.automations.gmail_tasks.automation.build')
+@patch('todoist.automations.gmail_tasks.automation.InstalledAppFlow')
+@patch('todoist.automations.gmail_tasks.automation.Credentials')
+@patch('os.path.exists')
+def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
+    mock_exists,
+    mock_credentials,
+    mock_flow_cls,
+    mock_build,
+    _mock_file,
+):
+    """Invalid refresh token should trigger a fresh OAuth flow when allowed."""
+    automation = GmailTasksAutomation()
+
+    mock_exists.side_effect = [True, True]  # token file exists, credentials file exists
+
+    stale_creds = Mock()
+    stale_creds.valid = False
+    stale_creds.expired = True
+    stale_creds.refresh_token = "refresh-token"
+    stale_creds.refresh.side_effect = RefreshError("invalid_grant")
+    mock_credentials.from_authorized_user_file.return_value = stale_creds
+
+    fresh_creds = Mock()
+    fresh_creds.valid = True
+    fresh_creds.to_json.return_value = '{"token": "new"}'
+    flow = Mock()
+    flow.run_local_server.return_value = fresh_creds
+    mock_flow_cls.from_client_secrets_file.return_value = flow
+
+    mock_service = Mock()
+    mock_build.return_value = mock_service
+
+    result = automation._authenticate_gmail()
+
+    assert result == mock_service
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with('gmail_credentials.json', automation.SCOPES)
+    flow.run_local_server.assert_called_once_with(port=0)
+    mock_build.assert_called_once_with('gmail', 'v1', credentials=fresh_creds)
+
+
 def test_task_keywords_coverage():
     """Test that task keywords cover common actionable terms."""
     automation = GmailTasksAutomation()
@@ -173,3 +234,109 @@ def test_automation_inheritance():
     assert hasattr(automation, '_tick')
     assert hasattr(automation, 'name')
     assert hasattr(automation, 'frequency')
+
+
+def test_list_matching_messages_paginates_and_respects_cap():
+    """Gmail list pagination is followed until cap is reached."""
+    automation = GmailTasksAutomation(max_messages_per_tick=3)
+    service = Mock()
+    messages_api = service.users.return_value.messages.return_value
+    messages_api.list.side_effect = [
+        _request(
+            {
+                "messages": [{"id": "m1"}, {"id": "m2"}],
+                "nextPageToken": "page-2",
+            }
+        ),
+        _request(
+            {
+                "messages": [{"id": "m3"}, {"id": "m4"}],
+            }
+        ),
+    ]
+    automation.gmail_service = service
+
+    result = automation._list_matching_messages("is:unread")
+
+    assert [msg["id"] for msg in result] == ["m1", "m2", "m3"]
+    assert messages_api.list.call_count == 2
+    assert "pageToken" not in messages_api.list.call_args_list[0].kwargs
+    assert messages_api.list.call_args_list[1].kwargs["pageToken"] == "page-2"
+
+
+def test_tick_creates_todoist_task_and_marks_message_processed():
+    """A single actionable email creates one Todoist task and updates cache state."""
+    automation = GmailTasksAutomation()
+    automation._processed_message_ids = set()
+    automation._cache = Mock()
+    automation._cache.processed_gmail_messages.save = Mock()
+
+    service = Mock()
+    service.users.return_value.messages.return_value.get.return_value = _request(
+        {
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Fwd: Action required for launch"},
+                    {"name": "From", "value": "Alice <alice@example.com>"},
+                ],
+            },
+            "snippet": "Please review and respond by tomorrow.",
+        }
+    )
+
+    db = Mock()
+    db.insert_task.return_value = {"id": "todoist-task-1"}
+
+    with (
+        patch.object(automation, "_authenticate_gmail", return_value=service),
+        patch.object(automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-1"}]),
+        patch.object(automation, "_get_existing_task_contents", return_value=set()),
+    ):
+        automation._tick(db)
+
+    db.insert_task.assert_called_once()
+    insert_kwargs = db.insert_task.call_args.kwargs
+    assert insert_kwargs["content"] == "Action required for launch"
+    assert insert_kwargs["labels"] == ["gmail-task"]
+    assert "alice@example.com" in insert_kwargs["description"].lower()
+    assert "gmail-msg-1" in automation._processed_message_ids
+    automation._cache.processed_gmail_messages.save.assert_called_once_with(automation._processed_message_ids)
+    assert automation.last_sync_stats["created"] == 1
+    assert automation.last_sync_stats["would_create"] == 0
+
+
+def test_tick_dry_run_does_not_create_or_persist_processed_ids():
+    """Dry-run mode exercises the sync path without writing to Todoist or cache."""
+    automation = GmailTasksAutomation(dry_run=True)
+    automation._processed_message_ids = set()
+    automation._cache = Mock()
+    automation._cache.processed_gmail_messages.save = Mock()
+
+    service = Mock()
+    service.users.return_value.messages.return_value.get.return_value = _request(
+        {
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "TODO: Review sprint backlog"},
+                    {"name": "From", "value": "PM <pm@example.com>"},
+                ],
+            },
+            "snippet": "Please review before the standup.",
+        }
+    )
+
+    db = Mock()
+
+    with (
+        patch.object(automation, "_authenticate_gmail", return_value=service),
+        patch.object(automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-2"}]),
+        patch.object(automation, "_get_existing_task_contents", return_value=set()),
+    ):
+        automation._tick(db)
+
+    db.insert_task.assert_not_called()
+    automation._cache.processed_gmail_messages.save.assert_not_called()
+    assert "gmail-msg-2" not in automation._processed_message_ids
+    assert automation.last_sync_stats["dry_run"] is True
+    assert automation.last_sync_stats["created"] == 0
+    assert automation.last_sync_stats["would_create"] == 1

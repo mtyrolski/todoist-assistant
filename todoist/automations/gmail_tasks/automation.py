@@ -1,14 +1,12 @@
-"""Gmail Tasks Automation for Todoist Assistant.
-
-This module provides automation to fetch emails from Gmail and create Todoist tasks
-from emails that appear to contain actionable items, while avoiding duplicates.
-"""
+"""Gmail Tasks automation: turn actionable unread emails into Todoist tasks."""
 
 import datetime
 import os.path
 import re
+from typing import Any
 
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -22,6 +20,7 @@ from todoist.utils import Cache
 
 GMAIL_CREDENTIALS_FILE = 'gmail_credentials.json'
 GMAIL_TOKEN_FILE = 'gmail_token.json'
+
 
 class GmailTasksAutomation(Automation):
     """
@@ -44,7 +43,17 @@ class GmailTasksAutomation(Automation):
         'respond', 'reply', 'meeting', 'call', 'schedule', 'due'
     ]
 
-    def __init__(self, name: str = "Gmail Tasks", frequency_in_minutes: float = 60):
+    def __init__(
+        self,
+        name: str = "Gmail Tasks",
+        frequency_in_minutes: float = 60,
+        *,
+        dry_run: bool = False,
+        max_messages_per_tick: int | None = None,
+        lookback_days: int = 7,
+        label_name: str = "gmail-task",
+        allow_interactive_auth: bool = True,
+    ):
         """
         Initialize the Gmail Tasks automation.
 
@@ -53,10 +62,21 @@ class GmailTasksAutomation(Automation):
             frequency_in_minutes: How often to run the automation (in minutes)
         """
         super().__init__(name, frequency_in_minutes)
-        self.gmail_service = None
+        self.gmail_service: Any | None = None
+        self.dry_run = dry_run
+        self.max_messages_per_tick = (
+            int(max_messages_per_tick)
+            if max_messages_per_tick is not None and int(max_messages_per_tick) > 0
+            else None
+        )
+        self.lookback_days = max(1, int(lookback_days))
+        self.label_name = label_name
+        self.allow_interactive_auth = allow_interactive_auth
         self._cache = Cache()
         # Keep persistent set of processed Gmail message IDs to avoid duplicate tasks across runs
-        self._processed_message_ids = self._cache.processed_gmail_messages.load()
+        loaded_processed_ids = self._cache.processed_gmail_messages.load()
+        self._processed_message_ids = set(loaded_processed_ids or set())
+        self.last_sync_stats: dict[str, Any] = {}
 
     @staticmethod
     def _format_gmail_date(d: datetime.date) -> str:
@@ -74,8 +94,19 @@ class GmailTasksAutomation(Automation):
         # If there are no (valid) credentials available, let the user log in
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
+                try:
+                    creds.refresh(Request())
+                except RefreshError as exc:
+                    logger.warning(f"Gmail token refresh failed ({exc}); falling back to interactive OAuth.")
+                    creds = None
+
+            if not creds or not creds.valid:
+                if not self.allow_interactive_auth:
+                    logger.error(
+                        "Gmail credentials require interactive OAuth, but interactive auth is disabled."
+                    )
+                    return None
+
                 if os.path.exists(GMAIL_CREDENTIALS_FILE):
                     flow = InstalledAppFlow.from_client_secrets_file(GMAIL_CREDENTIALS_FILE, self.SCOPES)
                     creds = flow.run_local_server(port=0)
@@ -89,6 +120,50 @@ class GmailTasksAutomation(Automation):
                 token.write(creds.to_json())
 
         return build('gmail', 'v1', credentials=creds)
+
+    def _build_gmail_query(self) -> str:
+        """Build the Gmail search query for unread messages in the lookback window."""
+        today = datetime.date.today()
+        start_date = today - datetime.timedelta(days=self.lookback_days)
+        tomorrow = today + datetime.timedelta(days=1)  # `before:` is exclusive
+        after_str = self._format_gmail_date(start_date)
+        before_str = self._format_gmail_date(tomorrow)
+        return f'is:unread after:{after_str} before:{before_str}'
+
+    def _list_matching_messages(self, query_: str) -> list[dict[str, Any]]:
+        """List Gmail message refs (with pagination), capped when configured."""
+        if self.gmail_service is None:
+            raise RuntimeError("Gmail service is not initialized")
+
+        messages: list[dict[str, Any]] = []
+        page_token: str | None = None
+
+        while True:
+            list_kwargs: dict[str, Any] = {'userId': 'me', 'q': query_}
+            if page_token:
+                list_kwargs['pageToken'] = page_token
+
+            results = self.gmail_service.users().messages().list(**list_kwargs).execute()
+            batch = results.get('messages', [])
+            if batch:
+                messages.extend(batch)
+                if self.max_messages_per_tick is not None and len(messages) >= self.max_messages_per_tick:
+                    return messages[:self.max_messages_per_tick]
+
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                return messages
+
+    @staticmethod
+    def _header_map(headers: list[dict[str, Any]] | None) -> dict[str, str]:
+        """Normalize Gmail headers into a lowercase name->value map."""
+        normalized: dict[str, str] = {}
+        for header in headers or []:
+            name = str(header.get('name', '')).strip().lower()
+            if not name:
+                continue
+            normalized[name] = str(header.get('value', ''))
+        return normalized
 
     def _is_actionable_email(self, subject: str, snippet: str) -> bool:
         """
@@ -107,7 +182,7 @@ class GmailTasksAutomation(Automation):
         logger.debug(f"Email {subject} -> actionable? {is_actionable}")
         return is_actionable
 
-    def _extract_task_content(self, subject: str, snippet: str, sender: str) -> dict:
+    def _extract_task_content(self, subject: str, snippet: str, sender: str) -> dict[str, Any]:
         """
         Extract task content from email data.
 
@@ -122,8 +197,12 @@ class GmailTasksAutomation(Automation):
         # Use subject as task content, with some cleanup
         content = subject.strip()
 
-        # Remove common email prefixes
-        content = re.sub(r'^(re:|fwd?:|fw:)\s*', '', content, flags=re.IGNORECASE)
+        # Remove repeated email prefixes like "Re: Fwd: ..."
+        content = re.sub(r'^(?:(?:re|fwd?):\s*)+', '', content, flags=re.IGNORECASE).strip()
+
+        if not content:
+            fallback = re.sub(r'\s+', ' ', snippet).strip()
+            content = fallback[:120] if fallback else "Email follow-up"
 
         # Create description with context
         description = f"Email from: {sender}\n\nSnippet: {snippet}"
@@ -131,7 +210,9 @@ class GmailTasksAutomation(Automation):
         # Determine priority based on urgency keywords
         priority = 1  # Normal priority
         urgent_keywords = ['urgent', 'asap', 'important', 'deadline', 'critical']
-        if any(keyword in content.lower() or keyword in snippet.lower() for keyword in urgent_keywords):
+        content_lower = content.lower()
+        snippet_lower = snippet.lower()
+        if any(keyword in content_lower or keyword in snippet_lower for keyword in urgent_keywords):
             priority = 3  # High priority
 
         return {
@@ -155,9 +236,12 @@ class GmailTasksAutomation(Automation):
             existing_contents = set()
 
             for project in projects:
-                for task in project.tasks:
+                for task in getattr(project, 'tasks', []) or []:
                     # Normalize content for comparison (lowercase, stripped)
-                    normalized_content = task.task_entry.content.lower().strip()
+                    content = getattr(getattr(task, 'task_entry', None), 'content', '')
+                    if not isinstance(content, str) or not content.strip():
+                        continue
+                    normalized_content = content.lower().strip()
                     existing_contents.add(normalized_content)
 
             logger.info(f"Found {len(existing_contents)} existing tasks")
@@ -174,36 +258,40 @@ class GmailTasksAutomation(Automation):
         Args:
             db: Database instance for Todoist operations
         """
-        if not os.path.exists(GMAIL_CREDENTIALS_FILE):
-            logger.error(f"Gmail credentials file {GMAIL_CREDENTIALS_FILE} not found. "
-                         "Please follow the setup instructions to configure Gmail API access.")
-            return
+        stats: dict[str, Any] = {
+            'dry_run': self.dry_run,
+            'auth_failed': False,
+            'query': None,
+            'messages_found': 0,
+            'messages_scanned': 0,
+            'actionable_messages': 0,
+            'duplicates': 0,
+            'created': 0,
+            'would_create': 0,
+            'skipped_processed': 0,
+            'skipped_missing_id': 0,
+            'skipped_empty_content': 0,
+            'errors': 0,
+        }
+        self.last_sync_stats = stats
         try:
             # Authenticate with Gmail
             self.gmail_service = self._authenticate_gmail()
             if not self.gmail_service:
+                stats['auth_failed'] = True
+                stats['errors'] += 1
                 logger.error("Failed to authenticate with Gmail API")
                 return
 
             logger.info("Successfully authenticated with Gmail API")
 
-            # Get timeframe - last week (Gmail query expects YYYY/M/D)
-            today = datetime.date.today()
-            one_week_ago_date = today - datetime.timedelta(days=7)
-            tomorrow = today + datetime.timedelta(days=1)  # before is exclusive, include today's emails
-            after_str = self._format_gmail_date(one_week_ago_date)
-            before_str = self._format_gmail_date(tomorrow)
-
-            # Fetch unread emails from the last week
-            logger.info("Fetching unread emails from the last week...")
-            query_ = f'is:unread after:{after_str} before:{before_str}'
+            # Fetch unread emails from the lookback window
+            logger.info("Fetching unread emails from Gmail...")
+            query_ = self._build_gmail_query()
+            stats['query'] = query_
             logger.debug(f'Gmail query: {query_}')
-            results = self.gmail_service.users().messages().list(
-                userId='me',
-                q=query_
-            ).execute()
-
-            messages = results.get('messages', [])
+            messages = self._list_matching_messages(query_)
+            stats['messages_found'] = len(messages)
             logger.info(f"Found {len(messages)} unread emails")
 
             if not messages:
@@ -214,17 +302,20 @@ class GmailTasksAutomation(Automation):
             existing_task_contents = self._get_existing_task_contents(db)
 
             # Process each email
-            tasks_created = 0
+            processed_ids_changed = False
             for message in messages:
                 try:
                     msg_id = message.get('id')
+                    stats['messages_scanned'] += 1
                     logger.debug(f"Processing email id={msg_id}")
                     if msg_id and msg_id in self._processed_message_ids:
+                        stats['skipped_processed'] += 1
                         logger.debug(f"Skipping already processed email id={msg_id}")
                         continue
                     logger.debug(f'Not yet processed email id={msg_id} in bag of {len(messages)} marked mails.')
                     # Get email details
                     if not msg_id:
+                        stats['skipped_missing_id'] += 1
                         logger.debug("Skipping email without id")
                         continue
 
@@ -234,22 +325,35 @@ class GmailTasksAutomation(Automation):
                     ).execute()
 
                     # Extract email data
-                    headers = {h['name']: h['value'] for h in msg['payload']['headers']}
-                    subject = headers.get('Subject', 'No Subject')
-                    sender = headers.get('From', 'Unknown Sender')
+                    payload = msg.get('payload', {})
+                    headers = self._header_map(payload.get('headers'))
+                    subject = headers.get('subject', 'No Subject')
+                    sender = headers.get('from', 'Unknown Sender')
                     snippet = msg.get('snippet', '')
 
                     # Check if email is actionable
                     if not self._is_actionable_email(subject, snippet):
                         continue
+                    stats['actionable_messages'] += 1
 
                     # Extract task content
                     task_data = self._extract_task_content(subject, snippet, sender)
 
                     # Check for duplicates
                     normalized_content = task_data[TaskField.CONTENT.value].lower().strip()
+                    if not normalized_content:
+                        stats['skipped_empty_content'] += 1
+                        logger.debug(f"Skipping email with empty task content id={msg_id}")
+                        continue
                     if normalized_content in existing_task_contents:
+                        stats['duplicates'] += 1
                         logger.debug(f"Skipping duplicate task: {task_data[TaskField.CONTENT.value]}")
+                        continue
+
+                    if self.dry_run:
+                        stats['would_create'] += 1
+                        existing_task_contents.add(normalized_content)
+                        logger.info(f"[dry-run] Would create task: {task_data[TaskField.CONTENT.value]}")
                         continue
 
                     # Create task in Todoist
@@ -257,30 +361,39 @@ class GmailTasksAutomation(Automation):
                         content=task_data[TaskField.CONTENT.value],
                         description=task_data[TaskField.DESCRIPTION.value],
                         priority=task_data[TaskField.PRIORITY.value],
-                        labels=['gmail-task']  # Add label to identify Gmail-generated tasks
+                        labels=[self.label_name],
                     )
 
                     if 'error' not in result:
-                        tasks_created += 1
+                        stats['created'] += 1
                         existing_task_contents.add(normalized_content)  # Prevent duplicates in this run
                         logger.info(f"Created task: {task_data[TaskField.CONTENT.value]}")
                         # Mark this message as processed
                         if msg_id:
                             logger.debug(f"Marking email as processed: {msg_id}")
                             self._processed_message_ids.add(msg_id)
+                            processed_ids_changed = True
                     else:
+                        stats['errors'] += 1
                         logger.error(f"Failed to create task: {result.get('error')}")
 
                 except (HttpError, KeyError, ValueError, AttributeError, TypeError) as e:
-                    logger.error(f"Error processing email {message['id']}: {e}")
+                    stats['errors'] += 1
+                    logger.error(f"Error processing email {message.get('id')}: {e}")
 
             # Persist processed IDs if updated
-            try:
-                self._cache.processed_gmail_messages.save(self._processed_message_ids)
-            except (OSError, TypeError, ValueError) as e:
-                logger.error(f"Failed to save processed Gmail message IDs: {e}")
+            if not self.dry_run and processed_ids_changed:
+                try:
+                    self._cache.processed_gmail_messages.save(self._processed_message_ids)
+                except (OSError, TypeError, ValueError) as e:
+                    logger.error(f"Failed to save processed Gmail message IDs: {e}")
 
-            logger.info(f"Gmail Tasks automation completed. Created {tasks_created} new tasks.")
+            logger.info(
+                "Gmail Tasks automation completed. "
+                f"created={stats['created']}, would_create={stats['would_create']}, "
+                f"duplicates={stats['duplicates']}, errors={stats['errors']}"
+            )
 
         except (HttpError, OSError, ValueError, TypeError) as e:
+            stats['errors'] += 1
             logger.error(f"Gmail Tasks automation failed: {e}")
