@@ -6,8 +6,8 @@ defaults:
 activity:
   _target_: todoist.automations.activity.Activity
   name: Activity Fetching Automation
-  nweeks_window_size: 10 # 10-week window per fetch batch
-  early_stop_after_n_windows: 2 # Stop if 2 consecutive windows yield no new events
+  early_stop_after_n_windows: 2
+  nweeks_window_size: 4 # 4-week window per fetch batch
 
 # Multiply automation configuration
 multiply:
@@ -62,7 +62,7 @@ automations:
   - ${activity}
   - ${multiply}
   - ${llm_breakdown}
-  # - ${gmail_tasks}
+  - ${gmail_tasks}
 
 hydra:
   searchpath:
