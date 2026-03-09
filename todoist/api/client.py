@@ -3,6 +3,7 @@
 
 from collections import deque
 from dataclasses import dataclass, field
+import random
 from threading import Condition, Lock, local
 from time import perf_counter
 from typing import Any, Mapping, MutableMapping, Optional
@@ -17,6 +18,10 @@ from todoist.utils import (
     RETRY_BACKOFF_STD,
     RETRY_MAX_ATTEMPTS,
     get_api_key,
+    get_max_requests_per_minute,
+    get_rate_pacing_base_delay_seconds,
+    get_rate_pacing_jitter_max_seconds,
+    get_rate_pacing_jitter_min_seconds,
     with_retry,
 )
 
@@ -77,14 +82,22 @@ class TodoistAPIClient:
     ) -> None:
         self._session_local = local()
         self._default_timeout = default_timeout or TimeoutSettings()
-        self._max_requests_per_minute = max_requests_per_minute
+        self._max_requests_per_minute = (
+            get_max_requests_per_minute()
+            if max_requests_per_minute == DEFAULT_MAX_REQUESTS_PER_MINUTE
+            else max_requests_per_minute
+        )
         self._max_attempts = max_attempts
         self._backoff_mean = backoff_mean
         self._backoff_std = backoff_std
+        self._pacing_base_delay_seconds = get_rate_pacing_base_delay_seconds()
+        self._pacing_jitter_min_seconds = get_rate_pacing_jitter_min_seconds()
+        self._pacing_jitter_max_seconds = get_rate_pacing_jitter_max_seconds()
         self._last_call_lock = Lock()
         self._last_call_result: EndpointCallResult | None = None
         self._rate_condition: Condition = Condition()
         self._request_timestamps: deque[float] = deque()
+        self._next_pacing_ready_at: float = 0.0
 
     @property
     def last_call_result(self) -> EndpointCallResult | None:
@@ -237,6 +250,9 @@ class TodoistAPIClient:
         if max_rpm is None or max_rpm <= 0:
             return
 
+        min_interval_seconds = RATE_LIMIT_WINDOW_SECONDS / max_rpm
+        min_logged_wait_seconds = 0.5
+
         with self._rate_condition:
             while True:
                 now = perf_counter()
@@ -247,13 +263,38 @@ class TodoistAPIClient:
                     slot_released = True
                 if slot_released:
                     self._rate_condition.notify_all()
+
+                # Smooth requests over the whole window instead of allowing bursts.
+                if now < self._next_pacing_ready_at:
+                    wait_time = max(self._next_pacing_ready_at - now, 0.05)
+                    if wait_time >= min_logged_wait_seconds:
+                        logger.debug(
+                            f"Rate pacing delay for {operation_name}: {wait_time:.2f} seconds"
+                        )
+                    self._rate_condition.wait(timeout=wait_time)
+                    continue
+
                 if len(self._request_timestamps) < max_rpm:
                     self._request_timestamps.append(now)
+                    self._next_pacing_ready_at = now + self._resolve_pacing_interval_seconds(min_interval_seconds)
                     return
 
                 wait_time = self._request_timestamps[0] + RATE_LIMIT_WINDOW_SECONDS - now
                 wait_time = max(wait_time, 0.05)
-                logger.debug(
-                    f"Rate limit reached, delaying request {operation_name} for {wait_time:.2f} seconds"
-                )
+                if wait_time >= min_logged_wait_seconds:
+                    logger.debug(
+                        f"Rate limit reached, delaying request {operation_name} for {wait_time:.2f} seconds"
+                    )
                 self._rate_condition.wait(timeout=wait_time)
+
+    def _resolve_pacing_interval_seconds(self, min_interval_seconds: float) -> float:
+        """Return pacing interval with optional extra base delay and jitter."""
+
+        jitter_min = self._pacing_jitter_min_seconds
+        jitter_max = self._pacing_jitter_max_seconds
+        if jitter_max < jitter_min:
+            jitter_min, jitter_max = jitter_max, jitter_min
+
+        jitter = random.uniform(jitter_min, jitter_max) if jitter_max > 0 else 0.0
+        configured_interval = self._pacing_base_delay_seconds + 0.05 + jitter
+        return max(min_interval_seconds, configured_interval)

@@ -14,6 +14,7 @@ from todoist.env import EnvVar
 from todoist.utils import (
     DEFAULT_CACHE_SUBDIR,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
+    DEFAULT_MAX_REQUESTS_PER_MINUTE,
     MIGRATION_BACKUP_DIRNAME,
     RETRY_BACKOFF_MEAN,
     RETRY_BACKOFF_STD,
@@ -26,6 +27,10 @@ from todoist.utils import (
     get_all_fields_of_dataclass,
     get_api_key,
     get_max_concurrent_requests,
+    get_max_requests_per_minute,
+    get_rate_pacing_base_delay_seconds,
+    get_rate_pacing_jitter_max_seconds,
+    get_rate_pacing_jitter_min_seconds,
     last_n_years_in_weeks,
     load_config,
     retry_with_backoff,
@@ -271,8 +276,70 @@ def test_get_max_concurrent_requests_parses_env_value(env_value: str | None, exp
         payload: dict[str, str] = {}
     else:
         payload = {EnvVar.MAX_CONCURRENT_REQUESTS: env_value}
+        with patch.dict(os.environ, payload, clear=True):
+            assert get_max_concurrent_requests() == expected
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        (None, DEFAULT_MAX_REQUESTS_PER_MINUTE),
+        ("30", 30),
+        ("1", 1),
+        ("0", DEFAULT_MAX_REQUESTS_PER_MINUTE),
+        ("-5", DEFAULT_MAX_REQUESTS_PER_MINUTE),
+        ("not-an-int", DEFAULT_MAX_REQUESTS_PER_MINUTE),
+    ],
+)
+def test_get_max_requests_per_minute_parses_env_value(env_value: str | None, expected: int):
+    if env_value is None:
+        payload: dict[str, str] = {}
+    else:
+        payload = {EnvVar.MAX_REQUESTS_PER_MINUTE: env_value}
     with patch.dict(os.environ, payload, clear=True):
-        assert get_max_concurrent_requests() == expected
+        assert get_max_requests_per_minute() == expected
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        (None, 0.0),
+        ("5", 5.0),
+        ("2.5", 2.5),
+        ("-1", 0.0),
+        ("oops", 0.0),
+    ],
+)
+def test_get_rate_pacing_base_delay_seconds_parses_env_value(env_value: str | None, expected: float):
+    payload = {} if env_value is None else {EnvVar.RATE_PACING_BASE_DELAY_SECONDS: env_value}
+    with patch.dict(os.environ, payload, clear=True):
+        assert get_rate_pacing_base_delay_seconds() == expected
+
+
+@pytest.mark.parametrize(
+    ("min_raw", "max_raw", "expected_min", "expected_max"),
+    [
+        (None, None, 0.0, 0.0),
+        ("1", "5", 1.0, 5.0),
+        ("0.5", "2.5", 0.5, 2.5),
+        ("-1", "3", 0.0, 3.0),
+        ("oops", "bad", 0.0, 0.0),
+    ],
+)
+def test_get_rate_pacing_jitter_range_parses_env_values(
+    min_raw: str | None,
+    max_raw: str | None,
+    expected_min: float,
+    expected_max: float,
+):
+    payload: dict[str, str] = {}
+    if min_raw is not None:
+        payload[EnvVar.RATE_PACING_JITTER_MIN_SECONDS] = min_raw
+    if max_raw is not None:
+        payload[EnvVar.RATE_PACING_JITTER_MAX_SECONDS] = max_raw
+    with patch.dict(os.environ, payload, clear=True):
+        assert get_rate_pacing_jitter_min_seconds() == expected_min
+        assert get_rate_pacing_jitter_max_seconds() == expected_max
 
 
 def test_try_n_times_success_first_attempt():
