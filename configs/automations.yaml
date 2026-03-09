@@ -62,7 +62,7 @@ automations:
   - ${activity}
   - ${multiply}
   - ${llm_breakdown}
-  - ${gmail_tasks}
+  # - ${gmail_tasks}  # Enable Gmail Tasks automation explicitly when needed
 
 hydra:
   searchpath:
