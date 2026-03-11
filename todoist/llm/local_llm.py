@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 import json
 from pathlib import Path
-from typing import Any, Literal, Sequence, TypeVar
+from typing import Any, Literal, Protocol, Sequence, TypeVar, cast
 
 import torch
 from huggingface_hub import snapshot_download
@@ -53,6 +53,14 @@ class LocalChatConfig:
     suppress_hf_warnings: bool = True
 
 
+class _GenerativeModel(Protocol):
+    device: torch.device
+
+    def to(self, device: torch.device) -> "_GenerativeModel": ...
+    def eval(self) -> object: ...
+    def generate(self, **kwargs: Any) -> torch.Tensor: ...
+
+
 class TransformersMistral3ChatModel:
     """Minimal local chat model with strict structured output."""
 
@@ -80,10 +88,11 @@ class TransformersMistral3ChatModel:
         if torch_dtype is not None:
             model_kwargs["torch_dtype"] = torch_dtype
 
-        model_loader: Any = AutoModelForCausalLM
         if getattr(hf_config, "model_type", None) == "mistral3":
-            model_loader = Mistral3ForConditionalGeneration
-        self._model = model_loader.from_pretrained(config.model_id, **model_kwargs)
+            model = Mistral3ForConditionalGeneration.from_pretrained(config.model_id, **model_kwargs)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(config.model_id, **model_kwargs)
+        self._model = cast(_GenerativeModel, model)
         if config.device != "cpu":
             self._model = self._model.to(torch.device(config.device))
 

@@ -611,6 +611,8 @@ def test_load_config_with_relative_path():
 
 
 def test_load_config_with_absolute_path():
+    absolute_config_dir = str((Path.cwd() / "tmp" / "todoist-config").resolve())
+
     with (
         patch("todoist.utils.GlobalHydra") as mock_global_hydra,
         patch("todoist.utils.initialize") as mock_initialize,
@@ -621,11 +623,11 @@ def test_load_config_with_absolute_path():
         mock_global_hydra.instance.return_value = mock_instance
         mock_compose.return_value = MagicMock()
 
-        load_config("config", "/tmp/todoist-config")
+        load_config("config", absolute_config_dir)
 
         mock_instance.clear.assert_called_once()
         mock_initialize.assert_not_called()
-        mock_initialize_config_dir.assert_called_once_with(config_dir="/tmp/todoist-config")
+        mock_initialize_config_dir.assert_called_once_with(config_dir=absolute_config_dir)
 
 
 def test_retry_with_backoff_success_first_attempt():

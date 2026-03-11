@@ -1,4 +1,4 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test typecheck lint validate check chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -131,8 +131,15 @@ update_and_run: # updates history, fetches activity, do templates, and runs the 
 test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
 
-typecheck: ## Run pyright type checks
-	PYTHONPATH=. uv run python3 -m pyright --warnings
+coverage: ## Run full pytest coverage report
+	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run --with coverage python -m coverage run -m pytest tests/
+	PYTHONPATH=. uv run --with coverage python -m coverage report
+
+check_explicit_any: ## Reject `: Any =` variable annotations used as typecheck escape hatches
+	PYTHONPATH=. uv run python3 -m scripts.check_explicit_any
+
+typecheck: check_explicit_any ## Run pyright type checks
+	PYTHONPATH=. uv run pyright --warnings
 
 lint: ## Run pylint
 	PYTHONPATH=. uv run pylint -j 0 todoist tests

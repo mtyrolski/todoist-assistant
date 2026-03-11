@@ -140,7 +140,7 @@ class SafePythonReplTool:
         try:
             tree = ast.parse(code, mode="exec")
             last_expr = tree.body[-1] if tree.body else None
-            value: Any = None
+            value = None
 
             if isinstance(last_expr, ast.Expr):
                 expr = ast.Expression(last_expr.value)

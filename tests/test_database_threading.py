@@ -2,9 +2,11 @@
 
 from concurrent.futures import Future
 
+from todoist.constants import TaskField
 from todoist.database.db_activity import DatabaseActivity
 from todoist.database.db_projects import DatabaseProjects
-from todoist.database.db_tasks import DatabaseTasks
+from todoist.database.db_tasks import DatabaseTasks, TaskTemplateInsertRequest
+from tests.factories import make_task
 
 
 def test_fetch_activity_short_circuits_for_zero_pages():
@@ -88,3 +90,48 @@ def test_insert_tasks_replaces_timed_out_futures_with_empty_dict(monkeypatch):
 
     result = db_tasks.insert_tasks([{"content": "Task 1"}, {"content": "Task 2"}])
     assert result == [{"id": "Task 1"}, {}]
+
+
+def test_insert_tasks_from_templates_preserves_order(monkeypatch):
+    db_tasks = DatabaseTasks()
+    template = make_task(task_id="task-1", content="Template", project_id="project-1")
+
+    class InlineExecutor:
+        def __init__(self, max_workers: int):
+            self._max_workers = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def submit(self, fn, *args, **kwargs):
+            fut: Future[dict[str, str]] = Future()
+            fut.set_result(fn(*args, **kwargs))
+            return fut
+
+    monkeypatch.setattr("todoist.database.db_tasks.ThreadPoolExecutor", InlineExecutor)
+    monkeypatch.setattr("todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable)
+    monkeypatch.setattr(
+        db_tasks,
+        "insert_task_from_template",
+        lambda task, **overrides: {
+            "id": f"{task.id}:{overrides[TaskField.CONTENT.value]}",
+        },
+    )
+
+    requests = [
+        TaskTemplateInsertRequest(
+            template=template,
+            overrides={TaskField.CONTENT.value: "Task 1"},
+        ),
+        TaskTemplateInsertRequest(
+            template=template,
+            overrides={TaskField.CONTENT.value: "Task 2"},
+        ),
+    ]
+
+    result = db_tasks.insert_tasks_from_templates(requests)
+
+    assert result == [{"id": "task-1:Task 1"}, {"id": "task-1:Task 2"}]
