@@ -55,12 +55,7 @@ class OpenAIResponsesChatModel:
     def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
         payload = self._create_payload(
             messages,
-            text_format={
-                "type": "json_schema",
-                "name": schema.__name__,
-                "strict": True,
-                "schema": schema.model_json_schema(),
-            },
+            text_format=_build_text_format(schema),
         )
         response = self._post(payload)
         text = _extract_response_text(response)
@@ -78,19 +73,26 @@ class OpenAIResponsesChatModel:
         payload: dict[str, Any] = {
             "model": self.config.model,
             "input": input_messages,
-            "temperature": self.config.temperature,
-            "top_p": self.config.top_p,
             "max_output_tokens": self.config.max_output_tokens,
             "store": False,
             "text": {"format": text_format or {"type": "text"}},
         }
+        if _supports_sampling_controls(self.config.model):
+            payload["temperature"] = self.config.temperature
+            payload["top_p"] = self.config.top_p
         if instructions:
             payload["instructions"] = instructions
         return payload
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self._client.post(self.config.base_url, json=payload)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = _extract_error_detail(exc.response)
+            raise ValueError(
+                f"OpenAI Responses API request failed ({exc.response.status_code}): {detail}"
+            ) from exc
         data = response.json()
         if not isinstance(data, dict):
             raise ValueError("OpenAI response payload is not a JSON object")
@@ -151,3 +153,54 @@ def _extract_response_text(payload: dict[str, Any]) -> str:
         if message:
             raise ValueError(message)
     raise ValueError("OpenAI response did not include output text")
+
+
+def _supports_sampling_controls(model: str) -> bool:
+    normalized = model.strip().lower()
+    return not normalized.startswith("gpt-5")
+
+
+def _build_text_format(schema: type[BaseModel]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "name": schema.__name__,
+        "strict": True,
+        "schema": _normalize_structured_output_schema(schema.model_json_schema()),
+    }
+
+
+def _normalize_structured_output_schema(node: object) -> object:
+    if isinstance(node, dict):
+        normalized = {
+            str(key): _normalize_structured_output_schema(value)
+            for key, value in node.items()
+            if key not in {"default", "title"}
+        }
+        if normalized.get("type") == "object":
+            properties = normalized.get("properties")
+            if isinstance(properties, dict):
+                normalized["required"] = list(properties.keys())
+            else:
+                normalized["required"] = []
+            normalized["additionalProperties"] = False
+        return normalized
+    if isinstance(node, list):
+        return [_normalize_structured_output_schema(item) for item in node]
+    return node
+
+
+def _extract_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        text = response.text.strip()
+        return text or "No error details returned"
+    if not isinstance(payload, dict):
+        return "No error details returned"
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = str(error.get("message") or "").strip()
+        if message:
+            return message
+    message = str(payload.get("message") or "").strip()
+    return message or "No error details returned"
