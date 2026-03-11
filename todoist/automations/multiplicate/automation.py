@@ -2,7 +2,7 @@ import argparse
 import re
 from dataclasses import dataclass
 from collections.abc import Mapping
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence, cast
 
 from omegaconf import DictConfig
 
@@ -136,7 +136,11 @@ def _insert_tasks_from_templates_compat(
 ) -> list[dict[str, Any]]:
     insert_many = getattr(db, "insert_tasks_from_templates", None)
     if callable(insert_many):
-        return insert_many(requests)
+        typed_insert_many = cast(
+            Callable[[list[TaskTemplateInsertRequest]], list[dict[str, Any]]],
+            insert_many,
+        )
+        return typed_insert_many(requests)
 
     return [
         db.insert_task_from_template(request.template, **request.overrides)

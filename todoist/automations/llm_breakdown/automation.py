@@ -1,14 +1,24 @@
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from datetime import datetime
+import os
+from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
 from loguru import logger
+from dotenv import dotenv_values
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database
-from todoist.llm import LocalChatConfig, TransformersMistral3ChatModel
+from todoist.env import EnvVar
+from todoist.llm import (
+    DEFAULT_OPENAI_MODEL,
+    LocalChatConfig,
+    OpenAIChatConfig,
+    OpenAIResponsesChatModel,
+    TransformersMistral3ChatModel,
+)
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.types import Task
 from todoist.utils import Cache
@@ -19,6 +29,8 @@ from .runner import run_breakdown
 
 
 # === LLM BREAKDOWN AUTOMATION ================================================
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)
@@ -90,7 +102,8 @@ class LLMBreakdown(Automation):
         self.track_progress = settings_obj.track_progress
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
-        self._llm: TransformersMistral3ChatModel | None = None
+        self._llm: TransformersMistral3ChatModel | OpenAIResponsesChatModel | None = None
+        self._llm_backend: str | None = None
         self._progress_storage = Cache().llm_breakdown_progress
         self._queue_storage = Cache().llm_breakdown_queue
 
@@ -156,9 +169,66 @@ class LLMBreakdown(Automation):
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Failed to save LLM breakdown queue: {}", exc)
 
-    def _get_llm(self) -> TransformersMistral3ChatModel:
-        if self._llm is None:
-            self._llm = TransformersMistral3ChatModel(self.model_config)
+    @staticmethod
+    def _resolve_env_path() -> Path:
+        cache_dir = os.getenv(str(EnvVar.CACHE_DIR))
+        if cache_dir:
+            return Path(cache_dir).expanduser().resolve() / ".env"
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            return cwd_env
+        return _REPO_ROOT / ".env"
+
+    @staticmethod
+    def _env_values() -> dict[str, Any]:
+        env_path = LLMBreakdown._resolve_env_path()
+        file_values = dotenv_values(env_path) if env_path.exists() else {}
+        return dict(file_values)
+
+    def _resolve_selected_backend(self) -> tuple[str, dict[str, Any]]:
+        values = self._env_values()
+        backend = _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_BACKEND)) or values.get(str(EnvVar.AGENT_BACKEND))
+        ) or "transformers_local"
+        return backend.lower(), values
+
+    def _build_transformers_llm(self, values: Mapping[str, Any]) -> TransformersMistral3ChatModel:
+        device = _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_DEVICE)) or values.get(str(EnvVar.AGENT_DEVICE))
+        )
+        if device:
+            normalized_device = "cuda" if device.lower() == "gpu" else device.lower()
+            config = replace(self.model_config, device=cast(Any, normalized_device))
+        else:
+            config = self.model_config
+        return TransformersMistral3ChatModel(config)
+
+    @staticmethod
+    def _build_openai_llm(values: Mapping[str, Any]) -> OpenAIResponsesChatModel:
+        api_key = _sanitize_text(
+            os.getenv("OPEN_AI_SECRET_KEY") or values.get("OPEN_AI_SECRET_KEY")
+        )
+        if not api_key:
+            raise RuntimeError("OpenAI backend selected but OPEN_AI_SECRET_KEY is missing.")
+        key_name = _sanitize_text(
+            os.getenv("OPEN_AI_KEY_NAME") or values.get("OPEN_AI_KEY_NAME")
+        )
+        model = _sanitize_text(
+            os.getenv("OPEN_AI_MODEL") or values.get("OPEN_AI_MODEL")
+        ) or DEFAULT_OPENAI_MODEL
+        return OpenAIResponsesChatModel(
+            OpenAIChatConfig(api_key=api_key, key_name=key_name, model=model)
+        )
+
+    def _get_llm(self) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel:
+        backend, values = self._resolve_selected_backend()
+        if self._llm is None or self._llm_backend != backend:
+            if backend == "openai":
+                self._llm = self._build_openai_llm(values)
+            else:
+                self._llm = self._build_transformers_llm(values)
+                backend = "transformers_local"
+            self._llm_backend = backend
         return self._llm
 
     def _resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
@@ -190,7 +260,7 @@ class LLMBreakdown(Automation):
     def queue_save(self, items: list[QueueItem]) -> None:
         self._queue_save(items)
 
-    def get_llm(self) -> TransformersMistral3ChatModel:
+    def get_llm(self) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel:
         return self._get_llm()
 
     def resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
