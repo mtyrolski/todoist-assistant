@@ -38,9 +38,34 @@ type ChatConversation = {
   messages: ChatMessage[];
 };
 
+type ChatOption = {
+  id: string;
+  label: string;
+  available: boolean;
+};
+
 type ChatStatus = {
   enabled: boolean;
   loading: boolean;
+  backend: {
+    selected: string;
+    label: string;
+    active: string | null;
+    options: ChatOption[];
+    openai?: {
+      configured: boolean;
+      keyName?: string | null;
+      model?: string | null;
+    };
+    envPath?: string;
+  };
+  device: {
+    selected: string;
+    label: string;
+    active: string | null;
+    options: ChatOption[];
+    envPath?: string;
+  };
   queue: {
     total: number;
     queued: number;
@@ -58,7 +83,9 @@ const CHAT_HELP = `**LLM Chat**
 Local model for quick analysis and summaries.
 
 - Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
-- Enable loads the model on demand.
+- Pick a backend and device before loading the model.
+- Enable loads the selected backend on demand.
+- OpenAI uses the credentials configured in your local \`.env\`.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
 
@@ -92,9 +119,12 @@ export function LlmChatPanel() {
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [enabling, setEnabling] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const [lastConversationId, setLastConversationId] = useState<string | null>(null);
+  const [backendDraft, setBackendDraft] = useState("transformers_local");
+  const [deviceDraft, setDeviceDraft] = useState("cpu");
 
   const refreshStatus = useCallback(async (silent = false) => {
     try {
@@ -138,6 +168,12 @@ export function LlmChatPanel() {
     const interval = setInterval(() => refreshStatus(true), POLL_MS);
     return () => clearInterval(interval);
   }, [refreshStatus]);
+
+  useEffect(() => {
+    if (!status) return;
+    setBackendDraft(status.backend.selected);
+    setDeviceDraft(status.device.selected);
+  }, [status?.backend.selected, status?.device.selected]);
 
   useEffect(() => {
     if (didAutoSelect.current) return;
@@ -200,6 +236,27 @@ export function LlmChatPanel() {
     }
   };
 
+  const handleApplySettings = async () => {
+    try {
+      setActionError(null);
+      setSavingSettings(true);
+      const res = await fetch("/api/llm_chat/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backend: backendDraft, device: deviceDraft })
+      });
+      const payload = (await res.json()) as { detail?: string };
+      if (!res.ok) {
+        throw new Error(payload.detail ?? "Failed to save LLM settings");
+      }
+      await refreshStatus();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to save LLM settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = messageDraft.trim();
@@ -238,6 +295,22 @@ export function LlmChatPanel() {
   const queueSummary = queue
     ? `${queue.queued} queued / ${queue.running} running / ${queue.failed} failed`
     : "Queue unavailable";
+  const backendOptions = status?.backend.options ?? [];
+  const deviceOptions = status?.device.options ?? [];
+  const settingsChanged =
+    !!status && (backendDraft !== status.backend.selected || deviceDraft !== status.device.selected);
+  const backendStatusLabel =
+    status?.backend.selected === "openai"
+      ? `Backend: ${status.backend.label}${status.backend.openai?.model ? ` (${status.backend.openai.model})` : ""}`
+      : status
+        ? `Backend: ${status.backend.label}`
+        : null;
+  const deviceStatusLabel =
+    status?.backend.selected === "openai"
+      ? "Device: remote"
+      : status
+        ? `Device: ${status.device.label}`
+        : null;
 
   const pendingForSelected = useMemo(() => {
     if (!selectedConversationId || !queue?.items) return [];
@@ -277,10 +350,68 @@ export function LlmChatPanel() {
 
       <div className="status-row">
         <span className={`pill pill-${badge.tone}`}>{badge.label}</span>
+        {backendStatusLabel ? <span className="pill pill-neutral">{backendStatusLabel}</span> : null}
+        {deviceStatusLabel ? <span className="pill pill-neutral">{deviceStatusLabel}</span> : null}
         {statusError ? <span className="pill pill-warn">{statusError}</span> : null}
       </div>
 
       {actionError ? <p className="muted tiny">Error: {actionError}</p> : null}
+
+      <div className="chatSettingsBar">
+        <div className="chatSettingControl">
+          <label className="muted tiny" htmlFor="llm-backend-select">
+            LLM backend
+          </label>
+          <select
+            id="llm-backend-select"
+            className="select"
+            value={backendDraft}
+            onChange={(event) => setBackendDraft(event.target.value)}
+            disabled={savingSettings || loading}
+          >
+            {backendOptions.map((option) => (
+              <option key={option.id} value={option.id} disabled={!option.available}>
+                {option.label}{option.available ? "" : " (coming soon)"}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="chatSettingControl">
+          <label className="muted tiny" htmlFor="llm-device-select">
+            Device
+          </label>
+          <select
+            id="llm-device-select"
+            className="select"
+            value={deviceDraft}
+            onChange={(event) => setDeviceDraft(event.target.value)}
+            disabled={savingSettings || loading}
+          >
+            {deviceOptions.map((option) => (
+              <option key={option.id} value={option.id} disabled={!option.available}>
+                {option.label}{option.available ? "" : " (unavailable)"}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="chatSettingsActions">
+          <button
+            className="button buttonSmall"
+            type="button"
+            onClick={handleApplySettings}
+            disabled={!settingsChanged || savingSettings || loading}
+          >
+            {savingSettings ? "Saving..." : "Apply"}
+          </button>
+          {backendDraft === "openai" && status?.backend.openai?.configured ? (
+            <span className="muted tiny">
+              OpenAI model: {status.backend.openai.model ?? "unknown"}
+              {status.backend.openai.keyName ? ` | key: ${status.backend.openai.keyName}` : ""}
+            </span>
+          ) : null}
+          {status?.backend.envPath ? <span className="muted tiny">{status.backend.envPath}</span> : null}
+        </div>
+      </div>
 
       <div className="chatLayout">
         <div className="chatPane">

@@ -128,7 +128,9 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     logger.info('Adjusting root project names...')
     # Adjust project names and map back to ids
     df['root_project_name'] = df['root_project_name'].apply(lambda name: link_mapping.get(name, name))
-    mapped_ids = df['root_project_name'].map(mapping_project_name_to_id)
+    mapped_ids = df['root_project_name'].map(
+        lambda project_name: mapping_project_name_to_id.get(project_name)
+    )
     df['root_project_id'] = mapped_ids.fillna(original_root_id)
     missing_names = set(df.loc[mapped_ids.isna(), 'root_project_name'])
     if missing_names:

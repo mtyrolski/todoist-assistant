@@ -1,7 +1,7 @@
-
 import inspect
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
@@ -13,6 +13,12 @@ from todoist.constants import TaskField
 from todoist.api.client import EndpointCallResult
 from todoist.types import Task
 from todoist.utils import MaxRetriesExceeded, RETRY_MAX_ATTEMPTS, with_retry, get_max_concurrent_requests
+
+
+@dataclass(frozen=True)
+class TaskTemplateInsertRequest:
+    template: Task
+    overrides: dict[str, object]
 
 
 class DatabaseTasks:
@@ -377,5 +383,90 @@ class DatabaseTasks:
         for i in range(len(ordered_results)):
             if ordered_results[i] is None:
                 ordered_results[i] = {}
+
+        return [result or {} for result in ordered_results]
+
+    def insert_tasks_from_templates(
+        self,
+        requests: list[TaskTemplateInsertRequest],
+    ) -> list[dict[str, Any]]:
+        """Insert multiple tasks from templates in parallel.
+
+        Each request clones a source ``Task`` and applies the provided overrides
+        through :meth:`insert_task_from_template`.
+        """
+        if not requests:
+            logger.info("No template tasks to insert")
+            return []
+
+        def insert_single_request(
+            request: TaskTemplateInsertRequest,
+            index: int,
+        ) -> dict[str, Any]:
+            try:
+                return self.insert_task_from_template(
+                    request.template,
+                    **request.overrides,
+                )
+            except (RuntimeError, ValueError, TypeError, KeyError) as exc:
+                logger.error(
+                    f"Failed to insert template task at index {index}: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+                return {}
+
+        def insert_single_request_with_retry(
+            request: TaskTemplateInsertRequest,
+            index: int,
+        ) -> dict[str, Any]:
+            content = str(
+                request.overrides.get(
+                    TaskField.CONTENT.value,
+                    request.template.task_entry.content,
+                )
+            )
+            return with_retry(
+                partial(insert_single_request, request, index),
+                operation_name=f"insert template task {index} (content: {content})",
+                max_attempts=RETRY_MAX_ATTEMPTS,
+            )
+
+        logger.info(f"Inserting {len(requests)} template tasks with thread pool")
+        max_workers = min(get_max_concurrent_requests(), len(requests))
+        ordered_results: list[dict[str, Any] | None] = [None] * len(requests)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(insert_single_request_with_retry, request, idx): idx
+                for idx, request in enumerate(requests)
+            }
+            for future in tqdm(
+                as_completed(future_to_index),
+                total=len(requests),
+                desc="Inserting template tasks",
+                unit="task",
+                position=0,
+                leave=True,
+            ):
+                idx = future_to_index[future]
+                try:
+                    result = future.result(timeout=60)
+                except (
+                    MaxRetriesExceeded,
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    OSError,
+                ) as exc:  # pragma: no cover - defensive
+                    logger.error(
+                        f"Failed inserting template task at index {idx}: "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
+                    result = {}
+                ordered_results[idx] = result
+                logger.debug(f"Inserted template task {idx + 1}/{len(requests)}")
+
+        for index, result in enumerate(ordered_results):
+            if result is None:
+                ordered_results[index] = {}
 
         return [result or {} for result in ordered_results]

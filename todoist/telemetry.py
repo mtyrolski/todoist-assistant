@@ -13,7 +13,7 @@ SENTINEL_FILENAME = ".telemetry_sent"
 
 
 def default_data_dir() -> Path:
-    override = os.getenv(EnvVar.DATA_DIR)
+    override = os.getenv(str(EnvVar.DATA_DIR))
     if override:
         return Path(override).expanduser().resolve()
     if os.name == "nt":
@@ -25,7 +25,7 @@ def default_data_dir() -> Path:
 
 
 def resolve_config_dir() -> Path:
-    override = os.getenv(EnvVar.CONFIG_DIR)
+    override = os.getenv(str(EnvVar.CONFIG_DIR))
     if override:
         return Path(override).expanduser().resolve()
     return default_data_dir() / "config"
@@ -94,11 +94,11 @@ def is_enabled(config_dir: Path) -> bool:
 
 
 def _endpoint() -> str | None:
-    return os.getenv(EnvVar.TELEMETRY_ENDPOINT)
+    return os.getenv(str(EnvVar.TELEMETRY_ENDPOINT))
 
 
 def _debug_enabled() -> bool:
-    value = os.getenv(EnvVar.TELEMETRY_DEBUG, "")
+    value = os.getenv(str(EnvVar.TELEMETRY_DEBUG), "")
     return value.strip().lower() in {"1", "true", "yes"}
 
 

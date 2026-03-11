@@ -1,16 +1,15 @@
 # pylint: disable=global-statement,too-many-lines
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 import contextlib
 import io
-import json
 import os
 import re
 from pathlib import Path
@@ -20,8 +19,6 @@ import time
 
 import pandas as pd
 import numpy as np
-import plotly.io as pio
-import plotly.graph_objects as go
 import hydra
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
@@ -50,8 +47,25 @@ from todoist.automations.llm_breakdown.config import (
 )
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
-from todoist.llm import MessageRole, TransformersMistral3ChatModel
+from todoist.llm import (
+    DEFAULT_OPENAI_MODEL,
+    MessageRole,
+    OpenAIChatConfig,
+    OpenAIResponsesChatModel,
+    TransformersMistral3ChatModel,
+)
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.web.dashboard_payload import (
+    completed_share_leaderboard as _completed_share_leaderboard,
+    compute_insights as _compute_insights,
+    compute_plot_range as _compute_plot_range,
+    empty_activity_df as _empty_activity_df,
+    extract_metrics_dict as _extract_metrics_dict,
+    fig_to_dict as _fig_to_dict,
+    last_completed_week_bounds as _last_completed_week_bounds,
+    period_bounds as _period_bounds,
+    safe_activity_anchor as _safe_activity_anchor,
+)
 from todoist.utils import (
     Cache,
     LocalStorageError,
@@ -65,6 +79,9 @@ from todoist.utils import (
 from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
+
+if TYPE_CHECKING:
+    from todoist.agent.graph import AgentState
 
 configure_runtime_logging(log_path=automation_log_path())
 
@@ -89,89 +106,6 @@ async def healthcheck() -> dict[str, str]:
 
 
 Granularity = Literal["W", "ME", "3ME"]
-
-
-def _period_bounds(df_activity, granularity: Granularity) -> dict[str, Any]:
-    granularity_to_timedelta = {
-        "W": timedelta(weeks=1),
-        "ME": timedelta(weeks=4),
-        "3ME": timedelta(weeks=12),
-    }
-    timespan = granularity_to_timedelta[granularity]
-
-    end_range = _safe_activity_anchor(df_activity)
-    beg_range = end_range - timespan
-    previous_beg_range = beg_range - timespan
-    previous_end_range = end_range - timespan
-
-    current_period_str = (
-        f"{beg_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
-    )
-    previous_period_str = f"{previous_beg_range.strftime('%Y-%m-%d')} to {previous_end_range.strftime('%Y-%m-%d')}"
-
-    return {
-        "beg": beg_range,
-        "end": end_range,
-        "prevBeg": previous_beg_range,
-        "prevEnd": previous_end_range,
-        "currentLabel": current_period_str,
-        "previousLabel": previous_period_str,
-    }
-
-
-def _extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
-    def _get_total_events(beg_, end_) -> int:
-        filtered_df = df_activity[
-            (df_activity.index >= beg_) & (df_activity.index <= end_)
-        ]
-        return len(filtered_df)
-
-    def _get_total_tasks_by_type(beg_, end_, task_type: str) -> int:
-        filtered_df = df_activity[
-            (df_activity.index >= beg_) & (df_activity.index <= end_)
-        ]
-        return int((filtered_df["type"] == task_type).sum())
-
-    metric_specs: list[tuple[str, Any, bool]] = [
-        ("Events", _get_total_events, False),
-        (
-            "Completed Tasks",
-            lambda b, e: _get_total_tasks_by_type(b, e, "completed"),
-            False,
-        ),
-        ("Added Tasks", lambda b, e: _get_total_tasks_by_type(b, e, "added"), False),
-        (
-            "Rescheduled Tasks",
-            lambda b, e: _get_total_tasks_by_type(b, e, "rescheduled"),
-            True,
-        ),
-    ]
-
-    metrics: list[dict[str, Any]] = []
-    for metric_name, metric_func, inverse in metric_specs:
-        current_value = int(metric_func(periods["beg"], periods["end"]))
-        previous_value = int(metric_func(periods["prevBeg"], periods["prevEnd"]))
-        if previous_value:
-            delta_percent = round(
-                (current_value - previous_value) / previous_value * 100, 2
-            )
-        else:
-            delta_percent = None
-        metrics.append(
-            {
-                "name": metric_name,
-                "value": current_value,
-                "deltaPercent": delta_percent,
-                "inverseDelta": inverse,
-            }
-        )
-
-    return metrics
-
-
-def _fig_to_dict(fig) -> dict[str, Any]:
-    payload = pio.to_json(fig, validate=False, pretty=False)
-    return json.loads(payload or "{}")
 
 
 class _DashboardState:
@@ -228,14 +162,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _resolve_data_dir() -> Path:
-    override = os.getenv(EnvVar.DATA_DIR) or os.getenv(EnvVar.CACHE_DIR)
+    override = os.getenv(str(EnvVar.DATA_DIR)) or os.getenv(str(EnvVar.CACHE_DIR))
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT
 
 
 def _resolve_config_dir() -> Path:
-    override = os.getenv(EnvVar.CONFIG_DIR)
+    override = os.getenv(str(EnvVar.CONFIG_DIR))
     if override:
         return Path(override).expanduser().resolve()
     return _REPO_ROOT / "configs"
@@ -258,7 +192,7 @@ _API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 
 def _resolve_env_path() -> Path:
-    cache_dir = os.getenv(EnvVar.CACHE_DIR)
+    cache_dir = os.getenv(str(EnvVar.CACHE_DIR))
     if cache_dir:
         return Path(cache_dir).expanduser().resolve() / ".env"
     cwd_env = Path.cwd() / ".env"
@@ -424,12 +358,24 @@ _CHAT_ROLES = {
 }
 _CHAT_QUEUE_LIMIT = 200
 _LLM_CHAT_TIMEOUT_S = 60 * 60
+_LLM_CHAT_BACKEND_DEFAULT = "transformers_local"
+_LLM_CHAT_BACKEND_LABELS = {
+    "transformers_local": "Transformers local",
+    "openai": "OpenAI",
+}
+_LLM_CHAT_DEVICE_DEFAULT = "cpu"
+_LLM_CHAT_DEVICE_LABELS = {
+    "cpu": "CPU",
+    "cuda": "GPU",
+}
 _CHAT_SYSTEM_PROMPT = (
     "You are a helpful assistant for planning and summarizing Todoist work. "
     "Be concise and ask clarifying questions when needed."
 )
 
-_LLM_CHAT_MODEL: TransformersMistral3ChatModel | None = None
+_LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel
+
+_LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
 _LLM_CHAT_MODEL_LOCK = asyncio.Lock()
 _LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
@@ -440,7 +386,7 @@ _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
 
 def _env_demo_mode() -> bool:
-    value = os.getenv(EnvVar.DASHBOARD_DEMO, "").strip().lower()
+    value = os.getenv(str(EnvVar.DASHBOARD_DEMO), "").strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 
@@ -1106,6 +1052,128 @@ def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return trimmed
 
 
+def _available_llm_chat_devices() -> list[str]:
+    devices = ["cpu"]
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            devices.append("cuda")
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return devices
+
+
+def _normalize_llm_chat_backend(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value in _LLM_CHAT_BACKEND_LABELS:
+        return value
+    return _LLM_CHAT_BACKEND_DEFAULT
+
+
+def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
+    value = str(raw or "").strip().lower()
+    if value == "gpu":
+        value = "cuda"
+    if value in available_devices:
+        return value
+    return _LLM_CHAT_DEVICE_DEFAULT
+
+
+def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
+    secret_key = _sanitize_text(
+        os.getenv("OPEN_AI_SECRET_KEY") or file_values.get("OPEN_AI_SECRET_KEY")
+    )
+    key_name = _sanitize_text(
+        os.getenv("OPEN_AI_KEY_NAME") or file_values.get("OPEN_AI_KEY_NAME")
+    )
+    model = _sanitize_text(
+        os.getenv("OPEN_AI_MODEL") or file_values.get("OPEN_AI_MODEL")
+    ) or DEFAULT_OPENAI_MODEL
+    if secret_key:
+        os.environ["OPEN_AI_SECRET_KEY"] = secret_key
+    if key_name:
+        os.environ["OPEN_AI_KEY_NAME"] = key_name
+    os.environ["OPEN_AI_MODEL"] = model
+    return {
+        "configured": bool(secret_key),
+        "keyName": key_name,
+        "model": model,
+        "secretKey": secret_key,
+    }
+
+
+def _resolve_llm_chat_settings() -> dict[str, Any]:
+    env_path = _resolve_env_path()
+    backend_key = str(EnvVar.AGENT_BACKEND)
+    device_key = str(EnvVar.AGENT_DEVICE)
+    file_values = dotenv_values(env_path) if env_path.exists() else {}
+    available_devices = _available_llm_chat_devices()
+    openai_settings = _resolve_openai_settings(file_values)
+
+    backend = _normalize_llm_chat_backend(
+        os.getenv(backend_key) or file_values.get(backend_key)
+    )
+    device = _normalize_llm_chat_device(
+        os.getenv(device_key) or file_values.get(device_key),
+        available_devices=available_devices,
+    )
+    if backend == "openai" and not openai_settings["configured"]:
+        backend = _LLM_CHAT_BACKEND_DEFAULT
+    os.environ[backend_key] = backend
+    os.environ[device_key] = device
+
+    return {
+        "backend": backend,
+        "backendLabel": _LLM_CHAT_BACKEND_LABELS[backend],
+        "device": device,
+        "deviceLabel": _LLM_CHAT_DEVICE_LABELS[device],
+        "availableBackends": [
+            {
+                "id": backend_id,
+                "label": label,
+                "available": (
+                    backend_id == "transformers_local"
+                    or (backend_id == "openai" and openai_settings["configured"])
+                ),
+            }
+            for backend_id, label in _LLM_CHAT_BACKEND_LABELS.items()
+        ],
+        "availableDevices": [
+            {
+                "id": device_id,
+                "label": label,
+                "available": device_id in available_devices,
+            }
+            for device_id, label in _LLM_CHAT_DEVICE_LABELS.items()
+        ],
+        "openai": {
+            "configured": openai_settings["configured"],
+            "keyName": openai_settings["keyName"],
+            "model": openai_settings["model"],
+            "secretKey": openai_settings["secretKey"],
+        },
+        "envPath": str(env_path),
+    }
+
+
+async def _reset_llm_chat_runtime() -> None:
+    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING, _LLM_CHAT_AGENT
+    async with _LLM_CHAT_MODEL_LOCK:
+        _LLM_CHAT_MODEL = None
+        _LLM_CHAT_MODEL_LOADING = False
+    async with _LLM_CHAT_AGENT_LOCK:
+        _LLM_CHAT_AGENT = None
+
+
+def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    public = dict(settings)
+    openai_settings = dict(public.get("openai") or {})
+    openai_settings.pop("secretKey", None)
+    public["openai"] = openai_settings
+    return public
+
+
 async def _llm_chat_model_status() -> tuple[bool, bool]:
     async with _LLM_CHAT_MODEL_LOCK:
         return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
@@ -1123,8 +1191,27 @@ async def _start_llm_chat_model_load() -> None:
 async def _load_llm_chat_model_task() -> None:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
     try:
-        config = coerce_model_config(None)
-        model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
+        settings = _resolve_llm_chat_settings()
+        backend = settings["backend"]
+        if backend == "transformers_local":
+            config = coerce_model_config({"device": settings["device"]})
+            model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
+        elif backend == "openai":
+            openai_settings = settings["openai"]
+            secret_key = _sanitize_text(openai_settings.get("secretKey"))
+            if not secret_key:
+                raise ValueError("OpenAI backend is not configured.")
+            model = await asyncio.to_thread(
+                OpenAIResponsesChatModel,
+                OpenAIChatConfig(
+                    api_key=secret_key,
+                    key_name=_sanitize_text(openai_settings.get("keyName")),
+                    model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
+                    max_output_tokens=256,
+                ),
+            )
+        else:
+            raise ValueError(f"Unsupported LLM backend: {backend}")
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model
         await asyncio.to_thread(_build_llm_chat_agent_sync, model)
@@ -1154,7 +1241,7 @@ def _build_chat_messages(
     return messages
 
 
-def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
+def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
     global _LLM_CHAT_AGENT
     try:
         from todoist.agent.context import load_local_agent_context
@@ -1164,11 +1251,11 @@ def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
         logger.warning(f"LLM chat agent unavailable: {exc}")
         return
 
-    cache_path = os.getenv(EnvVar.AGENT_CACHE_PATH, str(_REPO_ROOT))
+    cache_path = os.getenv(str(EnvVar.AGENT_CACHE_PATH), str(_REPO_ROOT))
     prefabs_dir = os.getenv(
-        EnvVar.AGENT_INSTRUCTIONS_DIR, str(_REPO_ROOT / "configs/agent_instructions")
+        str(EnvVar.AGENT_INSTRUCTIONS_DIR), str(_REPO_ROOT / "configs/agent_instructions")
     )
-    max_tool_loops_env = os.getenv(EnvVar.AGENT_MAX_TOOL_LOOPS, "8").strip()
+    max_tool_loops_env = os.getenv(str(EnvVar.AGENT_MAX_TOOL_LOOPS), "8").strip()
     try:
         max_tool_loops = max(1, int(max_tool_loops_env))
     except ValueError:
@@ -1255,7 +1342,9 @@ async def _run_llm_chat_queue() -> None:
                         for msg in (conversation.get("messages") or [])
                         if msg.get("role") and msg.get("content")
                     ]
-                    state: Any = {
+                    state = cast(
+                        "AgentState",
+                        {
                         "messages": [
                             *base_messages,
                             {
@@ -1263,7 +1352,8 @@ async def _run_llm_chat_queue() -> None:
                                 "content": next_item["content"],
                             },
                         ]
-                    }
+                        },
+                    )
                     result = await asyncio.to_thread(agent.invoke, state)
                     messages = (
                         result.get("messages") if isinstance(result, dict) else None
@@ -1399,6 +1489,7 @@ async def _run_llm_chat_queue() -> None:
 
 async def _llm_chat_snapshot() -> dict[str, Any]:
     enabled, loading = await _llm_chat_model_status()
+    settings = _resolve_llm_chat_settings()
     async with _LLM_CHAT_STORAGE_LOCK:
         queue = _load_llm_chat_queue()
         if _expire_llm_chat_queue(queue, datetime.now()):
@@ -1418,6 +1509,29 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
     return {
         "enabled": enabled,
         "loading": loading,
+        "backend": {
+            "selected": settings["backend"],
+            "label": settings["backendLabel"],
+            "active": settings["backend"] if enabled or loading else None,
+            "options": settings["availableBackends"],
+            "openai": {
+                "configured": settings["openai"]["configured"],
+                "keyName": settings["openai"]["keyName"],
+                "model": settings["openai"]["model"],
+            },
+            "envPath": settings["envPath"],
+        },
+        "device": {
+            "selected": settings["device"],
+            "label": settings["deviceLabel"],
+            "active": (
+                settings["device"]
+                if (enabled or loading) and settings["backend"] == "transformers_local"
+                else None
+            ),
+            "options": settings["availableDevices"],
+            "envPath": settings["envPath"],
+        },
         "queue": {
             "total": len(queue),
             "queued": counts["queued"],
@@ -1438,13 +1552,80 @@ async def dashboard_llm_chat() -> dict[str, Any]:
     return await _llm_chat_snapshot()
 
 
+@app.get("/api/llm_chat/settings", tags=["llm"])
+async def llm_chat_settings() -> dict[str, Any]:
+    return _public_llm_chat_settings(_resolve_llm_chat_settings())
+
+
+@app.put("/api/llm_chat/settings", tags=["llm"])
+async def llm_chat_update_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    settings = _resolve_llm_chat_settings()
+    requested_backend = str(payload.get("backend") or "").strip().lower()
+    if requested_backend not in {item["id"] for item in settings["availableBackends"]}:
+        raise HTTPException(status_code=400, detail="Unsupported LLM backend.")
+    backend = _normalize_llm_chat_backend(requested_backend)
+    if backend == "openai" and not settings["openai"]["configured"]:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI backend is not configured.",
+        )
+
+    available_devices = [
+        str(item["id"])
+        for item in settings["availableDevices"]
+        if bool(item["available"])
+    ]
+    requested_device = str(payload.get("device") or "").strip().lower()
+    if requested_device == "gpu":
+        requested_device = "cuda"
+    if requested_device not in _LLM_CHAT_DEVICE_LABELS:
+        raise HTTPException(status_code=400, detail="Unsupported LLM device.")
+    if requested_device not in available_devices:
+        raise HTTPException(
+            status_code=400,
+            detail="Requested device is not available on this machine.",
+        )
+    device = _normalize_llm_chat_device(requested_device, available_devices=available_devices)
+
+    enabled, loading = await _llm_chat_model_status()
+    if loading:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot change LLM settings while the model is loading.",
+        )
+
+    env_path = _resolve_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
+    set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
+    os.environ[str(EnvVar.AGENT_BACKEND)] = backend
+    os.environ[str(EnvVar.AGENT_DEVICE)] = device
+
+    if enabled:
+        await _reset_llm_chat_runtime()
+
+    updated = _resolve_llm_chat_settings()
+    updated["enabled"] = False if enabled else enabled
+    updated["loading"] = False
+    updated["reloadedRequired"] = enabled
+    return _public_llm_chat_settings(updated)
+
+
 @app.post("/api/llm_chat/enable", tags=["llm"])
 async def llm_chat_enable() -> dict[str, Any]:
     """Start loading the local LLM model used for chat."""
 
     await _start_llm_chat_model_load()
     enabled, loading = await _llm_chat_model_status()
-    return {"enabled": enabled, "loading": loading}
+    settings = _resolve_llm_chat_settings()
+    return {
+        "enabled": enabled,
+        "loading": loading,
+        "backend": settings["backend"],
+        "device": settings["device"],
+    }
 
 
 @app.post("/api/llm_chat/send", tags=["llm"])
@@ -1551,278 +1732,6 @@ async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
             for msg in conversation.get("messages") or []
         ],
     }
-
-
-def _parse_yyyy_mm_dd(value: str) -> datetime:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d")
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail="Dates must use YYYY-MM-DD format"
-        ) from exc
-
-
-def _safe_activity_anchor(df_activity) -> datetime:
-    if df_activity is None or df_activity.empty:
-        return datetime.now()
-    try:
-        max_value = pd.to_datetime(df_activity.index).max()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
-        return datetime.now()
-    if pd.isna(max_value):
-        return datetime.now()
-    if isinstance(max_value, pd.Timestamp):
-        return max_value.to_pydatetime()
-    if isinstance(max_value, datetime):
-        return max_value
-    try:
-        return datetime.fromisoformat(str(max_value))
-    except ValueError:
-        return datetime.now()
-
-
-def _empty_activity_df() -> pd.DataFrame:
-    df = pd.DataFrame(
-        columns=pd.Index(
-            [
-                "id",
-                "title",
-                "type",
-                "parent_project_id",
-                "parent_project_name",
-                "root_project_id",
-                "root_project_name",
-                "parent_item_id",
-                "task_id",
-                "date",
-            ]
-        )
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    return df.set_index("date")
-
-
-def _compute_plot_range(
-    df_activity,
-    *,
-    weeks: int,
-    beg: str | None,
-    end: str | None,
-) -> tuple[datetime, datetime]:
-    if (beg is None) ^ (end is None):
-        raise HTTPException(
-            status_code=400, detail="Provide both beg and end, or neither"
-        )
-
-    if beg is not None and end is not None:
-        beg_dt = _parse_yyyy_mm_dd(beg)
-        # Make `end` inclusive at the day level for dataframe slicing / plotting.
-        end_dt = _parse_yyyy_mm_dd(end) + timedelta(days=1)
-        if end_dt <= beg_dt:
-            raise HTTPException(status_code=400, detail="end must be after beg")
-        if (end_dt - beg_dt) > timedelta(weeks=260):
-            raise HTTPException(
-                status_code=400, detail="Date range must be <= 260 weeks"
-            )
-        return beg_dt, end_dt
-
-    if weeks < 1 or weeks > 260:
-        raise HTTPException(status_code=400, detail="weeks must be between 1 and 260")
-
-    end_range = _safe_activity_anchor(df_activity)
-    beg_range = end_range - timedelta(weeks=weeks)
-    return beg_range, end_range
-
-
-def _last_completed_week_bounds(anchor: datetime) -> tuple[datetime, datetime, str]:
-    week_start = datetime.combine(
-        anchor.date() - timedelta(days=anchor.weekday()), datetime.min.time()
-    )
-    last_week_end = week_start
-    last_week_start = last_week_end - timedelta(days=7)
-    label = f"{last_week_start.strftime('%Y-%m-%d')} to {(last_week_end - timedelta(days=1)).strftime('%Y-%m-%d')}"
-    return last_week_start, last_week_end, label
-
-
-def _completed_share_leaderboard(
-    df_activity,
-    *,
-    beg: datetime,
-    end: datetime,
-    column: str,
-    project_colors: dict[str, str],
-    limit: int = 10,
-) -> dict[str, Any]:
-    df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
-    df_completed = df_period[df_period["type"] == "completed"]
-    total_completed = int(len(df_completed))
-
-    counts = (
-        df_completed[column]
-        .fillna("")
-        .replace("", "(unknown)")
-        .value_counts()
-        .head(limit)
-    )
-
-    items: list[dict[str, Any]] = []
-    for name, completed in counts.items():
-        completed_i = int(completed)
-        pct = (
-            round((completed_i / total_completed) * 100, 2) if total_completed else 0.0
-        )
-        items.append(
-            {
-                "name": name,
-                "completed": completed_i,
-                "percentOfCompleted": pct,
-                "color": project_colors.get(name, "#808080"),
-            }
-        )
-
-    fig = go.Figure(
-        data=[
-            go.Bar(
-                x=[it["percentOfCompleted"] for it in items][::-1],
-                y=[it["name"] for it in items][::-1],
-                orientation="h",
-                marker=dict(color=[it["color"] for it in items][::-1]),
-                hovertemplate="%{y}<br>%{x:.2f}% of completed tasks<extra></extra>",
-            )
-        ]
-    )
-    fig.update_layout(
-        template="plotly_dark",
-        title=None,
-        xaxis_title="% of completed tasks",
-        yaxis_title="Project",
-        height=360,
-        margin=dict(l=140, r=18, t=10, b=46),
-        plot_bgcolor="#111318",
-        paper_bgcolor="#111318",
-    )
-
-    return {
-        "items": items,
-        "totalCompleted": total_completed,
-        "figure": _fig_to_dict(fig),
-    }
-
-
-def _compute_insights(
-    df_activity,
-    *,
-    beg: datetime,
-    end: datetime,
-    project_colors: dict[str, str],
-) -> list[dict[str, Any]]:
-    insights: list[dict[str, Any]] = []
-
-    df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
-
-    # 1) Most active sub-project (completed tasks) in the completed week.
-    project_col = (
-        "parent_project_name"
-        if "parent_project_name" in df_period.columns
-        else "root_project_name"
-    )
-    df_completed = df_period[df_period["type"] == "completed"]
-    if not df_completed.empty and project_col in df_completed.columns:
-        counts = (
-            df_completed[project_col].fillna("").replace("", "(unknown)").value_counts()
-        )
-        if not counts.empty:
-            name = str(counts.index[0])
-            completed_i = int(counts.iloc[0])
-            insights.append(
-                {
-                    "title": "Most active project",
-                    "value": name,
-                    "detail": f"{completed_i} completed tasks (last week)",
-                    "color": project_colors.get(name),
-                }
-            )
-
-    # 2) Most rescheduled sub-project (proxy for churn).
-    df_rescheduled = df_period[df_period["type"] == "rescheduled"]
-    if not df_rescheduled.empty and project_col in df_rescheduled.columns:
-        counts = (
-            df_rescheduled[project_col]
-            .fillna("")
-            .replace("", "(unknown)")
-            .value_counts()
-        )
-        if not counts.empty:
-            name = str(counts.index[0])
-            rescheduled_i = int(counts.iloc[0])
-            insights.append(
-                {
-                    "title": "Most rescheduled project",
-                    "value": name,
-                    "detail": f"{rescheduled_i} reschedules (last week)",
-                    "color": project_colors.get(name),
-                }
-            )
-
-    # 3) Busiest day (all events).
-    try:
-        if not df_period.empty:
-            day_counts = pd.Series(
-                pd.to_datetime(df_period.index).day_name()
-            ).value_counts()
-            if not day_counts.empty:
-                day = str(day_counts.index[0])
-                cnt = int(day_counts.iloc[0])
-                insights.append(
-                    {
-                        "title": "Busiest day",
-                        "value": day,
-                        "detail": f"{cnt} events (last week)",
-                    }
-                )
-    except Exception as exc:
-        logger.debug(f"Skipping busiest day insight: {exc}")
-
-    # 4) Added vs completed (throughput).
-    try:
-        added_i = int((df_period["type"] == "added").sum())
-        completed_i = int((df_period["type"] == "completed").sum())
-        ratio = round((completed_i / added_i), 2) if added_i else None
-        insights.append(
-            {
-                "title": "Added vs completed",
-                "value": f"{added_i} / {completed_i}",
-                "detail": f"Completion/added ratio: {ratio}"
-                if ratio is not None
-                else "No added tasks (last week)",
-            }
-        )
-    except Exception as exc:
-        logger.debug(f"Skipping added vs completed insight: {exc}")
-
-    # 5) Peak hour (all events) in the completed week.
-    try:
-        if not df_period.empty:
-            hours = (
-                pd.to_datetime(df_period.index).to_series(index=df_period.index).dt.hour
-            )
-            hour_counts = hours.value_counts()
-            if not hour_counts.empty:
-                peak_hour_raw = hour_counts.index.to_list()[0]
-                peak_hour = int(peak_hour_raw)
-                insights.append(
-                    {
-                        "title": "Peak hour",
-                        "value": f"{peak_hour:02d}:00",
-                        "detail": "Most events (selected range)",
-                    }
-                )
-    except Exception as exc:
-        logger.debug(f"Skipping peak hour insight: {exc}")
-
-    return insights[:4]
-
 
 @app.get("/api/dashboard/home", tags=["dashboard"])
 async def dashboard_home(

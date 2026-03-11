@@ -3,7 +3,7 @@ name = "todoist-assistant"
 version = "0.2.6"
 description = "Interactive Dashboard"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115.6,<1.0.0",
     "google-api-python-client>=2.169.0",
@@ -74,3 +74,35 @@ index-strategy = "unsafe-best-match"
 name = "pytorch-cpu"
 # CPU-only torch wheels to avoid CUDA runtime deps in Docker/CI.
 url = "https://download.pytorch.org/whl/cpu"
+
+[tool.coverage.run]
+branch = true
+source = ["todoist"]
+omit = [
+    "todoist/**/__init__.py",
+    "todoist/version.py",
+]
+
+[tool.coverage.report]
+omit = [
+    "todoist/**/__init__.py",
+    "todoist/version.py",
+]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "except ImportError:",
+]
+
+[tool.pyright]
+include = ["todoist", "tests", "scripts"]
+exclude = [
+    ".venv",
+    ".cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "frontend/node_modules",
+]

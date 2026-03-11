@@ -88,6 +88,19 @@ Open:
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
 
+## Checks
+```bash
+make typecheck
+make lint
+make test
+make coverage
+make check
+```
+
+- `make typecheck` now rejects explicit `: Any =` variable annotations used as checker escape hatches.
+- Keep secrets local: commit `.env.example`, never `.env`, OAuth tokens, private keys, or local credential exports.
+- Full coverage snapshots live in [`tests/COVERAGE_REPORT.md`](tests/COVERAGE_REPORT.md).
+
 ## Cache and logs
 - Runtime cache files now live in `./.cache/todoist-assistant/` by default.
 - You can override cache location with `TODOIST_CACHE_DIR`.

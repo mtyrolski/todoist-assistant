@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 *.pyc
 *.joblib
 *.pickle
@@ -27,11 +29,21 @@ credentials.json
 gmail_credentials.json
 gmail_token.json
 token.json
+*.pem
+*.p12
+*.pfx
+*.key
+secrets/
 outputs/
 *.log
 todoist/scripts/*.log
 .cache/
 .cache-migration-backup/
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
 # Screenshots added temporarily
 *.png
 

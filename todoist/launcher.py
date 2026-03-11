@@ -17,7 +17,7 @@ from todoist.env import EnvVar
 
 
 def _default_data_dir() -> Path:
-    override = os.getenv(EnvVar.DATA_DIR)
+    override = os.getenv(str(EnvVar.DATA_DIR))
     if override:
         return Path(override).expanduser().resolve()
     if os.name == "nt":
@@ -85,23 +85,23 @@ def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | 
                 shutil.copyfile(template_path, env_path)
                 break
 
-    os.environ[EnvVar.CONFIG_DIR] = str(config_dir)
-    os.environ[EnvVar.CACHE_DIR] = str(cache_dir)
-    os.environ.setdefault(EnvVar.DATA_DIR, str(data_dir))
-    os.environ.setdefault(EnvVar.LOGS_DIR, str(logs_dir))
-    os.environ.setdefault(EnvVar.PERSONAL_DIR, str(data_dir / "personal"))
-    os.environ[EnvVar.AGENT_CACHE_PATH] = str(cache_dir)
-    os.environ[EnvVar.AGENT_INSTRUCTIONS_DIR] = str(config_dir / "agent_instructions")
+    os.environ[str(EnvVar.CONFIG_DIR)] = str(config_dir)
+    os.environ[str(EnvVar.CACHE_DIR)] = str(cache_dir)
+    os.environ.setdefault(str(EnvVar.DATA_DIR), str(data_dir))
+    os.environ.setdefault(str(EnvVar.LOGS_DIR), str(logs_dir))
+    os.environ.setdefault(str(EnvVar.PERSONAL_DIR), str(data_dir / "personal"))
+    os.environ[str(EnvVar.AGENT_CACHE_PATH)] = str(cache_dir)
+    os.environ[str(EnvVar.AGENT_INSTRUCTIONS_DIR)] = str(config_dir / "agent_instructions")
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Launch the Todoist Assistant dashboard.")
-    parser.add_argument("--api-host", default=os.getenv(EnvVar.API_HOST, "127.0.0.1"))
-    parser.add_argument("--api-port", type=int, default=int(os.getenv(EnvVar.API_PORT, "8000")))
-    parser.add_argument("--frontend-host", default=os.getenv(EnvVar.FRONTEND_HOST, "127.0.0.1"))
-    parser.add_argument("--frontend-port", type=int, default=int(os.getenv(EnvVar.FRONTEND_PORT, "3000")))
-    parser.add_argument("--data-dir", default=os.getenv(EnvVar.DATA_DIR))
-    parser.add_argument("--config-dir", default=os.getenv(EnvVar.CONFIG_DIR))
+    parser.add_argument("--api-host", default=os.getenv(str(EnvVar.API_HOST), "127.0.0.1"))
+    parser.add_argument("--api-port", type=int, default=int(os.getenv(str(EnvVar.API_PORT), "8000")))
+    parser.add_argument("--frontend-host", default=os.getenv(str(EnvVar.FRONTEND_HOST), "127.0.0.1"))
+    parser.add_argument("--frontend-port", type=int, default=int(os.getenv(str(EnvVar.FRONTEND_PORT), "3000")))
+    parser.add_argument("--data-dir", default=os.getenv(str(EnvVar.DATA_DIR)))
+    parser.add_argument("--config-dir", default=os.getenv(str(EnvVar.CONFIG_DIR)))
     parser.add_argument("--no-frontend", action="store_true", help="Start only the API server.")
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
     return parser.parse_args()

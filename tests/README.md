@@ -69,11 +69,15 @@ This directory contains comprehensive tests for the data structures and database
 
 ### Run All Tests
 ```bash
-# Using the test runner script
-PYTHONPATH=. python3 run_tests.py
+make test
 
-# Using pytest directly
+# Or invoke pytest directly
 PYTHONPATH=. python3 -m pytest tests/ -v
+```
+
+### Run Coverage
+```bash
+make coverage
 ```
 
 ### Run Specific Test Files
@@ -210,7 +214,7 @@ The test suite has been migrated from `unittest` to `pytest`:
 
 ## Test Results
 
-Current status: **158 tests passing, 100% success rate**
+Current status: see the latest full-suite snapshot in [COVERAGE_REPORT.md](COVERAGE_REPORT.md).
 
 ### Test Breakdown by Module
 - **test_types.py**: 12 tests - Data structure creation and validation

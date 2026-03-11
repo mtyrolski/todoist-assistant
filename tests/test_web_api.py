@@ -535,8 +535,12 @@ def test_dashboard_progress_without_error() -> None:
 # LLM Chat endpoint tests
 
 
-def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
+def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
+    monkeypatch.delenv("OPEN_AI_SECRET_KEY", raising=False)
+    monkeypatch.delenv("OPEN_AI_KEY_NAME", raising=False)
+    monkeypatch.delenv("OPEN_AI_MODEL", raising=False)
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: tmp_path / ".env")
 
     # Mock the model status to be disabled
     async def _mock_model_status():
@@ -556,6 +560,8 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
     # Verify structure
     assert "enabled" in payload
     assert "loading" in payload
+    assert "backend" in payload
+    assert "device" in payload
     assert "queue" in payload
     assert "conversations" in payload
 
@@ -571,8 +577,89 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch) -> None:
     # Verify disabled state
     assert payload["enabled"] is False
     assert payload["loading"] is False
+    assert payload["backend"]["selected"] == "transformers_local"
+    assert payload["device"]["selected"] == "cpu"
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
+
+
+def test_llm_chat_update_settings_persists_env_and_resets_runtime(
+    monkeypatch, tmp_path
+) -> None:
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/llm_chat/settings",
+        json={"backend": "transformers_local", "device": "cuda"},
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["backend"] == "transformers_local"
+    assert payload["device"] == "cuda"
+    assert payload["reloadedRequired"] is True
+    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_DEVICE='cuda'") >= 0
+    assert web_api._LLM_CHAT_MODEL is None
+    assert web_api._LLM_CHAT_AGENT is None
+
+
+def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/llm_chat/settings",
+        json={"backend": "transformers_local", "device": "cuda"},
+    )
+
+    assert res.status_code == 400
+    payload = res.json()
+    assert "not available" in payload["detail"]
+
+
+def test_llm_chat_update_settings_supports_openai_backend(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("OPEN_AI_SECRET_KEY", "sk-test")
+    monkeypatch.setenv("OPEN_AI_KEY_NAME", "primary-key")
+    monkeypatch.setenv("OPEN_AI_MODEL", "gpt-5-mini")
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "OPEN_AI_SECRET_KEY='sk-test'",
+                "OPEN_AI_KEY_NAME='primary-key'",
+                "OPEN_AI_MODEL='gpt-5-mini'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/llm_chat/settings",
+        json={"backend": "openai", "device": "cpu"},
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["backend"] == "openai"
+    assert payload["openai"]["configured"] is True
+    assert payload["openai"]["keyName"] == "primary-key"
+    assert payload["openai"]["model"] == "gpt-5-mini"
+    assert web_api._LLM_CHAT_MODEL is None
+    assert web_api._LLM_CHAT_AGENT is None
 
 
 def test_llm_chat_send_requires_message() -> None:

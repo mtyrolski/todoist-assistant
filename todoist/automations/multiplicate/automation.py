@@ -11,6 +11,7 @@ from loguru import logger
 from todoist.automations.base import Automation
 from todoist.constants import TaskField
 from todoist.database.base import Database
+from todoist.database.db_tasks import TaskTemplateInsertRequest
 from todoist.types import Task, TaskEntry
 
 
@@ -127,6 +128,20 @@ def _make_placeholder_task(info: _CreatedTaskInfo) -> Task:
         id=info.id,
         task_entry=TaskEntry(**entry_dict),
     )
+
+
+def _insert_tasks_from_templates_compat(
+    db: Database,
+    requests: list[TaskTemplateInsertRequest],
+) -> list[dict[str, Any]]:
+    insert_many = getattr(db, "insert_tasks_from_templates", None)
+    if callable(insert_many):
+        return insert_many(requests)
+
+    return [
+        db.insert_task_from_template(request.template, **request.overrides)
+        for request in requests
+    ]
 
 
 def _resolve_parent_targets(task: Task, *, flat_expansions: dict[str, list[str]]) -> Sequence[str | None]:
@@ -422,27 +437,33 @@ class Multiply(Automation):
 
         # If the parent was expanded earlier, replicate this task under each parent copy.
         for parent_id in parent_targets:
+            requests: list[TaskTemplateInsertRequest] = []
+            contents: list[str] = []
             for i in range(1, n + 1):
                 content = _render(self.config.flat_leaf_template, base=base, i=i, n=n)
                 logger.debug(f"Creating flat task: {content}")
-                overrides: dict[str, Any] = {
+                overrides: dict[str, object] = {
                     TaskField.CONTENT.value: content,
                     TaskField.LABELS.value: labels,
                 }
                 if parent_id is not None:
                     overrides[TaskField.PARENT_ID.value] = parent_id
+                requests.append(TaskTemplateInsertRequest(template=task, overrides=overrides))
+                contents.append(content)
 
-                created = db.insert_task_from_template(task, **overrides)
+            created_batch = _insert_tasks_from_templates_compat(db, requests)
+            for content, created in zip(contents, created_batch, strict=False):
                 new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
-                if new_id:
-                    created_ids.append(new_id)
-                    created_task_infos.append(_CreatedTaskInfo(
-                        id=new_id,
-                        content=content,
-                        labels=list(labels),
-                        parent_id=parent_id,
-                        source_task=task,
-                    ))
+                if not new_id:
+                    continue
+                created_ids.append(new_id)
+                created_task_infos.append(_CreatedTaskInfo(
+                    id=new_id,
+                    content=content,
+                    labels=list(labels),
+                    parent_id=parent_id,
+                    source_task=task,
+                ))
 
         removed_ids: set[str] = set()
         if children_by_parent.get(task.id):
@@ -478,15 +499,25 @@ class Multiply(Automation):
 
         created_task_infos: list[_CreatedTaskInfo] = []
         base = task.task_entry.content
+        requests: list[TaskTemplateInsertRequest] = []
+        leaf_titles: list[str] = []
         for i in range(1, n + 1):
             leaf_title = _render(self.config.deep_leaf_template, base=base, i=i, n=n)
             logger.debug(f"Creating deep subtask under {task.id}: {leaf_title}")
-            created = db.insert_task_from_template(
-                task,
-                content=leaf_title,
-                labels=labels,
-                parent_id=task.id,
+            requests.append(
+                TaskTemplateInsertRequest(
+                    template=task,
+                    overrides={
+                        TaskField.CONTENT.value: leaf_title,
+                        TaskField.LABELS.value: labels,
+                        TaskField.PARENT_ID.value: task.id,
+                    },
+                )
             )
+            leaf_titles.append(leaf_title)
+
+        created_batch = _insert_tasks_from_templates_compat(db, requests)
+        for leaf_title, created in zip(leaf_titles, created_batch, strict=False):
             new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
             if new_id:
                 created_task_infos.append(_CreatedTaskInfo(

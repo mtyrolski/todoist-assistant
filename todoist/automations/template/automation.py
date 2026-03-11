@@ -115,6 +115,8 @@ class Template(Automation):
 
         def insert_subtasks(root_task: Task, parent_id: str, task_template: TaskTemplate,
                             parent_due_date: datetime | None):
+            child_payloads: list[dict[str, object]] = []
+            child_due_dates: list[datetime | None] = []
             for child in task_template.children:
                 if child.due_date_days_difference is not None and parent_due_date is not None:
                     subtask_due_date = (parent_due_date +
@@ -122,17 +124,32 @@ class Template(Automation):
                 else:
                     subtask_due_date = None
 
-                child_insertion_result = db.insert_task(
-                    content=child.content,
-                    description=child.description,
-                    project_id=task.task_entry.project_id,
-                    parent_id=parent_id,
-                    priority=child.priority,
-                    due_date=subtask_due_date,
+                child_payloads.append(
+                    {
+                        TaskField.CONTENT.value: child.content,
+                        TaskField.DESCRIPTION.value: child.description,
+                        TaskField.PROJECT_ID.value: task.task_entry.project_id,
+                        TaskField.PARENT_ID.value: parent_id,
+                        TaskField.PRIORITY.value: child.priority,
+                        TaskField.DUE_DATE.value: subtask_due_date,
+                    }
                 )
+                child_due_dates.append(parent_due_date)
 
+            child_results = db.insert_tasks(child_payloads)
+            for child, child_insertion_result, child_parent_due_date in zip(
+                task_template.children,
+                child_results,
+                child_due_dates,
+                strict=False,
+            ):
                 if 'id' in child_insertion_result:
-                    insert_subtasks(root_task, cast(str, child_insertion_result['id']), child, parent_due_date)
+                    insert_subtasks(
+                        root_task,
+                        cast(str, child_insertion_result['id']),
+                        child,
+                        child_parent_due_date,
+                    )
                 else:
                     logger.error(f"Failed to insert subtask {child.content}")
 
