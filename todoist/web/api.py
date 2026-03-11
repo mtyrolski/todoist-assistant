@@ -74,9 +74,6 @@ from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
 
-if TYPE_CHECKING:
-    from todoist.agent.graph import AgentState
-
 configure_runtime_logging(log_path=automation_log_path())
 
 # FastAPI application powering the new web dashboard.
