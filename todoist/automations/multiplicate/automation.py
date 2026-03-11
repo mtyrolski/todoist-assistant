@@ -130,6 +130,20 @@ def _make_placeholder_task(info: _CreatedTaskInfo) -> Task:
     )
 
 
+def _insert_tasks_from_templates_compat(
+    db: Database,
+    requests: list[TaskTemplateInsertRequest],
+) -> list[dict[str, Any]]:
+    insert_many = getattr(db, "insert_tasks_from_templates", None)
+    if callable(insert_many):
+        return insert_many(requests)
+
+    return [
+        db.insert_task_from_template(request.template, **request.overrides)
+        for request in requests
+    ]
+
+
 def _resolve_parent_targets(task: Task, *, flat_expansions: dict[str, list[str]]) -> Sequence[str | None]:
     """Return the parent IDs that new copies of `task` should attach to.
 
@@ -437,7 +451,8 @@ class Multiply(Automation):
                 requests.append(TaskTemplateInsertRequest(template=task, overrides=overrides))
                 contents.append(content)
 
-            for content, created in zip(contents, db.insert_tasks_from_templates(requests), strict=False):
+            created_batch = _insert_tasks_from_templates_compat(db, requests)
+            for content, created in zip(contents, created_batch, strict=False):
                 new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
                 if not new_id:
                     continue
@@ -501,7 +516,8 @@ class Multiply(Automation):
             )
             leaf_titles.append(leaf_title)
 
-        for leaf_title, created in zip(leaf_titles, db.insert_tasks_from_templates(requests), strict=False):
+        created_batch = _insert_tasks_from_templates_compat(db, requests)
+        for leaf_title, created in zip(leaf_titles, created_batch, strict=False):
             new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
             if new_id:
                 created_task_infos.append(_CreatedTaskInfo(

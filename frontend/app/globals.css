@@ -1569,6 +1569,26 @@ textarea.textInput {
   gap: 8px;
 }
 
+.chatSettingsBar {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(140px, 180px) 1fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.chatSettingControl {
+  display: grid;
+  gap: 6px;
+}
+
+.chatSettingsActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .chatInputRow {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1632,6 +1652,20 @@ textarea.textInput {
   display: grid;
   grid-template-columns: minmax(220px, 0.9fr) minmax(320px, 1.4fr);
   gap: 16px;
+}
+
+@media (max-width: 980px) {
+  .chatSettingsBar {
+    grid-template-columns: 1fr;
+  }
+
+  .chatSettingsActions {
+    justify-content: flex-start;
+  }
+
+  .chatLists {
+    grid-template-columns: 1fr;
+  }
 }
 
 .chatSectionHighlight {

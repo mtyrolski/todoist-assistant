@@ -1,7 +1,7 @@
 # pylint: disable=global-statement,too-many-lines
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
@@ -47,7 +47,13 @@ from todoist.automations.llm_breakdown.config import (
 )
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
-from todoist.llm import MessageRole, TransformersMistral3ChatModel
+from todoist.llm import (
+    DEFAULT_OPENAI_MODEL,
+    MessageRole,
+    OpenAIChatConfig,
+    OpenAIResponsesChatModel,
+    TransformersMistral3ChatModel,
+)
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.web.dashboard_payload import (
     completed_share_leaderboard as _completed_share_leaderboard,
@@ -73,6 +79,9 @@ from todoist.utils import (
 from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
+
+if TYPE_CHECKING:
+    from todoist.agent.graph import AgentState
 
 configure_runtime_logging(log_path=automation_log_path())
 
@@ -349,12 +358,24 @@ _CHAT_ROLES = {
 }
 _CHAT_QUEUE_LIMIT = 200
 _LLM_CHAT_TIMEOUT_S = 60 * 60
+_LLM_CHAT_BACKEND_DEFAULT = "transformers_local"
+_LLM_CHAT_BACKEND_LABELS = {
+    "transformers_local": "Transformers local",
+    "openai": "OpenAI",
+}
+_LLM_CHAT_DEVICE_DEFAULT = "cpu"
+_LLM_CHAT_DEVICE_LABELS = {
+    "cpu": "CPU",
+    "cuda": "GPU",
+}
 _CHAT_SYSTEM_PROMPT = (
     "You are a helpful assistant for planning and summarizing Todoist work. "
     "Be concise and ask clarifying questions when needed."
 )
 
-_LLM_CHAT_MODEL: TransformersMistral3ChatModel | None = None
+_LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel
+
+_LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
 _LLM_CHAT_MODEL_LOCK = asyncio.Lock()
 _LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
@@ -1031,6 +1052,128 @@ def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return trimmed
 
 
+def _available_llm_chat_devices() -> list[str]:
+    devices = ["cpu"]
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            devices.append("cuda")
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return devices
+
+
+def _normalize_llm_chat_backend(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value in _LLM_CHAT_BACKEND_LABELS:
+        return value
+    return _LLM_CHAT_BACKEND_DEFAULT
+
+
+def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
+    value = str(raw or "").strip().lower()
+    if value == "gpu":
+        value = "cuda"
+    if value in available_devices:
+        return value
+    return _LLM_CHAT_DEVICE_DEFAULT
+
+
+def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
+    secret_key = _sanitize_text(
+        os.getenv("OPEN_AI_SECRET_KEY") or file_values.get("OPEN_AI_SECRET_KEY")
+    )
+    key_name = _sanitize_text(
+        os.getenv("OPEN_AI_KEY_NAME") or file_values.get("OPEN_AI_KEY_NAME")
+    )
+    model = _sanitize_text(
+        os.getenv("OPEN_AI_MODEL") or file_values.get("OPEN_AI_MODEL")
+    ) or DEFAULT_OPENAI_MODEL
+    if secret_key:
+        os.environ["OPEN_AI_SECRET_KEY"] = secret_key
+    if key_name:
+        os.environ["OPEN_AI_KEY_NAME"] = key_name
+    os.environ["OPEN_AI_MODEL"] = model
+    return {
+        "configured": bool(secret_key),
+        "keyName": key_name,
+        "model": model,
+        "secretKey": secret_key,
+    }
+
+
+def _resolve_llm_chat_settings() -> dict[str, Any]:
+    env_path = _resolve_env_path()
+    backend_key = str(EnvVar.AGENT_BACKEND)
+    device_key = str(EnvVar.AGENT_DEVICE)
+    file_values = dotenv_values(env_path) if env_path.exists() else {}
+    available_devices = _available_llm_chat_devices()
+    openai_settings = _resolve_openai_settings(file_values)
+
+    backend = _normalize_llm_chat_backend(
+        os.getenv(backend_key) or file_values.get(backend_key)
+    )
+    device = _normalize_llm_chat_device(
+        os.getenv(device_key) or file_values.get(device_key),
+        available_devices=available_devices,
+    )
+    if backend == "openai" and not openai_settings["configured"]:
+        backend = _LLM_CHAT_BACKEND_DEFAULT
+    os.environ[backend_key] = backend
+    os.environ[device_key] = device
+
+    return {
+        "backend": backend,
+        "backendLabel": _LLM_CHAT_BACKEND_LABELS[backend],
+        "device": device,
+        "deviceLabel": _LLM_CHAT_DEVICE_LABELS[device],
+        "availableBackends": [
+            {
+                "id": backend_id,
+                "label": label,
+                "available": (
+                    backend_id == "transformers_local"
+                    or (backend_id == "openai" and openai_settings["configured"])
+                ),
+            }
+            for backend_id, label in _LLM_CHAT_BACKEND_LABELS.items()
+        ],
+        "availableDevices": [
+            {
+                "id": device_id,
+                "label": label,
+                "available": device_id in available_devices,
+            }
+            for device_id, label in _LLM_CHAT_DEVICE_LABELS.items()
+        ],
+        "openai": {
+            "configured": openai_settings["configured"],
+            "keyName": openai_settings["keyName"],
+            "model": openai_settings["model"],
+            "secretKey": openai_settings["secretKey"],
+        },
+        "envPath": str(env_path),
+    }
+
+
+async def _reset_llm_chat_runtime() -> None:
+    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING, _LLM_CHAT_AGENT
+    async with _LLM_CHAT_MODEL_LOCK:
+        _LLM_CHAT_MODEL = None
+        _LLM_CHAT_MODEL_LOADING = False
+    async with _LLM_CHAT_AGENT_LOCK:
+        _LLM_CHAT_AGENT = None
+
+
+def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    public = dict(settings)
+    openai_settings = dict(public.get("openai") or {})
+    openai_settings.pop("secretKey", None)
+    public["openai"] = openai_settings
+    return public
+
+
 async def _llm_chat_model_status() -> tuple[bool, bool]:
     async with _LLM_CHAT_MODEL_LOCK:
         return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
@@ -1048,8 +1191,27 @@ async def _start_llm_chat_model_load() -> None:
 async def _load_llm_chat_model_task() -> None:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
     try:
-        config = coerce_model_config(None)
-        model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
+        settings = _resolve_llm_chat_settings()
+        backend = settings["backend"]
+        if backend == "transformers_local":
+            config = coerce_model_config({"device": settings["device"]})
+            model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
+        elif backend == "openai":
+            openai_settings = settings["openai"]
+            secret_key = _sanitize_text(openai_settings.get("secretKey"))
+            if not secret_key:
+                raise ValueError("OpenAI backend is not configured.")
+            model = await asyncio.to_thread(
+                OpenAIResponsesChatModel,
+                OpenAIChatConfig(
+                    api_key=secret_key,
+                    key_name=_sanitize_text(openai_settings.get("keyName")),
+                    model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
+                    max_output_tokens=256,
+                ),
+            )
+        else:
+            raise ValueError(f"Unsupported LLM backend: {backend}")
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model
         await asyncio.to_thread(_build_llm_chat_agent_sync, model)
@@ -1079,7 +1241,7 @@ def _build_chat_messages(
     return messages
 
 
-def _build_llm_chat_agent_sync(model: TransformersMistral3ChatModel) -> None:
+def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
     global _LLM_CHAT_AGENT
     try:
         from todoist.agent.context import load_local_agent_context
@@ -1327,6 +1489,7 @@ async def _run_llm_chat_queue() -> None:
 
 async def _llm_chat_snapshot() -> dict[str, Any]:
     enabled, loading = await _llm_chat_model_status()
+    settings = _resolve_llm_chat_settings()
     async with _LLM_CHAT_STORAGE_LOCK:
         queue = _load_llm_chat_queue()
         if _expire_llm_chat_queue(queue, datetime.now()):
@@ -1346,6 +1509,29 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
     return {
         "enabled": enabled,
         "loading": loading,
+        "backend": {
+            "selected": settings["backend"],
+            "label": settings["backendLabel"],
+            "active": settings["backend"] if enabled or loading else None,
+            "options": settings["availableBackends"],
+            "openai": {
+                "configured": settings["openai"]["configured"],
+                "keyName": settings["openai"]["keyName"],
+                "model": settings["openai"]["model"],
+            },
+            "envPath": settings["envPath"],
+        },
+        "device": {
+            "selected": settings["device"],
+            "label": settings["deviceLabel"],
+            "active": (
+                settings["device"]
+                if (enabled or loading) and settings["backend"] == "transformers_local"
+                else None
+            ),
+            "options": settings["availableDevices"],
+            "envPath": settings["envPath"],
+        },
         "queue": {
             "total": len(queue),
             "queued": counts["queued"],
@@ -1366,13 +1552,80 @@ async def dashboard_llm_chat() -> dict[str, Any]:
     return await _llm_chat_snapshot()
 
 
+@app.get("/api/llm_chat/settings", tags=["llm"])
+async def llm_chat_settings() -> dict[str, Any]:
+    return _public_llm_chat_settings(_resolve_llm_chat_settings())
+
+
+@app.put("/api/llm_chat/settings", tags=["llm"])
+async def llm_chat_update_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    settings = _resolve_llm_chat_settings()
+    requested_backend = str(payload.get("backend") or "").strip().lower()
+    if requested_backend not in {item["id"] for item in settings["availableBackends"]}:
+        raise HTTPException(status_code=400, detail="Unsupported LLM backend.")
+    backend = _normalize_llm_chat_backend(requested_backend)
+    if backend == "openai" and not settings["openai"]["configured"]:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI backend is not configured.",
+        )
+
+    available_devices = [
+        str(item["id"])
+        for item in settings["availableDevices"]
+        if bool(item["available"])
+    ]
+    requested_device = str(payload.get("device") or "").strip().lower()
+    if requested_device == "gpu":
+        requested_device = "cuda"
+    if requested_device not in _LLM_CHAT_DEVICE_LABELS:
+        raise HTTPException(status_code=400, detail="Unsupported LLM device.")
+    if requested_device not in available_devices:
+        raise HTTPException(
+            status_code=400,
+            detail="Requested device is not available on this machine.",
+        )
+    device = _normalize_llm_chat_device(requested_device, available_devices=available_devices)
+
+    enabled, loading = await _llm_chat_model_status()
+    if loading:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot change LLM settings while the model is loading.",
+        )
+
+    env_path = _resolve_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
+    set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
+    os.environ[str(EnvVar.AGENT_BACKEND)] = backend
+    os.environ[str(EnvVar.AGENT_DEVICE)] = device
+
+    if enabled:
+        await _reset_llm_chat_runtime()
+
+    updated = _resolve_llm_chat_settings()
+    updated["enabled"] = False if enabled else enabled
+    updated["loading"] = False
+    updated["reloadedRequired"] = enabled
+    return _public_llm_chat_settings(updated)
+
+
 @app.post("/api/llm_chat/enable", tags=["llm"])
 async def llm_chat_enable() -> dict[str, Any]:
     """Start loading the local LLM model used for chat."""
 
     await _start_llm_chat_model_load()
     enabled, loading = await _llm_chat_model_status()
-    return {"enabled": enabled, "loading": loading}
+    settings = _resolve_llm_chat_settings()
+    return {
+        "enabled": enabled,
+        "loading": loading,
+        "backend": settings["backend"],
+        "device": settings["device"],
+    }
 
 
 @app.post("/api/llm_chat/send", tags=["llm"])

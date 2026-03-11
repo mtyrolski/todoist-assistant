@@ -3,7 +3,7 @@ name = "todoist-assistant"
 version = "0.2.6"
 description = "Interactive Dashboard"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115.6,<1.0.0",
     "google-api-python-client>=2.169.0",
