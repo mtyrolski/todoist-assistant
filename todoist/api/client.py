@@ -1,10 +1,10 @@
 """Reusable HTTP client helpers for the Todoist API."""
 
 
-from collections import deque
 from dataclasses import dataclass, field
-import random
-from threading import Condition, Lock, local
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from threading import Lock, local
 from time import perf_counter
 from typing import Any, Mapping, MutableMapping, Optional
 
@@ -19,9 +19,6 @@ from todoist.utils import (
     RETRY_MAX_ATTEMPTS,
     get_api_key,
     get_max_requests_per_minute,
-    get_rate_pacing_base_delay_seconds,
-    get_rate_pacing_jitter_max_seconds,
-    get_rate_pacing_jitter_min_seconds,
     with_retry,
 )
 
@@ -68,6 +65,17 @@ class EndpointCallResult:
     json: Any | None
 
 
+class RateLimitExceeded(RuntimeError):
+    """Retryable exception raised when Todoist responds with HTTP 429."""
+
+    def __init__(self, endpoint_name: str, retry_after_seconds: float) -> None:
+        self.retry_after_seconds = max(0.1, retry_after_seconds)
+        super().__init__(
+            f"Todoist rate limit reached for {endpoint_name}; retry after "
+            f"{self.retry_after_seconds:.2f} seconds"
+        )
+
+
 class TodoistAPIClient:
     """High level client that wraps HTTP calls with retry, timeout and logging."""
 
@@ -90,14 +98,8 @@ class TodoistAPIClient:
         self._max_attempts = max_attempts
         self._backoff_mean = backoff_mean
         self._backoff_std = backoff_std
-        self._pacing_base_delay_seconds = get_rate_pacing_base_delay_seconds()
-        self._pacing_jitter_min_seconds = get_rate_pacing_jitter_min_seconds()
-        self._pacing_jitter_max_seconds = get_rate_pacing_jitter_max_seconds()
         self._last_call_lock = Lock()
         self._last_call_result: EndpointCallResult | None = None
-        self._rate_condition: Condition = Condition()
-        self._request_timestamps: deque[float] = deque()
-        self._next_pacing_ready_at: float = 0.0
 
     @property
     def last_call_result(self) -> EndpointCallResult | None:
@@ -108,7 +110,7 @@ class TodoistAPIClient:
 
     @property
     def max_requests_per_minute(self) -> int | None:
-        """Return the configured requests-per-minute throttle (``None`` disables it)."""
+        """Return the fallback RPM hint used when Todoist omits ``Retry-After``."""
 
         return self._max_requests_per_minute
 
@@ -128,8 +130,6 @@ class TodoistAPIClient:
         op_name = operation_name or spec.endpoint.name
 
         def _do_request() -> EndpointCallResult:
-            if spec.rate_limited:
-                self._acquire_request_slot(op_name)
             start = perf_counter()
 
             try:
@@ -161,6 +161,13 @@ class TodoistAPIClient:
 
             elapsed = perf_counter() - start
 
+            if response.status_code == 429:
+                retry_after_seconds = self._resolve_retry_after_seconds(response)
+                logger.warning(
+                    f"Todoist rate limit hit for {spec.endpoint.name}; "
+                    f"waiting {retry_after_seconds:.2f} seconds before retry."
+                )
+                raise RateLimitExceeded(spec.endpoint.name, retry_after_seconds)
 
             try:
                 response.raise_for_status()
@@ -243,58 +250,61 @@ class TodoistAPIClient:
             self._session_local.session = session
         return session
 
-    def _acquire_request_slot(self, operation_name: str) -> None:
-        """Throttle requests to respect the configured RPM ceiling."""
+    def _resolve_retry_after_seconds(self, response: requests.Response) -> float:
+        retry_after_header = response.headers.get("Retry-After")
+        parsed_header = self._parse_retry_after_header(retry_after_header)
+        if parsed_header is not None:
+            return parsed_header
 
-        max_rpm = self._max_requests_per_minute
-        if max_rpm is None or max_rpm <= 0:
-            return
+        parsed_payload = self._parse_retry_after_payload(response)
+        if parsed_payload is not None:
+            return parsed_payload
 
-        min_interval_seconds = RATE_LIMIT_WINDOW_SECONDS / max_rpm
-        min_logged_wait_seconds = 0.5
+        max_rpm = self._max_requests_per_minute or DEFAULT_MAX_REQUESTS_PER_MINUTE
+        if max_rpm <= 0:
+            return RATE_LIMIT_WINDOW_SECONDS
+        return max(1.0, RATE_LIMIT_WINDOW_SECONDS / max_rpm)
 
-        with self._rate_condition:
-            while True:
-                now = perf_counter()
-                cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-                slot_released = False
-                while self._request_timestamps and self._request_timestamps[0] <= cutoff:
-                    self._request_timestamps.popleft()
-                    slot_released = True
-                if slot_released:
-                    self._rate_condition.notify_all()
+    @staticmethod
+    def _parse_retry_after_header(raw_value: str | None) -> float | None:
+        if raw_value is None:
+            return None
 
-                # Smooth requests over the whole window instead of allowing bursts.
-                if now < self._next_pacing_ready_at:
-                    wait_time = max(self._next_pacing_ready_at - now, 0.05)
-                    if wait_time >= min_logged_wait_seconds:
-                        logger.debug(
-                            f"Rate pacing delay for {operation_name}: {wait_time:.2f} seconds"
-                        )
-                    self._rate_condition.wait(timeout=wait_time)
-                    continue
+        stripped = raw_value.strip()
+        if not stripped:
+            return None
 
-                if len(self._request_timestamps) < max_rpm:
-                    self._request_timestamps.append(now)
-                    self._next_pacing_ready_at = now + self._resolve_pacing_interval_seconds(min_interval_seconds)
-                    return
+        try:
+            return max(0.1, float(stripped))
+        except ValueError:
+            pass
 
-                wait_time = self._request_timestamps[0] + RATE_LIMIT_WINDOW_SECONDS - now
-                wait_time = max(wait_time, 0.05)
-                if wait_time >= min_logged_wait_seconds:
-                    logger.debug(
-                        f"Rate limit reached, delaying request {operation_name} for {wait_time:.2f} seconds"
-                    )
-                self._rate_condition.wait(timeout=wait_time)
+        try:
+            retry_at = parsedate_to_datetime(stripped)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
 
-    def _resolve_pacing_interval_seconds(self, min_interval_seconds: float) -> float:
-        """Return pacing interval with optional extra base delay and jitter."""
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        wait_seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        return max(0.1, wait_seconds)
 
-        jitter_min = self._pacing_jitter_min_seconds
-        jitter_max = self._pacing_jitter_max_seconds
-        if jitter_max < jitter_min:
-            jitter_min, jitter_max = jitter_max, jitter_min
+    @staticmethod
+    def _parse_retry_after_payload(response: requests.Response) -> float | None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
 
-        jitter = random.uniform(jitter_min, jitter_max) if jitter_max > 0 else 0.0
-        configured_interval = self._pacing_base_delay_seconds + 0.05 + jitter
-        return max(min_interval_seconds, configured_interval)
+        if not isinstance(payload, Mapping):
+            return None
+
+        for key in ("retry_after", "retryAfter"):
+            value = payload.get(key)
+            if value is None:
+                continue
+            try:
+                return max(0.1, float(value))
+            except (TypeError, ValueError):
+                return None
+        return None

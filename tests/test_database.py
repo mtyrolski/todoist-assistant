@@ -422,6 +422,93 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
         assert mock_fetch_window.call_count == 2
 
 
+@patch('todoist.database.db_activity.logger')
+def test_fetch_activity_adaptively_passes_cached_events_to_range(_mock_logger, db_activity):
+    from todoist.types import Event, EventEntry
+    import datetime as dt
+
+    cached_entry = EventEntry(
+        id="cached1", object_type="item", object_id="task1",
+        event_type="completed", event_date="2024-01-01T12:00:00Z",
+        parent_project_id="proj1", parent_item_id=None,
+        initiator_id="user1", extra_data={"content": "Task 1"},
+        extra_data_id="extra1", v2_object_id="v2_task1",
+        v2_parent_item_id=None, v2_parent_project_id="v2_proj1"
+    )
+    cached_event = Event(
+        event_entry=cached_entry,
+        id="cached1",
+        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+    )
+
+    with patch.object(db_activity, '_fetch_activity_range', return_value=[]) as mock_fetch_window:
+        db_activity.fetch_activity_adaptively(
+            nweeks_window_size=1,
+            early_stop_after_n_windows=1,
+            events_already_fetched={cached_event}
+        )
+
+    first_call_kwargs = mock_fetch_window.call_args_list[0].kwargs
+    assert first_call_kwargs["events_already_fetched"] == {cached_event}
+
+
+@patch('todoist.database.db_activity.TodoistAPIClient.request_json')
+def test_fetch_activity_range_stops_after_cached_page(mock_request_json, db_activity):
+    from datetime import datetime, timezone
+    from todoist.types import Event, EventEntry
+    import datetime as dt
+
+    new_event_payload = {
+        "id": "event-new",
+        "object_type": "item",
+        "object_id": "task-new",
+        "event_type": "completed",
+        "event_date": "2024-01-03T12:00:00Z",
+        "parent_project_id": "proj1",
+        "parent_item_id": None,
+        "initiator_id": "user1",
+        "extra_data": {"content": "Task new"},
+        "extra_data_id": "extra-new",
+        "v2_object_id": "v2_task_new",
+        "v2_parent_item_id": None,
+        "v2_parent_project_id": "v2_proj1",
+    }
+    cached_event_payload = {
+        "id": "event-cached",
+        "object_type": "item",
+        "object_id": "task-cached",
+        "event_type": "completed",
+        "event_date": "2024-01-02T12:00:00Z",
+        "parent_project_id": "proj1",
+        "parent_item_id": None,
+        "initiator_id": "user1",
+        "extra_data": {"content": "Task cached"},
+        "extra_data_id": "extra-cached",
+        "v2_object_id": "v2_task_cached",
+        "v2_parent_item_id": None,
+        "v2_parent_project_id": "v2_proj1",
+    }
+    cached_entry = EventEntry(**cached_event_payload)
+    cached_event = Event(
+        event_entry=cached_entry,
+        id="event-cached",
+        date=dt.datetime(2024, 1, 2, 12, 0, 0)
+    )
+    mock_request_json.side_effect = [
+        {"results": [new_event_payload], "next_cursor": "cursor-1"},
+        {"results": [cached_event_payload], "next_cursor": "cursor-2"},
+    ]
+
+    events = db_activity._fetch_activity_range(
+        date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        date_to=datetime(2024, 1, 31, tzinfo=timezone.utc),
+        events_already_fetched={cached_event},
+    )
+
+    assert [event.id for event in events] == ["event-new"]
+    assert mock_request_json.call_count == 2
+
+
 def test_fetch_activity_signature(db_activity):
     """Test fetch_activity method signature."""
     signature = inspect.signature(db_activity.fetch_activity)

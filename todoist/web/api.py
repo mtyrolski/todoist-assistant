@@ -56,6 +56,8 @@ from todoist.utils import (
     Cache,
     LocalStorageError,
     automation_log_path,
+    configure_runtime_logging,
+    get_log_level,
     load_config,
     set_tqdm_progress_callback,
     get_tqdm_progress_callback,
@@ -63,6 +65,8 @@ from todoist.utils import (
 from todoist.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.version import get_version
+
+configure_runtime_logging(log_path=automation_log_path())
 
 # FastAPI application powering the new web dashboard.
 app = FastAPI(title="Todoist Dashboard API", version=get_version())
@@ -2115,7 +2119,7 @@ def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str,
         contextlib.redirect_stdout(output_stream),
         contextlib.redirect_stderr(output_stream),
     ):
-        loguru_handler_id = logger.add(output_stream, format="{message}", level="DEBUG")
+        loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
         try:
             task_delegations = automation.tick(dbio)
         finally:

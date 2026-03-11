@@ -126,6 +126,8 @@ The tests require the following Python packages:
 
 ## Test Coverage
 
+Latest full-suite coverage snapshot: [COVERAGE_REPORT.md](COVERAGE_REPORT.md)
+
 The tests cover:
 
 ✅ **Data Structure Creation and Validation**

@@ -62,6 +62,7 @@ class DatabaseActivity:
                 date_from=window_start,
                 date_to=window_end,
                 max_pages=max_pages_per_window,
+                events_already_fetched=events_already_fetched,
             )
             iterated_weeks += nweeks_window_size
             events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
@@ -144,12 +145,13 @@ class DatabaseActivity:
         date_from: datetime,
         date_to: datetime,
         max_pages: int | None = None,
+        events_already_fetched: set[Event] | None = None,
     ) -> list[Event]:
         if max_pages is not None and max_pages <= 0:
             return []
 
         cursor: str | None = None
-        entries: list[EventEntry] = []
+        events: list[Event] = []
         logger.info(f"Starting activity fetch over range [{date_from.isoformat()} .. {date_to.isoformat()})")
         fetched_pages = 0
 
@@ -194,15 +196,28 @@ class DatabaseActivity:
                 raise RuntimeError("Unexpected results payload when fetching activity range")
             if not all(isinstance(event, dict) for event in raw_events):
                 raise RuntimeError("Unexpected non-object event record in activity range payload")
-            entries.extend(safe_instantiate_entry(EventEntry, **event) for event in raw_events)
+            page_entries = [safe_instantiate_entry(EventEntry, **event) for event in raw_events]
+            page_events = self._events_from_entries(page_entries)
             fetched_pages += 1
+
+            if (
+                events_already_fetched
+                and page_events
+                and all(event in events_already_fetched for event in page_events)
+            ):
+                logger.info(
+                    f"Stopping activity range fetch early after {fetched_pages} page(s); "
+                    "latest page is already cached."
+                )
+                break
+
+            events.extend(page_events)
 
             next_cursor = decoded_result.get("next_cursor")
             if not isinstance(next_cursor, str):
                 break
             cursor = next_cursor
 
-        events = self._events_from_entries(entries)
         logger.info(f"Finished activity range fetch. Total events collected: {len(events)}")
         return events
 

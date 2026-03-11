@@ -1,19 +1,18 @@
 """Entry point for running the automation observer."""
 
 import hydra
-from loguru import logger
 from omegaconf import DictConfig
 
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
 from todoist.database.base import Database
-from todoist.utils import automation_log_path
+from todoist.utils import automation_log_path, configure_runtime_logging
 
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
-    logger.add(automation_log_path(), rotation="500 MB")
+    configure_runtime_logging(log_path=automation_log_path())
     db = Database('.env')
 
     # Instantiate activity automation explicitly to avoid cross-instantiation.
@@ -33,4 +32,4 @@ def main(config: DictConfig) -> None:
 
 if __name__ == "__main__":
     # pylint: disable=no-value-for-parameter
-    main()
+    main() # pyright: ignore[reportCallIssue]

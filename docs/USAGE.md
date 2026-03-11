@@ -26,6 +26,10 @@ Update local cache + automations:
 ```bash
 make update_env
 ```
+- Logs are stored in `./.cache/todoist-assistant/automation.log` by default, or in `<TODOIST_CACHE_DIR>/automation.log` if you override the cache location.
+- Runtime logs default to `INFO`. Use `TODOIST_LOG_LEVEL=DEBUG` for verbose troubleshooting.
+- Todoist retries now react to real `429` responses instead of adding a fixed local pacing delay before every request.
+- `make update_env` now keeps the activity refresh incremental: it stops paging once a fetched activity page is already fully cached.
 
 ## Background observer
 Continuously refresh activity and run short automations:
