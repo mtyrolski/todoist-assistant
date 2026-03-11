@@ -92,6 +92,9 @@ Open:
 - Runtime cache files now live in `./.cache/todoist-assistant/` by default.
 - You can override cache location with `TODOIST_CACHE_DIR`.
 - Automation logs are written to `<cache-dir>/automation.log`.
+- Runtime logging defaults to `INFO`. Set `TODOIST_LOG_LEVEL=DEBUG` when you want the verbose trace again.
+- Recent runtime logs in `outputs/2026-03-08` through `outputs/2026-03-10` contain `0` recorded Todoist rate-limit hits (`429`, `Retry-After`, `Too Many Requests`).
+- Todoist request retries now wait only after an actual `429` response, using Todoist's `Retry-After` value when available and a small RPM-based fallback otherwise.
 - On startup, legacy runtime files found in old locations are migrated to the cache dir and backed up in `.cache-migration-backup/`.
 - Migration backups are temporary and are planned for removal in `v0.3.0`.
 

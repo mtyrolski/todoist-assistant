@@ -7,11 +7,6 @@ init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
 
 update_env: # updates history, fetches activity, do templates
-	TODOIST_MAX_CONCURRENT_REQUESTS=$${TODOIST_MAX_CONCURRENT_REQUESTS:-1} \
-	TODOIST_MAX_REQUESTS_PER_MINUTE=$${TODOIST_MAX_REQUESTS_PER_MINUTE:-45} \
-	TODOIST_RATE_PACING_BASE_DELAY_SECONDS=$${TODOIST_RATE_PACING_BASE_DELAY_SECONDS:-2} \
-	TODOIST_RATE_PACING_JITTER_MIN_SECONDS=$${TODOIST_RATE_PACING_JITTER_MIN_SECONDS:-0.5} \
-	TODOIST_RATE_PACING_JITTER_MAX_SECONDS=$${TODOIST_RATE_PACING_JITTER_MAX_SECONDS:-1.5} \
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations
 
 ensure_frontend_deps: # installs frontend deps if missing
@@ -130,11 +125,6 @@ clear_local_env:
 		llm_chat_conversations.joblib
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
-	TODOIST_MAX_CONCURRENT_REQUESTS=$${TODOIST_MAX_CONCURRENT_REQUESTS:-1} \
-	TODOIST_MAX_REQUESTS_PER_MINUTE=$${TODOIST_MAX_REQUESTS_PER_MINUTE:-45} \
-	TODOIST_RATE_PACING_BASE_DELAY_SECONDS=$${TODOIST_RATE_PACING_BASE_DELAY_SECONDS:-2} \
-	TODOIST_RATE_PACING_JITTER_MIN_SECONDS=$${TODOIST_RATE_PACING_JITTER_MIN_SECONDS:-0.5} \
-	TODOIST_RATE_PACING_JITTER_MAX_SECONDS=$${TODOIST_RATE_PACING_JITTER_MAX_SECONDS:-1.5} \
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
 	make run_dashboard
 

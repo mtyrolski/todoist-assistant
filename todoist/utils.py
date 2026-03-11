@@ -4,6 +4,7 @@ import time
 import random
 import os
 import shutil
+import sys
 from lzma import LZMAError
 from os import getenv
 from os.path import exists, join
@@ -42,6 +43,9 @@ RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIM
 _MIGRATION_WARNING_LOGGED = False
 _MIGRATED_CACHE_DIRS: set[str] = set()
 _MISSING_REQUIRED_FIELD_WARNINGS: set[tuple[str, str]] = set()
+_RUNTIME_LOGGING_SIGNATURE: tuple[str | None, str] | None = None
+DEFAULT_LOG_LEVEL = "INFO"
+VALID_LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
 
 TqdmProgressCallback = Callable[[str, int, int, str | None], None]
 _TQDM_PROGRESS_CALLBACK: TqdmProgressCallback | None = None
@@ -87,6 +91,35 @@ def automation_log_path(cache_dir: str | None = None) -> str:
     Path(resolved_cache_dir).mkdir(parents=True, exist_ok=True)
     migrate_legacy_runtime_files(resolved_cache_dir)
     return runtime_file_path("automation.log", cache_dir=resolved_cache_dir)
+
+
+def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
+    raw = getenv(str(EnvVar.LOG_LEVEL), default)
+    normalized = str(raw).strip().upper() if raw is not None else default
+    if normalized in VALID_LOG_LEVELS:
+        return normalized
+
+    logger.warning(
+        f"Invalid {EnvVar.LOG_LEVEL} value '{raw}'. Falling back to {default.upper()}."
+    )
+    return default.upper()
+
+
+def configure_runtime_logging(log_path: str | None = None, level: str | None = None) -> None:
+    global _RUNTIME_LOGGING_SIGNATURE
+
+    resolved_level = get_log_level(level or DEFAULT_LOG_LEVEL)
+    resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
+    signature = (resolved_log_path, resolved_level)
+    if _RUNTIME_LOGGING_SIGNATURE == signature:
+        return
+
+    logger.remove()
+    logger.add(sys.stderr, level=resolved_level)
+    if resolved_log_path is not None:
+        Path(resolved_log_path).parent.mkdir(parents=True, exist_ok=True)
+        logger.add(resolved_log_path, rotation="500 MB", level=resolved_level)
+    _RUNTIME_LOGGING_SIGNATURE = signature
 
 
 def _migration_backup_path(legacy_root: Path, filename: str) -> Path:
@@ -406,6 +439,16 @@ def get_rate_pacing_jitter_max_seconds() -> float:
     return _get_positive_float_env(EnvVar.RATE_PACING_JITTER_MAX_SECONDS, default=0.0)
 
 
+def _resolve_retry_wait_seconds(exception: Exception, backoff_mean: float, backoff_std: float) -> float:
+    retry_after_seconds = getattr(exception, "retry_after_seconds", None)
+    if retry_after_seconds is not None:
+        try:
+            return max(0.1, float(retry_after_seconds))
+        except (TypeError, ValueError):
+            pass
+    return max(0.1, random.gauss(backoff_mean, backoff_std))
+
+
 def try_n_times(fn: Callable[[], U], n) -> U | None:
     """
     Try to run a function n times and return the result if successful.
@@ -445,11 +488,19 @@ def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMP
         try:
             return fn()
         except Exception as e:  # pragma: no cover - logged and retried
-            logger.error(f"Exception {e} occurred on attempt {attempt + 1}/{max_attempts}")
+            retry_after_seconds = getattr(e, "retry_after_seconds", None)
+            if retry_after_seconds is not None:
+                logger.warning(
+                    f"Rate limit on attempt {attempt + 1}/{max_attempts}: {e}"
+                )
+            else:
+                logger.error(f"Exception {e} occurred on attempt {attempt + 1}/{max_attempts}")
             if attempt < max_attempts - 1:
-                # Gaussian backoff with floor of 0.1s to ensure positive wait time
-                wait_time = max(0.1, random.gauss(backoff_mean, backoff_std))
-                logger.debug(f"Waiting {wait_time:.2f} seconds before retrying...")
+                wait_time = _resolve_retry_wait_seconds(e, backoff_mean, backoff_std)
+                if retry_after_seconds is not None:
+                    logger.warning(f"Retrying after {wait_time:.2f} seconds.")
+                else:
+                    logger.debug(f"Waiting {wait_time:.2f} seconds before retrying...")
                 time.sleep(wait_time)
     return None
 

@@ -10,7 +10,7 @@ import tempfile
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-import typer
+import typer # pyright: ignore[reportMissingImports]
 
 from todoist import telemetry
 from todoist.env import EnvVar

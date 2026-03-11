@@ -3,6 +3,7 @@
 # pylint: disable=protected-access
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, KeysView
@@ -14,6 +15,7 @@ from todoist.env import EnvVar
 from todoist.utils import (
     DEFAULT_CACHE_SUBDIR,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
+    DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     MIGRATION_BACKUP_DIRNAME,
     RETRY_BACKOFF_MEAN,
@@ -24,8 +26,10 @@ from todoist.utils import (
     LocalStorage,
     LocalStorageError,
     MaxRetriesExceeded,
+    configure_runtime_logging,
     get_all_fields_of_dataclass,
     get_api_key,
+    get_log_level,
     get_max_concurrent_requests,
     get_max_requests_per_minute,
     get_rate_pacing_base_delay_seconds,
@@ -261,6 +265,25 @@ def test_get_api_key(env_payload: dict[str, str], expected: str):
         assert get_api_key() == expected
 
 
+def test_get_log_level_defaults_to_info():
+    with patch.dict(os.environ, {}, clear=True):
+        assert get_log_level() == DEFAULT_LOG_LEVEL
+
+
+def test_get_log_level_normalizes_env_value():
+    with patch.dict(os.environ, {EnvVar.LOG_LEVEL: "debug"}, clear=True):
+        assert get_log_level() == "DEBUG"
+
+
+def test_get_log_level_falls_back_on_invalid_env_value():
+    with (
+        patch.dict(os.environ, {EnvVar.LOG_LEVEL: "nope"}, clear=True),
+        patch("todoist.utils.logger.warning") as mock_warning,
+    ):
+        assert get_log_level() == DEFAULT_LOG_LEVEL
+    mock_warning.assert_called_once()
+
+
 @pytest.mark.parametrize(
     ("env_value", "expected"),
     [
@@ -454,6 +477,39 @@ def test_cache_uses_dot_cache_default_when_env_missing(monkeypatch, tmp_path):
     with patch.dict(os.environ, {}, clear=True):
         cache = Cache()
     assert Path(cache.path) == (tmp_path / DEFAULT_CACHE_SUBDIR).resolve()
+
+
+def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypatch):
+    import todoist.utils as utils
+
+    monkeypatch.setattr(utils, "_RUNTIME_LOGGING_SIGNATURE", None)
+    log_path = tmp_path / "automation.log"
+    with (
+        patch("todoist.utils.logger.remove") as mock_remove,
+        patch("todoist.utils.logger.add") as mock_add,
+    ):
+        configure_runtime_logging(str(log_path), level="debug")
+
+    mock_remove.assert_called_once()
+    assert mock_add.call_args_list[0].args[0] == sys.stderr
+    assert mock_add.call_args_list[0].kwargs["level"] == "DEBUG"
+    assert mock_add.call_args_list[1].args[0] == str(log_path.resolve())
+    assert mock_add.call_args_list[1].kwargs["level"] == "DEBUG"
+
+
+def test_configure_runtime_logging_is_idempotent(monkeypatch):
+    import todoist.utils as utils
+
+    monkeypatch.setattr(utils, "_RUNTIME_LOGGING_SIGNATURE", None)
+    with (
+        patch("todoist.utils.logger.remove") as mock_remove,
+        patch("todoist.utils.logger.add") as mock_add,
+    ):
+        configure_runtime_logging(level="info")
+        configure_runtime_logging(level="info")
+
+    mock_remove.assert_called_once()
+    assert mock_add.call_count == 1
 
 
 def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
