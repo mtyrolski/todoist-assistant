@@ -181,6 +181,7 @@ export function DashboardView({
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
     { id: "events", label: "Events" },
+    { id: "projects", label: "Projects" },
     { id: "ops", label: "Activity & Ops" }
   ];
   const insightItems = dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null);
@@ -225,6 +226,14 @@ export function DashboardView({
       figure: figures.eventsOverTime,
       height: 520,
       help: PLOT_HELP.eventsOverTime
+    }
+  ];
+  const projectPlots = [
+    {
+      title: "Active Project Hierarchy",
+      figure: figures.activeProjectHierarchy,
+      height: 620,
+      help: PLOT_HELP.activeProjectHierarchy
     }
   ];
   const onAfterMutation = () => {
@@ -520,6 +529,14 @@ export function DashboardView({
       {!noData ? (
         <section id="events" className="stack jumpTarget" aria-label="Event trends">
           {eventPlots.map((plot) => (
+            <PlotCard key={plot.title} {...plot} />
+          ))}
+        </section>
+      ) : null}
+
+      {!noData ? (
+        <section id="projects" className="stack jumpTarget" aria-label="Active project hierarchy">
+          {projectPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
         </section>

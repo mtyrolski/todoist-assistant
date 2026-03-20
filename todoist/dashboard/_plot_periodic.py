@@ -417,7 +417,7 @@ def plot_completed_tasks_periodically(
                     y=historical,
                     name=root_project_name,
                     legendgroup=root_project_name,
-                    line_shape="linear",
+                    line_shape="spline",
                     mode="lines+markers",
                     line=dict(color=color),
                 )
@@ -584,7 +584,7 @@ def cumsum_completed_tasks_periodically(
                     y=historical,
                     name=root_project_name,
                     legendgroup=root_project_name,
-                    line_shape="linear",
+                    line_shape="spline",
                     mode="lines+markers",
                     line=dict(color=color),
                 )

@@ -31,6 +31,7 @@ from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
 from todoist.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
+    plot_active_project_hierarchy,
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
@@ -1832,6 +1833,15 @@ async def dashboard_home(
             ),
             "eventsOverTime": _fig_to_dict(
                 plot_events_over_time(df_activity, beg_range, end_range, granularity)
+            ),
+            "activeProjectHierarchy": _fig_to_dict(
+                plot_active_project_hierarchy(
+                    df_activity,
+                    beg_range,
+                    end_range,
+                    active_projects,
+                    project_colors,
+                )
             ),
         }
         parent_completed_share = _completed_share_leaderboard(

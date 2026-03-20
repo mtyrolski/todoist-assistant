@@ -29,6 +29,11 @@ def _stub_all_figures(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         web_api,
+        "plot_active_project_hierarchy",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
         "plot_heatmap_of_events_by_day_and_hour",
         lambda *args, **kwargs: go.Figure(),
     )
@@ -286,6 +291,7 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
 
     last_week = payload["leaderboards"]["lastCompletedWeek"]
     assert "weeklyCompletionTrend" in payload["figures"]
+    assert "activeProjectHierarchy" in payload["figures"]
     assert "mostPopularLabels" not in payload["figures"]
     assert last_week["label"] == "2025-01-06 to 2025-01-12"
     parent_items = last_week["parentProjects"]["items"]

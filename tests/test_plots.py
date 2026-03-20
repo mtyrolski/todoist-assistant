@@ -9,11 +9,13 @@ from typing import Any, cast
 import plotly.graph_objects as go
 
 from todoist.dashboard.plots import (
+    plot_active_project_hierarchy,
     plot_completed_tasks_periodically,
     cumsum_completed_tasks_periodically,
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
+from tests.factories import make_project, make_project_entry
 
 
 @pytest.fixture
@@ -567,8 +569,8 @@ def test_cumsum_completed_tasks_periodically_adds_total_overlay_on_primary_axis(
     assert getattr(cast(Any, fig.layout), "yaxis2", None) is None
 
 
-def test_cumsum_completed_tasks_periodically_uses_linear_lines_to_avoid_fake_drops():
-    """Cumulative traces must stay linear so interpolation cannot visually dip."""
+def test_cumsum_completed_tasks_periodically_curves_projects_but_keeps_total_linear():
+    """Project cumulative lines can curve, but the total overlay stays linear."""
 
     df = _weekly_completion_df()
     beg_date = datetime(2024, 5, 27)
@@ -583,16 +585,25 @@ def test_cumsum_completed_tasks_periodically_uses_linear_lines_to_avoid_fake_dro
     )
 
     traces = cast(tuple[Any, ...], fig.data)
-    cumulative_lines = [
+    project_lines = [
         trace
         for trace in traces
-        if str(getattr(trace, "name", "")).startswith("Project A")
-        or "all projects (total cumulative)" in str(getattr(trace, "name", "")).lower()
+        if str(getattr(trace, "name", "")) == "Project A"
     ]
-    assert cumulative_lines
+    total_lines = [
+        trace
+        for trace in traces
+        if "all projects (total cumulative)" in str(getattr(trace, "name", "")).lower()
+    ]
+    assert project_lines
+    assert total_lines
+    assert all(
+        getattr(getattr(trace, "line", None), "shape", None) == "spline"
+        for trace in project_lines
+    )
     assert all(
         getattr(getattr(trace, "line", None), "shape", None) in (None, "linear")
-        for trace in cumulative_lines
+        for trace in total_lines
     )
 
 
@@ -616,6 +627,174 @@ def test_plot_completed_tasks_periodically_can_disable_total_overlay():
         str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)
     ]
     assert not any("all projects" in name.lower() for name in trace_names)
+
+
+def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-02",
+                "id": "e1",
+                "title": "Root task",
+                "type": "completed",
+                "parent_project_id": "root-a",
+                "parent_project_name": "Root A",
+                "root_project_id": "root-a",
+                "root_project_name": "Root A",
+            },
+            {
+                "date": "2025-01-03",
+                "id": "e2",
+                "title": "Child task 1",
+                "type": "completed",
+                "parent_project_id": "child-a1",
+                "parent_project_name": "Child A1",
+                "root_project_id": "root-a",
+                "root_project_name": "Root A",
+            },
+            {
+                "date": "2025-01-04",
+                "id": "e3",
+                "title": "Child task 2",
+                "type": "completed",
+                "parent_project_id": "child-a1",
+                "parent_project_name": "Child A1",
+                "root_project_id": "root-a",
+                "root_project_name": "Root A",
+            },
+            {
+                "date": "2025-01-05",
+                "id": "e4",
+                "title": "Nested task",
+                "type": "completed",
+                "parent_project_id": "grand-a",
+                "parent_project_name": "Grand A",
+                "root_project_id": "root-a",
+                "root_project_name": "Root A",
+            },
+            {
+                "date": "2025-01-06",
+                "id": "e5",
+                "title": "Other root task",
+                "type": "completed",
+                "parent_project_id": "root-b",
+                "parent_project_name": "Root B",
+                "root_project_id": "root-b",
+                "root_project_name": "Root B",
+            },
+            {
+                "date": "2025-01-07",
+                "id": "e6",
+                "title": "Ignored archived-like task",
+                "type": "completed",
+                "parent_project_id": "inactive-project",
+                "parent_project_name": "Inactive",
+                "root_project_id": "inactive-project",
+                "root_project_name": "Inactive",
+            },
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    df.set_index("date", inplace=True)
+
+    active_projects = [
+        make_project(
+            project_id="root-a",
+            project_entry=make_project_entry(project_id="root-a", name="Root A"),
+        ),
+        make_project(
+            project_id="child-a1",
+            project_entry=make_project_entry(
+                project_id="child-a1",
+                name="Child A1",
+                parent_id="root-a",
+            ),
+        ),
+        make_project(
+            project_id="grand-a",
+            project_entry=make_project_entry(
+                project_id="grand-a",
+                name="Grand A",
+                parent_id="child-a1",
+            ),
+        ),
+        make_project(
+            project_id="root-b",
+            project_entry=make_project_entry(project_id="root-b", name="Root B"),
+        ),
+    ]
+
+    fig = plot_active_project_hierarchy(
+        df,
+        datetime(2025, 1, 1),
+        datetime(2025, 1, 10),
+        active_projects,
+        {"Root A": "#123456", "Root B": "#654321"},
+    )
+
+    traces = cast(tuple[Any, ...], fig.data)
+    assert len(traces) == 1
+    trace = cast(Any, traces[0])
+    assert trace.type == "treemap"
+
+    ids = list(getattr(trace, "ids", []))
+    labels = list(getattr(trace, "labels", []))
+    values = list(getattr(trace, "values", []))
+    customdata = list(getattr(trace, "customdata", []))
+
+    by_id = {
+        str(node_id): {
+            "label": str(labels[idx]),
+            "value": int(values[idx]),
+            "direct": int(customdata[idx][0]),
+            "total": int(customdata[idx][1]),
+        }
+        for idx, node_id in enumerate(ids)
+    }
+
+    assert "inactive-project" not in by_id
+    assert by_id["root-a"]["label"] == "Root A"
+    assert by_id["root-a"]["direct"] == 1
+    assert by_id["root-a"]["total"] == 4
+    assert by_id["child-a1"]["total"] == 3
+    assert by_id["grand-a"]["total"] == 1
+    assert by_id["root-b"]["total"] == 1
+
+
+def test_plot_active_project_hierarchy_returns_empty_figure_without_completed_tasks():
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-02",
+                "id": "e1",
+                "title": "Task",
+                "type": "added",
+                "parent_project_id": "root-a",
+                "parent_project_name": "Root A",
+                "root_project_id": "root-a",
+                "root_project_name": "Root A",
+            }
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    df.set_index("date", inplace=True)
+
+    fig = plot_active_project_hierarchy(
+        df,
+        datetime(2025, 1, 1),
+        datetime(2025, 1, 10),
+        [
+            make_project(
+                project_id="root-a",
+                project_entry=make_project_entry(project_id="root-a", name="Root A"),
+            )
+        ],
+        {"Root A": "#123456"},
+    )
+
+    assert not fig.data
+    assert fig.layout.annotations
+    assert "No completed tasks" in str(fig.layout.annotations[0].text)
 
 
 def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows():

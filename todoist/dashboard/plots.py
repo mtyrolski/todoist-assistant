@@ -9,9 +9,11 @@ from todoist.dashboard._plot_periodic import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
 )
+from todoist.dashboard._plot_project_hierarchy import plot_active_project_hierarchy
 from todoist.dashboard._plot_weekly_trend import plot_weekly_completion_trend
 
 __all__ = [
+    "plot_active_project_hierarchy",
     "cumsum_completed_tasks_periodically",
     "plot_completed_tasks_periodically",
     "plot_events_over_time",
