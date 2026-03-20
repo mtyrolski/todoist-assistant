@@ -15,6 +15,8 @@ export function StatCard({
   inverseDelta,
   currentPeriod,
   previousPeriod,
+  currentLabel = "Current",
+  previousLabel = "Previous",
   help
 }: {
   name: string;
@@ -23,6 +25,8 @@ export function StatCard({
   inverseDelta: boolean;
   currentPeriod: string;
   previousPeriod: string;
+  currentLabel?: string;
+  previousLabel?: string;
   help?: string;
 }) {
   const isUp = (deltaPercent ?? 0) > 0;
@@ -46,16 +50,16 @@ export function StatCard({
           <p className="muted">{name}</p>
           {help ? <InfoTip label={`About ${name}`} content={help} /> : null}
         </div>
-        <span className={`pill pill-${deltaTone}`}>{formatDelta(deltaPercent)}</span>
+        <span className={`pill pill-${deltaTone} statDeltaPill`}>{formatDelta(deltaPercent)}</span>
       </div>
       <p className="statValue">{value.toLocaleString()}</p>
       <div className="statPeriods">
-        <div>
-          <p className="muted tiny">Current</p>
+        <div className="statPeriodBlock">
+          <p className="muted tiny">{currentLabel}</p>
           <p className="tiny">{currentPeriod}</p>
         </div>
-        <div>
-          <p className="muted tiny">Previous</p>
+        <div className="statPeriodBlock">
+          <p className="muted tiny">{previousLabel}</p>
           <p className="tiny">{previousPeriod}</p>
         </div>
       </div>

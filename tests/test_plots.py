@@ -740,9 +740,20 @@ def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
         if str(getattr(trace, "hoverinfo", "")) != "skip"
     ]
     assert [trace.type for trace in bubble_traces] == ["scatter", "scatter"]
+    assert fig.layout.dragmode == "pan"
+    assert fig.layout.xaxis.fixedrange is False
+    assert fig.layout.yaxis.fixedrange is False
+    assert fig.layout.margin.l >= 24
+    assert fig.layout.margin.r >= 24
+    assert fig.layout.margin.t >= 30
+    assert fig.layout.margin.b >= 72
+    assert fig.layout.annotations
+    assert int(fig.layout.annotations[0].font.size) <= 9
 
     by_id: dict[str, dict[str, Any]] = {}
     for trace in bubble_traces:
+        x_values = list(getattr(trace, "x", []))
+        y_values = list(getattr(trace, "y", []))
         sizes = list(getattr(getattr(trace, "marker", None), "size", []))
         customdata = list(getattr(trace, "customdata", []))
         for idx, point in enumerate(customdata):
@@ -755,6 +766,8 @@ def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
                 "hidden_projects": int(point[6]),
                 "kind": str(point[7]),
                 "size": float(sizes[idx]),
+                "x": float(x_values[idx]),
+                "y": float(y_values[idx]),
             }
 
     assert "inactive-project" not in by_id
@@ -766,6 +779,14 @@ def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
     assert by_id["child-a1"]["root_name"] == "Root A"
     assert by_id["grand-a"]["total"] == 1
     assert by_id["root-b"]["total"] == 1
+    child_a1_to_root_a = ((by_id["child-a1"]["x"] - by_id["root-a"]["x"]) ** 2 + (by_id["child-a1"]["y"] - by_id["root-a"]["y"]) ** 2) ** 0.5
+    child_a1_to_root_b = ((by_id["child-a1"]["x"] - by_id["root-b"]["x"]) ** 2 + (by_id["child-a1"]["y"] - by_id["root-b"]["y"]) ** 2) ** 0.5
+    grand_a_to_root_a = ((by_id["grand-a"]["x"] - by_id["root-a"]["x"]) ** 2 + (by_id["grand-a"]["y"] - by_id["root-a"]["y"]) ** 2) ** 0.5
+    grand_a_to_root_b = ((by_id["grand-a"]["x"] - by_id["root-b"]["x"]) ** 2 + (by_id["grand-a"]["y"] - by_id["root-b"]["y"]) ** 2) ** 0.5
+    assert child_a1_to_root_a < child_a1_to_root_b
+    assert grand_a_to_root_a < grand_a_to_root_b
+    assert by_id["child-a1"]["y"] < by_id["root-a"]["y"]
+    assert by_id["grand-a"]["y"] < by_id["root-a"]["y"]
 
 
 def test_plot_active_project_hierarchy_folds_small_long_tail_into_other_bubble():

@@ -146,7 +146,7 @@ def _rgba(color: str, alpha: float) -> str:
     return f"rgba({red},{green},{blue},{max(0.0, min(alpha, 1.0)):.3f})"
 
 
-def _wrap_label(label: str, max_line_length: int = 13) -> str:
+def _wrap_label(label: str, max_line_length: int = 15) -> str:
     words = label.split()
     if not words:
         return label
@@ -228,34 +228,77 @@ def _cluster_centers(cluster_count: int) -> list[tuple[float, float]]:
         return []
     if cluster_count <= 3:
         xs = _cluster_x_positions(cluster_count)
-        return [(x_value, 66.0 + 4.0 * math.sin((idx - (cluster_count - 1) / 2.0) * 0.8)) for idx, x_value in enumerate(xs)]
+        return [
+            (
+                x_value,
+                70.0 + 3.0 * math.sin((idx - (cluster_count - 1) / 2.0) * 0.7),
+            )
+            for idx, x_value in enumerate(xs)
+        ]
 
     first_row = math.ceil(cluster_count / 2)
     second_row = cluster_count - first_row
     centers: list[tuple[float, float]] = []
     for idx, x_value in enumerate(_cluster_x_positions(first_row)):
-        centers.append((x_value, 73.0 + 2.5 * math.sin((idx - (first_row - 1) / 2.0) * 0.8)))
+        centers.append(
+            (
+                x_value,
+                76.0 + 2.0 * math.sin((idx - (first_row - 1) / 2.0) * 0.7),
+            )
+        )
     for idx, x_value in enumerate(_cluster_x_positions(second_row)):
-        centers.append((x_value, 39.0 + 2.0 * math.sin((idx - (second_row - 1) / 2.0) * 0.6)))
+        centers.append(
+            (
+                x_value,
+                34.0 + 1.5 * math.sin((idx - (second_row - 1) / 2.0) * 0.5),
+            )
+        )
     return centers
 
 
-def _orbit_angles(count: int) -> list[float]:
-    if count <= 0:
-        return []
-    if count == 1:
-        return [math.radians(270)]
-    start = math.radians(206)
-    end = math.radians(334)
-    step = (end - start) / (count - 1)
-    return [start + step * idx for idx in range(count)]
+def _child_anchor_offsets(count: int) -> list[tuple[float, float]]:
+    anchor_map: dict[int, list[tuple[float, float]]] = {
+        1: [(0.0, -1.0)],
+        2: [(-0.78, -0.84), (0.78, -0.84)],
+        3: [(0.0, -1.02), (-0.96, -0.58), (0.96, -0.58)],
+        4: [(-0.68, -1.1), (0.68, -1.1), (-1.04, -0.45), (1.04, -0.45)],
+        5: [
+            (0.0, -1.12),
+            (-0.78, -1.0),
+            (0.78, -1.0),
+            (-1.06, -0.42),
+            (1.06, -0.42),
+        ],
+        6: [
+            (0.0, -1.22),
+            (-0.76, -1.08),
+            (0.76, -1.08),
+            (-1.06, -0.52),
+            (1.06, -0.52),
+            (0.0, -0.46),
+        ],
+    }
+    return anchor_map.get(count, anchor_map[6])
+
+
+def _nearest_center_distance(
+    centers: list[tuple[float, float]], current_idx: int
+) -> float:
+    if len(centers) <= 1:
+        return 36.0
+    current_x, current_y = centers[current_idx]
+    return min(
+        math.dist((current_x, current_y), other_center)
+        for idx, other_center in enumerate(centers)
+        if idx != current_idx
+    )
 
 
 def _bubble_text(node: _HierarchyNode, size: float) -> str:
     wrapped_label = _wrap_label(node.label if node.kind != "aggregate" else "Other")
     if node.kind == "root":
         return f"{wrapped_label}<br>{node.total_completed}"
-    if size >= 34.0 or node.kind == "aggregate":
+    if size >= 32.0 or node.kind == "aggregate":
         return f"{wrapped_label}<br>{node.total_completed}"
     if size >= 26.0:
         return str(node.total_completed)
@@ -540,16 +583,26 @@ def plot_active_project_hierarchy(
             )
             for descendant in descendants
         ]
-        orbit_radius = 11.5 + root_size * 0.23 + max(child_sizes, default=0.0) * 0.15
-        vertical_shift = 7.5 if len(visible_roots) <= 3 else 6.0
-        for descendant, child_size, angle in zip(
-            descendants, child_sizes, _orbit_angles(len(descendants)), strict=False
+        nearest_gap = _nearest_center_distance(cluster_centers, idx)
+        horizontal_span = min(11.5, max(7.4, nearest_gap * 0.24))
+        vertical_span = min(13.0, max(8.8, nearest_gap * 0.21))
+        radial_padding = max(4.4, root_size * 0.12)
+        anchors = _child_anchor_offsets(len(descendants))
+        for descendant, child_size, anchor in zip(
+            descendants, child_sizes, anchors, strict=False
         ):
+            anchor_x, anchor_y = anchor
+            horizontal_offset = anchor_x * (
+                horizontal_span + child_size * 0.09 + radial_padding * 0.12
+            )
+            vertical_offset = anchor_y * (
+                vertical_span + child_size * 0.07 + radial_padding * 0.18
+            )
             child_points.append(
                 _BubblePoint(
                     node=descendant,
-                    x=center_x + orbit_radius * math.cos(angle),
-                    y=center_y - vertical_shift + orbit_radius * 0.55 * math.sin(angle),
+                    x=center_x + horizontal_offset,
+                    y=center_y + vertical_offset,
                     size=child_size,
                 )
             )
@@ -560,7 +613,7 @@ def plot_active_project_hierarchy(
         line_width=1.6,
         border_mix=0.42,
         glow_scale=1.55,
-        text_size=11,
+        text_size=12,
         hovertemplate=(
             "<b>%{customdata[1]}</b>"
             "<br>Root project: %{customdata[4]}"
@@ -577,7 +630,7 @@ def plot_active_project_hierarchy(
         line_width=2.2,
         border_mix=0.28,
         glow_scale=1.65,
-        text_size=12,
+        text_size=13,
         hovertemplate=(
             "<b>%{customdata[1]}</b>"
             "<br>Total completed in range: %{customdata[2]}"
@@ -592,26 +645,28 @@ def plot_active_project_hierarchy(
         template="plotly_dark",
         title=None,
         height=620,
-        margin=dict(l=18, r=18, t=14, b=30),
+        margin=dict(l=24, r=24, t=30, b=72),
         paper_bgcolor=_BACKGROUND_COLOR,
         plot_bgcolor=_BACKGROUND_COLOR,
         showlegend=False,
         xaxis=dict(
             visible=False,
             range=[0, 100],
-            fixedrange=True,
+            fixedrange=False,
         ),
         yaxis=dict(
             visible=False,
             range=[0, 100],
-            fixedrange=True,
+            fixedrange=False,
             scaleanchor="x",
             scaleratio=1,
         ),
+        dragmode="pan",
+        uirevision="active-project-hierarchy",
         annotations=[
             dict(
                 x=0.99,
-                y=0.01,
+                y=0.0,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
@@ -623,7 +678,7 @@ def plot_active_project_hierarchy(
                     "Long tails are folded into Other only when they stay smaller "
                     "than the smallest visible bubble."
                 ),
-                font=dict(size=11, color=_MUTED_TEXT_COLOR),
+                font=dict(size=9, color=_MUTED_TEXT_COLOR),
             )
         ],
     )
