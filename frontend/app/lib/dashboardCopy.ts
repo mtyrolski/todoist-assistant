@@ -69,3 +69,10 @@ Top projects by completed tasks in the most recent finished week.
 
 - Subprojects includes nested projects.
 - Root projects are top-level only.`;
+
+export const HABIT_TREND_HELP = `**Habit trend**
+Weekly totals for tasks labeled \`@track_habit\`.
+
+- Green bars are completions.
+- Orange bars are reschedules.
+- The window covers the most recent completed weeks.`;

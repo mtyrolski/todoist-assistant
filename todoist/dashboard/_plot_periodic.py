@@ -287,7 +287,7 @@ def _add_total_overlay_cumulative_traces(
                 y=historical.astype(float).tolist(),
                 name="All Projects (total cumulative)",
                 legendgroup="all-projects-total",
-                line_shape="spline",
+                line_shape="linear",
                 mode="lines+markers",
                 line=dict(color=_ALL_TASKS_TOTAL_COLOR, width=3),
                 marker=dict(size=8, symbol="diamond", color=_ALL_TASKS_TOTAL_COLOR),
@@ -417,7 +417,7 @@ def plot_completed_tasks_periodically(
                     y=historical,
                     name=root_project_name,
                     legendgroup=root_project_name,
-                    line_shape="spline",
+                    line_shape="linear",
                     mode="lines+markers",
                     line=dict(color=color),
                 )
@@ -584,7 +584,7 @@ def cumsum_completed_tasks_periodically(
                     y=historical,
                     name=root_project_name,
                     legendgroup=root_project_name,
-                    line_shape="spline",
+                    line_shape="linear",
                     mode="lines+markers",
                     line=dict(color=color),
                 )

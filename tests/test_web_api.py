@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from fastapi.testclient import TestClient
 
+from tests.factories import make_project, make_project_entry, make_task
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
@@ -331,6 +332,127 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     assert payload.get("noData") is True
 
 
+def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
+    async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
+        return None
+
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _stub_all_figures(monkeypatch)
+
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-07",
+                "id": "c1",
+                "title": "Morning walk",
+                "type": "completed",
+                "parent_project_name": "Health",
+                "root_project_name": "Health",
+                "task_id": "habit-1",
+            },
+            {
+                "date": "2025-01-08",
+                "id": "r1",
+                "title": "Morning walk",
+                "type": "rescheduled",
+                "parent_project_name": "Health",
+                "root_project_name": "Health",
+                "task_id": "habit-1",
+            },
+            {
+                "date": "2025-01-15",
+                "id": "anchor-1",
+                "title": "Another task",
+                "type": "completed",
+                "parent_project_name": "Health",
+                "root_project_name": "Health",
+                "task_id": "anchor-task",
+            },
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    df.set_index("date", inplace=True)
+    web_api._state.df_activity = df
+    web_api._state.active_projects = [
+        make_project(
+            project_id="project-1",
+            project_entry=make_project_entry(
+                project_id="project-1",
+                name="Health",
+                color="green",
+            ),
+            tasks=[
+                make_task(
+                    "habit-1",
+                    content="Morning walk",
+                    project_id="project-1",
+                    labels=["track_habit"],
+                )
+            ],
+        )
+    ]
+    web_api._state.project_colors = {"Health": "#00aa88"}
+    web_api._state.db = None
+    web_api._state.home_payload_cache = {}
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    assert res.status_code == 200
+    payload = res.json()
+
+    habit_tracker = payload["habitTracker"]
+    assert habit_tracker["trackedCount"] == 1
+    assert habit_tracker["totals"]["weeklyCompleted"] == 1
+    assert habit_tracker["totals"]["weeklyRescheduled"] == 1
+    assert habit_tracker["items"][0]["name"] == "Morning walk"
+    assert habit_tracker["figure"]["data"]
+
+
+def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
+    async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
+        return None
+
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _stub_all_figures(monkeypatch)
+
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-07",
+                "id": "e1",
+                "title": "Morning walk",
+                "type": "completed",
+                "parent_project_name": "Health",
+                "root_project_name": "Health",
+                "task_id": "habit-1",
+            },
+            {
+                "date": "2025-01-08",
+                "id": "e2",
+                "title": "Morning walk",
+                "type": "rescheduled",
+                "parent_project_name": "Health",
+                "root_project_name": "Health",
+                "task_id": "habit-1",
+            },
+        ]
+    )
+    df.index = [0, 1]
+    web_api._state.df_activity = df
+    web_api._state.active_projects = []
+    web_api._state.project_colors = {"Health": "#00aa88"}
+    web_api._state.db = None
+    web_api._state.home_payload_cache = {}
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["metrics"]["items"]
+
+
 def test_dashboard_status_returns_services() -> None:
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/status")
@@ -338,6 +460,41 @@ def test_dashboard_status_returns_services() -> None:
     payload = res.json()
     assert isinstance(payload.get("services"), list)
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
+
+
+def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) -> None:
+    monkeypatch.setattr(web_api, "_available_mapping_files", lambda: ["adj_private.py"])
+    monkeypatch.setattr(
+        web_api,
+        "_load_mapping_file",
+        lambda filename: ({"Archived Research": "Academy"}, []),
+    )
+
+    def _fake_projects_for_adjustments(refresh: bool):
+        _ = refresh
+        return (
+            ["Academy", "Inbox", "skynet"],
+            ["Archived Root"],
+            ["Archived Research", "Archived Root"],
+            ["Inbox"],
+        )
+
+    monkeypatch.setattr(
+        web_api, "_load_projects_for_adjustments_sync", _fake_projects_for_adjustments
+    )
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/project_adjustments")
+    assert res.status_code == 200
+    payload = res.json()
+
+    assert payload["remappableActiveRootProjects"] == ["Inbox"]
+    assert payload["sourceProjects"] == [
+        "Archived Research",
+        "Archived Root",
+        "Inbox",
+    ]
+    assert payload["unmappedSourceProjects"] == ["Archived Root", "Inbox"]
 
 
 def test_admin_timezone_status_uses_system_timezone_when_not_configured(

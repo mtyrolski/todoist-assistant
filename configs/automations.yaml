@@ -19,6 +19,13 @@ gmail_tasks:
   name: Gmail Tasks
   frequency_in_minutes: 0.1
 
+habit_tracker:
+  _target_: todoist.automations.habit_tracker.HabitTracker
+  name: Habit Tracker
+  frequency_in_minutes: 10080
+  label_name: "track_habit"
+  history_weeks: 8
+
 # Template automation
 template:
   _target_: todoist.automations.template.Template
@@ -62,6 +69,7 @@ automations:
   - ${activity}
   - ${multiply}
   - ${llm_breakdown}
+  - ${habit_tracker}
   # - ${gmail_tasks}  # Enable Gmail Tasks automation explicitly when needed
 
 hydra:

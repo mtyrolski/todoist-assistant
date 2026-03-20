@@ -31,6 +31,7 @@ RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "observer_state.joblib",
     "integration_launches.joblib",
     "automation_launches.joblib",
+    "habit_tracker_posts.joblib",
     "processed_gmail_messages.joblib",
     "dashboard_state.joblib",
     "llm_breakdown_progress.joblib",
@@ -325,6 +326,7 @@ class Cache:
         self.observer_state = LocalStorage(join(self.path, 'observer_state.joblib'), dict)
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
+        self.habit_tracker_posts = LocalStorage(join(self.path, 'habit_tracker_posts.joblib'), dict)
         self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)
         self.dashboard_state = LocalStorage(join(self.path, 'dashboard_state.joblib'), dict)
         self.llm_breakdown_progress = LocalStorage(join(self.path, 'llm_breakdown_progress.joblib'), dict)

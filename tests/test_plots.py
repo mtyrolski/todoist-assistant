@@ -567,6 +567,35 @@ def test_cumsum_completed_tasks_periodically_adds_total_overlay_on_primary_axis(
     assert getattr(cast(Any, fig.layout), "yaxis2", None) is None
 
 
+def test_cumsum_completed_tasks_periodically_uses_linear_lines_to_avoid_fake_drops():
+    """Cumulative traces must stay linear so interpolation cannot visually dip."""
+
+    df = _weekly_completion_df()
+    beg_date = datetime(2024, 5, 27)
+    end_date = datetime(2024, 6, 5)
+
+    fig = cumsum_completed_tasks_periodically(
+        df,
+        beg_date,
+        end_date,
+        granularity="W-SUN",
+        project_colors={"Project A": "#123456"},
+    )
+
+    traces = cast(tuple[Any, ...], fig.data)
+    cumulative_lines = [
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")).startswith("Project A")
+        or "all projects (total cumulative)" in str(getattr(trace, "name", "")).lower()
+    ]
+    assert cumulative_lines
+    assert all(
+        getattr(getattr(trace, "line", None), "shape", None) in (None, "linear")
+        for trace in cumulative_lines
+    )
+
+
 def test_plot_completed_tasks_periodically_can_disable_total_overlay():
     """Secondary-axis total line should be optional and hideable via function flag."""
 

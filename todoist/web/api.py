@@ -56,6 +56,7 @@ from todoist.llm import (
 )
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.web.dashboard_payload import (
+    build_habit_tracker_payload as _build_habit_tracker_payload,
     completed_share_leaderboard as _completed_share_leaderboard,
     compute_insights as _compute_insights,
     compute_plot_range as _compute_plot_range,
@@ -63,9 +64,11 @@ from todoist.web.dashboard_payload import (
     extract_metrics_dict as _extract_metrics_dict,
     fig_to_dict as _fig_to_dict,
     last_completed_week_bounds as _last_completed_week_bounds,
+    normalize_activity_df as _normalize_activity_df,
     period_bounds as _period_bounds,
     safe_activity_anchor as _safe_activity_anchor,
 )
+from todoist.habit_tracker import extract_tracked_habit_tasks
 from todoist.utils import (
     Cache,
     LocalStorageError,
@@ -372,6 +375,7 @@ _CHAT_SYSTEM_PROMPT = (
     "You are a helpful assistant for planning and summarizing Todoist work. "
     "Be concise and ask clarifying questions when needed."
 )
+_REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
 _LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel
 
@@ -552,7 +556,7 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
         return False
 
     _state.db = None
-    _state.df_activity = df_activity
+    _state.df_activity = _normalize_activity_df(df_activity)
     _state.active_projects = active_projects
     _state.project_colors = {str(k): str(v) for k, v in project_colors.items()}
     _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
@@ -670,7 +674,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             )
         )
         try:
-            df_activity = load_activity_data(dbio)
+            df_activity = _normalize_activity_df(load_activity_data(dbio))
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(f"Failed to load activity data; using empty dataset: {exc}")
             df_activity = _empty_activity_df()
@@ -1761,6 +1765,8 @@ async def dashboard_home(
             "error": "Dashboard data unavailable. Please ensure the database is configured and accessible."
         }
 
+    df_activity = _normalize_activity_df(df_activity)
+
     no_data = df_activity.empty
     beg_range, end_range = _compute_plot_range(
         df_activity, weeks=weeks, beg=beg, end=end
@@ -1790,6 +1796,13 @@ async def dashboard_home(
     anchor_dt = _safe_activity_anchor(df_activity)
     last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(
         anchor_dt
+    )
+    tracked_habit_tasks = extract_tracked_habit_tasks(active_projects)
+    habit_tracker = _build_habit_tracker_payload(
+        df_activity,
+        tracked_habit_tasks,
+        anchor=anchor_dt,
+        project_colors=project_colors,
     )
 
     if no_data:
@@ -1850,6 +1863,7 @@ async def dashboard_home(
             "previousPeriod": periods["previousLabel"],
         },
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
+        "habitTracker": habit_tracker,
         "insights": {
             "label": last_week_label,
             "items": []
@@ -2494,7 +2508,7 @@ def _save_mapping_file(
 
 def _load_projects_for_adjustments_sync(
     refresh: bool,
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     if not refresh and _state.db is not None:
         dbio = _state.db
     else:
@@ -2518,7 +2532,10 @@ def _load_projects_for_adjustments_sync(
         }
     )
     archived_names = sorted({p.project_entry.name for p in archived_projects})
-    return active_root, archived_root, archived_names
+    remappable_active_root = sorted(
+        [name for name in active_root if name in _REMAPPABLE_ACTIVE_ROOT_PROJECTS]
+    )
+    return active_root, archived_root, archived_names, remappable_active_root
 
 
 def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
@@ -2630,7 +2647,12 @@ async def admin_project_adjustments(
     mappings, archived_parents = _load_mapping_file(selected)
     warning: str | None = None
     try:
-        active_root, archived_root, archived_names = await asyncio.to_thread(
+        (
+            active_root,
+            archived_root,
+            archived_names,
+            remappable_active_root,
+        ) = await asyncio.to_thread(
             _load_projects_for_adjustments_sync,
             refresh,
         )
@@ -2639,8 +2661,10 @@ async def admin_project_adjustments(
         active_root = []
         archived_root = []
         archived_names = []
+        remappable_active_root = []
         warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
-    unmapped_archived = [name for name in archived_names if name not in mappings]
+    source_projects = sorted(set(archived_names) | set(remappable_active_root))
+    unmapped_source_projects = [name for name in source_projects if name not in mappings]
     archived_parents = sorted(
         [name for name in archived_parents if name in archived_names]
     )
@@ -2651,9 +2675,11 @@ async def admin_project_adjustments(
         "mappings": mappings,
         "activeRootProjects": active_root,
         "archivedRootProjects": archived_root,
+        "remappableActiveRootProjects": remappable_active_root,
         "archivedParentProjects": archived_parents,
         "archivedProjects": archived_names,
-        "unmappedArchivedProjects": unmapped_archived,
+        "sourceProjects": source_projects,
+        "unmappedSourceProjects": unmapped_source_projects,
         "warning": warning,
     }
 

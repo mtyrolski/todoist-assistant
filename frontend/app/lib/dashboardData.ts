@@ -1,5 +1,6 @@
 import type { PlotlyFigure } from "../components/PlotCard";
 import type { InsightItem } from "../components/InsightCard";
+import type { HabitTrackerItem } from "../components/HabitTrackerCard";
 import type { LeaderboardItem } from "../components/LeaderboardCard";
 import type { ServiceStatus } from "../components/ServiceMonitor";
 
@@ -16,6 +17,21 @@ export type DashboardHome = {
     previousPeriod: string;
   };
   badges: { p1: number; p2: number; p3: number; p4: number };
+  habitTracker: {
+    label: string;
+    weekBeg: string;
+    weekEnd: string;
+    trackedCount: number;
+    totals: {
+      weeklyCompleted: number;
+      weeklyRescheduled: number;
+      allTimeCompleted: number;
+      allTimeRescheduled: number;
+    };
+    items: HabitTrackerItem[];
+    history: { label: string; completed: number; rescheduled: number }[];
+    figure: PlotlyFigure;
+  };
   insights?: { label?: string; items: InsightItem[] };
   leaderboards?: {
     lastCompletedWeek: {
