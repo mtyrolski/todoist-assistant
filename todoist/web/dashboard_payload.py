@@ -1,5 +1,6 @@
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from collections.abc import Sequence
 from typing import Any, cast
 
 from fastapi import HTTPException
@@ -9,6 +10,121 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 from todoist.habit_tracker import summarize_tracked_habits
+from todoist.types import Project
+from todoist.stats import extract_task_due_date
+
+FIRE_TASK_LABEL = "fire \U0001F9EF\U0001F692"
+
+
+def _normalize_label_name(value: str) -> str:
+    return value.strip().casefold()
+
+
+def count_labeled_tasks(
+    active_projects: Sequence[Project] | None, *, label_name: str
+) -> int:
+    if not active_projects:
+        return 0
+
+    normalized_target = _normalize_label_name(label_name)
+    total = 0
+    for project in active_projects:
+        for task in project.tasks or []:
+            task_labels = {
+                _normalize_label_name(str(label))
+                for label in (task.task_entry.labels or [])
+            }
+            if normalized_target in task_labels:
+                total += 1
+    return total
+
+
+def _task_matches_label(task: Any, label_name: str) -> bool:
+    task_labels = {
+        _normalize_label_name(str(label))
+        for label in (task.task_entry.labels or [])
+    }
+    return _normalize_label_name(label_name) in task_labels
+
+
+def _task_date_is_due(task_value: Any, reference_day: date) -> bool:
+    task_date = extract_task_due_date(task_value)
+    return task_date is not None and task_date.date() <= reference_day
+
+
+def evaluate_urgency_status(
+    active_projects: Sequence[Project] | None,
+    *,
+    today: date | None = None,
+) -> dict[str, Any]:
+    reference_day = today or datetime.now().date()
+    counts = {
+        "fireTasks": 0,
+        "p1Tasks": 0,
+        "p2Tasks": 0,
+        "dueTasks": 0,
+        "deadlineTasks": 0,
+    }
+    urgent_task_count = 0
+
+    for project in active_projects or []:
+        for task in project.tasks or []:
+            task_entry = task.task_entry
+            fire = _task_matches_label(task, FIRE_TASK_LABEL)
+            p1 = task_entry.priority == 4
+            p2 = task_entry.priority == 3
+            due = _task_date_is_due(task_entry.due, reference_day)
+            deadline = _task_date_is_due(task_entry.deadline, reference_day)
+
+            if fire:
+                counts["fireTasks"] += 1
+            if p1:
+                counts["p1Tasks"] += 1
+            if p2:
+                counts["p2Tasks"] += 1
+            if due:
+                counts["dueTasks"] += 1
+            if deadline:
+                counts["deadlineTasks"] += 1
+
+            if fire or p1 or p2 or due or deadline:
+                urgent_task_count += 1
+
+    fire_count = counts["fireTasks"]
+    if fire_count > 0:
+        state = "danger"
+        title = "Urgent attention needed"
+        summary = (
+            f"{fire_count} fire task{'s' if fire_count != 1 else ''} are active."
+            f" {urgent_task_count} task{'s' if urgent_task_count != 1 else ''} total"
+            " need attention."
+        )
+    elif urgent_task_count > 0:
+        state = "warn"
+        title = "Attention needed"
+        summary = (
+            f"{urgent_task_count} active task{'s' if urgent_task_count != 1 else ''}"
+            " are flagged by priority, due date, or deadline."
+        )
+    else:
+        state = "good"
+        title = "All clear"
+        summary = "No active fire, P1, P2, or due/deadline tasks found."
+
+    return {
+        "state": state,
+        "title": title,
+        "summary": summary,
+        "todayLabel": reference_day.isoformat(),
+        "total": urgent_task_count,
+        "counts": counts,
+        "badgeLabel": {
+            "good": "OK",
+            "warn": "Watch",
+            "danger": "Urgent",
+        }[state],
+        "helpKey": "Urgency Status",
+    }
 
 
 def normalize_activity_df(df_activity) -> pd.DataFrame:
@@ -76,7 +192,10 @@ def period_bounds(df_activity, granularity: str) -> dict[str, Any]:
     }
 
 
-def extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
+def extract_metrics_dict(
+    df_activity,
+    periods: dict[str, Any],
+) -> list[dict[str, Any]]:
     df_activity = normalize_activity_df(df_activity)
 
     def _get_total_events(beg_, end_) -> int:

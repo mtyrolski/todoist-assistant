@@ -15,6 +15,13 @@ Total tasks added in the selected period.
 Total tasks rescheduled in the selected period.
 
 - Lower is better, so the delta is inverted.`,
+  "Urgency Status": `**Urgency status**
+Live health check for active tasks.
+
+- Green means no active fire, P1, P2, due-today, or deadline-today tasks.
+- Yellow means urgent work exists, but there are no fire tasks.
+- Red means at least one active fire task is present.
+- Counts are based on active tasks only and due/deadline are compared with today.`,
 };
 
 export const DEFAULT_METRIC_HELP = `**Metric**
@@ -59,6 +66,12 @@ Clustered bubble view of the busiest root projects and their busiest active subp
 - Bubble area is proportional to completed tasks in the selected range.
 - Smaller long-tail projects are folded into an \`Other\` bubble only when that bubble stays smaller than the smallest visible sibling.
 - Hover shows subtree total, direct completions, and how many hidden projects were folded in.`,
+  activeProjectHierarchyChooser: `**Hierarchy view chooser**
+Switch between the available representations of active projects inside the same card.
+
+- Bubble is the default, most compact overview.
+- Other views may emphasize structure, nesting, or breadth depending on what the API provides.
+- If only one view is available, the chooser stays hidden.`,
   heatmapEventsByDayHour: `**Event Heatmap**
 Activity intensity by day of week and hour. Darker means more events.`,
   eventsOverTime: `**Events Over Time**

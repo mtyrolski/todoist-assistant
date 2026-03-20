@@ -1,5 +1,7 @@
 """Tests for FastAPI web dashboard endpoints."""
 
+from datetime import date
+
 import pandas as pd
 import plotly.graph_objects as go
 from fastapi.testclient import TestClient
@@ -30,6 +32,21 @@ def _stub_all_figures(monkeypatch) -> None:
     monkeypatch.setattr(
         web_api,
         "plot_active_project_hierarchy",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_active_project_hierarchy_treemap",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_active_project_hierarchy_sunburst",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "plot_active_project_hierarchy_icicle",
         lambda *args, **kwargs: go.Figure(),
     )
     monkeypatch.setattr(
@@ -782,8 +799,52 @@ def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> Non
     )
 
     assert res.status_code == 400
+
+
+def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
+    async def _noop_ensure_state(*, refresh: bool) -> None:
+        _ = refresh
+        return None
+
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _stub_all_figures(monkeypatch)
+
+    df = _single_event_df()
+    web_api._state.df_activity = df
+    web_api._state.active_projects = [
+        make_project(
+            project_id="proj-urgency",
+            project_entry=make_project_entry(project_id="proj-urgency", name="Urgency"),
+            tasks=[
+                make_task("p1-1", content="Priority 1", priority=4),
+                make_task(
+                    "due-1",
+                    content="Due today",
+                    due={"date": date.today().isoformat()},
+                ),
+            ],
+        )
+    ]
+    web_api._state.project_colors = {"Urgency": "#44aa66"}
+    web_api._state.db = None
+    web_api._state.home_payload_cache = {}
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+
+    assert res.status_code == 200
     payload = res.json()
-    assert "not available" in payload["detail"]
+    urgency_status = payload["urgencyStatus"]
+    assert urgency_status["state"] == "warn"
+    assert urgency_status["badgeLabel"] == "Watch"
+    assert urgency_status["total"] == 2
+    assert urgency_status["counts"]["p1Tasks"] == 1
+    assert urgency_status["counts"]["dueTasks"] == 1
+    assert urgency_status["counts"]["fireTasks"] == 0
+    variants = payload["figures"]["activeProjectHierarchyVariants"]
+    assert set(variants) == {"treemap", "sunburst", "icicle"}
+    assert variants["treemap"]["label"] == "Treemap"
+    assert isinstance(variants["treemap"]["figure"], dict)
 
 
 def test_llm_chat_update_settings_supports_openai_backend(

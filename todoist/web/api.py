@@ -32,6 +32,9 @@ from todoist.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
     plot_active_project_hierarchy,
+    plot_active_project_hierarchy_icicle,
+    plot_active_project_hierarchy_sunburst,
+    plot_active_project_hierarchy_treemap,
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
@@ -62,6 +65,7 @@ from todoist.web.dashboard_payload import (
     compute_insights as _compute_insights,
     compute_plot_range as _compute_plot_range,
     empty_activity_df as _empty_activity_df,
+    evaluate_urgency_status as _evaluate_urgency_status,
     extract_metrics_dict as _extract_metrics_dict,
     fig_to_dict as _fig_to_dict,
     last_completed_week_bounds as _last_completed_week_bounds,
@@ -1777,6 +1781,8 @@ async def dashboard_home(
 
     periods = _period_bounds(df_activity, granularity)
     metrics = _extract_metrics_dict(df_activity, periods)
+    today = datetime.now().date()
+    urgency_status = _evaluate_urgency_status(active_projects, today=today)
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
@@ -1789,6 +1795,7 @@ async def dashboard_home(
         f"beg={beg_label}",
         f"end={end_label}",
         f"no_data={int(no_data)}",
+        f"today={today.isoformat()}",
     )
     cached = _state.home_payload_cache.get(cache_key)
     if cached and not refresh:
@@ -1843,6 +1850,47 @@ async def dashboard_home(
                     project_colors,
                 )
             ),
+            "activeProjectHierarchyVariants": {
+                "treemap": {
+                    "label": "Treemap",
+                    "description": "Nested area view",
+                    "figure": _fig_to_dict(
+                        plot_active_project_hierarchy_treemap(
+                            df_activity,
+                            beg_range,
+                            end_range,
+                            active_projects,
+                            project_colors,
+                        )
+                    ),
+                },
+                "sunburst": {
+                    "label": "Sunburst",
+                    "description": "Radial nesting view",
+                    "figure": _fig_to_dict(
+                        plot_active_project_hierarchy_sunburst(
+                            df_activity,
+                            beg_range,
+                            end_range,
+                            active_projects,
+                            project_colors,
+                        )
+                    ),
+                },
+                "icicle": {
+                    "label": "Icicle",
+                    "description": "Vertical nesting view",
+                    "figure": _fig_to_dict(
+                        plot_active_project_hierarchy_icicle(
+                            df_activity,
+                            beg_range,
+                            end_range,
+                            active_projects,
+                            project_colors,
+                        )
+                    ),
+                },
+            },
         }
         parent_completed_share = _completed_share_leaderboard(
             df_activity,
@@ -1872,6 +1920,7 @@ async def dashboard_home(
             "currentPeriod": periods["currentLabel"],
             "previousPeriod": periods["previousLabel"],
         },
+        "urgencyStatus": urgency_status,
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
         "habitTracker": habit_tracker,
         "insights": {

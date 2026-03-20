@@ -8,11 +8,43 @@ export type Health = { status: string; version?: string } | null;
 
 export type Granularity = "W" | "ME" | "3ME";
 
+export type ProjectHierarchyVariantFigure =
+  | PlotlyFigure
+  | {
+      figure?: PlotlyFigure;
+      label?: string;
+      title?: string;
+      description?: string;
+      help?: string;
+    };
+
+export type ProjectHierarchyVariants = Record<string, ProjectHierarchyVariantFigure>;
+
+export type DashboardFigures = {
+  weeklyCompletionTrend?: PlotlyFigure;
+  taskLifespans?: PlotlyFigure;
+  completedTasksPeriodically?: PlotlyFigure;
+  cumsumCompletedTasksPeriodically?: PlotlyFigure;
+  heatmapEventsByDayHour?: PlotlyFigure;
+  eventsOverTime?: PlotlyFigure;
+  activeProjectHierarchy?: PlotlyFigure;
+  activeProjectHierarchyVariants?: ProjectHierarchyVariants;
+};
+
 export type DashboardHome = {
   noData?: boolean;
   range: { beg: string; end: string; granularity: Granularity; weeks: number };
   metrics: {
-    items: { name: string; value: number; deltaPercent: number | null; inverseDelta: boolean }[];
+    items: {
+      name: string;
+      value: number;
+      deltaPercent: number | null;
+      inverseDelta: boolean;
+      currentPeriod?: string;
+      previousPeriod?: string;
+      currentLabel?: string;
+      previousLabel?: string;
+    }[];
     currentPeriod: string;
     previousPeriod: string;
   };
@@ -42,7 +74,8 @@ export type DashboardHome = {
       rootProjects: { items: LeaderboardItem[]; totalCompleted: number; figure: PlotlyFigure };
     };
   };
-  figures: Record<string, PlotlyFigure>;
+  figures: DashboardFigures;
+  activeProjectHierarchyVariants?: ProjectHierarchyVariants;
   refreshedAt: string;
   error?: string;
 };
