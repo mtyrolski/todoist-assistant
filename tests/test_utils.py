@@ -207,6 +207,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
         "content": "Task 1",
         "description": "",
         "note_count": 0,
+        "goal_ids": ["goal-1"],
         "day_order": "0",
         "is_collapsed": False,
     }
@@ -215,6 +216,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
     assert task_entry.v2_id is None
     assert task_entry.v2_project_id is None
     assert task_entry.is_collapsed is False
+    assert task_entry.goal_ids == ["goal-1"]
     assert task_entry.day_order == 0
     assert task_entry.new_api_kwargs is not None
     assert task_entry.new_api_kwargs == {}
@@ -236,6 +238,68 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
     assert event_entry.v2_object_id is None
     assert event_entry.v2_parent_project_id is None
     assert event_entry.source == "api"
+
+
+def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_payloads():
+    # pylint: disable=protected-access
+    import todoist.utils as utils
+    from todoist.types import ProjectEntry, TaskEntry
+
+    project_payload = {
+        "id": "proj1",
+        "name": "Project 1",
+        "color": "blue",
+        "parent_id": None,
+        "child_order": 1,
+        "view_style": "list",
+        "is_favorite": False,
+        "is_archived": False,
+        "is_deleted": False,
+        "is_frozen": False,
+        "can_assign_tasks": True,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-02T00:00:00Z",
+        "is_shared": True,
+        "is_collapsed": False,
+        "access": {"visibility": "restricted", "configuration": {}},
+    }
+    task_payload = {
+        "id": "task1",
+        "user_id": "user1",
+        "project_id": "proj1",
+        "section_id": None,
+        "parent_id": None,
+        "added_by_uid": "user1",
+        "assigned_by_uid": None,
+        "responsible_uid": None,
+        "labels": [],
+        "deadline": None,
+        "duration": None,
+        "checked": False,
+        "is_deleted": False,
+        "added_at": "2024-01-01T00:00:00Z",
+        "completed_at": None,
+        "updated_at": "2024-01-01T00:00:00Z",
+        "due": None,
+        "priority": 1,
+        "child_order": 1,
+        "content": "Task 1",
+        "description": "",
+        "note_count": 0,
+        "goal_ids": ["goal-1"],
+        "is_collapsed": False,
+    }
+
+    utils._MISSING_REQUIRED_FIELD_WARNINGS.clear()
+    with patch("todoist.utils.logger.warning") as mock_warning:
+        project_entry = safe_instantiate_entry(ProjectEntry, **project_payload)
+        task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
+
+    assert project_entry.shared is None
+    assert task_entry.sync_id is None
+    assert task_entry.collapsed is None
+    assert task_entry.goal_ids == ["goal-1"]
+    assert mock_warning.call_count == 0
 
 
 @pytest.mark.parametrize(

@@ -54,11 +54,11 @@ Completed tasks per project for each period in the selected range.`,
   cumsumCompletedTasksPeriodically: `**Cumulative Completed Tasks**
 Running total of completions per project across the range.`,
   activeProjectHierarchy: `**Active Project Hierarchy**
-Treemap of active root projects and their active subprojects.
+Clustered bubble view of the busiest root projects and their busiest active subprojects.
 
-- Area is proportional to completed tasks in the selected range.
-- Parent tiles roll up completions from nested active subprojects.
-- Hover shows both subtree total and tasks completed directly in that project.`,
+- Bubble area is proportional to completed tasks in the selected range.
+- Smaller long-tail projects are folded into an \`Other\` bubble only when that bubble stays smaller than the smallest visible sibling.
+- Hover shows subtree total, direct completions, and how many hidden projects were folded in.`,
   heatmapEventsByDayHour: `**Event Heatmap**
 Activity intensity by day of week and hour. Darker means more events.`,
   eventsOverTime: `**Events Over Time**
