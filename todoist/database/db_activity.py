@@ -199,19 +199,21 @@ class DatabaseActivity:
             page_entries = [safe_instantiate_entry(EventEntry, **event) for event in raw_events]
             page_events = self._events_from_entries(page_entries)
             fetched_pages += 1
+            if events_already_fetched:
+                page_new_events = [event for event in page_events if event not in events_already_fetched]
+                skipped_events = len(page_events) - len(page_new_events)
+                if skipped_events:
+                    logger.debug(
+                        "Skipped {} already cached event(s) while scanning range page {}.",
+                        skipped_events,
+                        fetched_pages,
+                    )
+            else:
+                page_new_events = page_events
 
-            if (
-                events_already_fetched
-                and page_events
-                and all(event in events_already_fetched for event in page_events)
-            ):
-                logger.info(
-                    f"Stopping activity range fetch early after {fetched_pages} page(s); "
-                    "latest page is already cached."
-                )
-                break
-
-            events.extend(page_events)
+            # Keep scanning older cursor pages even when the newest page is
+            # already cached. Otherwise gaps in deeper pages can never be healed.
+            events.extend(page_new_events)
 
             next_cursor = decoded_result.get("next_cursor")
             if not isinstance(next_cursor, str):
