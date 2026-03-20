@@ -15,6 +15,8 @@
         <p>Local-first analytics, automation, and a dashboard for Todoist data, plus optional AI summaries and read-only chat over cached activity. Sync once, analyze and automate repeatedly.</p>
         <p><strong>Quick links</strong><br/>
           <a href="docs/README.md">Docs index</a><br/>
+          <a href="docs/v0.3-release-notes.md">v0.3 release notes</a><br/>
+          <a href="CHANGELOG.md">Changelog</a><br/>
           <a href="docs/INSTALLATION.md">Installation</a><br/>
           <a href="docs/USAGE.md">Usage</a><br/>
           <a href="docs/BUILDING.md">Build and CI</a><br/>
@@ -27,8 +29,14 @@
   </table>
 </div>
 
-<p><strong>Download the latest release</strong><br/>
-  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases">GitHub Releases</a>, open the newest release, and download the file you need:<br/>
+<p><strong>Pre-release notice</strong><br/>
+  This branch tracks the <code>v0.3</code> pre-release line. For production use, install the latest stable release:
+  <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7">todoist-assistant-v0.2.7</a>.<br/>
+  For the current release work in progress and checklist, see <a href="docs/v0.3-release-notes.md">v0.3 release notes</a>.
+</p>
+
+<p><strong>Download the latest stable release</strong><br/>
+  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7">GitHub Releases</a> and open the latest stable tag, then download the file you need:<br/>
   - Windows installer: <code>TodoistAssistantSetup.exe</code> or the <code>.msi</code>.<br/>
   - macOS app: <code>.dmg</code> (full app) or <code>.pkg</code> (CLI-only).<br/>
   - Linux: source distribution (see docs for setup).
@@ -106,10 +114,9 @@ make check
 - You can override cache location with `TODOIST_CACHE_DIR`.
 - Automation logs are written to `<cache-dir>/automation.log`.
 - Runtime logging defaults to `INFO`. Set `TODOIST_LOG_LEVEL=DEBUG` when you want the verbose trace again.
-- Recent runtime logs in `outputs/2026-03-08` through `outputs/2026-03-10` contain `0` recorded Todoist rate-limit hits (`429`, `Retry-After`, `Too Many Requests`).
 - Todoist request retries now wait only after an actual `429` response, using Todoist's `Retry-After` value when available and a small RPM-based fallback otherwise.
 - On startup, legacy runtime files found in old locations are migrated to the cache dir and backed up in `.cache-migration-backup/`.
-- Migration backups are temporary and are planned for removal in `v0.3.0`.
+- Migration backups are temporary and will be removed once the `v0.3` line is finalized.
 
 ## Quick start (Docker)
 ```bash

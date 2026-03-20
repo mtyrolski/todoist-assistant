@@ -2,6 +2,10 @@
 
 This folder contains the long-form docs. Start here and jump into the section you need.
 
+## Release notes
+- v0.3 pre-release notes and compliance checklist: [v0.3 release notes](v0.3-release-notes.md)
+- Changelog: [CHANGELOG.md](../CHANGELOG.md)
+
 ## Core
 - Installation: [docs/INSTALLATION.md](INSTALLATION.md)
 - Usage (CLI, dashboard, automations): [docs/USAGE.md](USAGE.md)
