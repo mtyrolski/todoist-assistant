@@ -1,5 +1,10 @@
 # Usage
 
+## Surface status
+- Stable: dashboard, Control Panel, automation tooling, and the library/API surfaces.
+- Beta: LLM-Agent Chat. It is local and read-only, but it still changes more often than the stable dashboard path.
+- Experimental: Habit Tracker Lab and other opt-in experimental dashboard surfaces.
+
 ## CLI
 - Show help: `todoist-assistant --help`
 - Check version: `todoist-assistant version --check`
@@ -10,6 +15,7 @@ make run_dashboard
 ```
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
+- This is the stable default surface for day-to-day use.
 
 Demo (anonymized):
 ```bash
@@ -41,6 +47,7 @@ uv run python3 -m todoist.run_observer --config-dir configs --config-name automa
 ```bash
 make chat_agent
 ```
+- The dashboard chat page is the beta surface; `make chat_agent` gives you the full local agent workflow.
 
 ## Library integration (example)
 ```python
