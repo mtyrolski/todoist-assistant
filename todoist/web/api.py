@@ -156,6 +156,7 @@ _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
 _DASHBOARD_STATE_SCHEMA_VERSION = 1
+_DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 1
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
     "Querying project data": 1,
@@ -518,6 +519,9 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         "created_at": _now_iso(),
         "last_refresh_s": float(_state.last_refresh_s),
         "demo_mode": bool(demo_mode),
+        "demo_state_version": (
+            _DEMO_DASHBOARD_STATE_SCHEMA_VERSION if demo_mode else None
+        ),
         "activity_cache_signature": _activity_cache_signature(),
         "df_activity": df_activity,
         "active_projects": active_projects,
@@ -539,6 +543,8 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     if isinstance(payload, dict):
         if payload.get("version") == _DASHBOARD_STATE_SCHEMA_VERSION:
             if bool(payload.get("demo_mode", False)) == demo_mode:
+                if demo_mode and payload.get("demo_state_version") != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION:
+                    return False
                 payload_signature = payload.get("activity_cache_signature")
                 current_signature = _activity_cache_signature()
                 if payload_signature == current_signature:

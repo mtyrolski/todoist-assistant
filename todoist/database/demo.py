@@ -190,7 +190,7 @@ def anonymize_label_names(active_projects: list[Project]) -> dict[str, str]:
 
     label_mapping: dict[str, str] = {
         original: str(replacement)
-        for original, replacement in zip(all_labels_names, _LABEL_NAMES, strict=True)
+        for original, replacement in zip(all_labels_names, _LABEL_NAMES)
     }
 
     for project in active_projects:

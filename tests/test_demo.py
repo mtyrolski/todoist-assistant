@@ -2,8 +2,14 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import cast
 
-from tests.factories import make_project, make_project_entry
-from todoist.database.demo import anonymize_activity_dates, anonymize_project_names
+import pytest
+from tests.factories import make_project, make_project_entry, make_task
+
+from todoist.database.demo import (
+    anonymize_activity_dates,
+    anonymize_label_names,
+    anonymize_project_names,
+)
 
 
 def _duration(index: pd.Index) -> pd.Timedelta:
@@ -166,3 +172,41 @@ def test_anonymize_project_names_uses_stable_hierarchy_themes():
     assert set(result.values()).isdisjoint(
         original_names
     )
+
+
+def test_anonymize_label_names_handles_partial_catalog_without_error():
+    active_projects = [
+        make_project(
+            project_id="root",
+            project_entry=make_project_entry(project_id="root", name="Alpha"),
+            tasks=[
+                make_task(task_id="t1", labels=["alpha", "beta"]),
+                make_task(task_id="t2", labels=["beta", "gamma"]),
+            ],
+        )
+    ]
+
+    label_mapping = anonymize_label_names(active_projects)
+
+    assert set(label_mapping) == {"alpha", "beta", "gamma"}
+    remapped_labels = {label for task in active_projects[0].tasks for label in task.task_entry.labels}
+    assert remapped_labels == set(label_mapping.values())
+
+
+def test_anonymize_label_names_raises_when_catalog_is_too_small(monkeypatch):
+    monkeypatch.setattr(
+        "todoist.database.demo._LABEL_NAMES",
+        ("one", "two"),
+    )
+    active_projects = [
+        make_project(
+            project_id="root",
+            project_entry=make_project_entry(project_id="root", name="Alpha"),
+            tasks=[
+                make_task(task_id="t1", labels=["alpha", "beta", "gamma"]),
+            ],
+        )
+    ]
+
+    with pytest.raises(ValueError, match="Not enough unique names"):
+        anonymize_label_names(active_projects)
