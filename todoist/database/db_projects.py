@@ -422,7 +422,17 @@ class DatabaseProjects:
         if mapping_ref is None:
             logger.error("Project name to color mapping not initialized; aborting anonymization.")
             return
+
+        projects_to_rename = list(self.projects_cache or [])
+        if self.archived_projects_cache:
+            projects_to_rename.extend(self.archived_projects_cache.values())
+
         for ori_name, anonym_name in tqdm(project_mapping.items(), desc="Anonymizing projects", unit="project"):
-            logger.info(f"Anonymizing project '{ori_name}' to '{anonym_name}'")
-            if ori_name in mapping_ref:
-                mapping_ref[anonym_name] = mapping_ref[ori_name]
+            color = mapping_ref.pop(ori_name, None)
+            if color is not None:
+                mapping_ref[anonym_name] = color
+            for project in projects_to_rename:
+                if project.project_entry.name == ori_name:
+                    project.project_entry.name = anonym_name
+
+        logger.info(f"Anonymized {len(project_mapping)} projects.")
