@@ -14,7 +14,8 @@ _BORDER_COLOR = "rgba(17,19,24,0.92)"
 _EMPTY_COLOR = "#7f8b99"
 _TEXT_COLOR = "#e7edf5"
 _MUTED_TEXT_COLOR = "#9fb0c2"
-_CENTER_COLOR = "#1b2231"
+_CENTER_COLOR = "#151a2b"
+_PANEL_GLOW = "#71dfff"
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,11 @@ def _mix_color(color: str, target: str, weight: float) -> str:
     return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
 
 
+def _rgba(color: str, alpha: float) -> str:
+    red, green, blue = _hex_to_rgb(color)
+    return f"rgba({red},{green},{blue},{max(0.0, min(alpha, 1.0)):.3f})"
+
+
 def _wrap_label(label: str, max_line_length: int = 15) -> str:
     words = label.split()
     if not words:
@@ -216,7 +222,10 @@ def _build_nodes_for_parent(
                 root_name=root_name,
                 depth=depth,
                 kind="project",
-                color=_mix_color(root_color, "#ffffff", min(0.68, 0.18 + depth * 0.1)),
+                color=_rgba(
+                    _mix_color(root_color, "#d9e8ff", min(0.24, 0.06 + depth * 0.05)),
+                    max(0.58, 0.88 - depth * 0.08),
+                ),
             )
         )
 
@@ -239,7 +248,10 @@ def _build_nodes_for_parent(
                 root_name=root_name,
                 depth=depth,
                 kind="aggregate",
-                color=_mix_color(root_color, "#dbe7f5", 0.34 + min(depth, 4) * 0.04),
+                color=_rgba(
+                    _mix_color(root_color, "#b7c8da", 0.2 + min(depth, 4) * 0.03),
+                    0.62,
+                ),
                 hidden_projects=len(hidden_children),
             )
         )
@@ -265,7 +277,7 @@ def _build_nodes_for_parent(
 
 def _sunburst_display_label(node: _HierarchyNode) -> str:
     if node.kind == "center":
-        return node.label
+        return f"{node.label}<br>{node.total_completed}"
     if node.kind == "aggregate":
         return "Other" if node.label == "Other" else _wrap_label(node.label)
     return _wrap_label(node.label)
@@ -339,12 +351,16 @@ def plot_active_project_hierarchy_sunburst(
             root_name=str(projects_by_id[project_id].project_entry.name),
             depth=1,
             kind="root",
-            color=_mix_color(
-                project_colors.get(
-                    str(projects_by_id[project_id].project_entry.name), _EMPTY_COLOR
+            color=_rgba(
+                _mix_color(
+                    project_colors.get(
+                        str(projects_by_id[project_id].project_entry.name),
+                        _EMPTY_COLOR,
+                    ),
+                    "#d7eeff",
+                    0.12,
                 ),
-                "#ffffff",
-                0.08,
+                0.9,
             ),
         )
         for project_id in sorted(
@@ -369,7 +385,7 @@ def plot_active_project_hierarchy_sunburst(
                 root_name="Active projects",
                 depth=1,
                 kind="aggregate",
-                color=_mix_color(_EMPTY_COLOR, "#dbe7f5", 0.18),
+                color=_rgba(_mix_color(_EMPTY_COLOR, "#b8c7de", 0.22), 0.78),
                 hidden_projects=len(hidden_roots),
             )
         )
@@ -384,7 +400,7 @@ def plot_active_project_hierarchy_sunburst(
             root_name="Active projects",
             depth=0,
             kind="center",
-            color=_CENTER_COLOR,
+            color=_rgba(_CENTER_COLOR, 0.98),
         )
     ]
     for root_node in visible_roots:
@@ -431,10 +447,18 @@ def plot_active_project_hierarchy_sunburst(
                 values=values,
                 branchvalues="total",
                 sort=False,
-                marker=dict(colors=colors, line=dict(color=_BORDER_COLOR, width=1.4)),
+                marker=dict(
+                    colors=colors,
+                    line=dict(color="rgba(8,12,24,0.74)", width=2.0),
+                ),
                 customdata=customdata,
                 textinfo="label+value",
-                insidetextorientation="auto",
+                insidetextorientation="radial",
+                hoverlabel=dict(
+                    bgcolor="rgba(12,16,28,0.96)",
+                    bordercolor=_rgba(_PANEL_GLOW, 0.28),
+                    font=dict(color=_TEXT_COLOR, size=13),
+                ),
                 hovertemplate=(
                     "<b>%{customdata[1]}</b>"
                     "<br>Total completed in range: %{customdata[2]}"
@@ -451,16 +475,17 @@ def plot_active_project_hierarchy_sunburst(
         template="plotly_dark",
         title=None,
         height=620,
-        margin=dict(l=24, r=24, t=30, b=52),
+        margin=dict(l=24, r=24, t=30, b=54),
         paper_bgcolor=_BACKGROUND_COLOR,
         plot_bgcolor=_BACKGROUND_COLOR,
         showlegend=False,
-        uniformtext=dict(minsize=10, mode="hide"),
+        uniformtext=dict(minsize=12, mode="hide"),
+        font=dict(color=_TEXT_COLOR, family="Inter, ui-sans-serif, system-ui, sans-serif"),
         uirevision="active-project-hierarchy-sunburst",
         annotations=[
             dict(
                 x=0.5,
-                y=0.01,
+                y=0.015,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
@@ -468,9 +493,7 @@ def plot_active_project_hierarchy_sunburst(
                 yanchor="bottom",
                 align="center",
                 text=(
-                    "Sunburst area tracks completed tasks. "
-                    "Long tails are folded into Other when they stay smaller "
-                    "than the smallest visible sibling."
+                    "Ring area tracks completed tasks. Long tails fold into Other only when they stay smaller than the smallest visible sibling."
                 ),
                 font=dict(size=9, color=_MUTED_TEXT_COLOR),
             )

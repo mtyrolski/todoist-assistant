@@ -8,18 +8,6 @@ export type Health = { status: string; version?: string } | null;
 
 export type Granularity = "W" | "ME" | "3ME";
 
-export type ProjectHierarchyVariantFigure =
-  | PlotlyFigure
-  | {
-      figure?: PlotlyFigure;
-      label?: string;
-      title?: string;
-      description?: string;
-      help?: string;
-    };
-
-export type ProjectHierarchyVariants = Record<string, ProjectHierarchyVariantFigure>;
-
 export type DashboardFigures = {
   weeklyCompletionTrend?: PlotlyFigure;
   taskLifespans?: PlotlyFigure;
@@ -28,7 +16,6 @@ export type DashboardFigures = {
   heatmapEventsByDayHour?: PlotlyFigure;
   eventsOverTime?: PlotlyFigure;
   activeProjectHierarchy?: PlotlyFigure;
-  activeProjectHierarchyVariants?: ProjectHierarchyVariants;
 };
 
 export type DashboardHome = {
@@ -75,7 +62,6 @@ export type DashboardHome = {
     };
   };
   figures: DashboardFigures;
-  activeProjectHierarchyVariants?: ProjectHierarchyVariants;
   refreshedAt: string;
   error?: string;
 };

@@ -36,21 +36,6 @@ def _stub_all_figures(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         web_api,
-        "plot_active_project_hierarchy_treemap",
-        lambda *args, **kwargs: go.Figure(),
-    )
-    monkeypatch.setattr(
-        web_api,
-        "plot_active_project_hierarchy_sunburst",
-        lambda *args, **kwargs: go.Figure(),
-    )
-    monkeypatch.setattr(
-        web_api,
-        "plot_active_project_hierarchy_icicle",
-        lambda *args, **kwargs: go.Figure(),
-    )
-    monkeypatch.setattr(
-        web_api,
         "plot_heatmap_of_events_by_day_and_hour",
         lambda *args, **kwargs: go.Figure(),
     )
@@ -841,10 +826,7 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
     assert urgency_status["counts"]["p1Tasks"] == 1
     assert urgency_status["counts"]["dueTasks"] == 1
     assert urgency_status["counts"]["fireTasks"] == 0
-    variants = payload["figures"]["activeProjectHierarchyVariants"]
-    assert set(variants) == {"treemap", "sunburst", "icicle"}
-    assert variants["treemap"]["label"] == "Treemap"
-    assert isinstance(variants["treemap"]["figure"], dict)
+    assert isinstance(payload["figures"]["activeProjectHierarchy"], dict)
 
 
 def test_llm_chat_update_settings_supports_openai_backend(

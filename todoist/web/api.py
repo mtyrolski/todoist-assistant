@@ -32,9 +32,6 @@ from todoist.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
     plot_active_project_hierarchy,
-    plot_active_project_hierarchy_icicle,
-    plot_active_project_hierarchy_sunburst,
-    plot_active_project_hierarchy_treemap,
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
@@ -1850,47 +1847,6 @@ async def dashboard_home(
                     project_colors,
                 )
             ),
-            "activeProjectHierarchyVariants": {
-                "treemap": {
-                    "label": "Treemap",
-                    "description": "Nested area view",
-                    "figure": _fig_to_dict(
-                        plot_active_project_hierarchy_treemap(
-                            df_activity,
-                            beg_range,
-                            end_range,
-                            active_projects,
-                            project_colors,
-                        )
-                    ),
-                },
-                "sunburst": {
-                    "label": "Sunburst",
-                    "description": "Radial nesting view",
-                    "figure": _fig_to_dict(
-                        plot_active_project_hierarchy_sunburst(
-                            df_activity,
-                            beg_range,
-                            end_range,
-                            active_projects,
-                            project_colors,
-                        )
-                    ),
-                },
-                "icicle": {
-                    "label": "Icicle",
-                    "description": "Vertical nesting view",
-                    "figure": _fig_to_dict(
-                        plot_active_project_hierarchy_icicle(
-                            df_activity,
-                            beg_range,
-                            end_range,
-                            active_projects,
-                            project_colors,
-                        )
-                    ),
-                },
-            },
         }
         parent_completed_share = _completed_share_leaderboard(
             df_activity,

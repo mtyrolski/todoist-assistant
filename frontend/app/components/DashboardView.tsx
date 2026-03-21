@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { ComponentType } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlotParams } from "react-plotly.js";
 import { PlotCard } from "./PlotCard";
 import type { PlotlyFigure } from "./PlotCard";
@@ -36,26 +36,8 @@ import {
 } from "../lib/dashboardHooks";
 
 const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
-const HIERARCHY_VIEW_KEY = "todoist-assistant.activeProjectHierarchyView";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
-
-type PlotlyFigureWithMeta =
-  | PlotlyFigure
-  | {
-      figure?: PlotlyFigure;
-      label?: string;
-      title?: string;
-      description?: string;
-      help?: string;
-    };
-
-type HierarchyVariantOption = {
-  key: string;
-  label: string;
-  description?: string;
-  figure: PlotlyFigure;
-};
 
 type UrgencyStatusPayload = {
   state: "good" | "warn" | "danger";
@@ -77,91 +59,6 @@ type UrgencyStatusPayload = {
 type DashboardHomeWithUrgency = DashboardHome & {
   urgencyStatus?: UrgencyStatusPayload;
 };
-
-function isPlotlyFigure(value: unknown): value is PlotlyFigure {
-  return Boolean(value && typeof value === "object" && Array.isArray((value as PlotlyFigure).data));
-}
-
-function extractHierarchyFigure(source: PlotlyFigureWithMeta | undefined): PlotlyFigure | null {
-  if (!source || typeof source !== "object") return null;
-  if (isPlotlyFigure(source)) return source;
-  const nestedFigure = (source as { figure?: unknown }).figure;
-  return isPlotlyFigure(nestedFigure) ? nestedFigure : null;
-}
-
-function hierarchyVariantLabelFromKey(key: string): string {
-  const normalized = key.trim().toLowerCase();
-  const keywordMap: Array<[string, string]> = [
-    ["bubble", "Bubble"],
-    ["packed", "Packed bubbles"],
-    ["treemap", "Treemap"],
-    ["sunburst", "Sunburst"],
-    ["icicle", "Icicle"],
-    ["tree", "Tree"],
-    ["network", "Network"],
-    ["graph", "Network"],
-    ["radial", "Radial tree"],
-    ["dendrogram", "Dendrogram"],
-    ["table", "Table"],
-    ["list", "List"]
-  ];
-
-  for (const [needle, label] of keywordMap) {
-    if (normalized.includes(needle)) return label;
-  }
-
-  return key
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function hierarchyVariantDescriptionFromKey(key: string): string | undefined {
-  const normalized = key.trim().toLowerCase();
-  if (normalized.includes("bubble")) return "Default clustered overview";
-  if (normalized.includes("treemap")) return "Nested area view";
-  if (normalized.includes("sunburst")) return "Radial nesting view";
-  if (normalized.includes("icicle")) return "Vertical nesting view";
-  if (normalized.includes("tree") || normalized.includes("dendrogram")) return "Hierarchy-first structure";
-  if (normalized.includes("network") || normalized.includes("graph")) return "Relationship-first layout";
-  if (normalized.includes("table") || normalized.includes("list")) return "Text-first summary";
-  return undefined;
-}
-
-function normalizeHierarchyVariant(key: string, value: PlotlyFigureWithMeta): HierarchyVariantOption | null {
-  const figure = extractHierarchyFigure(value);
-  if (!figure) return null;
-
-  if (isPlotlyFigure(value)) {
-    return {
-      key,
-      label: hierarchyVariantLabelFromKey(key),
-      description: hierarchyVariantDescriptionFromKey(key),
-      figure
-    };
-  }
-
-  const labelSource =
-    typeof value.label === "string" && value.label.trim()
-      ? value.label.trim()
-      : typeof value.title === "string" && value.title.trim()
-        ? value.title.trim()
-        : hierarchyVariantLabelFromKey(key);
-  const descriptionSource =
-    typeof value.description === "string" && value.description.trim()
-      ? value.description.trim()
-      : typeof value.help === "string" && value.help.trim()
-        ? value.help.trim()
-        : hierarchyVariantDescriptionFromKey(key);
-
-  return {
-    key,
-    label: labelSource,
-    description: descriptionSource,
-    figure
-  };
-}
 
 function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknown> {
   const { title: _title, height: _height, ...baseLayout } = figure.layout ?? {};
@@ -197,16 +94,21 @@ function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknow
     font: { color: "#e8ecf2" },
     template: "plotly_dark",
     margin: {
-      l: Math.max(36, toNumber(margin.l, 36)),
-      r: Math.max(20, toNumber(margin.r, 20)),
-      t: Math.max(34, toNumber(margin.t, 34)),
-      b: Math.max(34, toNumber(margin.b, 34))
+      l: Math.max(22, toNumber(margin.l, 22)),
+      r: Math.max(22, toNumber(margin.r, 22)),
+      t: Math.max(22, toNumber(margin.t, 22)),
+      b: Math.max(50, toNumber(margin.b, 50))
     },
     xaxis: withTitleStandoff(xaxis, 16),
     yaxis: withTitleStandoff(yaxis, 14),
     legend: {
       ...legend,
       tracegroupgap: Math.max(10, toNumber(legend.tracegroupgap, 10))
+    },
+    hoverlabel: {
+      bgcolor: "rgba(13,16,27,0.96)",
+      bordercolor: "rgba(146,225,255,0.24)",
+      font: { color: "#eff4ff", size: 13 }
     }
   };
 }
@@ -252,7 +154,8 @@ export function DashboardView({
   const [firstSyncPending, setFirstSyncPending] = useState(false);
   const [firstSyncTriggered, setFirstSyncTriggered] = useState(false);
   const [activityRecoveryAttempted, setActivityRecoveryAttempted] = useState(false);
-  const [selectedHierarchyView, setSelectedHierarchyView] = useState("bubble");
+  const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
+  const focusMetricsRef = useRef<HTMLDivElement | null>(null);
   const activityReady = Boolean(status?.activityCache);
   const mappingReady = setupComplete;
   const setupSteps = useMemo(() => {
@@ -329,14 +232,6 @@ export function DashboardView({
   }, [status, activityRecoveryAttempted, activityReady, firstSyncPending]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storedView = window.localStorage.getItem(HIERARCHY_VIEW_KEY);
-    if (storedView) {
-      setSelectedHierarchyView(storedView);
-    }
-  }, []);
-
-  useEffect(() => {
     if (!firstSyncPending || firstSyncTriggered) return;
     setFirstSyncTriggered(true);
     refresh();
@@ -356,7 +251,6 @@ export function DashboardView({
   const noData = Boolean(dashboard?.noData);
   const dashboardWithUrgency = dashboard as DashboardHomeWithUrgency | null;
   const figures = dashboard?.figures ?? {};
-  const hierarchyVariantsSource = dashboard?.activeProjectHierarchyVariants ?? figures.activeProjectHierarchyVariants ?? null;
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
   const rootBoard = lastWeek?.rootProjects?.items ?? null;
@@ -383,65 +277,25 @@ export function DashboardView({
   const secondaryMetricItems = metricItems.filter(
     (item) => item && !focusMetricItems.some((focus) => focus?.name === item.name) && item.name !== "Events" && item.name !== "Added Tasks"
   );
-  const hierarchyViewOptions = useMemo(() => {
-    const rawOptions = [
-      figures.activeProjectHierarchy
-        ? {
-            key: "bubble",
-            label: "Bubble",
-            description: "Default clustered overview",
-            figure: figures.activeProjectHierarchy
-          }
-        : null,
-      ...Object.entries(hierarchyVariantsSource ?? {}).flatMap(([key, value]) => {
-        const normalized = normalizeHierarchyVariant(key, value);
-        return normalized ? [normalized] : [];
-      })
-    ].filter((option): option is HierarchyVariantOption => Boolean(option));
+  const activeProjectHierarchyFigure = figures.activeProjectHierarchy ?? null;
+  useEffect(() => {
+    const metricsNode = focusMetricsRef.current;
+    if (!metricsNode) return;
 
-    const byKey = new Map<string, HierarchyVariantOption>();
-    for (const option of rawOptions) {
-      const normalizedKey = option.key.trim().toLowerCase();
-      if (!byKey.has(normalizedKey)) {
-        byKey.set(normalizedKey, option);
-      }
-    }
-
-    const priority = (option: HierarchyVariantOption): number => {
-      const value = `${option.key} ${option.label}`.toLowerCase();
-      const keywords = ["bubble", "treemap", "sunburst", "icicle", "tree", "network", "graph", "radial", "dendrogram", "table", "list"];
-      const index = keywords.findIndex((keyword) => value.includes(keyword));
-      return index === -1 ? keywords.length : index;
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(metricsNode.getBoundingClientRect().height);
+      setFocusMetricsHeight((currentHeight) => (currentHeight === nextHeight ? currentHeight : nextHeight));
     };
 
-    return Array.from(byKey.values()).sort((left, right) => {
-      const leftPriority = priority(left);
-      const rightPriority = priority(right);
-      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-      return left.label.localeCompare(right.label);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return undefined;
+
+    const observer = new ResizeObserver(() => {
+      updateHeight();
     });
-  }, [figures.activeProjectHierarchy, hierarchyVariantsSource]);
-  const defaultHierarchyView = hierarchyViewOptions[0] ?? null;
-  const selectedHierarchyOption =
-    hierarchyViewOptions.find((option) => option.key === selectedHierarchyView) ?? defaultHierarchyView;
-  const selectedHierarchyKey = selectedHierarchyOption?.key ?? "";
-  const hierarchyViewDescription =
-    selectedHierarchyOption?.description ??
-    (hierarchyViewOptions.length > 1 ? "Choose a different hierarchy view when the API provides more than one." : undefined);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!hierarchyViewOptions.length) return;
-    if (selectedHierarchyKey) {
-      window.localStorage.setItem(HIERARCHY_VIEW_KEY, selectedHierarchyKey);
-    }
-  }, [hierarchyViewOptions.length, selectedHierarchyKey]);
-  useEffect(() => {
-    if (!hierarchyViewOptions.length) return;
-    const isValid = hierarchyViewOptions.some((option) => option.key === selectedHierarchyView);
-    if (!isValid) {
-      setSelectedHierarchyView(defaultHierarchyView?.key ?? "bubble");
-    }
-  }, [hierarchyViewOptions, selectedHierarchyView, defaultHierarchyView?.key]);
+    observer.observe(metricsNode);
+    return () => observer.disconnect();
+  }, [urgencyStatus, focusMetricItems.length, metricsCurrentPeriod, metricsPreviousPeriod]);
   const urgencyTheme = {
     good: {
       background: "linear-gradient(180deg, rgba(39, 77, 66, 0.82), rgba(18, 22, 28, 0.94))",
@@ -532,16 +386,9 @@ export function DashboardView({
       help: PLOT_HELP.eventsOverTime
     }
   ];
-  const activeProjectHierarchyFigure = selectedHierarchyOption?.figure ?? figures.activeProjectHierarchy ?? null;
   const onAfterMutation = () => {
     refresh();
     refreshStatus();
-  };
-  const handleHierarchyViewChange = (key: string) => {
-    setSelectedHierarchyView(key);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(HIERARCHY_VIEW_KEY, key);
-    }
   };
   const badgeItems = [
     { key: "p1", label: "P1", className: "badge badge-p1", value: dashboard?.badges.p1 },
@@ -786,7 +633,7 @@ export function DashboardView({
 
       {!noData ? (
         <section id="stats" className="overviewSplit jumpTarget" aria-label="Focused metrics and project hierarchy">
-          <div className="overviewMetricColumn" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div ref={focusMetricsRef} className="overviewMetricColumn">
             {urgencyStatus ? (
               <section
                 className="card"
@@ -904,59 +751,22 @@ export function DashboardView({
               </>
             )}
           </div>
-          <div id="projects" className="overviewPlotColumn jumpTarget" style={{ display: "flex", alignSelf: "stretch" }}>
+          <div
+            id="projects"
+            className="overviewPlotColumn jumpTarget"
+            style={focusMetricsHeight ? { height: `${focusMetricsHeight}px` } : undefined}
+          >
             <section className="card cardFillHeight hierarchyCard">
               <header className="cardHeader hierarchyCardHeader">
                 <div className="hierarchyCardHeaderTop">
                   <div className="cardTitleRow">
                     <h2>Active Project Hierarchy</h2>
-                    <InfoTip
-                      label="About active project hierarchy"
-                      content={PLOT_HELP.activeProjectHierarchy}
-                    />
+                    <InfoTip label="About active project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
                   </div>
-                  {hierarchyViewOptions.length > 1 ? (
-                    <InfoTip
-                      label="About hierarchy views"
-                      content={PLOT_HELP.activeProjectHierarchyChooser}
-                    />
-                  ) : null}
                 </div>
-                <div className="hierarchyVariantArea">
-                  {hierarchyViewOptions.length > 1 ? (
-                    <>
-                      <div className="hierarchyVariantSwitcher" role="tablist" aria-label="Choose hierarchy view">
-                        {hierarchyViewOptions.map((option) => {
-                          const isSelected = option.key === selectedHierarchyOption?.key;
-                          const isDefault = option.key === defaultHierarchyView?.key;
-                          return (
-                            <button
-                              key={option.key}
-                              type="button"
-                              className={`hierarchyVariantButton${isSelected ? " hierarchyVariantButtonActive" : ""}`}
-                              onClick={() => handleHierarchyViewChange(option.key)}
-                              aria-pressed={isSelected}
-                              aria-label={`${option.label}${isDefault ? ", default" : ""}${isSelected ? ", selected" : ""}`}
-                            >
-                              <span className="hierarchyVariantButtonLabel">{option.label}</span>
-                              <span className="hierarchyVariantButtonMeta">
-                                {isSelected ? "Selected" : isDefault ? "Default" : "View"}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="muted tiny hierarchyVariantNote">
-                        {hierarchyViewDescription ?? "Switch representations inside the same card."}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="muted tiny hierarchyVariantNote">
-                      {selectedHierarchyOption?.label ? `${selectedHierarchyOption.label} view` : "Bubble view"} is
-                      available.
-                    </p>
-                  )}
-                </div>
+                <p className="muted hierarchyCardLead">
+                  Sunburst view of active roots and subprojects, tuned to match the dashboard palette.
+                </p>
               </header>
               <div className="cardBody cardBodyFill hierarchyCardBody">
                 <div className="hierarchyPlotStage">

@@ -9,11 +9,13 @@ from typing import Any, cast
 import plotly.graph_objects as go
 
 from todoist.dashboard.plots import (
-    plot_active_project_hierarchy,
     plot_completed_tasks_periodically,
     cumsum_completed_tasks_periodically,
     plot_task_lifespans,
     plot_weekly_completion_trend,
+)
+from todoist.dashboard._plot_project_hierarchy import (
+    plot_active_project_hierarchy,
 )
 from tests.factories import make_project, make_project_entry
 

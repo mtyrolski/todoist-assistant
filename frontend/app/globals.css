@@ -1128,9 +1128,6 @@ textarea.textInput {
 }
 
 .overviewSplit {
-  --focus-card-height: 214px;
-  --focus-card-gap: 22px;
-  --focus-stack-height: calc((2 * var(--focus-card-height)) + var(--focus-card-gap));
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 24px;
@@ -1138,31 +1135,24 @@ textarea.textInput {
   margin-top: 4px;
 }
 
-.overviewSplit:has(> .overviewMetricColumn > .stat:nth-child(3)) {
-  --focus-stack-height: calc((3 * var(--focus-card-height)) + (2 * var(--focus-card-gap)));
-}
-
-.overviewSplit:has(> .overviewMetricColumn > .stat:nth-child(4)) {
-  --focus-stack-height: calc((4 * var(--focus-card-height)) + (3 * var(--focus-card-gap)));
-}
-
 .overviewMetricColumn {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: var(--focus-card-gap) !important;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
   align-content: start;
+  min-width: 0;
 }
 
 .overviewPlotColumn {
   display: flex;
   min-width: 0;
   min-height: 0;
-  align-self: start;
+  align-self: stretch;
 }
 
 .overviewPlotColumn > .card {
   width: 100%;
-  height: var(--focus-stack-height);
+  height: 100%;
   min-height: 0;
 }
 
@@ -1171,19 +1161,18 @@ textarea.textInput {
   min-height: 0;
   padding: 14px;
   background:
-    radial-gradient(circle at 15% 10%, rgba(106, 227, 255, 0.08), transparent 28%),
-    radial-gradient(circle at 88% 12%, rgba(140, 123, 255, 0.08), transparent 24%),
-    rgba(0, 0, 0, 0.1);
+    radial-gradient(circle at 14% 16%, rgba(109, 231, 255, 0.16), transparent 30%),
+    radial-gradient(circle at 82% 18%, rgba(180, 113, 255, 0.13), transparent 28%),
+    radial-gradient(circle at 72% 82%, rgba(255, 196, 120, 0.08), transparent 22%),
+    linear-gradient(180deg, rgba(18, 22, 36, 0.86), rgba(10, 12, 20, 0.96));
 }
 
 .hierarchyCard {
-  gap: 12px;
+  gap: 14px;
 }
 
 .hierarchyCardHeader {
-  align-items: stretch;
-  flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .hierarchyCardHeaderTop {
@@ -1194,77 +1183,30 @@ textarea.textInput {
   flex-wrap: wrap;
 }
 
-.hierarchyVariantArea {
-  display: grid;
-  gap: 8px;
-}
-
-.hierarchyVariantSwitcher {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.hierarchyVariantButton {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 102px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-}
-
-.hierarchyVariantButton:hover {
-  transform: translateY(-1px);
-  border-color: rgba(106, 227, 255, 0.42);
-  background: rgba(106, 227, 255, 0.1);
-}
-
-.hierarchyVariantButton:focus-visible {
-  outline: 2px solid rgba(106, 227, 255, 0.6);
-  outline-offset: 2px;
-}
-
-.hierarchyVariantButtonActive {
-  border-color: rgba(106, 227, 255, 0.6);
-  background: rgba(106, 227, 255, 0.14);
-  box-shadow: 0 0 0 2px rgba(106, 227, 255, 0.1);
-}
-
-.hierarchyVariantButtonLabel {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.hierarchyVariantButtonMeta {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted);
-}
-
-.hierarchyVariantNote {
-  line-height: 1.45;
+.hierarchyCardLead {
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 62ch;
 }
 
 .hierarchyCardBody {
-  padding: 12px;
+  padding: 10px;
 }
 
 .hierarchyPlotStage {
   flex: 1;
   min-height: 0;
   display: flex;
-  border-radius: 12px;
+  border-radius: 18px;
   overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(123, 138, 255, 0.2), transparent 18%),
+    radial-gradient(circle at 24% 24%, rgba(109, 231, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 74% 76%, rgba(255, 173, 109, 0.1), transparent 22%),
+    linear-gradient(180deg, rgba(16, 20, 34, 0.92), rgba(9, 11, 18, 0.98));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 24px 64px rgba(255, 255, 255, 0.02);
 }
 
 .hierarchyPlotStage > * {
@@ -1303,7 +1245,7 @@ textarea.textInput {
   display: grid;
   gap: 15px;
   align-content: start;
-  min-height: var(--focus-card-height);
+  min-height: 214px;
 }
 
 .statTop {

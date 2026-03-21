@@ -9,23 +9,16 @@ from todoist.dashboard._plot_periodic import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
 )
-from todoist.dashboard._plot_project_hierarchy import plot_active_project_hierarchy
-from todoist.dashboard._plot_project_hierarchy_icicle import (
-    plot_active_project_hierarchy_icicle,
-)
 from todoist.dashboard._plot_project_hierarchy_sunburst import (
     plot_active_project_hierarchy_sunburst,
 )
-from todoist.dashboard._plot_project_hierarchy_treemap import (
-    plot_active_project_hierarchy_treemap,
-)
 from todoist.dashboard._plot_weekly_trend import plot_weekly_completion_trend
+
+plot_active_project_hierarchy = plot_active_project_hierarchy_sunburst
 
 __all__ = [
     "plot_active_project_hierarchy",
-    "plot_active_project_hierarchy_icicle",
     "plot_active_project_hierarchy_sunburst",
-    "plot_active_project_hierarchy_treemap",
     "cumsum_completed_tasks_periodically",
     "plot_completed_tasks_periodically",
     "plot_events_over_time",
