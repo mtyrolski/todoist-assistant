@@ -1,5 +1,7 @@
 """Tests for the OpenAI Responses API adapter."""
 
+import json
+
 import pytest
 
 import httpx
@@ -14,24 +16,56 @@ from todoist.llm.openai_llm import (
 
 
 def test_gpt5_payload_omits_sampling_controls() -> None:
+    captured_payload: dict[str, object] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured_payload.update(json.loads(request.content))
+        return httpx.Response(200, json={"output_text": "ok"}, request=request)
+
     model = OpenAIResponsesChatModel(OpenAIChatConfig(api_key="sk-test"))
+    setattr(
+        model,
+        "_client",
+        httpx.Client(
+            transport=httpx.MockTransport(_handler),
+            timeout=model.config.timeout_seconds,
+            headers={"Authorization": "Bearer sk-test", "Content-Type": "application/json"},
+        ),
+    )
 
-    payload = model._create_payload([{"role": "user", "content": "Hello"}])
+    payload = model.chat([{"role": "user", "content": "Hello"}])
 
-    assert payload["model"] == DEFAULT_OPENAI_MODEL
-    assert "temperature" not in payload
-    assert "top_p" not in payload
+    assert payload == "ok"
+    assert captured_payload["model"] == DEFAULT_OPENAI_MODEL
+    assert "temperature" not in captured_payload
+    assert "top_p" not in captured_payload
 
 
 def test_non_gpt5_payload_keeps_sampling_controls() -> None:
+    captured_payload: dict[str, object] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured_payload.update(json.loads(request.content))
+        return httpx.Response(200, json={"output_text": "ok"}, request=request)
+
     model = OpenAIResponsesChatModel(
         OpenAIChatConfig(api_key="sk-test", model="gpt-4.1-mini")
     )
+    setattr(
+        model,
+        "_client",
+        httpx.Client(
+            transport=httpx.MockTransport(_handler),
+            timeout=model.config.timeout_seconds,
+            headers={"Authorization": "Bearer sk-test", "Content-Type": "application/json"},
+        ),
+    )
 
-    payload = model._create_payload([{"role": "user", "content": "Hello"}])
+    payload = model.chat([{"role": "user", "content": "Hello"}])
 
-    assert payload["temperature"] == pytest.approx(0.2)
-    assert payload["top_p"] == pytest.approx(0.95)
+    assert payload == "ok"
+    assert captured_payload["temperature"] == pytest.approx(0.2)
+    assert captured_payload["top_p"] == pytest.approx(0.95)
 
 
 def test_post_raises_api_message_for_http_errors() -> None:
@@ -47,14 +81,18 @@ def test_post_raises_api_message_for_http_errors() -> None:
         )
 
     model = OpenAIResponsesChatModel(OpenAIChatConfig(api_key="sk-test"))
-    model._client = httpx.Client(
-        transport=httpx.MockTransport(_handler),
-        timeout=model.config.timeout_seconds,
-        headers={"Authorization": "Bearer sk-test", "Content-Type": "application/json"},
+    setattr(
+        model,
+        "_client",
+        httpx.Client(
+            transport=httpx.MockTransport(_handler),
+            timeout=model.config.timeout_seconds,
+            headers={"Authorization": "Bearer sk-test", "Content-Type": "application/json"},
+        ),
     )
 
     with pytest.raises(ValueError, match="Unsupported parameter"):
-        model._post({"model": DEFAULT_OPENAI_MODEL, "input": []})
+        model.chat([{"role": "user", "content": "Hello"}])
 
 
 def test_build_text_format_uses_openai_strict_object_schema() -> None:

@@ -262,23 +262,25 @@ def parse_yyyy_mm_dd(value: str) -> datetime:
 
 def safe_activity_anchor(df_activity) -> datetime:
     df_activity = normalize_activity_df(df_activity)
-    if df_activity is None or df_activity.empty:
-        return datetime.now()
-    try:
-        max_value = pd.to_datetime(df_activity.index).max()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
-        return datetime.now()
-    if max_value is None or bool(pd.isna(cast(Any, max_value))):
-        return datetime.now()
-    if isinstance(max_value, pd.Timestamp):
-        return max_value.to_pydatetime(warn=False)
-    if isinstance(max_value, datetime):
-        return max_value
-    try:
-        return datetime.fromisoformat(str(max_value))
-    except ValueError:
-        return datetime.now()
+    anchor = datetime.now()
+    if df_activity is not None and not df_activity.empty:
+        try:
+            max_value = pd.to_datetime(df_activity.index).max()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
+            max_value = None
+
+        if max_value is not None and not bool(pd.isna(cast(Any, max_value))):
+            if isinstance(max_value, pd.Timestamp):
+                anchor = max_value.to_pydatetime(warn=False)
+            elif isinstance(max_value, datetime):
+                anchor = max_value
+            else:
+                try:
+                    anchor = datetime.fromisoformat(str(max_value))
+                except ValueError:
+                    pass
+    return anchor
 
 
 def empty_activity_df() -> pd.DataFrame:

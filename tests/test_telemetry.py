@@ -1,13 +1,14 @@
+import json
 from pathlib import Path
 
-import todoist.telemetry as telemetry
+from todoist import telemetry
 
 
 def test_bootstrap_config_defaults_to_disabled(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(telemetry, "_read_windows_registry_opt_in", lambda: None)
 
     enabled = telemetry.bootstrap_config(tmp_path)
-    config = telemetry._read_json(tmp_path / telemetry.CONFIG_FILENAME)
+    config = json.loads((tmp_path / telemetry.CONFIG_FILENAME).read_text(encoding="utf-8"))
 
     assert enabled is False
     assert config == {"enabled": False}

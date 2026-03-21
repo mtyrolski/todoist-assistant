@@ -530,45 +530,45 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
 
 
 def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
+    loaded = False
     try:
         payload = Cache().dashboard_state.load()
     except LocalStorageError:
-        return False
+        payload = None
 
-    if not isinstance(payload, dict):
-        return False
-    if payload.get("version") != _DASHBOARD_STATE_SCHEMA_VERSION:
-        return False
-    if bool(payload.get("demo_mode", False)) != demo_mode:
-        return False
+    if isinstance(payload, dict):
+        if payload.get("version") == _DASHBOARD_STATE_SCHEMA_VERSION:
+            if bool(payload.get("demo_mode", False)) == demo_mode:
+                payload_signature = payload.get("activity_cache_signature")
+                current_signature = _activity_cache_signature()
+                if payload_signature == current_signature:
+                    df_activity = payload.get("df_activity")
+                    active_projects = payload.get("active_projects")
+                    project_colors = payload.get("project_colors")
+                    if isinstance(df_activity, pd.DataFrame):
+                        if isinstance(active_projects, list):
+                            if isinstance(project_colors, dict):
+                                _state.db = None
+                                _state.df_activity = _normalize_activity_df(
+                                    df_activity
+                                )
+                                _state.active_projects = active_projects
+                                _state.project_colors = {
+                                    str(k): str(v) for k, v in project_colors.items()
+                                }
+                                _state.last_refresh_s = float(
+                                    payload.get("last_refresh_s") or time.time()
+                                )
+                                _state.home_payload_cache = {}
+                                _state.demo_mode = demo_mode
+                                logger.info(
+                                    "Loaded dashboard state cache from disk "
+                                    f"(events={len(df_activity)}, "
+                                    f"projects={len(active_projects)})"
+                                )
+                                loaded = True
 
-    payload_signature = payload.get("activity_cache_signature")
-    current_signature = _activity_cache_signature()
-    if payload_signature != current_signature:
-        return False
-
-    df_activity = payload.get("df_activity")
-    active_projects = payload.get("active_projects")
-    project_colors = payload.get("project_colors")
-    if not isinstance(df_activity, pd.DataFrame):
-        return False
-    if not isinstance(active_projects, list):
-        return False
-    if not isinstance(project_colors, dict):
-        return False
-
-    _state.db = None
-    _state.df_activity = _normalize_activity_df(df_activity)
-    _state.active_projects = active_projects
-    _state.project_colors = {str(k): str(v) for k, v in project_colors.items()}
-    _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
-    _state.home_payload_cache = {}
-    _state.demo_mode = demo_mode
-    logger.info(
-        f"Loaded dashboard state cache from disk (events={len(df_activity)}, "
-        f"projects={len(active_projects)})"
-    )
-    return True
+    return loaded
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:

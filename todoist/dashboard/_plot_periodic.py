@@ -41,7 +41,7 @@ def _current_period_label(
 
 
 def _drop_projects_without_period_activity(df_periodic: pd.DataFrame) -> pd.DataFrame:
-    if df_periodic.empty or not len(df_periodic.columns):
+    if df_periodic.empty or df_periodic.columns.empty:
         return df_periodic
 
     active_columns = [
@@ -147,7 +147,7 @@ def _current_period_project_counts(
 
 
 def _total_tasks_series(df_periodic: pd.DataFrame) -> pd.Series:
-    if df_periodic.empty or not len(df_periodic.columns):
+    if df_periodic.empty or df_periodic.columns.empty:
         return pd.Series(dtype=float)
 
     totals = cast(pd.Series, df_periodic.fillna(0).sum(axis=1).astype(float))

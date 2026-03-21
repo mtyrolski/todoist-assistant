@@ -515,7 +515,7 @@ def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_r
         {"results": [older_missing_event_payload], "next_cursor": None},
     ]
 
-    events = db_activity._fetch_activity_range(
+    events = getattr(db_activity, "_fetch_activity_range")(
         date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
         date_to=datetime(2024, 1, 31, tzinfo=timezone.utc),
         events_already_fetched={cached_event},

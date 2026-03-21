@@ -22,9 +22,9 @@ def _response(
     response.url = TodoistEndpoints.LIST_LABELS.url
     response.request = requests.Request("GET", response.url).prepare()
     if payload is not None:
-        response._content = json.dumps(payload).encode("utf-8")
+        setattr(response, "_content", json.dumps(payload).encode("utf-8"))
     else:
-        response._content = text.encode("utf-8")
+        setattr(response, "_content", text.encode("utf-8"))
     return response
 
 
@@ -35,7 +35,7 @@ def test_request_json_retries_using_retry_after_header():
         _response(429, payload={"error": "rate_limited"}, headers={"Retry-After": "7"}),
         _response(200, payload={"results": []}),
     ]
-    client._session_local.session = session
+    setattr(client.__dict__["_session_local"], "session", session)
     spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
 
     with patch("todoist.utils.time.sleep") as mock_sleep:
@@ -53,7 +53,7 @@ def test_request_json_retries_using_payload_retry_after():
         _response(429, payload={"retry_after": 3}),
         _response(200, payload={"results": [{"id": "label1"}]}),
     ]
-    client._session_local.session = session
+    setattr(client.__dict__["_session_local"], "session", session)
     spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
 
     with patch("todoist.utils.time.sleep") as mock_sleep:
@@ -71,7 +71,7 @@ def test_request_json_uses_rpm_hint_when_retry_after_is_missing():
         _response(429, text="Too Many Requests"),
         _response(200, payload={"results": []}),
     ]
-    client._session_local.session = session
+    setattr(client.__dict__["_session_local"], "session", session)
     spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
 
     with patch("todoist.utils.time.sleep") as mock_sleep:

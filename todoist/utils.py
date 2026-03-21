@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import MISSING
+from dataclasses import MISSING, dataclass, field
 import time
 import random
 import os
@@ -41,28 +41,34 @@ RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
 )
 RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
-_MIGRATION_WARNING_LOGGED = False
 _MIGRATED_CACHE_DIRS: set[str] = set()
-_MISSING_REQUIRED_FIELD_WARNINGS: set[tuple[str, str]] = set()
-_RUNTIME_LOGGING_SIGNATURE: tuple[str | None, str] | None = None
 DEFAULT_LOG_LEVEL = "INFO"
 VALID_LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
 
 TqdmProgressCallback = Callable[[str, int, int, str | None], None]
-_TQDM_PROGRESS_CALLBACK: TqdmProgressCallback | None = None
+
+
+@dataclass
+class _RuntimeState:
+    tqdm_progress_callback: TqdmProgressCallback | None = None
+    migration_warning_logged: bool = False
+    runtime_logging_signature: tuple[str | None, str] | None = None
+    missing_required_field_warnings: set[tuple[str, str]] = field(default_factory=set)
+
+
+_STATE = _RuntimeState()
 
 
 def set_tqdm_progress_callback(callback: TqdmProgressCallback | None) -> None:
-    global _TQDM_PROGRESS_CALLBACK
-    _TQDM_PROGRESS_CALLBACK = callback
+    _STATE.tqdm_progress_callback = callback
 
 
 def get_tqdm_progress_callback() -> TqdmProgressCallback | None:
-    return _TQDM_PROGRESS_CALLBACK
+    return _STATE.tqdm_progress_callback
 
 
 def report_tqdm_progress(desc: str, current: int, total: int, unit: str | None = None) -> None:
-    callback = _TQDM_PROGRESS_CALLBACK
+    callback = _STATE.tqdm_progress_callback
     if callback is None:
         return
     try:
@@ -107,12 +113,10 @@ def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
 
 
 def configure_runtime_logging(log_path: str | None = None, level: str | None = None) -> None:
-    global _RUNTIME_LOGGING_SIGNATURE
-
     resolved_level = get_log_level(level or DEFAULT_LOG_LEVEL)
     resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
     signature = (resolved_log_path, resolved_level)
-    if _RUNTIME_LOGGING_SIGNATURE == signature:
+    if _STATE.runtime_logging_signature == signature:
         return
 
     logger.remove()
@@ -120,7 +124,7 @@ def configure_runtime_logging(log_path: str | None = None, level: str | None = N
     if resolved_log_path is not None:
         Path(resolved_log_path).parent.mkdir(parents=True, exist_ok=True)
         logger.add(resolved_log_path, rotation="500 MB", level=resolved_level)
-    _RUNTIME_LOGGING_SIGNATURE = signature
+    _STATE.runtime_logging_signature = signature
 
 
 def _migration_backup_path(legacy_root: Path, filename: str) -> Path:
@@ -152,7 +156,6 @@ def _legacy_cache_roots(cache_root: Path) -> list[Path]:
 
 
 def migrate_legacy_runtime_files(cache_dir: str | None = None) -> None:
-    global _MIGRATION_WARNING_LOGGED
     cache_root = Path(resolve_cache_dir(cache_dir))
     cache_root.mkdir(parents=True, exist_ok=True)
 
@@ -189,12 +192,12 @@ def migrate_legacy_runtime_files(cache_dir: str | None = None) -> None:
                         f"Skipped copy to avoid overwrite and moved legacy file to backup '{backup_path}'"
                     )
 
-                if not _MIGRATION_WARNING_LOGGED:
+                if not _STATE.migration_warning_logged:
                     logger.warning(
                         f"Legacy cache migration backups are temporary and will be removed in "
                         f"{MIGRATION_BACKUP_REMOVAL_VERSION}."
                     )
-                    _MIGRATION_WARNING_LOGGED = True
+                    _STATE.migration_warning_logged = True
             except OSError as exc:
                 logger.warning(
                     f"Failed to migrate legacy runtime file '{legacy_path}' into cache "
@@ -211,8 +214,6 @@ def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
 
 def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     """Safely instantiates a class by writing unexpected (i.e now in todoist api) field to kwargs parameter"""
-    # pylint: disable=global-statement
-    global _MISSING_REQUIRED_FIELD_WARNINGS
     class_fields = get_all_fields_of_dataclass(cls)
     class_field_set = set(class_fields)
     normalized_kwargs = dict(entry_kwargs)
@@ -246,13 +247,13 @@ def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
     if missing_required_fields:
         for field_name in missing_required_fields:
             warning_key = (cls.__name__, field_name)
-            if warning_key in _MISSING_REQUIRED_FIELD_WARNINGS:
+            if warning_key in _STATE.missing_required_field_warnings:
                 continue
             logger.warning(
                 f"{cls.__name__}: missing required field '{field_name}' in API payload; "
                 "defaulting to None for compatibility."
             )
-            _MISSING_REQUIRED_FIELD_WARNINGS.add(warning_key)
+            _STATE.missing_required_field_warnings.add(warning_key)
 
     unexpected_fields = set(normalized_kwargs.keys()) - class_field_set
 

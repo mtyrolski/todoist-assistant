@@ -125,14 +125,14 @@ def test_safe_instantiate_entry_collects_unexpected_fields(
 
 def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
     # pylint: disable=protected-access
-    import todoist.utils as utils
+    from todoist import utils
 
     @dataclass
     class DataclassWithRequiredAndKwargs:
         required_field: str
         new_api_kwargs: dict[str, Any] | None = None
 
-    utils._MISSING_REQUIRED_FIELD_WARNINGS.clear()
+    utils._STATE.missing_required_field_warnings.clear()
     with patch("todoist.utils.logger.warning") as mock_warning:
         first = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
         second = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
@@ -242,7 +242,7 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
 
 def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_payloads():
     # pylint: disable=protected-access
-    import todoist.utils as utils
+    from todoist import utils
     from todoist.types import ProjectEntry, TaskEntry
 
     project_payload = {
@@ -290,7 +290,7 @@ def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_paylo
         "is_collapsed": False,
     }
 
-    utils._MISSING_REQUIRED_FIELD_WARNINGS.clear()
+    utils._STATE.missing_required_field_warnings.clear()
     with patch("todoist.utils.logger.warning") as mock_warning:
         project_entry = safe_instantiate_entry(ProjectEntry, **project_payload)
         task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
@@ -544,9 +544,9 @@ def test_cache_uses_dot_cache_default_when_env_missing(monkeypatch, tmp_path):
 
 
 def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypatch):
-    import todoist.utils as utils
+    from todoist import utils
 
-    monkeypatch.setattr(utils, "_RUNTIME_LOGGING_SIGNATURE", None)
+    monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
     log_path = tmp_path / "automation.log"
     with (
         patch("todoist.utils.logger.remove") as mock_remove,
@@ -562,9 +562,9 @@ def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypat
 
 
 def test_configure_runtime_logging_is_idempotent(monkeypatch):
-    import todoist.utils as utils
+    from todoist import utils
 
-    monkeypatch.setattr(utils, "_RUNTIME_LOGGING_SIGNATURE", None)
+    monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
     with (
         patch("todoist.utils.logger.remove") as mock_remove,
         patch("todoist.utils.logger.add") as mock_add,
