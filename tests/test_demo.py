@@ -2,7 +2,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import cast
 
-from todoist.database.demo import anonymize_activity_dates
+from tests.factories import make_project, make_project_entry
+from todoist.database.demo import anonymize_activity_dates, anonymize_project_names
 
 
 def _duration(index: pd.Index) -> pd.Timedelta:
@@ -43,3 +44,125 @@ def test_anonymize_activity_dates_preserves_task_durations():
         original = df[df["task_id"] == task_id].sort_index()
         anonymized = result[result["task_id"] == task_id].sort_index()
         assert _duration(original.index) == _duration(anonymized.index)
+
+
+def test_anonymize_project_names_uses_stable_hierarchy_themes():
+    base = datetime(2024, 1, 1, 9, 0, 0)
+    active_projects = [
+        make_project(
+            project_id="root-alpha",
+            project_entry=make_project_entry(
+                project_id="root-alpha",
+                name="Alpha",
+                child_order=2,
+            ),
+        ),
+        make_project(
+            project_id="child-one",
+            project_entry=make_project_entry(
+                project_id="child-one",
+                name="Alpha Child One",
+                parent_id="root-alpha",
+                child_order=1,
+            ),
+        ),
+        make_project(
+            project_id="grandchild",
+            project_entry=make_project_entry(
+                project_id="grandchild",
+                name="Alpha Grandchild",
+                parent_id="child-one",
+                child_order=1,
+            ),
+        ),
+        make_project(
+            project_id="child-two",
+            project_entry=make_project_entry(
+                project_id="child-two",
+                name="Alpha Child Two",
+                parent_id="root-alpha",
+                child_order=2,
+            ),
+        ),
+        make_project(
+            project_id="root-beta",
+            project_entry=make_project_entry(
+                project_id="root-beta",
+                name="Beta",
+                child_order=1,
+            ),
+        ),
+    ]
+    df = pd.DataFrame(
+        [
+            {
+                "date": base,
+                "id": "e1",
+                "type": "completed",
+                "parent_project_name": "Alpha",
+                "root_project_name": "Alpha",
+                "task_id": "t1",
+            },
+            {
+                "date": base + timedelta(days=1),
+                "id": "e2",
+                "type": "completed",
+                "parent_project_name": "Alpha Child One",
+                "root_project_name": "Alpha",
+                "task_id": "t2",
+            },
+            {
+                "date": base + timedelta(days=2),
+                "id": "e3",
+                "type": "completed",
+                "parent_project_name": "Alpha Grandchild",
+                "root_project_name": "Alpha",
+                "task_id": "t3",
+            },
+            {
+                "date": base + timedelta(days=3),
+                "id": "e4",
+                "type": "completed",
+                "parent_project_name": "Alpha Child Two",
+                "root_project_name": "Alpha",
+                "task_id": "t4",
+            },
+            {
+                "date": base + timedelta(days=4),
+                "id": "e5",
+                "type": "completed",
+                "parent_project_name": "Beta",
+                "root_project_name": "Beta",
+                "task_id": "t5",
+            },
+            {
+                "date": base + timedelta(days=5),
+                "id": "e6",
+                "type": "completed",
+                "parent_project_name": "Legacy Project",
+                "root_project_name": "Legacy Project",
+                "task_id": "t6",
+            },
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+
+    anonymized_df = df.copy()
+    result = anonymize_project_names(anonymized_df, active_projects)
+    repeat = anonymize_project_names(df.copy(), active_projects)
+
+    assert result == repeat
+    assert result["Alpha"] != "Alpha"
+    assert result["Beta"] != "Beta"
+    assert result["Legacy Project"] != "Legacy Project"
+    assert result["Alpha Child One"].startswith(result["Alpha"])
+    assert result["Alpha Child Two"].startswith(result["Alpha"])
+    assert result["Alpha Grandchild"].startswith(result["Alpha Child One"])
+    assert result["Alpha Child One"] != result["Alpha Child Two"]
+    original_names = {"Alpha", "Alpha Child One", "Alpha Grandchild", "Alpha Child Two", "Beta", "Legacy Project"}
+    assert set(anonymized_df["parent_project_name"]).isdisjoint(original_names)
+    assert set(anonymized_df["root_project_name"]).isdisjoint(original_names)
+    assert set(result.values()).isdisjoint(
+        original_names
+    )
