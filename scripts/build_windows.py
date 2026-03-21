@@ -11,6 +11,8 @@ from pathlib import Path
 from urllib.request import urlopen
 from xml.etree import ElementTree
 
+from todoist.version import get_version
+
 SIGNING_CERT_ENV = "WINDOWS_SIGNING_CERTIFICATE"
 SIGNING_PASSWORD_ENV = "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
 SIGNING_TIMESTAMP_ENV = "WINDOWS_SIGNING_TIMESTAMP_URL"
@@ -28,27 +30,8 @@ def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None 
 
 
 def _read_version(repo_root: Path) -> tuple[str, str]:
-    pyproject = repo_root / "pyproject.toml"
-    if pyproject.exists():
-        try:
-            import tomllib
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("Python 3.11+ is required to parse pyproject.toml") from exc
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        version = data.get("project", {}).get("version")
-        if isinstance(version, str) and version.strip():
-            return version.strip(), "pyproject.toml"
-
-    package_json = repo_root / "package.json"
-    frontend_pkg = repo_root / "frontend" / "package.json"
-    for pkg in (package_json, frontend_pkg):
-        if pkg.exists():
-            payload = json.loads(pkg.read_text(encoding="utf-8"))
-            version = payload.get("version")
-            if isinstance(version, str) and version.strip():
-                return version.strip(), str(pkg.relative_to(repo_root))
-
-    raise RuntimeError("Unable to determine version from pyproject.toml or package.json")
+    _ = repo_root
+    return get_version(), "todoist.version"
 
 
 def _normalize_msi_version(version: str) -> str:

@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from fastapi.testclient import TestClient
 
 from tests.factories import make_project, make_project_entry, make_task
+import todoist
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
@@ -583,8 +584,7 @@ def test_openapi_includes_app_version() -> None:
     res = client.get("/openapi.json")
     assert res.status_code == 200
     payload = res.json()
-    assert payload["info"]["version"] == web_api.app.version
-    assert payload["info"]["version"] != "0.0.0"
+    assert payload["info"]["version"] == web_api.app.version == todoist.__version__
 
 
 def test_dashboard_progress_inactive_state() -> None:

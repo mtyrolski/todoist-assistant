@@ -1,23 +1,32 @@
 from pathlib import Path
 import sys
 
+try:
+    from todoist.version import get_version as _get_version
+except ModuleNotFoundError:
+    _get_version = None
 
-def main() -> int:
-    repo_root = Path(__file__).resolve().parents[2]
-    pyproject = repo_root / "pyproject.toml"
+
+def _read_pyproject_version(pyproject: Path) -> str:
     if not pyproject.exists():
-        print("0.0.0")
-        return 0
-
+        return "0.0.0"
     if sys.version_info < (3, 11):
-        print("0.0.0")
-        return 0
+        return "0.0.0"
 
     import tomllib
 
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     version = data.get("project", {}).get("version")
-    print(version or "0.0.0")
+    return version or "0.0.0"
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parents[2]
+    if _get_version is not None:
+        print(_get_version())
+        return 0
+
+    print(_read_pyproject_version(repo_root / "pyproject.toml"))
     return 0
 
 
