@@ -1,6 +1,7 @@
 import json
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import date, datetime, timedelta
+from collections.abc import Sequence
+from typing import Any, cast
 
 from fastapi import HTTPException
 from loguru import logger
@@ -8,8 +9,159 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
+from todoist.habit_tracker import summarize_tracked_habits
+from todoist.types import Project
+from todoist.stats import extract_task_due_date
+
+FIRE_TASK_LABEL = "fire \U0001F9EF\U0001F692"
+
+
+def _normalize_label_name(value: str) -> str:
+    return value.strip().casefold()
+
+
+def count_labeled_tasks(
+    active_projects: Sequence[Project] | None, *, label_name: str
+) -> int:
+    if not active_projects:
+        return 0
+
+    normalized_target = _normalize_label_name(label_name)
+    total = 0
+    for project in active_projects:
+        for task in project.tasks or []:
+            task_labels = {
+                _normalize_label_name(str(label))
+                for label in (task.task_entry.labels or [])
+            }
+            if normalized_target in task_labels:
+                total += 1
+    return total
+
+
+def _task_matches_label(task: Any, label_name: str) -> bool:
+    task_labels = {
+        _normalize_label_name(str(label))
+        for label in (task.task_entry.labels or [])
+    }
+    return _normalize_label_name(label_name) in task_labels
+
+
+def _task_date_is_due(task_value: Any, reference_day: date) -> bool:
+    task_date = extract_task_due_date(task_value)
+    return task_date is not None and task_date.date() <= reference_day
+
+
+def evaluate_urgency_status(
+    active_projects: Sequence[Project] | None,
+    *,
+    today: date | None = None,
+) -> dict[str, Any]:
+    reference_day = today or datetime.now().date()
+    counts = {
+        "fireTasks": 0,
+        "p1Tasks": 0,
+        "p2Tasks": 0,
+        "dueTasks": 0,
+        "deadlineTasks": 0,
+    }
+    urgent_task_count = 0
+
+    for project in active_projects or []:
+        for task in project.tasks or []:
+            task_entry = task.task_entry
+            fire = _task_matches_label(task, FIRE_TASK_LABEL)
+            p1 = task_entry.priority == 4
+            p2 = task_entry.priority == 3
+            due = _task_date_is_due(task_entry.due, reference_day)
+            deadline = _task_date_is_due(task_entry.deadline, reference_day)
+
+            if fire:
+                counts["fireTasks"] += 1
+            if p1:
+                counts["p1Tasks"] += 1
+            if p2:
+                counts["p2Tasks"] += 1
+            if due:
+                counts["dueTasks"] += 1
+            if deadline:
+                counts["deadlineTasks"] += 1
+
+            if fire or p1 or p2 or due or deadline:
+                urgent_task_count += 1
+
+    fire_count = counts["fireTasks"]
+    if fire_count > 0:
+        state = "danger"
+        title = "Urgent attention needed"
+        summary = (
+            f"{fire_count} fire task{'s' if fire_count != 1 else ''} are active."
+            f" {urgent_task_count} task{'s' if urgent_task_count != 1 else ''} total"
+            " need attention."
+        )
+    elif urgent_task_count > 0:
+        state = "warn"
+        title = "Attention needed"
+        summary = (
+            f"{urgent_task_count} active task{'s' if urgent_task_count != 1 else ''}"
+            " are flagged by priority, due date, or deadline."
+        )
+    else:
+        state = "good"
+        title = "All clear"
+        summary = "No active fire, P1, P2, or due/deadline tasks found."
+
+    return {
+        "state": state,
+        "title": title,
+        "summary": summary,
+        "todayLabel": reference_day.isoformat(),
+        "total": urgent_task_count,
+        "counts": counts,
+        "badgeLabel": {
+            "good": "OK",
+            "warn": "Watch",
+            "danger": "Urgent",
+        }[state],
+        "helpKey": "Urgency Status",
+    }
+
+
+def normalize_activity_df(df_activity) -> pd.DataFrame:
+    if not isinstance(df_activity, pd.DataFrame):
+        return empty_activity_df()
+
+    normalized = df_activity.copy()
+    if normalized.empty:
+        if "date" in normalized.columns:
+            normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+            return cast(pd.DataFrame, normalized.set_index("date", drop=False))
+        normalized.index = pd.to_datetime(normalized.index, errors="coerce")
+        return normalized
+
+    if "date" in normalized.columns:
+        date_values = pd.to_datetime(normalized["date"], errors="coerce")
+        valid_date_values = int(date_values.notna().sum())
+        if not isinstance(normalized.index, pd.DatetimeIndex) or valid_date_values > 0:
+            normalized["date"] = date_values
+            normalized = cast(
+                pd.DataFrame,
+                normalized[date_values.notna()].set_index("date", drop=False),
+            )
+    else:
+        normalized.index = pd.to_datetime(normalized.index, errors="coerce")
+        normalized = cast(pd.DataFrame, normalized[~pd.isna(normalized.index)])
+
+    if not isinstance(normalized.index, pd.DatetimeIndex):
+        normalized.index = pd.to_datetime(normalized.index, errors="coerce")
+        normalized = cast(pd.DataFrame, normalized[~pd.isna(normalized.index)])
+
+    normalized_df = cast(pd.DataFrame, normalized)
+    return cast(pd.DataFrame, normalized_df.sort_index())
+
 
 def period_bounds(df_activity, granularity: str) -> dict[str, Any]:
+    df_activity = normalize_activity_df(df_activity)
     granularity_to_timedelta = {
         "W": timedelta(weeks=1),
         "ME": timedelta(weeks=4),
@@ -40,7 +192,12 @@ def period_bounds(df_activity, granularity: str) -> dict[str, Any]:
     }
 
 
-def extract_metrics_dict(df_activity, periods: dict[str, Any]) -> list[dict[str, Any]]:
+def extract_metrics_dict(
+    df_activity,
+    periods: dict[str, Any],
+) -> list[dict[str, Any]]:
+    df_activity = normalize_activity_df(df_activity)
+
     def _get_total_events(beg_, end_) -> int:
         filtered_df = df_activity[
             (df_activity.index >= beg_) & (df_activity.index <= end_)
@@ -104,23 +261,26 @@ def parse_yyyy_mm_dd(value: str) -> datetime:
 
 
 def safe_activity_anchor(df_activity) -> datetime:
-    if df_activity is None or df_activity.empty:
-        return datetime.now()
-    try:
-        max_value = pd.to_datetime(df_activity.index).max()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
-        return datetime.now()
-    if pd.isna(max_value):
-        return datetime.now()
-    if isinstance(max_value, pd.Timestamp):
-        return max_value.to_pydatetime()
-    if isinstance(max_value, datetime):
-        return max_value
-    try:
-        return datetime.fromisoformat(str(max_value))
-    except ValueError:
-        return datetime.now()
+    df_activity = normalize_activity_df(df_activity)
+    anchor = datetime.now()
+    if df_activity is not None and not df_activity.empty:
+        try:
+            max_value = pd.to_datetime(df_activity.index).max()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
+            max_value = None
+
+        if max_value is not None and not bool(pd.isna(cast(Any, max_value))):
+            if isinstance(max_value, pd.Timestamp):
+                anchor = max_value.to_pydatetime(warn=False)
+            elif isinstance(max_value, datetime):
+                anchor = max_value
+            else:
+                try:
+                    anchor = datetime.fromisoformat(str(max_value))
+                except ValueError:
+                    pass
+    return anchor
 
 
 def empty_activity_df() -> pd.DataFrame:
@@ -151,6 +311,7 @@ def compute_plot_range(
     beg: str | None,
     end: str | None,
 ) -> tuple[datetime, datetime]:
+    df_activity = normalize_activity_df(df_activity)
     if (beg is None) ^ (end is None):
         raise HTTPException(
             status_code=400, detail="Provide both beg and end, or neither"
@@ -197,12 +358,16 @@ def completed_share_leaderboard(
     project_colors: dict[str, str],
     limit: int = 10,
 ) -> dict[str, Any]:
-    df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
-    df_completed = df_period[df_period["type"] == "completed"]
+    df_activity = normalize_activity_df(df_activity)
+    df_period = cast(
+        pd.DataFrame,
+        df_activity[(df_activity.index >= beg) & (df_activity.index < end)],
+    )
+    df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
     total_completed = int(len(df_completed))
 
     counts = (
-        df_completed[column]
+        cast(pd.Series, df_completed[column])
         .fillna("")
         .replace("", "(unknown)")
         .value_counts()
@@ -220,7 +385,7 @@ def completed_share_leaderboard(
                 "name": name,
                 "completed": completed_i,
                 "percentOfCompleted": pct,
-                "color": project_colors.get(name, "#808080"),
+                "color": project_colors.get(str(name), "#808080"),
             }
         )
 
@@ -253,6 +418,64 @@ def completed_share_leaderboard(
     }
 
 
+def build_habit_tracker_payload(
+    df_activity,
+    tracked_tasks,
+    *,
+    anchor: datetime,
+    history_weeks: int = 8,
+    project_colors: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    df_activity = normalize_activity_df(df_activity)
+    summary = summarize_tracked_habits(
+        df_activity,
+        tracked_tasks,
+        anchor=anchor,
+        history_weeks=history_weeks,
+    )
+    if project_colors is not None:
+        for item in summary["items"]:
+            item["color"] = project_colors.get(
+                str(item["projectName"]), str(item["color"])
+            )
+    history = summary["history"]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=[item["label"] for item in history],
+            y=[item["completed"] for item in history],
+            name="Completed",
+            marker=dict(color="#61f4b3"),
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=[item["label"] for item in history],
+            y=[item["rescheduled"] for item in history],
+            name="Rescheduled",
+            marker=dict(color="#ffb86c"),
+        )
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        barmode="group",
+        title=None,
+        xaxis_title="Week",
+        yaxis_title="Tracked habit events",
+        height=360,
+        margin=dict(l=56, r=18, t=18, b=70),
+        plot_bgcolor="#111318",
+        paper_bgcolor="#111318",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
+
+    return {
+        **summary,
+        "figure": fig_to_dict(fig),
+    }
+
+
 def compute_insights(
     df_activity,
     *,
@@ -260,18 +483,23 @@ def compute_insights(
     end: datetime,
     project_colors: dict[str, str],
 ) -> list[dict[str, Any]]:
+    df_activity = normalize_activity_df(df_activity)
     insights: list[dict[str, Any]] = []
-    df_period = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
+    df_period = cast(
+        pd.DataFrame,
+        df_activity[(df_activity.index >= beg) & (df_activity.index < end)],
+    )
 
     project_col = (
         "parent_project_name"
         if "parent_project_name" in df_period.columns
         else "root_project_name"
     )
-    df_completed = df_period[df_period["type"] == "completed"]
+    df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
     if not df_completed.empty and project_col in df_completed.columns:
+        project_series = cast(pd.Series, df_completed[project_col])
         counts = (
-            df_completed[project_col].fillna("").replace("", "(unknown)").value_counts()
+            project_series.fillna("").replace("", "(unknown)").value_counts()
         )
         if not counts.empty:
             name = str(counts.index[0])
@@ -285,10 +513,12 @@ def compute_insights(
                 }
             )
 
-    df_rescheduled = df_period[df_period["type"] == "rescheduled"]
+    df_rescheduled = cast(
+        pd.DataFrame, df_period[df_period["type"] == "rescheduled"]
+    )
     if not df_rescheduled.empty and project_col in df_rescheduled.columns:
         counts = (
-            df_rescheduled[project_col]
+            cast(pd.Series, df_rescheduled[project_col])
             .fillna("")
             .replace("", "(unknown)")
             .value_counts()
@@ -307,9 +537,11 @@ def compute_insights(
 
     try:
         if not df_period.empty:
-            day_counts = pd.Series(
-                pd.to_datetime(df_period.index).day_name()
-            ).value_counts()
+            day_names = (
+                pd.Series(pd.to_datetime(df_period.index), index=df_period.index)
+                .dt.day_name()
+            )
+            day_counts = day_names.value_counts()
             if not day_counts.empty:
                 day = str(day_counts.index[0])
                 cnt = int(day_counts.iloc[0])

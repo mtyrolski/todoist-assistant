@@ -17,29 +17,40 @@ export function PlotCard({
   title,
   figure,
   help,
-  height = 420
+  height = 420,
+  interactive = false
 }: {
   title: string;
   figure: PlotlyFigure | null | undefined;
   help?: string;
-  height?: number;
+  height?: number | string;
+  interactive?: boolean;
 }) {
+  const numericHeight = typeof height === "number" ? height : undefined;
+  const fillHeight = typeof height === "string" && !numericHeight;
+
   return (
-    <section className="card">
+    <section
+      className={`card${fillHeight ? " cardFillHeight" : ""}`}
+      style={fillHeight ? { height: "100%", minHeight: 0 } : undefined}
+    >
       <header className="cardHeader">
         <div className="cardTitleRow">
           <h2>{title}</h2>
           {help ? <InfoTip label={`About ${title}`} content={help} /> : null}
         </div>
       </header>
-      <div className="cardBody" style={{ height }}>
+      <div
+        className={`cardBody${fillHeight ? " cardBodyFill" : ""}`}
+        style={numericHeight ? { height: numericHeight } : fillHeight ? { minHeight: 0 } : undefined}
+      >
         {!figure ? (
           <div className="skeleton" />
         ) : (
           <Plot
             data={figure.data as PlotParams["data"]}
             layout={(() => {
-              const { title: _title, ...baseLayout } = figure.layout ?? {};
+              const { title: _title, height: _height, ...baseLayout } = figure.layout ?? {};
               const layoutRecord = baseLayout as Record<string, unknown>;
               const margin = (layoutRecord.margin ?? {}) as Record<string, unknown>;
               const xaxis = (layoutRecord.xaxis ?? {}) as Record<string, unknown>;
@@ -70,7 +81,7 @@ export function PlotCard({
               return {
                 ...baseLayout,
                 autosize: true,
-                height,
+                ...(numericHeight ? { height: numericHeight } : {}),
                 paper_bgcolor: "rgba(0,0,0,0)",
                 plot_bgcolor: "rgba(0,0,0,0)",
                 font: { color: "#e8ecf2" },
@@ -90,9 +101,10 @@ export function PlotCard({
               };
             })()}
             config={{
-              displayModeBar: false,
+              displayModeBar: interactive,
               responsive: true,
-              scrollZoom: false
+              scrollZoom: interactive,
+              doubleClick: interactive ? "reset+autosize" : false
             }}
             useResizeHandler
             style={{ width: "100%", height: "100%" }}

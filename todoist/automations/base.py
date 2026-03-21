@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import datetime as dt
+from typing import Any
 from loguru import logger
 
 from todoist.database.base import Database
@@ -49,7 +50,7 @@ class Automation(ABC):
         return task_delegations
 
     @abstractmethod
-    def _tick(self, db: Database):
+    def _tick(self, db: Database) -> Any:
         """
         Perform the automation's main operation.
         """

@@ -15,6 +15,13 @@ Total tasks added in the selected period.
 Total tasks rescheduled in the selected period.
 
 - Lower is better, so the delta is inverted.`,
+  "Urgency Status": `**Urgency status**
+Live health check for active tasks.
+
+- Green means no active fire, P1, P2, due-today, or deadline-today tasks.
+- Yellow means urgent work exists, but there are no fire tasks.
+- Red means at least one active fire task is present.
+- Counts are based on active tasks only and due/deadline are compared with today.`,
 };
 
 export const DEFAULT_METRIC_HELP = `**Metric**
@@ -53,6 +60,12 @@ Distribution of time between task creation and completion.`,
 Completed tasks per project for each period in the selected range.`,
   cumsumCompletedTasksPeriodically: `**Cumulative Completed Tasks**
 Running total of completions per project across the range.`,
+  activeProjectHierarchy: `**Active Project Hierarchy**
+Sunburst view of the busiest active root projects and their busiest subprojects.
+
+- Ring area is proportional to completed tasks in the selected range.
+- The inner ring shows active roots and outer rings show active subprojects.
+- Smaller long-tail projects are folded into \`Other\` only when they stay smaller than the smallest visible sibling.`,
   heatmapEventsByDayHour: `**Event Heatmap**
 Activity intensity by day of week and hour. Darker means more events.`,
   eventsOverTime: `**Events Over Time**
@@ -69,3 +82,10 @@ Top projects by completed tasks in the most recent finished week.
 
 - Subprojects includes nested projects.
 - Root projects are top-level only.`;
+
+export const HABIT_TREND_HELP = `**Habit trend**
+Weekly totals for tasks labeled \`@track_habit\`.
+
+- Green bars are completions.
+- Orange bars are reschedules.
+- The window covers the most recent completed weeks.`;

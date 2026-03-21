@@ -4,7 +4,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-import todoist.cli as cli
+from todoist import cli
 
 
 runner = CliRunner()

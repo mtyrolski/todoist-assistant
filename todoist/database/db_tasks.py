@@ -262,6 +262,45 @@ class DatabaseTasks:
 
         return self.update_task(task_id, content=content)
 
+    def create_comment(
+        self,
+        *,
+        content: str,
+        task_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a Todoist comment for a task or project."""
+
+        if bool(task_id) == bool(project_id):
+            raise ValueError("Provide exactly one of task_id or project_id")
+
+        payload: dict[str, Any] = {"content": content}
+        if task_id is not None:
+            payload["task_id"] = task_id
+        if project_id is not None:
+            payload["project_id"] = project_id
+
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.CREATE_COMMENT,
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-Id": str(uuid.uuid4()),
+            },
+            json_body=payload,
+            rate_limited=True,
+        )
+
+        logger.debug("Creating Todoist comment", payload=payload)
+        result: Any | None = self._api_client.request_json(
+            spec, operation_name="create comment"
+        )
+        if result is None:
+            logger.error("Todoist API returned empty response for comment creation")
+            return {}
+        if isinstance(result, dict):
+            return result
+        return {"result": result}
+
     def fetch_task_by_id(self, task_id: str) -> dict[str, Any]:
         """
         Fetches a task by its ID from the Todoist API.

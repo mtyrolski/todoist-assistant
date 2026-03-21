@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import type { ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { PlotParams } from "react-plotly.js";
 import { PlotCard } from "./PlotCard";
+import type { PlotlyFigure } from "./PlotCard";
 import { StatCard } from "./StatCard";
 import { LoadingBar } from "./LoadingBar";
 import { ProgressSteps } from "./ProgressSteps";
@@ -22,6 +26,7 @@ import {
   PLOT_HELP,
   SPOTLIGHT_HELP
 } from "../lib/dashboardCopy";
+import type { DashboardHome } from "../lib/dashboardData";
 import {
   useApiHealth,
   useDashboardHome,
@@ -31,6 +36,86 @@ import {
 } from "../lib/dashboardHooks";
 
 const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
+
+const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
+
+type UrgencyStatusPayload = {
+  state: "good" | "warn" | "danger";
+  title: string;
+  summary: string;
+  todayLabel: string;
+  total: number;
+  counts: {
+    fireTasks: number;
+    p1Tasks: number;
+    p2Tasks: number;
+    dueTasks: number;
+    deadlineTasks: number;
+  };
+  badgeLabel: string;
+  helpKey: string;
+};
+
+type DashboardHomeWithUrgency = DashboardHome & {
+  urgencyStatus?: UrgencyStatusPayload;
+};
+
+function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknown> {
+  const { title: _title, height: _height, ...baseLayout } = figure.layout ?? {};
+  const layoutRecord = baseLayout as Record<string, unknown>;
+  const margin = (layoutRecord.margin ?? {}) as Record<string, unknown>;
+  const xaxis = (layoutRecord.xaxis ?? {}) as Record<string, unknown>;
+  const yaxis = (layoutRecord.yaxis ?? {}) as Record<string, unknown>;
+  const legend = (layoutRecord.legend ?? {}) as Record<string, unknown>;
+  const font = (layoutRecord.font ?? {}) as Record<string, unknown>;
+
+  const toNumber = (value: unknown, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+  const withTitleStandoff = (axis: Record<string, unknown>, standoff: number): Record<string, unknown> => {
+    const axisTitle = axis.title;
+    if (typeof axisTitle === "string") {
+      return { ...axis, automargin: true, title: { text: axisTitle, standoff } };
+    }
+    if (axisTitle && typeof axisTitle === "object") {
+      return {
+        ...axis,
+        automargin: true,
+        title: { ...(axisTitle as Record<string, unknown>), standoff }
+      };
+    }
+    return { ...axis, automargin: true };
+  };
+
+  return {
+    ...baseLayout,
+    autosize: true,
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    font: {
+      ...font,
+      color: typeof font.color === "string" ? font.color : "#e8ecf2"
+    },
+    template: "plotly_dark",
+    margin: {
+      l: Math.max(22, toNumber(margin.l, 22)),
+      r: Math.max(22, toNumber(margin.r, 22)),
+      t: Math.max(22, toNumber(margin.t, 22)),
+      b: Math.max(50, toNumber(margin.b, 50))
+    },
+    xaxis: withTitleStandoff(xaxis, 16),
+    yaxis: withTitleStandoff(yaxis, 14),
+    legend: {
+      ...legend,
+      tracegroupgap: Math.max(10, toNumber(legend.tracegroupgap, 10))
+    },
+    hoverlabel: {
+      bgcolor: "rgba(13,16,27,0.96)",
+      bordercolor: "rgba(146,225,255,0.24)",
+      font: { color: "#eff4ff", size: 13 }
+    }
+  };
+}
 
 function toDateInputValue(date: Date): string {
   const year = date.getFullYear();
@@ -73,6 +158,8 @@ export function DashboardView({
   const [firstSyncPending, setFirstSyncPending] = useState(false);
   const [firstSyncTriggered, setFirstSyncTriggered] = useState(false);
   const [activityRecoveryAttempted, setActivityRecoveryAttempted] = useState(false);
+  const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
+  const focusMetricsRef = useRef<HTMLDivElement | null>(null);
   const activityReady = Boolean(status?.activityCache);
   const mappingReady = setupComplete;
   const setupSteps = useMemo(() => {
@@ -166,6 +253,7 @@ export function DashboardView({
   }, [firstSyncPending, activityReady, loadingDashboard, progressDisplay, dashboard, dashboardError]);
 
   const noData = Boolean(dashboard?.noData);
+  const dashboardWithUrgency = dashboard as DashboardHomeWithUrgency | null;
   const figures = dashboard?.figures ?? {};
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
@@ -177,14 +265,89 @@ export function DashboardView({
   const jumpTargets = [
     { id: "insights", label: "Insights" },
     { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
-    { id: "stats", label: "Stats" },
+    { id: "stats", label: "Focus" },
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
     { id: "events", label: "Events" },
+    { id: "projects", label: "Projects" },
     { id: "ops", label: "Activity & Ops" }
   ];
   const insightItems = dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null);
   const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
+  const urgencyStatus = dashboardWithUrgency?.urgencyStatus ?? null;
+  const focusMetricItems = metricItems.filter(
+    (item) => item && (item.name === "Completed Tasks" || item.name === "Rescheduled Tasks")
+  );
+  const secondaryMetricItems = metricItems.filter(
+    (item) => item && !focusMetricItems.some((focus) => focus?.name === item.name) && item.name !== "Events" && item.name !== "Added Tasks"
+  );
+  const activeProjectHierarchyFigure = figures.activeProjectHierarchy ?? null;
+  useEffect(() => {
+    const metricsNode = focusMetricsRef.current;
+    if (!metricsNode) return;
+
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(metricsNode.getBoundingClientRect().height);
+      setFocusMetricsHeight((currentHeight) => (currentHeight === nextHeight ? currentHeight : nextHeight));
+    };
+
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return undefined;
+
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+    observer.observe(metricsNode);
+    return () => observer.disconnect();
+  }, [urgencyStatus, focusMetricItems.length, metricsCurrentPeriod, metricsPreviousPeriod]);
+  const urgencyTheme = {
+    good: {
+      background: "linear-gradient(180deg, rgba(39, 77, 66, 0.82), rgba(18, 22, 28, 0.94))",
+      borderColor: "rgba(119, 212, 161, 0.35)",
+      shadow: "0 16px 36px rgba(31, 108, 77, 0.15)",
+      accent: "#a6f5c4",
+      pillBackground: "rgba(119, 212, 161, 0.15)",
+      pillBorder: "rgba(119, 212, 161, 0.45)",
+      pillText: "#c7ffe0",
+      chipBackground: "rgba(119, 212, 161, 0.12)",
+      chipBorder: "rgba(119, 212, 161, 0.18)",
+      chipText: "#e8fff1"
+    },
+    warn: {
+      background: "linear-gradient(180deg, rgba(79, 63, 22, 0.82), rgba(21, 20, 22, 0.94))",
+      borderColor: "rgba(255, 203, 107, 0.38)",
+      shadow: "0 16px 36px rgba(154, 109, 18, 0.16)",
+      accent: "#ffd89a",
+      pillBackground: "rgba(255, 203, 107, 0.16)",
+      pillBorder: "rgba(255, 203, 107, 0.52)",
+      pillText: "#fff0c9",
+      chipBackground: "rgba(255, 203, 107, 0.12)",
+      chipBorder: "rgba(255, 203, 107, 0.18)",
+      chipText: "#fff4d5"
+    },
+    danger: {
+      background: "linear-gradient(180deg, rgba(84, 34, 31, 0.84), rgba(23, 20, 22, 0.96))",
+      borderColor: "rgba(255, 133, 124, 0.4)",
+      shadow: "0 16px 36px rgba(168, 64, 56, 0.16)",
+      accent: "#ffb4ae",
+      pillBackground: "rgba(255, 133, 124, 0.18)",
+      pillBorder: "rgba(255, 133, 124, 0.52)",
+      pillText: "#ffd3d0",
+      chipBackground: "rgba(255, 133, 124, 0.12)",
+      chipBorder: "rgba(255, 133, 124, 0.18)",
+      chipText: "#ffe6e4"
+    }
+  } as const;
+  const urgencyStatusTheme = urgencyStatus ? urgencyTheme[urgencyStatus.state] : urgencyTheme.good;
+  const urgencyChips = urgencyStatus
+    ? [
+        { key: "fireTasks", label: "Fire", value: urgencyStatus.counts.fireTasks },
+        { key: "p1Tasks", label: "P1", value: urgencyStatus.counts.p1Tasks },
+        { key: "p2Tasks", label: "P2", value: urgencyStatus.counts.p2Tasks },
+        { key: "dueTasks", label: "Due today", value: urgencyStatus.counts.dueTasks },
+        { key: "deadlineTasks", label: "Deadline", value: urgencyStatus.counts.deadlineTasks }
+      ]
+    : [];
   const labelPlots = [
     {
       title: "Weekly Completion Trend",
@@ -473,23 +636,164 @@ export function DashboardView({
       ) : null}
 
       {!noData ? (
-        <section id="stats" className="statsRow jumpTarget" aria-label="Key stats">
-          {metricItems.map((m, idx) =>
-            m ? (
-              <StatCard
-                key={m.name}
-                name={m.name}
-                value={m.value}
-                deltaPercent={m.deltaPercent}
-                inverseDelta={m.inverseDelta}
-                currentPeriod={metricsCurrentPeriod}
-                previousPeriod={metricsPreviousPeriod}
-                help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
-              />
+        <section id="stats" className="overviewSplit jumpTarget" aria-label="Focused metrics and project hierarchy">
+          <div ref={focusMetricsRef} className="overviewMetricColumn">
+            {urgencyStatus ? (
+              <section
+                className="card"
+                style={{
+                  background: urgencyStatusTheme.background,
+                  borderColor: urgencyStatusTheme.borderColor,
+                  boxShadow: urgencyStatusTheme.shadow,
+                  minHeight: "172px"
+                }}
+              >
+                <header className="cardHeader">
+                  <div className="cardTitleRow" style={{ alignItems: "flex-start" }}>
+                    <div>
+                      <h2>Urgency status</h2>
+                      <p className="muted tiny" style={{ margin: "6px 0 0" }}>
+                        Active tasks only · as of {urgencyStatus.todayLabel}
+                      </p>
+                    </div>
+                    <InfoTip label="About urgency status" content={METRIC_HELP["Urgency Status"] ?? DEFAULT_METRIC_HELP} />
+                  </div>
+                </header>
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <div
+                        style={{
+                          fontSize: "clamp(2.75rem, 6vw, 4rem)",
+                          fontWeight: 700,
+                          lineHeight: 0.95,
+                          color: urgencyStatusTheme.accent,
+                          letterSpacing: "-0.03em"
+                        }}
+                      >
+                        {urgencyStatus.total}
+                      </div>
+                      <div style={{ color: urgencyStatusTheme.accent, fontSize: "1rem", fontWeight: 600 }}>
+                        {urgencyStatus.title}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0.55rem 0.95rem",
+                        borderRadius: "999px",
+                        background: urgencyStatusTheme.pillBackground,
+                        color: urgencyStatusTheme.pillText,
+                        border: `1px solid ${urgencyStatusTheme.pillBorder}`,
+                        fontSize: "0.95rem",
+                        fontWeight: 700,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        whiteSpace: "nowrap"
+                      }}
+                    >
+                      {urgencyStatus.badgeLabel}
+                    </span>
+                  </div>
+                  <p className="muted" style={{ margin: 0, lineHeight: 1.55 }}>
+                    {urgencyStatus.summary}
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    {urgencyChips.map((chip) => {
+                      const tone = chip.value > 0 ? "1" : "0.7";
+                      return (
+                        <span
+                          key={chip.key}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "0.45rem 0.7rem",
+                            borderRadius: "999px",
+                            background: urgencyStatusTheme.chipBackground,
+                            color: urgencyStatusTheme.chipText,
+                            border: `1px solid ${urgencyStatusTheme.chipBorder}`,
+                            fontSize: "0.86rem",
+                            fontWeight: 600,
+                            opacity: tone
+                          }}
+                        >
+                          <span>{chip.label}</span>
+                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{chip.value}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
             ) : (
-              <div key={idx} className="stat skeleton" />
-            )
-          )}
+              <div className="stat skeleton" style={{ minHeight: "172px" }} />
+            )}
+            {focusMetricItems.length ? (
+              focusMetricItems.map((m) =>
+                m ? (
+                  <StatCard
+                    key={m.name}
+                    name={m.name}
+                    value={m.value}
+                    deltaPercent={m.deltaPercent}
+                    inverseDelta={m.inverseDelta}
+                    currentPeriod={m.currentPeriod ?? metricsCurrentPeriod}
+                    previousPeriod={m.previousPeriod ?? metricsPreviousPeriod}
+                    currentLabel={m.currentLabel}
+                    previousLabel={m.previousLabel}
+                    help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
+                  />
+                ) : null
+              )
+            ) : (
+              <>
+                <div className="stat skeleton" />
+                <div className="stat skeleton" />
+              </>
+            )}
+          </div>
+          <div
+            id="projects"
+            className="overviewPlotColumn jumpTarget"
+            style={focusMetricsHeight ? { height: `${focusMetricsHeight}px` } : undefined}
+          >
+            <section className="card cardFillHeight hierarchyCard">
+              <header className="cardHeader hierarchyCardHeader">
+                <div className="hierarchyCardHeaderTop">
+                  <div className="cardTitleRow">
+                    <h2>Active Project Hierarchy</h2>
+                    <InfoTip label="About active project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
+                  </div>
+                </div>
+                <p className="muted hierarchyCardLead">
+                  Sunburst view of active roots and subprojects, tuned to match the dashboard palette.
+                </p>
+              </header>
+              <div className="cardBody cardBodyFill hierarchyCardBody">
+                <div className="hierarchyPlotStage">
+                  {!activeProjectHierarchyFigure ? (
+                    <div className="skeleton hierarchyPlotSkeleton" />
+                  ) : (
+                    <Plot
+                      data={activeProjectHierarchyFigure.data as PlotParams["data"]}
+                      layout={buildHierarchyFigureLayout(activeProjectHierarchyFigure)}
+                      config={{
+                        displayModeBar: true,
+                        responsive: true,
+                        scrollZoom: true,
+                        doubleClick: "reset+autosize"
+                      }}
+                      useResizeHandler
+                      style={{ width: "100%", height: "100%" }}
+                    />
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
         </section>
       ) : null}
 
@@ -522,6 +826,27 @@ export function DashboardView({
           {eventPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
+        </section>
+      ) : null}
+
+      {!noData && secondaryMetricItems.length ? (
+        <section className="statsRow jumpTarget" aria-label="Additional stats">
+          {secondaryMetricItems.map((m) =>
+            m ? (
+              <StatCard
+                key={m.name}
+                name={m.name}
+                value={m.value}
+                deltaPercent={m.deltaPercent}
+                inverseDelta={m.inverseDelta}
+                currentPeriod={m.currentPeriod ?? metricsCurrentPeriod}
+                previousPeriod={m.previousPeriod ?? metricsPreviousPeriod}
+                currentLabel={m.currentLabel}
+                previousLabel={m.previousLabel}
+                help={METRIC_HELP[m.name] ?? DEFAULT_METRIC_HELP}
+              />
+            ) : null
+          )}
         </section>
       ) : null}
 

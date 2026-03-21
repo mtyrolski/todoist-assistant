@@ -21,6 +21,12 @@ const NAV_GROUPS = [
     ]
   },
   {
+    title: "Experimental",
+    items: [
+      { href: "/experimental/habits", label: "Habit Tracker Lab", hint: "Experimental dashboard cards" }
+    ]
+  },
+  {
     title: "Operations",
     items: [
       { href: "/control-panel", label: "Control Panel", hint: "Runs, logs, and status" }

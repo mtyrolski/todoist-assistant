@@ -50,10 +50,10 @@ class _ProjectEntry_V1:
     is_deleted: bool
     is_frozen: bool
     can_assign_tasks: bool
-    shared: bool
     created_at: str
     updated_at: str
     # Todoist API v1 fields
+    shared: bool | None = None
     is_shared: bool | None = None
     is_collapsed: bool | None = None
     creator_uid: str | None = None
@@ -121,8 +121,6 @@ class _Task_V1:
     assigned_by_uid: str
     project_id: str
     section_id: str
-    sync_id: str | None
-    collapsed: bool
     due: str | None | dict[str, Any]
     parent_id: str | None
     labels: list[str]
@@ -135,8 +133,11 @@ class _Task_V1:
     duration: dict[str, str | int] | None
     updated_at: str
     # Todoist API v1 fields
+    sync_id: str | None = None
+    collapsed: bool | None = None
     is_collapsed: bool | None = None
     completed_by_uid: str | None = None
+    goal_ids: list[str] | None = None
     # Legacy pre-v1 compatibility fields
     v2_id: str | None = None
     v2_parent_id: str | None = None

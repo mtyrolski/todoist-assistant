@@ -12,9 +12,11 @@ type ProjectAdjustmentsResponse = {
   mappings: Record<string, string>;
   activeRootProjects: string[];
   archivedRootProjects: string[];
+  remappableActiveRootProjects: string[];
   archivedParentProjects: string[];
   archivedProjects: string[];
-  unmappedArchivedProjects: string[];
+  sourceProjects: string[];
+  unmappedSourceProjects: string[];
   warning?: string | null;
 };
 
@@ -27,11 +29,12 @@ type Props = {
 };
 
 const HELP_TEXT = `**Project hierarchy adjustments**
-Map archived projects to root projects so your history stays grouped.
+Map archived projects or selected active roots like \`Inbox\` to root projects so your history stays grouped.
 
 - Pick a mapping file (stored locally in \`personal/\`).
-- Drag archived project tiles into parent buckets to map them.
+- Drag project tiles into parent buckets to map them.
 - Drop a tile onto "Make parent" to allow that archived project as a parent bucket.
+- Leave a project unmapped if you want it counted as its own separate bucket.
 - Save to update the dashboard data.`;
 
 const RETRY_LIMIT = 6;
@@ -181,6 +184,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
 
   const activeRoots = adjustments?.activeRootProjects ?? [];
   const archivedProjects = adjustments?.archivedProjects ?? [];
+  const remappableActiveRoots = adjustments?.remappableActiveRootProjects ?? [];
+  const sourceProjects = adjustments?.sourceProjects ?? [];
   const parentSet = useMemo(() => {
     const set = new Set<string>();
     for (const name of activeRoots) set.add(name);
@@ -195,8 +200,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
 
   const unmappedProjects = useMemo(() => {
     const mapped = new Set(mappedEntries.map(([archived]) => archived));
-    return archivedProjects.filter((p) => !mapped.has(p));
-  }, [archivedProjects, mappedEntries]);
+    return sourceProjects.filter((p) => !mapped.has(p));
+  }, [sourceProjects, mappedEntries]);
 
   const assignments = useMemo(() => {
     const result: Record<string, string[]> = {};
@@ -389,8 +394,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             <InfoTip label="About adjustments" content={HELP_TEXT} />
           </div>
           <p className="muted tiny" style={{ margin: 0 }}>
-            Map archived projects to a root project so history and charts stay together. First load may take a few minutes while
-            Todoist data syncs.
+            Map archived projects or configurable active roots like Inbox to a root project so history and charts stay
+            together the way you want. First load may take a few minutes while Todoist data syncs.
           </p>
         </div>
         <div className="adjustmentsHeaderActions">
@@ -442,7 +447,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             <span className="pill">Mapped: {mappedEntries.length}</span>
             <span className="pill">Parents: {parentBuckets.length}</span>
             <span className="muted tiny">
-              {archivedProjects.length} archived projects • {activeRoots.length} active roots
+              {archivedProjects.length} archived projects • {remappableActiveRoots.length} configurable active roots •{" "}
+              {activeRoots.length} active roots
             </span>
           </div>
 
@@ -454,10 +460,11 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
               onDrop={handleDropUnassigned}
             >
               <header className="cardHeader">
-                <h3>Archived projects</h3>
+                <h3>Adjustable projects</h3>
               </header>
               <p className="muted tiny" style={{ margin: 0 }}>
-                Drag tiles into parent buckets to map them. Drop a tile onto Make parent to create a new parent bucket.
+                Drag archived projects or configurable active roots into parent buckets to map them. Leave a tile here if
+                you want it counted separately.
               </p>
               <div
                 className={`adjustmentsDropzone ${dragOverZone === "make-parent" ? "isDragOver" : ""}`}
@@ -480,7 +487,10 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                         onDragStart={startDrag(name)}
                         onDragEnd={endDrag}
                       >
-                        <span>{name}</span>
+                        <span>
+                          {name}
+                          {remappableActiveRoots.includes(name) ? " (active root)" : ""}
+                        </span>
                         <div className="adjustmentsTileActions">
                           <button
                             className="button buttonSmall buttonGhost"
@@ -496,9 +506,9 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                   })
                 ) : (
                   <p className="muted tiny" style={{ margin: 0 }}>
-                    {warning && !archivedProjects.length
-                      ? "Archived project list unavailable. Showing saved mappings only."
-                      : "All archived projects are mapped."}
+                    {warning && !sourceProjects.length
+                      ? "Project source list unavailable. Showing saved mappings only."
+                      : "All adjustable projects are mapped."}
                   </p>
                 )}
               </div>
@@ -579,7 +589,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                           ))
                         ) : (
                           <div className="adjustmentsBucketEmpty">
-                            Drop archived projects here
+                            Drop projects here
                           </div>
                         )}
                       </div>

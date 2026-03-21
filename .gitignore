@@ -16,6 +16,7 @@ scripts/*
 !scripts/build_macos_dmg.sh
 !scripts/get_version.py
 !scripts/check_versions.py
+!scripts/check_explicit_any.py
 !scripts/macos/
 !scripts/macos/**
 storage

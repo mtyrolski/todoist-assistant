@@ -453,7 +453,7 @@ def test_fetch_activity_adaptively_passes_cached_events_to_range(_mock_logger, d
 
 
 @patch('todoist.database.db_activity.TodoistAPIClient.request_json')
-def test_fetch_activity_range_stops_after_cached_page(mock_request_json, db_activity):
+def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_request_json, db_activity):
     from datetime import datetime, timezone
     from todoist.types import Event, EventEntry
     import datetime as dt
@@ -488,6 +488,21 @@ def test_fetch_activity_range_stops_after_cached_page(mock_request_json, db_acti
         "v2_parent_item_id": None,
         "v2_parent_project_id": "v2_proj1",
     }
+    older_missing_event_payload = {
+        "id": "event-older-missing",
+        "object_type": "item",
+        "object_id": "task-older-missing",
+        "event_type": "completed",
+        "event_date": "2024-01-01T12:00:00Z",
+        "parent_project_id": "proj1",
+        "parent_item_id": None,
+        "initiator_id": "user1",
+        "extra_data": {"content": "Task older missing"},
+        "extra_data_id": "extra-older-missing",
+        "v2_object_id": "v2_task_older_missing",
+        "v2_parent_item_id": None,
+        "v2_parent_project_id": "v2_proj1",
+    }
     cached_entry = EventEntry(**cached_event_payload)
     cached_event = Event(
         event_entry=cached_entry,
@@ -497,16 +512,17 @@ def test_fetch_activity_range_stops_after_cached_page(mock_request_json, db_acti
     mock_request_json.side_effect = [
         {"results": [new_event_payload], "next_cursor": "cursor-1"},
         {"results": [cached_event_payload], "next_cursor": "cursor-2"},
+        {"results": [older_missing_event_payload], "next_cursor": None},
     ]
 
-    events = db_activity._fetch_activity_range(
+    events = getattr(db_activity, "_fetch_activity_range")(
         date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
         date_to=datetime(2024, 1, 31, tzinfo=timezone.utc),
         events_already_fetched={cached_event},
     )
 
-    assert [event.id for event in events] == ["event-new"]
-    assert mock_request_json.call_count == 2
+    assert [event.id for event in events] == ["event-new", "event-older-missing"]
+    assert mock_request_json.call_count == 3
 
 
 def test_fetch_activity_signature(db_activity):
