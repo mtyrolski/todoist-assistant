@@ -4,7 +4,7 @@
 
 - Default uninstall removes binaries and shortcuts only; ProgramData is preserved.
 - A public MSI property `REMOVE_APPDATA` (default 0) controls optional data removal.
-- The Burn bundle passes `REMOVE_APPDATA` into the MSI when set on the setup.exe command line.
+- The Burn bundle passes `REMOVE_APPDATA` into the MSI when set on the `TodoistAssistantSetup.exe` command line.
 - MSI sets an internal `APPDATAREMOVE` property only when `REMOVE_APPDATA=1` on uninstall.
 - `util:RemoveFolderEx` deletes the ProgramData root only when `APPDATAREMOVE` is set.
 - A WiX Util `CloseApplication` action stops `todoist-assistant.exe` before uninstall/upgrade.
@@ -12,12 +12,12 @@
 ## Verification steps
 
 1) Default uninstall preserves ProgramData
-   - Install via `setup.exe` and run the app to create `C:\ProgramData\TodoistAssistant`.
-   - Uninstall via Apps & Features (or `setup.exe /uninstall`).
+   - Install via `TodoistAssistantSetup.exe` and run the app to create `C:\ProgramData\TodoistAssistant`.
+   - Uninstall via Apps & Features (or `TodoistAssistantSetup.exe /uninstall`).
    - Confirm `C:\ProgramData\TodoistAssistant` still exists and files remain.
 
 2) Explicit remove-data uninstall
-   - Run `setup.exe /uninstall REMOVE_APPDATA=1 /quiet /norestart`.
+   - Run `TodoistAssistantSetup.exe /uninstall REMOVE_APPDATA=1 /quiet /norestart`.
    - Confirm `C:\ProgramData\TodoistAssistant` is removed.
 
 3) Background process termination
@@ -26,5 +26,5 @@
    - Confirm the process is closed before file removal (no file-in-use errors).
 
 4) Upgrade path safety
-   - Install version N, then run setup.exe for version N+1.
+   - Install version N, then run `TodoistAssistantSetup.exe` for version N+1.
    - Confirm upgrade completes and ProgramData is preserved.

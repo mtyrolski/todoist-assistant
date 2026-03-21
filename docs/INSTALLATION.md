@@ -6,12 +6,13 @@ This project ships a desktop app + dashboard on Windows/macOS, and a developer-o
 
 ### Windows (recommended)
 - Download `TodoistAssistantSetup.exe` from GitHub Releases.
+- If you need the raw MSI for automation or enterprise deployment, use `todoist-assistant-<version>.msi`.
 - Run the setup and follow the wizard.
 - For MSI command lines, logging, and data retention options, see [docs/windows_installer.md](windows_installer.md).
 
 ### macOS
-- **App + dashboard:** use the DMG (`todoist-assistant-<version>-macos-<arch>.dmg`) and drag the app to `/Applications`.
-- **CLI-only:** use the pkg (`todoist-assistant-<version>-macos-<arch>.pkg`) or Homebrew.
+- **App + dashboard:** use the DMG release asset (`todoist-assistant-<version>-macos-<arch>.dmg`) and drag the app to `/Applications`. Local builds default to `todoist-assistant-<version>.dmg` unless you pass `--output-suffix`.
+- **CLI-only:** use the pkg release asset (`todoist-assistant-<version>-macos-<arch>.pkg`) or Homebrew. Local builds default to `todoist-assistant-<version>.pkg` unless you pass `--output-suffix`.
   - Homebrew (source build): `brew install --build-from-source Formula/todoist-assistant.rb`
 
 ### Linux
