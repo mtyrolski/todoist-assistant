@@ -179,6 +179,44 @@ def test_database_projects_initialization(db_projects):
     assert db_projects.mapping_project_name_to_color is None
 
 
+def test_anonymize_sub_db_rewrites_project_cache_and_colors(db_projects):
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(project_id="root", name="Alpha"),
+    )
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(
+            project_id="child",
+            name="Alpha Child",
+            parent_id="root",
+        ),
+    )
+    db_projects.projects_cache = [root, child]
+    db_projects.archived_projects_cache = {}
+    db_projects.mapping_project_name_to_color = {
+        "Alpha": "red",
+        "Alpha Child": "blue",
+    }
+
+    DatabaseProjects.anonymize_sub_db(
+        db_projects,
+        {
+            "Alpha": "North Star Studio",
+            "Alpha Child": "North Star Studio / Planning",
+        },
+    )
+
+    assert [project.project_entry.name for project in db_projects.projects_cache] == [
+        "North Star Studio",
+        "North Star Studio / Planning",
+    ]
+    assert "Alpha" not in db_projects.mapping_project_name_to_color
+    assert "Alpha Child" not in db_projects.mapping_project_name_to_color
+    assert db_projects.mapping_project_name_to_color["North Star Studio"] == "red"
+    assert db_projects.mapping_project_name_to_color["North Star Studio / Planning"] == "blue"
+
+
 @patch('todoist.database.db_projects.TodoistAPIClient.request_json')
 def test_fetch_archived_projects_caching(mock_request_json, db_projects):
     """Test fetch_archived_projects with caching behavior."""
