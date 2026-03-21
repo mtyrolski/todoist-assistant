@@ -30,9 +30,10 @@
 </div>
 
 <p><strong>Pre-release notice</strong><br/>
-  This branch tracks the <code>v0.3</code> pre-release line. For production use, install the latest stable release:
+  This branch tracks the <code>v0.3</code> pre-release line. The latest stable release is
   <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7">todoist-assistant-v0.2.7</a>.<br/>
-  For the current release work in progress and checklist, see <a href="docs/v0.3-release-notes.md">v0.3 release notes</a>.
+  Use the stable release for production. Use this branch for the current release prep, notes, and checklist:
+  <a href="docs/v0.3-release-notes.md">v0.3 release notes</a>.
 </p>
 
 <p><strong>Download the latest stable release</strong><br/>
@@ -40,6 +41,10 @@
   - Windows installer: <code>TodoistAssistantSetup.exe</code> or the <code>.msi</code>.<br/>
   - macOS app: <code>.dmg</code> (full app) or <code>.pkg</code> (CLI-only).<br/>
   - Linux: source distribution (see docs for setup).
+</p>
+
+<p><strong>Surface status</strong><br/>
+  The dashboard and control panel are the stable paths. LLM-Agent Chat is beta. Habit Tracker Lab is experimental and intentionally separate from the main dashboard flow.
 </p>
 
 ## Highlights
