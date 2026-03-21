@@ -95,6 +95,7 @@ uv run python3 -m scripts.build_windows --no-dashboard
 Output:
 
 ```
+dist\windows\TodoistAssistantSetup.exe
 dist\windows\todoist-assistant-<version>.msi
 ```
 
@@ -128,7 +129,7 @@ The launcher sets:
 
 ## Code signing
 
-The Windows MSI is unsigned by default, which is why SmartScreen/UAC show “Unknown publisher”. When you sign the PyInstaller executable and MSI with a trusted code signing certificate, those warnings go away and end users only need to download the single `todoist-assistant-<version>.msi` asset (the cabinet is embedded with the installer via `windows/installer/product.wxs`, so there is no separate `cab1.cab` file to carry alongside the MSI).
+The Windows MSI is unsigned by default, which is why SmartScreen/UAC show “Unknown publisher”. When you sign the PyInstaller executable and MSI with a trusted code signing certificate, those warnings go away and end users can keep using the single `TodoistAssistantSetup.exe` bootstrapper (the cabinet is embedded with the installer via `windows/installer/product.wxs`, so there is no separate `cab1.cab` file to carry alongside the MSI).
 
 ### Local builds
 
@@ -144,4 +145,4 @@ uv run python -m scripts.build_windows
 
 ### GitHub Actions
 
-Store the base64-encoded PFX in a secret like `WINDOWS_SIGNING_CERTIFICATE` and keep the password in `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`. The Windows installer workflow can decode the certificate into the workspace, export those environment variables, and then the `uv run python -m scripts.build_windows` step automatically signs both artifacts during the build. Once the release MSI carries that signature, Windows no longer treats it as an unknown publisher.
+Store the base64-encoded PFX in a secret like `WINDOWS_SIGNING_CERTIFICATE` and keep the password in `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`. The Windows installer workflow can decode the certificate into the workspace, export those environment variables, and then the `uv run python -m scripts.build_windows` step automatically signs both artifacts during the build. Once the release bootstrapper and MSI carry that signature, Windows no longer treats them as unknown publisher downloads.
