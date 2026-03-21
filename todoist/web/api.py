@@ -697,7 +697,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 anonymize_project_names,
             )
 
-            project_ori2anonym = anonymize_project_names(df_activity)
+            project_ori2anonym = anonymize_project_names(df_activity, active_projects)
             label_ori2anonym = anonymize_label_names(active_projects)
             dbio.anonymize(
                 project_mapping=project_ori2anonym, label_mapping=label_ori2anonym

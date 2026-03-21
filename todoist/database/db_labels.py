@@ -90,7 +90,6 @@ class DatabaseLabels:
             self._fetch_label_data()
 
         for ori_name, anonym_name in tqdm(label_mapping.items(), desc="Anonymizing labels", unit="label"):
-            logger.info(f"Anonymizing label '{ori_name}' to '{anonym_name}'")
             self._mapping_label_name_to_color[anonym_name] = self._mapping_label_name_to_color[ori_name]
 
             local_label = next((label for label in self._labels if label["name"] == ori_name), None)
