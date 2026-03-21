@@ -3,13 +3,13 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SURFACE_STATUS_SUMMARY } from "../lib/dashboardCopy";
 
 const NAV_GROUPS = [
   {
-    title: "Core",
+    title: "Stable",
     items: [
-      { href: "/", label: "Overview", hint: "Summary and highlights" },
-      { href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Local chat (beta)" }
+      { href: "/", label: "Overview", hint: "Summary and highlights" }
     ]
   },
   {
@@ -21,9 +21,13 @@ const NAV_GROUPS = [
     ]
   },
   {
+    title: "Beta",
+    items: [{ href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Local chat and queued prompts" }]
+  },
+  {
     title: "Experimental",
     items: [
-      { href: "/experimental/habits", label: "Habit Tracker Lab", hint: "Experimental dashboard cards" }
+      { href: "/experimental/habits", label: "Habit Tracker Lab", hint: "Opt-in habit dashboard cards" }
     ]
   },
   {
@@ -80,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="sidebarFooter">
-          <p className="muted tiny">Tip: use labels like <strong>llm-breakdown</strong> or <strong>template-feature</strong>.</p>
+          <p className="muted tiny">{SURFACE_STATUS_SUMMARY}</p>
         </div>
       </aside>
 

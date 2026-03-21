@@ -89,3 +89,5 @@ Weekly totals for tasks labeled \`@track_habit\`.
 - Green bars are completions.
 - Orange bars are reschedules.
 - The window covers the most recent completed weeks.`;
+
+export const SURFACE_STATUS_SUMMARY = `Stable: dashboard, control panel, and automation tooling. Beta: LLM-Agent Chat. Experimental: Habit Tracker Lab.`;
