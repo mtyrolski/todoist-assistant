@@ -1,12 +1,14 @@
 # Changelog
 
-## v0.3 pre-release
+## v0.3.0 pre-release
 
-This repository is currently on the `v0.3` pre-release line. For the latest stable build, use [todoist-assistant-v0.2.7](https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7).
+This branch tracks the in-progress `v0.3.0` release. The latest stable release remains [todoist-assistant-v0.2.7](https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7).
 
 For the full narrative release notes and the v0.3 compliance checklist, see [docs/v0.3-release-notes.md](docs/v0.3-release-notes.md).
 
-### Added
+`v0.3.0` is the consolidation release that follows the `v0.2.x` line. It turns the earlier analytics utilities into a more complete local-first product with a guided dashboard, broader automation coverage, optional AI workflows, and a more coherent packaging story.
+
+### Added across the v0.2.x line
 
 - Guided first-run setup and cached dashboard bootstrapping.
 - Dashboard cards for habit tracking and active project hierarchy.
