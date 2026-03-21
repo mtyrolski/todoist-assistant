@@ -4,12 +4,12 @@ This doc captures the current build structure and the GitHub Actions workflows.
 
 ## Build outputs
 - Windows: `dist/windows/`
-  - `todoist-assistant-<version>.msi`
-  - `TodoistAssistantSetup.exe` (Burn bootstrapper)
+  - `TodoistAssistantSetup.exe` (Burn bootstrapper used by end users)
+  - `todoist-assistant-<version>.msi` (raw MSI for deployment and automation)
 - macOS: `dist/macos/`
-  - `todoist-assistant-<version>-macos-<arch>.pkg`
-  - `todoist-assistant-<version>-macos-<arch>.dmg`
-  - `TodoistAssistant.app`
+  - `TodoistAssistant.app` (app bundle)
+  - `todoist-assistant-<version>.pkg` and `todoist-assistant-<version>.dmg` from local scripts
+  - `todoist-assistant-<version>-macos-<arch>.pkg` and `todoist-assistant-<version>-macos-<arch>.dmg` from CI/release runs that pass `--output-suffix macos-<arch>`
 
 ## Windows build (MSI + bootstrapper)
 
@@ -62,6 +62,8 @@ make build_macos_app
 make build_macos_dmg
 ```
 
+The pkg and dmg scripts write versioned artifacts into `dist/macos/`; the release workflow adds the `macos-<arch>` suffix so arm64 and x86_64 assets stay separate.
+
 ### Requirements
 - macOS runner
 - Xcode command line tools (for `pkgbuild`, `productbuild`, `hdiutil`)
@@ -82,6 +84,7 @@ make build_macos_dmg
 - `/.github/workflows/macos-installer.yml`
   - Matrix build for `macos-14` (arm64) and `macos-13` (x86_64)
   - Builds pkg/app/dmg and runs macOS installer tests
+  - Passes `--output-suffix macos-<arch>` so published pkg/dmg assets are architecture-specific
   - Publishes per-arch artifacts
 
 - `/.github/workflows/ci.yml`

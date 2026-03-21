@@ -48,6 +48,8 @@ Images:
 - `ghcr.io/<owner>/todoist-assistant-api`
 - `ghcr.io/<owner>/todoist-assistant-frontend`
 
+The workflow tags images from branch, pull request, commit SHA, and release-tag refs, plus `latest` on the default branch.
+
 ## Troubleshooting
 - The API healthcheck hits `/api/health`. If the frontend waits, check logs with `docker compose logs -f api`.
 - If you need local config changes, mount `configs/` into the API container or rebuild the image.
