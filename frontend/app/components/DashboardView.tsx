@@ -67,6 +67,7 @@ function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknow
   const xaxis = (layoutRecord.xaxis ?? {}) as Record<string, unknown>;
   const yaxis = (layoutRecord.yaxis ?? {}) as Record<string, unknown>;
   const legend = (layoutRecord.legend ?? {}) as Record<string, unknown>;
+  const font = (layoutRecord.font ?? {}) as Record<string, unknown>;
 
   const toNumber = (value: unknown, fallback: number): number =>
     typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -91,7 +92,10 @@ function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknow
     autosize: true,
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    font: { color: "#e8ecf2" },
+    font: {
+      ...font,
+      color: typeof font.color === "string" ? font.color : "#e8ecf2"
+    },
     template: "plotly_dark",
     margin: {
       l: Math.max(22, toNumber(margin.l, 22)),

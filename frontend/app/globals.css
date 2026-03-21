@@ -1197,16 +1197,21 @@ textarea.textInput {
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
+  isolation: isolate;
   border-radius: 18px;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 46%, rgba(123, 138, 255, 0.2), transparent 18%),
-    radial-gradient(circle at 24% 24%, rgba(109, 231, 255, 0.16), transparent 28%),
-    radial-gradient(circle at 74% 76%, rgba(255, 173, 109, 0.1), transparent 22%),
-    linear-gradient(180deg, rgba(16, 20, 34, 0.92), rgba(9, 11, 18, 0.98));
+    radial-gradient(circle at 50% 48%, rgba(114, 198, 255, 0.2), transparent 18%),
+    radial-gradient(circle at 18% 20%, rgba(109, 231, 255, 0.18), transparent 26%),
+    radial-gradient(circle at 82% 18%, rgba(198, 118, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 74% 80%, rgba(255, 187, 114, 0.12), transparent 24%),
+    conic-gradient(from 180deg at 50% 50%, rgba(105, 225, 255, 0.08), rgba(180, 118, 255, 0.1), rgba(255, 198, 120, 0.08), rgba(105, 225, 255, 0.08)),
+    linear-gradient(180deg, rgba(18, 23, 39, 0.94), rgba(9, 11, 18, 0.99));
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
-    inset 0 24px 64px rgba(255, 255, 255, 0.02);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 28px 72px rgba(255, 255, 255, 0.02),
+    0 28px 64px rgba(4, 6, 12, 0.28);
 }
 
 .hierarchyPlotStage > * {

@@ -11,7 +11,7 @@ from todoist.types import Project
 
 _BACKGROUND_COLOR = "#111318"
 _BORDER_COLOR = "rgba(17,19,24,0.92)"
-_EMPTY_COLOR = "#7f8b99"
+_EMPTY_COLOR = "#8ea3ff"
 _TEXT_COLOR = "#e7edf5"
 _MUTED_TEXT_COLOR = "#9fb0c2"
 _CENTER_COLOR = "#151a2b"
@@ -116,6 +116,28 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
             )
         except ValueError:
             pass
+    if normalized.startswith("rgba(") and normalized.endswith(")"):
+        channels = [part.strip() for part in normalized[5:-1].split(",")]
+        if len(channels) == 4:
+            try:
+                return (
+                    int(float(channels[0])),
+                    int(float(channels[1])),
+                    int(float(channels[2])),
+                )
+            except ValueError:
+                pass
+    if normalized.startswith("rgb(") and normalized.endswith(")"):
+        channels = [part.strip() for part in normalized[4:-1].split(",")]
+        if len(channels) == 3:
+            try:
+                return (
+                    int(float(channels[0])),
+                    int(float(channels[1])),
+                    int(float(channels[2])),
+                )
+            except ValueError:
+                pass
     fallback = _EMPTY_COLOR
     return (
         int(fallback[1:3], 16),
@@ -223,8 +245,8 @@ def _build_nodes_for_parent(
                 depth=depth,
                 kind="project",
                 color=_rgba(
-                    _mix_color(root_color, "#d9e8ff", min(0.24, 0.06 + depth * 0.05)),
-                    max(0.58, 0.88 - depth * 0.08),
+                    _mix_color(root_color, "#ffffff", min(0.34, 0.1 + depth * 0.11)),
+                    max(0.84, 1.0 - depth * 0.06),
                 ),
             )
         )
@@ -249,8 +271,8 @@ def _build_nodes_for_parent(
                 depth=depth,
                 kind="aggregate",
                 color=_rgba(
-                    _mix_color(root_color, "#b7c8da", 0.2 + min(depth, 4) * 0.03),
-                    0.62,
+                    _mix_color(root_color, "#fff3dc", 0.18 + min(depth, 4) * 0.05),
+                    0.82,
                 ),
                 hidden_projects=len(hidden_children),
             )
@@ -357,10 +379,10 @@ def plot_active_project_hierarchy_sunburst(
                         str(projects_by_id[project_id].project_entry.name),
                         _EMPTY_COLOR,
                     ),
-                    "#d7eeff",
-                    0.12,
+                    "#f9fcff",
+                    0.02,
                 ),
-                0.9,
+                0.96,
             ),
         )
         for project_id in sorted(
@@ -385,7 +407,7 @@ def plot_active_project_hierarchy_sunburst(
                 root_name="Active projects",
                 depth=1,
                 kind="aggregate",
-                color=_rgba(_mix_color(_EMPTY_COLOR, "#b8c7de", 0.22), 0.78),
+                color=_rgba(_mix_color(_EMPTY_COLOR, "#efe1ff", 0.34), 0.88),
                 hidden_projects=len(hidden_roots),
             )
         )
@@ -449,15 +471,25 @@ def plot_active_project_hierarchy_sunburst(
                 sort=False,
                 marker=dict(
                     colors=colors,
-                    line=dict(color="rgba(8,12,24,0.74)", width=2.0),
+                    line=dict(color="rgba(235,241,255,0.26)", width=2.8),
                 ),
+                leaf=dict(opacity=0.98),
                 customdata=customdata,
                 textinfo="label+value",
-                insidetextorientation="radial",
+                insidetextorientation="auto",
+                insidetextfont=dict(
+                    family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                    size=16,
+                    color=_TEXT_COLOR,
+                ),
                 hoverlabel=dict(
                     bgcolor="rgba(12,16,28,0.96)",
                     bordercolor=_rgba(_PANEL_GLOW, 0.28),
-                    font=dict(color=_TEXT_COLOR, size=13),
+                    font=dict(
+                        color=_TEXT_COLOR,
+                        size=14,
+                        family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                    ),
                 ),
                 hovertemplate=(
                     "<b>%{customdata[1]}</b>"
@@ -480,7 +512,7 @@ def plot_active_project_hierarchy_sunburst(
         plot_bgcolor=_BACKGROUND_COLOR,
         showlegend=False,
         uniformtext=dict(minsize=12, mode="hide"),
-        font=dict(color=_TEXT_COLOR, family="Inter, ui-sans-serif, system-ui, sans-serif"),
+        font=dict(color=_TEXT_COLOR, family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif"),
         uirevision="active-project-hierarchy-sunburst",
         annotations=[
             dict(
@@ -495,7 +527,11 @@ def plot_active_project_hierarchy_sunburst(
                 text=(
                     "Ring area tracks completed tasks. Long tails fold into Other only when they stay smaller than the smallest visible sibling."
                 ),
-                font=dict(size=9, color=_MUTED_TEXT_COLOR),
+                font=dict(
+                    size=10,
+                    color=_MUTED_TEXT_COLOR,
+                    family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                ),
             )
         ],
     )
