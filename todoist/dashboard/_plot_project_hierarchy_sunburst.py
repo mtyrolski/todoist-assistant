@@ -471,7 +471,7 @@ def plot_active_project_hierarchy_sunburst(
                 sort=False,
                 marker=dict(
                     colors=colors,
-                    line=dict(color="rgba(235,241,255,0.26)", width=2.8),
+                    line=dict(color="rgba(241,246,255,0.42)", width=3.2),
                 ),
                 leaf=dict(opacity=0.98),
                 customdata=customdata,
@@ -479,8 +479,13 @@ def plot_active_project_hierarchy_sunburst(
                 insidetextorientation="auto",
                 insidetextfont=dict(
                     family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                    size=18,
+                    color="#f8fbff",
+                ),
+                outsidetextfont=dict(
+                    family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
                     size=16,
-                    color=_TEXT_COLOR,
+                    color="#f8fbff",
                 ),
                 hoverlabel=dict(
                     bgcolor="rgba(12,16,28,0.96)",
@@ -507,17 +512,17 @@ def plot_active_project_hierarchy_sunburst(
         template="plotly_dark",
         title=None,
         height=620,
-        margin=dict(l=24, r=24, t=30, b=54),
+        margin=dict(l=24, r=24, t=30, b=76),
         paper_bgcolor=_BACKGROUND_COLOR,
         plot_bgcolor=_BACKGROUND_COLOR,
         showlegend=False,
-        uniformtext=dict(minsize=12, mode="hide"),
+        uniformtext=dict(minsize=13, mode="hide"),
         font=dict(color=_TEXT_COLOR, family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif"),
         uirevision="active-project-hierarchy-sunburst",
         annotations=[
             dict(
                 x=0.5,
-                y=0.015,
+                y=-0.065,
                 xref="paper",
                 yref="paper",
                 showarrow=False,

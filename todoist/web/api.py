@@ -156,7 +156,7 @@ _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
 _DASHBOARD_STATE_SCHEMA_VERSION = 1
-_DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 1
+_DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
     "Querying project data": 1,

@@ -145,11 +145,16 @@ def test_plot_active_project_hierarchy_sunburst_rolls_up_active_subprojects():
     assert trace.branchvalues == "total"
     assert trace.sort is False
     assert trace.textinfo == "label+value"
+    assert int(trace.insidetextfont.size) >= 18
+    assert str(trace.insidetextfont.color) == "#f8fbff"
+    assert int(trace.outsidetextfont.size) >= 16
     assert fig.layout.uirevision == "active-project-hierarchy-sunburst"
     assert fig.layout.margin.l >= 24
     assert fig.layout.margin.r >= 24
     assert fig.layout.margin.t >= 30
-    assert fig.layout.margin.b >= 52
+    assert fig.layout.margin.b >= 76
+    assert fig.layout.annotations
+    assert float(fig.layout.annotations[0].y) < 0
 
     nodes = _sunburst_node_map(fig)
     assert "inactive-project" not in nodes

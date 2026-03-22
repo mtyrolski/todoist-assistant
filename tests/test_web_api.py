@@ -153,6 +153,7 @@ def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
             "created_at": "2025-01-01T00:00:00",
             "last_refresh_s": 123.0,
             "demo_mode": True,
+            "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION - 1,
             "activity_cache_signature": web_api._activity_cache_signature(),
             "df_activity": _single_event_df(),
             "active_projects": [],
