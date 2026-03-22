@@ -17,9 +17,13 @@ FIRE_TASK_LABEL = "fire \U0001F9EF\U0001F692"
 DEFAULT_URGENCY_SETTINGS = {
     "enabled": True,
     "fire_label": FIRE_TASK_LABEL,
+    "fire_labels": (FIRE_TASK_LABEL,),
     "warn_priority_thresholds": (4, 3),
+    "warn_priority_min_count": 1,
     "warn_due_within_days": 0,
+    "warn_due_min_count": 1,
     "warn_deadline_within_days": 0,
+    "warn_deadline_min_count": 1,
     "danger_on_fire_label": True,
     "warn_on_priority": True,
     "warn_on_due": True,
@@ -65,6 +69,21 @@ def _task_matches_label(task: Any, label_name: str) -> bool:
     return _normalize_label_name(label_name) in task_labels
 
 
+def _task_matches_any_label(task: Any, label_names: Sequence[str]) -> bool:
+    normalized_labels = {
+        _normalize_label_name(str(label))
+        for label in label_names
+        if str(label).strip()
+    }
+    if not normalized_labels:
+        return False
+    task_labels = {
+        _normalize_label_name(str(label))
+        for label in (task.task_entry.labels or [])
+    }
+    return bool(task_labels & normalized_labels)
+
+
 def _task_date_is_due(task_value: Any, reference_day: date) -> bool:
     task_date = extract_task_due_date(task_value)
     return task_date is not None and task_date.date() <= reference_day
@@ -103,6 +122,25 @@ def _normalize_urgency_settings(
         normalized["warn_priority_thresholds"] = tuple(
             int(value) for value in thresholds if str(value).strip()
         )
+    fire_labels = settings.get("fire_labels")
+    if isinstance(fire_labels, list):
+        normalized["fire_labels"] = tuple(
+            str(value).strip() for value in fire_labels if str(value).strip()
+        )
+    elif isinstance(settings.get("fire_label"), str):
+        label = str(settings["fire_label"]).strip()
+        normalized["fire_labels"] = (label,) if label else tuple()
+    else:
+        normalized["fire_labels"] = tuple(DEFAULT_URGENCY_SETTINGS["fire_labels"])
+    for field_name in (
+        "warn_priority_min_count",
+        "warn_due_min_count",
+        "warn_deadline_min_count",
+    ):
+        try:
+            normalized[field_name] = max(1, int(settings.get(field_name, normalized[field_name])))
+        except (TypeError, ValueError):
+            normalized[field_name] = DEFAULT_URGENCY_SETTINGS[field_name]
     return normalized
 
 
@@ -125,6 +163,9 @@ def evaluate_urgency_status(
                 "fireTasks": 0,
                 "p1Tasks": 0,
                 "p2Tasks": 0,
+                "p3Tasks": 0,
+                "p4Tasks": 0,
+                "priorityTasks": 0,
                 "dueTasks": 0,
                 "deadlineTasks": 0,
             },
@@ -136,22 +177,28 @@ def evaluate_urgency_status(
         "fireTasks": 0,
         "p1Tasks": 0,
         "p2Tasks": 0,
+        "p3Tasks": 0,
+        "p4Tasks": 0,
+        "priorityTasks": 0,
         "dueTasks": 0,
         "deadlineTasks": 0,
     }
-    urgent_task_count = 0
     warn_priority_thresholds = set(int(value) for value in urgency_settings["warn_priority_thresholds"])
     warn_due_within_days = int(urgency_settings["warn_due_within_days"])
     warn_deadline_within_days = int(urgency_settings["warn_deadline_within_days"])
+    fire_labels = tuple(str(value) for value in urgency_settings["fire_labels"] if str(value).strip())
+    task_matches: list[dict[str, bool]] = []
 
     for project in active_projects or []:
         for task in project.tasks or []:
             task_entry = task.task_entry
-            fire = bool(urgency_settings["danger_on_fire_label"]) and _task_matches_label(
-                task, str(urgency_settings["fire_label"])
+            fire = bool(urgency_settings["danger_on_fire_label"]) and _task_matches_any_label(
+                task, fire_labels
             )
             p1 = bool(urgency_settings["warn_on_priority"]) and 4 in warn_priority_thresholds and task_entry.priority == 4
             p2 = bool(urgency_settings["warn_on_priority"]) and 3 in warn_priority_thresholds and task_entry.priority == 3
+            p3 = bool(urgency_settings["warn_on_priority"]) and 2 in warn_priority_thresholds and task_entry.priority == 2
+            p4 = bool(urgency_settings["warn_on_priority"]) and 1 in warn_priority_thresholds and task_entry.priority == 1
             due = bool(urgency_settings["warn_on_due"]) and _task_due_within_days(
                 task_entry.due,
                 reference_day,
@@ -169,41 +216,68 @@ def evaluate_urgency_status(
                 counts["p1Tasks"] += 1
             if p2:
                 counts["p2Tasks"] += 1
+            if p3:
+                counts["p3Tasks"] += 1
+            if p4:
+                counts["p4Tasks"] += 1
             if due:
                 counts["dueTasks"] += 1
             if deadline:
                 counts["deadlineTasks"] += 1
-
-            if fire or p1 or p2 or due or deadline:
-                urgent_task_count += 1
+            if p1 or p2 or p3 or p4:
+                counts["priorityTasks"] += 1
+            task_matches.append(
+                {
+                    "fire": fire,
+                    "priority": p1 or p2 or p3 or p4,
+                    "due": due,
+                    "deadline": deadline,
+                }
+            )
 
     fire_count = counts["fireTasks"]
-    if fire_count > 0:
+    priority_count = counts["priorityTasks"]
+    due_count = counts["dueTasks"]
+    deadline_count = counts["deadlineTasks"]
+    fire_triggered = fire_count > 0
+    priority_triggered = priority_count >= int(urgency_settings["warn_priority_min_count"])
+    due_triggered = due_count >= int(urgency_settings["warn_due_min_count"])
+    deadline_triggered = deadline_count >= int(urgency_settings["warn_deadline_min_count"])
+    active_match_count = sum(
+        1
+        for item in task_matches
+        if (fire_triggered and item["fire"])
+        or (priority_triggered and item["priority"])
+        or (due_triggered and item["due"])
+        or (deadline_triggered and item["deadline"])
+    )
+
+    if fire_triggered:
         state = "danger"
         title = str(urgency_settings["danger_summary_label"])
         summary = (
             f"{fire_count} fire task{'s' if fire_count != 1 else ''} are active."
-            f" {urgent_task_count} task{'s' if urgent_task_count != 1 else ''} total"
+            f" {active_match_count} task{'s' if active_match_count != 1 else ''} total"
             " need attention."
         )
-    elif urgent_task_count > 0:
+    elif priority_triggered or due_triggered or deadline_triggered:
         state = "warn"
         title = str(urgency_settings["warn_summary_label"])
         summary = (
-            f"{urgent_task_count} active task{'s' if urgent_task_count != 1 else ''}"
-            " are flagged by priority, due date, or deadline."
+            f"{active_match_count} active task{'s' if active_match_count != 1 else ''}"
+            " match the configured priority, due date, or deadline thresholds."
         )
     else:
         state = "good"
         title = "All clear"
-        summary = "No active fire, P1, P2, or due/deadline tasks found."
+        summary = "No configured urgency thresholds are currently met."
 
     return {
         "state": state,
         "title": title,
         "summary": summary,
         "todayLabel": reference_day.isoformat(),
-        "total": urgent_task_count,
+        "total": active_match_count,
         "counts": counts,
         "badgeLabel": {
             "good": "OK",

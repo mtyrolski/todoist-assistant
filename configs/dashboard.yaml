@@ -1,11 +1,16 @@
 urgency:
   enabled: true
   fire_label: fire 🧯🚒
+  fire_labels:
+  - fire 🧯🚒
   warn_priority_thresholds:
   - 4
   - 3
+  warn_priority_min_count: 1
   warn_due_within_days: 0
+  warn_due_min_count: 1
   warn_deadline_within_days: 0
+  warn_deadline_min_count: 1
   danger_on_fire_label: true
   warn_on_priority: true
   warn_on_due: true

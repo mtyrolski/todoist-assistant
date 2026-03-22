@@ -3029,6 +3029,10 @@ def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
     thresholds = data.get("warn_priority_thresholds")
     if not isinstance(thresholds, list):
         thresholds = list(defaults["warn_priority_thresholds"])
+    fire_labels = data.get("fire_labels")
+    if not isinstance(fire_labels, list):
+        fire_label_value = str(data.get("fire_label", defaults["fire_label"])).strip()
+        fire_labels = [fire_label_value] if fire_label_value else list(defaults["fire_labels"])
     try:
         config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
     except ValueError:
@@ -3037,12 +3041,22 @@ def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
     return {
         "enabled": bool(data.get("enabled", defaults["enabled"])),
         "fireLabel": data.get("fire_label", defaults["fire_label"]),
+        "fireLabels": fire_labels,
         "warnPriorityThresholds": thresholds,
+        "warnPriorityMinCount": data.get(
+            "warn_priority_min_count", defaults["warn_priority_min_count"]
+        ),
         "warnDueWithinDays": data.get(
             "warn_due_within_days", defaults["warn_due_within_days"]
         ),
+        "warnDueMinCount": data.get(
+            "warn_due_min_count", defaults["warn_due_min_count"]
+        ),
         "warnDeadlineWithinDays": data.get(
             "warn_deadline_within_days", defaults["warn_deadline_within_days"]
+        ),
+        "warnDeadlineMinCount": data.get(
+            "warn_deadline_min_count", defaults["warn_deadline_min_count"]
         ),
         "dangerOnFireLabel": bool(
             data.get("danger_on_fire_label", defaults["danger_on_fire_label"])
@@ -3103,6 +3117,13 @@ async def admin_dashboard_labels() -> dict[str, Any]:
                 "color": label_colors.get(name),
             }
         )
+    if not any(item["name"] == DEFAULT_URGENCY_SETTINGS["fire_label"] for item in labels):
+        labels.append(
+            {
+                "name": DEFAULT_URGENCY_SETTINGS["fire_label"],
+                "color": label_colors.get(DEFAULT_URGENCY_SETTINGS["fire_label"]),
+            }
+        )
     labels.sort(key=lambda item: item["name"].lower())
     return {"labels": labels}
 
@@ -3130,6 +3151,15 @@ async def admin_update_dashboard_settings(
         urgency["enabled"] = bool(payload["enabled"])
     if "fireLabel" in payload:
         urgency["fire_label"] = str(payload["fireLabel"]).strip()
+    if "fireLabels" in payload:
+        fire_labels = payload["fireLabels"]
+        if not isinstance(fire_labels, Sequence) or isinstance(fire_labels, str):
+            raise HTTPException(status_code=400, detail="fireLabels must be a list")
+        urgency["fire_labels"] = [
+            str(value).strip() for value in fire_labels if str(value).strip()
+        ]
+        if urgency["fire_labels"]:
+            urgency["fire_label"] = urgency["fire_labels"][0]
     if "warnPriorityThresholds" in payload:
         thresholds = payload["warnPriorityThresholds"]
         if not isinstance(thresholds, Sequence):
@@ -3137,13 +3167,25 @@ async def admin_update_dashboard_settings(
         urgency["warn_priority_thresholds"] = [
             _coerce_int(value, "warnPriorityThresholds") for value in thresholds
         ]
+    if "warnPriorityMinCount" in payload:
+        urgency["warn_priority_min_count"] = max(
+            1, _coerce_int(payload["warnPriorityMinCount"], "warnPriorityMinCount")
+        )
     if "warnDueWithinDays" in payload:
         urgency["warn_due_within_days"] = _coerce_int(
             payload["warnDueWithinDays"], "warnDueWithinDays"
         )
+    if "warnDueMinCount" in payload:
+        urgency["warn_due_min_count"] = max(
+            1, _coerce_int(payload["warnDueMinCount"], "warnDueMinCount")
+        )
     if "warnDeadlineWithinDays" in payload:
         urgency["warn_deadline_within_days"] = _coerce_int(
             payload["warnDeadlineWithinDays"], "warnDeadlineWithinDays"
+        )
+    if "warnDeadlineMinCount" in payload:
+        urgency["warn_deadline_min_count"] = max(
+            1, _coerce_int(payload["warnDeadlineMinCount"], "warnDeadlineMinCount")
         )
     if "dangerOnFireLabel" in payload:
         urgency["danger_on_fire_label"] = bool(payload["dangerOnFireLabel"])

@@ -72,6 +72,9 @@ def test_evaluate_urgency_status_returns_good_when_clear() -> None:
         "fireTasks": 0,
         "p1Tasks": 0,
         "p2Tasks": 0,
+        "p3Tasks": 0,
+        "p4Tasks": 0,
+        "priorityTasks": 0,
         "dueTasks": 0,
         "deadlineTasks": 0,
     }
@@ -101,6 +104,9 @@ def test_evaluate_urgency_status_returns_warn_for_priority_and_dates() -> None:
         "fireTasks": 0,
         "p1Tasks": 1,
         "p2Tasks": 1,
+        "p3Tasks": 0,
+        "p4Tasks": 0,
+        "priorityTasks": 2,
         "dueTasks": 1,
         "deadlineTasks": 1,
     }
@@ -158,4 +164,44 @@ def test_evaluate_urgency_status_respects_custom_settings() -> None:
     assert status["total"] == 2
     assert status["counts"]["fireTasks"] == 0
     assert status["counts"]["p1Tasks"] == 1
+    assert status["counts"]["priorityTasks"] == 1
     assert status["counts"]["dueTasks"] == 1
+
+
+def test_evaluate_urgency_status_supports_multi_labels_and_minimum_thresholds() -> None:
+    today = date(2026, 3, 20)
+    projects = [
+        make_project(
+            tasks=[
+                make_task("fire-1", labels=["fire 🧯🚒"]),
+                make_task("fire-2", labels=["hot"]),
+                make_task("p2", priority=3),
+                make_task("p3", priority=2),
+                make_task("due", due={"date": "2026-03-20"}),
+                make_task("deadline", deadline={"date": "2026-03-20"}),
+            ]
+        )
+    ]
+
+    status = evaluate_urgency_status(
+        projects,
+        today=today,
+        settings={
+            "enabled": True,
+            "fire_labels": ["fire 🧯🚒", "hot"],
+            "warn_priority_thresholds": [3, 2],
+            "warn_priority_min_count": 2,
+            "warn_due_within_days": 0,
+            "warn_due_min_count": 2,
+            "warn_deadline_within_days": 0,
+            "warn_deadline_min_count": 1,
+        },
+    )
+
+    assert status["state"] == "danger"
+    assert status["counts"]["fireTasks"] == 2
+    assert status["counts"]["p2Tasks"] == 1
+    assert status["counts"]["p3Tasks"] == 1
+    assert status["counts"]["priorityTasks"] == 2
+    assert status["counts"]["dueTasks"] == 1
+    assert status["counts"]["deadlineTasks"] == 1

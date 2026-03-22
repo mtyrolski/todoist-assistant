@@ -582,25 +582,39 @@ def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
     payload = res.json()
     assert payload["settings"]["enabled"] is True
     assert payload["editTargets"][0]["icon"] == "wrench"
+    assert payload["settings"]["fireLabels"] == [web_api.DEFAULT_URGENCY_SETTINGS["fire_label"]]
 
     update = client.put(
         "/api/admin/dashboard/settings",
         json={
             "enabled": False,
+            "fireLabels": ["fire 🧯🚒", "hot"],
             "warnPriorityThresholds": [4],
+            "warnPriorityMinCount": 2,
             "warnDueWithinDays": 2,
+            "warnDueMinCount": 3,
+            "warnDeadlineMinCount": 2,
             "badgeLabels": {"warn": "Check"},
         },
     )
     assert update.status_code == 200
     updated = update.json()
     assert updated["settings"]["enabled"] is False
+    assert updated["settings"]["fireLabels"] == ["fire 🧯🚒", "hot"]
     assert updated["settings"]["warnPriorityThresholds"] == [4]
+    assert updated["settings"]["warnPriorityMinCount"] == 2
     assert updated["settings"]["warnDueWithinDays"] == 2
+    assert updated["settings"]["warnDueMinCount"] == 3
+    assert updated["settings"]["warnDeadlineMinCount"] == 2
     assert updated["settings"]["badgeLabels"]["warn"] == "Check"
 
     saved_text = (config_dir / "dashboard.yaml").read_text(encoding="utf-8")
+    assert "fire_labels:" in saved_text
+    assert "- hot" in saved_text
+    assert "warn_priority_min_count: 2" in saved_text
     assert "warn_due_within_days: 2" in saved_text
+    assert "warn_due_min_count: 3" in saved_text
+    assert "warn_deadline_min_count: 2" in saved_text
     assert "enabled: false" in saved_text
 
 
@@ -624,6 +638,7 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None
     payload = res.json()
     assert payload["labels"] == [
         {"name": "alpha", "color": "#0000ff"},
+        {"name": web_api.DEFAULT_URGENCY_SETTINGS["fire_label"], "color": None},
         {"name": "zeta", "color": "#ff0000"},
     ]
 

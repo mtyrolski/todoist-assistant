@@ -862,6 +862,11 @@ h1 {
   text-align: right;
 }
 
+.multiSelectInput {
+  min-height: 132px;
+  resize: none;
+}
+
 textarea.textInput {
   min-height: 90px;
 }

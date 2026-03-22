@@ -49,6 +49,9 @@ type UrgencyStatusPayload = {
     fireTasks: number;
     p1Tasks: number;
     p2Tasks: number;
+    p3Tasks: number;
+    p4Tasks: number;
+    priorityTasks: number;
     dueTasks: number;
     deadlineTasks: number;
   };
@@ -345,6 +348,8 @@ export function DashboardView({
         { key: "fireTasks", label: "Fire", value: urgencyStatus.counts.fireTasks },
         { key: "p1Tasks", label: "P1", value: urgencyStatus.counts.p1Tasks },
         { key: "p2Tasks", label: "P2", value: urgencyStatus.counts.p2Tasks },
+        { key: "p3Tasks", label: "P3", value: urgencyStatus.counts.p3Tasks },
+        { key: "p4Tasks", label: "P4", value: urgencyStatus.counts.p4Tasks },
         { key: "dueTasks", label: "Due today", value: urgencyStatus.counts.dueTasks },
         { key: "deadlineTasks", label: "Deadline", value: urgencyStatus.counts.deadlineTasks }
       ]
@@ -403,7 +408,10 @@ export function DashboardView({
   ];
 
   const showFirstSyncOverlay =
-    !setupActive && (setupChecklistActive || loadingDashboard || progressDisplay?.active || retrying);
+    !setupActive &&
+    (firstSyncPending ||
+      retrying ||
+      (!dashboard && (setupChecklistActive || loadingDashboard || progressDisplay?.active)));
 
   return (
     <div>

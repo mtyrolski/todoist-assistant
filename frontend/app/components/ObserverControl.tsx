@@ -64,11 +64,13 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<"toggle" | "run" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const loadState = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      setNotice(null);
       const res = await fetch("/api/admin/observer");
       const payload = await readJson<ObserverResponse>(res);
       if (!res.ok) {
@@ -96,6 +98,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
     try {
       setAction("toggle");
       setError(null);
+      setNotice(null);
       const res = await fetch("/api/admin/observer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -111,6 +114,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
       if (typeof settingsMinutes === "number" && Number.isFinite(settingsMinutes)) {
         setRefreshIntervalMinutes(String(settingsMinutes));
       }
+      setNotice(nextEnabled ? "Observer enabled." : "Observer disabled.");
       onAfterMutation();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update observer");
@@ -123,6 +127,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
     try {
       setAction("run");
       setError(null);
+      setNotice(null);
       const res = await fetch("/api/admin/observer/run", { method: "POST" });
       const payload = await readJson<{ state?: ObserverState }>(res);
       if (!res.ok) {
@@ -134,6 +139,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
       } else {
         throw new Error("Observer response did not include state");
       }
+      setNotice("Observer run completed.");
       onAfterMutation();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to run observer");
@@ -146,6 +152,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
     try {
       setAction("save");
       setError(null);
+      setNotice(null);
       const numericValue = Number(refreshIntervalMinutes);
       const res = await fetch("/api/admin/observer", {
         method: "POST",
@@ -161,6 +168,9 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
       const settingsMinutes = payload.settings?.refreshIntervalMinutes ?? payload.state.refreshIntervalMinutes;
       if (typeof settingsMinutes === "number" && Number.isFinite(settingsMinutes)) {
         setRefreshIntervalMinutes(String(settingsMinutes));
+        setNotice(`Refresh interval updated to ${settingsMinutes} minute${settingsMinutes === 1 ? "" : "s"}.`);
+      } else {
+        setNotice("Observer settings updated.");
       }
       onAfterMutation();
     } catch (err) {
@@ -254,6 +264,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
               </button>
             </div>
           </div>
+          {notice ? <p className="pill pill-good">{notice}</p> : null}
           {state?.lastError ? <p className="muted tiny">Error: {state.lastError}</p> : null}
           {error ? <p className="muted tiny">Notice: {error}</p> : null}
         </div>
