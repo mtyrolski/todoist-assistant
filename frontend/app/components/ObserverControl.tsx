@@ -5,12 +5,29 @@ import { InfoTip } from "./InfoTip";
 
 type ObserverState = {
   enabled: boolean;
+  refreshIntervalMinutes?: number | null;
   updatedAt?: string | null;
   lastRunAt?: string | null;
   lastDurationSeconds?: number | null;
   lastEvents?: number | null;
   lastStatus?: string | null;
   lastError?: string | null;
+};
+
+type ObserverResponse = {
+  state: ObserverState;
+  settings?: {
+    enabled: boolean;
+    refreshIntervalMinutes: number;
+    configPath?: string;
+  };
+  editTargets?: {
+    key: string;
+    label: string;
+    icon?: string;
+    configPath?: string;
+    anchor?: string;
+  }[];
 };
 
 const OBSERVER_HELP = `**Observer**
@@ -43,8 +60,9 @@ function formatDuration(value: number | null | undefined): string {
 
 export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => void }) {
   const [state, setState] = useState<ObserverState | null>(null);
+  const [refreshIntervalMinutes, setRefreshIntervalMinutes] = useState<string>("0.5");
   const [loading, setLoading] = useState(false);
-  const [action, setAction] = useState<"toggle" | "run" | null>(null);
+  const [action, setAction] = useState<"toggle" | "run" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadState = useCallback(async () => {
@@ -52,12 +70,16 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
       setLoading(true);
       setError(null);
       const res = await fetch("/api/admin/observer");
-      const payload = await readJson<ObserverState>(res);
+      const payload = await readJson<ObserverResponse>(res);
       if (!res.ok) {
         const detail = (payload as unknown as { detail?: unknown })?.detail;
         throw new Error(String(detail ?? "Failed to load observer state"));
       }
-      setState(payload);
+      setState(payload.state);
+      const settingsMinutes = payload.settings?.refreshIntervalMinutes ?? payload.state.refreshIntervalMinutes;
+      if (typeof settingsMinutes === "number" && Number.isFinite(settingsMinutes)) {
+        setRefreshIntervalMinutes(String(settingsMinutes));
+      }
     } catch (err) {
       setState(null);
       setError(err instanceof Error ? err.message : "Failed to load observer state");
@@ -79,12 +101,16 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: nextEnabled })
       });
-      const payload = await readJson<ObserverState>(res);
+      const payload = await readJson<ObserverResponse>(res);
       if (!res.ok) {
         const detail = (payload as unknown as { detail?: unknown })?.detail;
         throw new Error(String(detail ?? "Failed to update observer"));
       }
-      setState(payload);
+      setState(payload.state);
+      const settingsMinutes = payload.settings?.refreshIntervalMinutes ?? payload.state.refreshIntervalMinutes;
+      if (typeof settingsMinutes === "number" && Number.isFinite(settingsMinutes)) {
+        setRefreshIntervalMinutes(String(settingsMinutes));
+      }
       onAfterMutation();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update observer");
@@ -105,8 +131,8 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
       }
       if (payload.state) {
         setState(payload.state);
-      } else if (payload as unknown as ObserverState) {
-        setState(payload as unknown as ObserverState);
+      } else {
+        throw new Error("Observer response did not include state");
       }
       onAfterMutation();
     } catch (err) {
@@ -116,15 +142,43 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
     }
   };
 
-  const enabled = state?.enabled ?? true;
-  const statusTone = enabled ? "good" : "warn";
-  const statusLabel = enabled ? "Enabled" : "Disabled";
-  const lastStatus = state?.lastStatus ? `Status: ${state.lastStatus}` : "No runs yet";
+  const saveSettings = async () => {
+    try {
+      setAction("save");
+      setError(null);
+      const numericValue = Number(refreshIntervalMinutes);
+      const res = await fetch("/api/admin/observer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshIntervalMinutes: numericValue })
+      });
+      const payload = await readJson<ObserverResponse>(res);
+      if (!res.ok) {
+        const detail = (payload as unknown as { detail?: unknown })?.detail;
+        throw new Error(String(detail ?? "Failed to save observer settings"));
+      }
+      setState(payload.state);
+      const settingsMinutes = payload.settings?.refreshIntervalMinutes ?? payload.state.refreshIntervalMinutes;
+      if (typeof settingsMinutes === "number" && Number.isFinite(settingsMinutes)) {
+        setRefreshIntervalMinutes(String(settingsMinutes));
+      }
+      onAfterMutation();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save observer settings");
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const enabled = state?.enabled ?? null;
+  const statusTone = enabled === null ? "neutral" : enabled ? "good" : "warn";
+  const statusLabel = enabled === null ? "Unknown" : enabled ? "Enabled" : "Disabled";
+  const lastStatus = state?.lastStatus ? `Status: ${state.lastStatus}` : loading ? "Loading..." : "No runs yet";
   const lastEvents =
     typeof state?.lastEvents === "number" ? `${state.lastEvents} new events` : "No activity yet";
 
   return (
-    <section className="card">
+    <section id="observer-control" className="card">
       <header className="cardHeader">
         <div className="cardTitleRow">
           <h2>Observer</h2>
@@ -136,17 +190,17 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
             className="button buttonSmall buttonGhost"
             type="button"
             onClick={runOnce}
-            disabled={!enabled || action !== null}
+            disabled={enabled !== true || action !== null}
           >
             {action === "run" ? "Running..." : "Run once"}
           </button>
           <button
             className="button buttonSmall"
             type="button"
-            onClick={() => updateState(!enabled)}
-            disabled={action !== null}
+            onClick={() => updateState(!(enabled === true))}
+            disabled={action !== null || enabled === null}
           >
-            {action === "toggle" ? "Updating..." : enabled ? "Disable" : "Enable"}
+            {action === "toggle" ? "Updating..." : enabled === true ? "Disable" : "Enable"}
           </button>
         </div>
       </header>
@@ -167,9 +221,38 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
             <div className="dot dot-neutral" />
             <div className="rowMain">
               <p className="rowTitle">Latest tick</p>
-              <p className="muted tiny">{lastEvents}</p>
+              <p className="muted tiny">
+                {lastEvents}
+                {state?.refreshIntervalMinutes ? ` · every ${state.refreshIntervalMinutes} min` : ""}
+              </p>
             </div>
             <p className="rowDetail">{formatDuration(state?.lastDurationSeconds)}</p>
+          </div>
+          <div className="row rowTight">
+            <div className="dot dot-neutral" />
+            <div className="rowMain">
+              <p className="rowTitle">Refresh interval (minutes)</p>
+              <p className="muted tiny">Polling delay in minutes. Example: 0.5 = 30 seconds.</p>
+            </div>
+            <div className="adminRowRight">
+              <input
+                className="textInput observerIntervalInput"
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={refreshIntervalMinutes}
+                onChange={(event) => setRefreshIntervalMinutes(event.target.value)}
+                style={{ width: 108 }}
+              />
+              <button
+                className="button buttonSmall"
+                type="button"
+                onClick={saveSettings}
+                disabled={action !== null}
+              >
+                {action === "save" ? "Saving..." : "Save"}
+              </button>
+            </div>
           </div>
           {state?.lastError ? <p className="muted tiny">Error: {state.lastError}</p> : null}
           {error ? <p className="muted tiny">Notice: {error}</p> : null}

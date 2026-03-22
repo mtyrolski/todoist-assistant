@@ -1,0 +1,21 @@
+urgency:
+  enabled: true
+  fire_label: fire 🧯🚒
+  warn_priority_thresholds:
+  - 4
+  - 3
+  warn_due_within_days: 0
+  warn_deadline_within_days: 0
+  danger_on_fire_label: true
+  warn_on_priority: true
+  warn_on_due: true
+  warn_on_deadline: true
+  warn_summary_label: Attention needed
+  danger_summary_label: Urgent attention needed
+  badge_labels:
+    good: OK
+    warn: Watch
+    danger: Urgent
+observer:
+  enabled: true
+  refresh_interval_minutes: 2.0

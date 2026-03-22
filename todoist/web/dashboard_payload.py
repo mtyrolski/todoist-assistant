@@ -14,6 +14,24 @@ from todoist.types import Project
 from todoist.stats import extract_task_due_date
 
 FIRE_TASK_LABEL = "fire \U0001F9EF\U0001F692"
+DEFAULT_URGENCY_SETTINGS = {
+    "enabled": True,
+    "fire_label": FIRE_TASK_LABEL,
+    "warn_priority_thresholds": (4, 3),
+    "warn_due_within_days": 0,
+    "warn_deadline_within_days": 0,
+    "danger_on_fire_label": True,
+    "warn_on_priority": True,
+    "warn_on_due": True,
+    "warn_on_deadline": True,
+    "warn_summary_label": "Attention needed",
+    "danger_summary_label": "Urgent attention needed",
+    "badge_labels": {
+        "good": "OK",
+        "warn": "Watch",
+        "danger": "Urgent",
+    },
+}
 
 
 def _normalize_label_name(value: str) -> str:
@@ -52,12 +70,68 @@ def _task_date_is_due(task_value: Any, reference_day: date) -> bool:
     return task_date is not None and task_date.date() <= reference_day
 
 
+def _task_due_within_days(
+    task_value: Any,
+    reference_day: date,
+    within_days: int,
+) -> bool:
+    task_date = extract_task_due_date(task_value)
+    if task_date is None:
+        return False
+    if within_days <= 0:
+        return task_date.date() <= reference_day
+    upper_bound = reference_day + timedelta(days=within_days)
+    return reference_day <= task_date.date() <= upper_bound
+
+
+def _normalize_urgency_settings(
+    settings: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized = dict(DEFAULT_URGENCY_SETTINGS)
+    if not isinstance(settings, dict):
+        return normalized
+    normalized.update(settings)
+    badge_labels = settings.get("badge_labels")
+    if isinstance(badge_labels, dict):
+        normalized["badge_labels"] = {
+            "good": str(badge_labels.get("good") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]),
+            "warn": str(badge_labels.get("warn") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]),
+            "danger": str(badge_labels.get("danger") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]),
+        }
+    thresholds = settings.get("warn_priority_thresholds")
+    if isinstance(thresholds, list):
+        normalized["warn_priority_thresholds"] = tuple(
+            int(value) for value in thresholds if str(value).strip()
+        )
+    return normalized
+
+
 def evaluate_urgency_status(
     active_projects: Sequence[Project] | None,
     *,
     today: date | None = None,
+    settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reference_day = today or datetime.now().date()
+    urgency_settings = _normalize_urgency_settings(settings)
+    if not bool(urgency_settings["enabled"]):
+        return {
+            "state": "good",
+            "title": "Monitoring disabled",
+            "summary": "Urgency monitoring is disabled in dashboard settings.",
+            "todayLabel": reference_day.isoformat(),
+            "total": 0,
+            "counts": {
+                "fireTasks": 0,
+                "p1Tasks": 0,
+                "p2Tasks": 0,
+                "dueTasks": 0,
+                "deadlineTasks": 0,
+            },
+            "badgeLabel": str(urgency_settings["badge_labels"]["good"]),
+            "helpKey": "Urgency Status",
+            "configurable": True,
+        }
     counts = {
         "fireTasks": 0,
         "p1Tasks": 0,
@@ -66,15 +140,28 @@ def evaluate_urgency_status(
         "deadlineTasks": 0,
     }
     urgent_task_count = 0
+    warn_priority_thresholds = set(int(value) for value in urgency_settings["warn_priority_thresholds"])
+    warn_due_within_days = int(urgency_settings["warn_due_within_days"])
+    warn_deadline_within_days = int(urgency_settings["warn_deadline_within_days"])
 
     for project in active_projects or []:
         for task in project.tasks or []:
             task_entry = task.task_entry
-            fire = _task_matches_label(task, FIRE_TASK_LABEL)
-            p1 = task_entry.priority == 4
-            p2 = task_entry.priority == 3
-            due = _task_date_is_due(task_entry.due, reference_day)
-            deadline = _task_date_is_due(task_entry.deadline, reference_day)
+            fire = bool(urgency_settings["danger_on_fire_label"]) and _task_matches_label(
+                task, str(urgency_settings["fire_label"])
+            )
+            p1 = bool(urgency_settings["warn_on_priority"]) and 4 in warn_priority_thresholds and task_entry.priority == 4
+            p2 = bool(urgency_settings["warn_on_priority"]) and 3 in warn_priority_thresholds and task_entry.priority == 3
+            due = bool(urgency_settings["warn_on_due"]) and _task_due_within_days(
+                task_entry.due,
+                reference_day,
+                warn_due_within_days,
+            )
+            deadline = bool(urgency_settings["warn_on_deadline"]) and _task_due_within_days(
+                task_entry.deadline,
+                reference_day,
+                warn_deadline_within_days,
+            )
 
             if fire:
                 counts["fireTasks"] += 1
@@ -93,7 +180,7 @@ def evaluate_urgency_status(
     fire_count = counts["fireTasks"]
     if fire_count > 0:
         state = "danger"
-        title = "Urgent attention needed"
+        title = str(urgency_settings["danger_summary_label"])
         summary = (
             f"{fire_count} fire task{'s' if fire_count != 1 else ''} are active."
             f" {urgent_task_count} task{'s' if urgent_task_count != 1 else ''} total"
@@ -101,7 +188,7 @@ def evaluate_urgency_status(
         )
     elif urgent_task_count > 0:
         state = "warn"
-        title = "Attention needed"
+        title = str(urgency_settings["warn_summary_label"])
         summary = (
             f"{urgent_task_count} active task{'s' if urgent_task_count != 1 else ''}"
             " are flagged by priority, due date, or deadline."
@@ -120,10 +207,11 @@ def evaluate_urgency_status(
         "counts": counts,
         "badgeLabel": {
             "good": "OK",
-            "warn": "Watch",
-            "danger": "Urgent",
+            "warn": str(urgency_settings["badge_labels"]["warn"]),
+            "danger": str(urgency_settings["badge_labels"]["danger"]),
         }[state],
         "helpKey": "Urgency Status",
+        "configurable": True,
     }
 
 

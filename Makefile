@@ -41,7 +41,7 @@ run_frontend: ensure_frontend_deps
 run_dashboard: ensure_frontend_deps
 	@bash -c '\
 		set -euo pipefail; \
-		pids=""; api_pid=""; fe_pid=""; \
+		pids=""; api_pid=""; fe_pid=""; observer_pid=""; \
 		wait_for_api() { \
 			local tries=0; \
 			echo "Waiting for API to be ready..."; \
@@ -62,12 +62,14 @@ run_dashboard: ensure_frontend_deps
 		}; \
 		trap cleanup INT TERM EXIT; \
 		uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		HYDRA_FULL_ERROR=1 uv run python3 -m todoist.run_observer --config-dir configs --config-name automations & observer_pid="$$!"; pids="$$pids $$observer_pid"; \
 		wait_for_api; \
 		npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
 		echo "Dashboard running:"; \
 		echo "  API:      http://127.0.0.1:8000"; \
+		echo "  Observer: enabled with dashboard startup"; \
 		echo "  Frontend: http://127.0.0.1:3000"; \
-		wait -n $$api_pid $$fe_pid; \
+		wait -n $$api_pid $$observer_pid $$fe_pid; \
 	'
 
 run_demo: ensure_frontend_deps

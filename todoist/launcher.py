@@ -10,10 +10,12 @@ import sys
 import time
 import traceback
 import webbrowser
+import threading
 import zipfile
 
 from todoist import telemetry
 from todoist.env import EnvVar
+from todoist.dashboard_settings import load_dashboard_config, observer_settings_payload
 
 
 def _default_data_dir() -> Path:
@@ -211,6 +213,32 @@ def _start_frontend(install_dir: Path, data_dir: Path, host: str, port: int) -> 
     return subprocess.Popen([node_cmd, str(server_js)], cwd=str(frontend_dir), env=env)
 
 
+def _start_dashboard_observer() -> threading.Thread:
+    from todoist.database.base import Database
+    from todoist.web.api import _build_observer  # pylint: disable=protected-access
+
+    db = Database(".env")
+    observer = _build_observer(db)
+    stop_event = threading.Event()
+
+    def _settings_provider() -> dict[str, object]:
+        config = load_dashboard_config()
+        payload = observer_settings_payload(config)
+        return {
+            "enabled": payload["enabled"],
+            "refreshIntervalSeconds": float(payload["refreshIntervalMinutes"]) * 60.0,
+        }
+
+    thread = threading.Thread(
+        target=observer.run_forever,
+        kwargs={"settings_provider": _settings_provider, "stop_event": stop_event},
+        name="dashboard-observer",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _win_long_path(path: Path) -> str:
     if os.name != "nt":
         return str(path)
@@ -275,6 +303,7 @@ def main() -> int:
     frontend_running = False
     try:
         api_app = _load_api_app()
+        _start_dashboard_observer()
         if not args.no_frontend:
             try:
                 frontend_proc = _start_frontend(install_dir, data_dir, args.frontend_host, args.frontend_port)

@@ -1,8 +1,10 @@
 "use client";
 
 import { AdminPanel } from "../components/AdminPanel";
+import { DashboardSettings } from "../components/DashboardSettings";
 import { LlmBreakdownStatus } from "../components/LlmBreakdownStatus";
 import { LoadingBar } from "../components/LoadingBar";
+import { ObserverControl } from "../components/ObserverControl";
 import { PageHeader } from "../components/PageHeader";
 import { ServiceMonitor } from "../components/ServiceMonitor";
 import { StatusPills } from "../components/StatusPills";
@@ -44,8 +46,23 @@ export default function ControlPanelPage() {
           />
         </div>
         <div className="stack">
+          <DashboardSettings
+            onAfterMutation={() => {
+              refreshStatus();
+            }}
+          />
+          <ObserverControl
+            onAfterMutation={() => {
+              refreshStatus();
+              refresh();
+            }}
+          />
           <LlmBreakdownStatus progress={progress} loading={loading} onRefresh={refresh} />
-          <ServiceMonitor services={status?.services ?? null} onRefresh={refreshStatus} />
+          <ServiceMonitor
+            services={status?.services ?? null}
+            configurableItems={status?.configurableItems}
+            onRefresh={refreshStatus}
+          />
         </div>
       </section>
     </>

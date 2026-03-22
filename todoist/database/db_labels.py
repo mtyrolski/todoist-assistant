@@ -1,3 +1,5 @@
+from typing import TypedDict
+
 from tqdm import tqdm
 from todoist.utils import TODOIST_COLOR_NAME_TO_RGB
 from loguru import logger
@@ -6,11 +8,16 @@ from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
 
 
+class LabelRecord(TypedDict):
+    name: str
+    color: str
+
+
 class DatabaseLabels:
     def __init__(self):
         super().__init__()
         self._api_client = TodoistAPIClient()
-        self._labels: list[dict] = []
+        self._labels: list[LabelRecord] = []
         self._mapping_label_name_to_color: dict[str, str] = {}
         self._fetch_label_data()
 
@@ -37,6 +44,11 @@ class DatabaseLabels:
 
         return mapping_name_to_color_code
 
+    def list_labels(self) -> list[LabelRecord]:
+        """Return a shallow copy of fetched label records."""
+
+        return [{"name": label["name"], "color": label["color"]} for label in self._labels]
+
     def _fetch_label_data(self) -> None:
         """
         Fetches label data from the Todoist API and populates local attributes.
@@ -47,8 +59,8 @@ class DatabaseLabels:
         self._mapping_label_name_to_color = {label["name"]: label["color"] for label in labels}
         logger.info(f"Fetched {len(labels)} labels.")
 
-    def _fetch_all_labels(self) -> list[dict]:
-        labels: list[dict] = []
+    def _fetch_all_labels(self) -> list[LabelRecord]:
+        labels: list[LabelRecord] = []
         cursor: str | None = None
 
         while True:
@@ -61,7 +73,9 @@ class DatabaseLabels:
                 rate_limited=True,
             )
             payload = self._api_client.request_json(spec, operation_name="list labels")
-            page_labels, next_cursor = self._extract_results_page(payload, operation_name="list labels")
+            page_labels, next_cursor = self._extract_label_results_page(
+                payload, operation_name="list labels"
+            )
             labels.extend(page_labels)
             if not next_cursor:
                 break
@@ -70,7 +84,9 @@ class DatabaseLabels:
         return labels
 
     @staticmethod
-    def _extract_results_page(payload: object, *, operation_name: str) -> tuple[list[dict], str | None]:
+    def _extract_label_results_page(
+        payload: object, *, operation_name: str
+    ) -> tuple[list[LabelRecord], str | None]:
         if not isinstance(payload, dict):
             raise RuntimeError(f"Unexpected payload type returned from {operation_name}: {type(payload).__name__}")
 
@@ -78,9 +94,15 @@ class DatabaseLabels:
         if not isinstance(results, list):
             raise RuntimeError(f"Unexpected results payload returned from {operation_name}")
 
-        typed_results = [item for item in results if isinstance(item, dict)]
-        if len(typed_results) != len(results):
-            raise RuntimeError(f"Unexpected non-object label record in {operation_name} response")
+        typed_results: list[LabelRecord] = []
+        for item in results:
+            if not isinstance(item, dict):
+                raise RuntimeError(f"Unexpected non-object label record in {operation_name} response")
+            name = item.get("name")
+            color = item.get("color")
+            if not isinstance(name, str) or not isinstance(color, str):
+                raise RuntimeError(f"Unexpected label shape returned from {operation_name}")
+            typed_results.append({"name": name, "color": color})
         next_cursor = payload.get("next_cursor")
         return typed_results, str(next_cursor) if isinstance(next_cursor, str) else None
 

@@ -275,6 +275,7 @@ export function DashboardView({
   const insightItems = dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null);
   const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
   const urgencyStatus = dashboardWithUrgency?.urgencyStatus ?? null;
+  const urgencyConfigItem = dashboard?.configurableItems?.find((item) => item.key === "urgency") ?? null;
   const focusMetricItems = metricItems.filter(
     (item) => item && (item.name === "Completed Tasks" || item.name === "Rescheduled Tasks")
   );
@@ -658,6 +659,11 @@ export function DashboardView({
                     </div>
                     <InfoTip label="About urgency status" content={METRIC_HELP["Urgency Status"] ?? DEFAULT_METRIC_HELP} />
                   </div>
+                  {urgencyConfigItem?.anchor ? (
+                    <a className="button buttonSmall buttonGhost" href={`/control-panel#${urgencyConfigItem.anchor}`}>
+                      🔧 Configure
+                    </a>
+                  ) : null}
                 </header>
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px" }}>
@@ -888,7 +894,11 @@ export function DashboardView({
 
           <ObserverControl onAfterMutation={onAfterMutation} />
 
-          <ServiceMonitor services={status?.services ?? null} onRefresh={refreshStatus} />
+          <ServiceMonitor
+            services={status?.services ?? null}
+            configurableItems={status?.configurableItems}
+            onRefresh={refreshStatus}
+          />
         </section>
       </section>
     </div>

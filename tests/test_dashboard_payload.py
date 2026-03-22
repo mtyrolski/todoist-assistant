@@ -124,3 +124,38 @@ def test_evaluate_urgency_status_returns_danger_for_fire_tasks() -> None:
     assert status["title"] == "Urgent attention needed"
     assert status["total"] == 1
     assert status["counts"]["fireTasks"] == 1
+
+
+def test_evaluate_urgency_status_respects_custom_settings() -> None:
+    today = date(2026, 3, 20)
+    projects = [
+        make_project(
+            tasks=[
+                make_task("p1", priority=4),
+                make_task("due", due={"date": "2026-03-25"}),
+                make_task("fire", labels=[FIRE_TASK_LABEL]),
+            ]
+        )
+    ]
+
+    status = evaluate_urgency_status(
+        projects,
+        today=today,
+        settings={
+            "enabled": True,
+            "danger_on_fire_label": False,
+            "warn_on_priority": True,
+            "warn_priority_thresholds": [4],
+            "warn_on_due": True,
+            "warn_due_within_days": 7,
+            "warn_on_deadline": False,
+            "badge_labels": {"good": "Clear", "warn": "Heads up", "danger": "Stop"},
+        },
+    )
+
+    assert status["state"] == "warn"
+    assert status["badgeLabel"] == "Heads up"
+    assert status["total"] == 2
+    assert status["counts"]["fireTasks"] == 0
+    assert status["counts"]["p1Tasks"] == 1
+    assert status["counts"]["dueTasks"] == 1
