@@ -29,15 +29,15 @@
   </table>
 </div>
 
-<p><strong>Pre-release notice</strong><br/>
-  This branch tracks the <code>v0.3</code> pre-release line. The latest stable release is
-  <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7">todoist-assistant-v0.2.7</a>.<br/>
-  Use the stable release for production. Use this branch for the current release prep, notes, and checklist:
+<p><strong>Latest release</strong><br/>
+  The latest stable release is
+  <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.0">todoist-assistant-v0.3.0</a>.<br/>
+  For release details, notes, and checklist, see
   <a href="docs/v0.3-release-notes.md">v0.3 release notes</a>.
 </p>
 
 <p><strong>Download the latest stable release</strong><br/>
-  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.2.7">GitHub Releases</a> and open the latest stable tag, then download the file you need:<br/>
+  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.0">GitHub Releases</a> and open the latest stable tag, then download the file you need:<br/>
   - Windows installer: <code>TodoistAssistantSetup.exe</code> or the <code>.msi</code>.<br/>
   - macOS app: <code>.dmg</code> (full app) or <code>.pkg</code> (CLI-only).<br/>
   - Linux: source distribution (see docs for setup).
