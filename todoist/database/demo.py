@@ -8,34 +8,83 @@ import pandas as pd
 
 from todoist.types import Project
 
-_PROJECT_ROOT_PREFIXES = (
-    "North Star",
-    "Harbor",
-    "Cedar",
-    "Aurora",
-    "Summit",
-    "Lumen",
-    "Riverbend",
-    "Orchard",
-    "Bluebird",
-    "Stone",
-    "Sunrise",
-    "Moon",
+@dataclass(frozen=True)
+class _ProjectTheme:
+    root_name: str
+    role_levels: tuple[tuple[str, ...], ...]
+
+
+_GENERIC_ROLE_LEVELS: tuple[tuple[str, ...], ...] = (
+    ("Inbox", "Backlog", "Notes", "Planning", "Tasks", "Ideas", "Archive", "Follow-up"),
+    ("Checklist", "Queue", "References", "Milestones", "Admin", "Review", "Someday", "Parking Lot"),
+    ("Drafts", "Next Steps", "Resources", "Open Loops", "Prep", "Recap", "History", "Details"),
 )
-_PROJECT_ROOT_SUFFIXES = (
-    "Studio",
-    "Lab",
-    "Works",
-    "Garden",
-    "Office",
-    "Collective",
-    "Project",
-    "Atelier",
-)
-_PROJECT_ROLE_LEVELS: tuple[tuple[str, ...], ...] = (
-    ("Planning", "Research", "Delivery", "Review", "Operations", "Notes", "Launch", "Support"),
-    ("Drafts", "Backlog", "Queue", "QA", "Follow-up", "Archive", "Inbox", "Checkpoints"),
-    ("Ideas", "Tasks", "References", "Comms", "Checklist", "Retrospective", "Closeout", "Briefing"),
+
+_PROJECT_THEME_CATALOG: tuple[_ProjectTheme, ...] = (
+    _ProjectTheme(
+        "North Star Studio",
+        (
+            ("Recordings", "First Album", "Office", "Rehearsal", "Mixing", "Merch", "Sessions", "Tour"),
+            ("Song Ideas", "Tracklist", "Demos", "Artwork", "Release Prep", "Gear", "Guests", "Budget"),
+            ("Lyrics", "Tasks", "References", "Notes", "Schedule", "Archive", "Assets", "Checklist"),
+        ),
+    ),
+    _ProjectTheme(
+        "Health",
+        (
+            ("Workout", "Vitamins", "Sleep", "Nutrition", "Checkups", "Recovery", "Mobility", "Routine"),
+            ("Weekly Plan", "Habits", "Measurements", "Appointments", "Shopping", "Research", "Coach", "Notes"),
+            ("Exercises", "Meals", "Supplements", "Questions", "Logs", "Milestones", "Results", "Archive"),
+        ),
+    ),
+    _ProjectTheme(
+        "Home Base",
+        (
+            ("Repairs", "Kitchen", "Bills", "Cleaning", "Garden", "Storage", "Shopping", "Decor"),
+            ("This Week", "Supplies", "Quotes", "Seasonal", "Appliances", "Paperwork", "Wishlist", "Notes"),
+            ("Checklist", "Receipts", "Measurements", "Ideas", "Contacts", "Tasks", "Archive", "Plans"),
+        ),
+    ),
+    _ProjectTheme(
+        "Learning Lab",
+        (
+            ("Courses", "Practice", "Reading List", "Notes", "Projects", "Review", "Milestones", "Ideas"),
+            ("Week 1", "Exercises", "Bookmarks", "Examples", "Questions", "Flashcards", "Goals", "Archive"),
+            ("Concepts", "Resources", "Homework", "Experiments", "Summaries", "Tasks", "References", "Recap"),
+        ),
+    ),
+    _ProjectTheme(
+        "Travel Plans",
+        (
+            ("Flights", "Hotels", "Itinerary", "Packing", "Budget", "Day Trips", "Food Spots", "Documents"),
+            ("Booking", "Maps", "Reservations", "Ideas", "Checklist", "Transit", "Photos", "Notes"),
+            ("Tickets", "Addresses", "Contacts", "Backup", "Tasks", "References", "Archive", "Expenses"),
+        ),
+    ),
+    _ProjectTheme(
+        "Family Hub",
+        (
+            ("Calendar", "School", "Birthdays", "Weekend Plans", "Paperwork", "Shopping", "Trips", "Notes"),
+            ("This Month", "Appointments", "Lists", "Ideas", "Photos", "Household", "Budget", "Archive"),
+            ("Tasks", "Contacts", "Checklist", "Memories", "References", "Prep", "Follow-up", "Recap"),
+        ),
+    ),
+    _ProjectTheme(
+        "Writing Desk",
+        (
+            ("Drafts", "Essays", "Newsletter", "Ideas", "Editing", "Research Notes", "Pitch List", "Archive"),
+            ("Outlines", "Sources", "Deadlines", "Rewrites", "Submissions", "Clippings", "Prompts", "Notes"),
+            ("Openers", "Quotes", "Checklist", "Tasks", "References", "Versions", "Feedback", "Recap"),
+        ),
+    ),
+    _ProjectTheme(
+        "Money Map",
+        (
+            ("Budget", "Bills", "Savings", "Taxes", "Investing", "Subscriptions", "Admin", "Goals"),
+            ("Monthly Plan", "Receipts", "Accounts", "Questions", "Renewals", "Transfers", "Wishlist", "Notes"),
+            ("Checklist", "Statements", "Tasks", "References", "History", "Forecast", "Archive", "Details"),
+        ),
+    ),
 )
 _LABEL_NAMES = (
     "Work",
@@ -68,13 +117,6 @@ _LABEL_NAMES = (
     "Fitness Goals",
     "Travel Plans",
 )
-_ROOT_THEME_CATALOG = tuple(
-    f"{prefix} {suffix}"
-    for prefix in _PROJECT_ROOT_PREFIXES
-    for suffix in _PROJECT_ROOT_SUFFIXES
-)
-
-
 @dataclass(frozen=True)
 class _ProjectTreeNode:
     project: Project
@@ -128,16 +170,20 @@ def _build_project_tree(active_projects: Sequence[Project]) -> tuple[list[_Proje
     return list(roots), node_cache
 
 
-def _select_root_theme(root_index: int) -> str:
-    theme = _ROOT_THEME_CATALOG[root_index % len(_ROOT_THEME_CATALOG)]
-    cycle = root_index // len(_ROOT_THEME_CATALOG)
+def _select_root_theme(root_index: int) -> _ProjectTheme:
+    theme = _PROJECT_THEME_CATALOG[root_index % len(_PROJECT_THEME_CATALOG)]
+    cycle = root_index // len(_PROJECT_THEME_CATALOG)
     if cycle == 0:
         return theme
-    return f"{theme} {cycle + 1}"
+    return _ProjectTheme(
+        root_name=f"{theme.root_name} {cycle + 1}",
+        role_levels=theme.role_levels,
+    )
 
 
-def _select_role(depth: int, sibling_index: int, root_index: int) -> str:
-    role_pool = _PROJECT_ROLE_LEVELS[min(depth - 1, len(_PROJECT_ROLE_LEVELS) - 1)]
+def _select_role(theme: _ProjectTheme, depth: int, sibling_index: int, root_index: int) -> str:
+    role_levels = theme.role_levels or _GENERIC_ROLE_LEVELS
+    role_pool = role_levels[min(depth - 1, len(role_levels) - 1)]
     position = sibling_index + (root_index % len(role_pool))
     role = role_pool[position % len(role_pool)]
     cycle = position // len(role_pool)
@@ -150,12 +196,12 @@ def _build_project_name_mapping(active_projects: Sequence[Project], project_name
     roots, _ = _build_project_tree(active_projects)
     mapping: dict[str, str] = {}
 
-    def _assign_node(node: _ProjectTreeNode, root_theme: str, role_path: tuple[str, ...], root_index: int) -> None:
-        anonymized_name = root_theme if not role_path else " / ".join((root_theme, *role_path))
+    def _assign_node(node: _ProjectTreeNode, theme: _ProjectTheme, role_path: tuple[str, ...], root_index: int) -> None:
+        anonymized_name = theme.root_name if not role_path else " / ".join((theme.root_name, *role_path))
         mapping[node.project.project_entry.name] = anonymized_name
         for child_index, child in enumerate(node.children):
-            role = _select_role(len(role_path) + 1, child_index, root_index)
-            _assign_node(child, root_theme, role_path + (role,), root_index)
+            role = _select_role(theme, len(role_path) + 1, child_index, root_index)
+            _assign_node(child, theme, role_path + (role,), root_index)
 
     for root_index, node in enumerate(roots):
         _assign_node(node, _select_root_theme(root_index), (), root_index)
@@ -165,7 +211,7 @@ def _build_project_name_mapping(active_projects: Sequence[Project], project_name
             continue
         digest = hashlib.sha256(project_name.encode("utf-8")).digest()
         fallback_index = int.from_bytes(digest[:8], "big")
-        mapping[project_name] = _ROOT_THEME_CATALOG[fallback_index % len(_ROOT_THEME_CATALOG)]
+        mapping[project_name] = _PROJECT_THEME_CATALOG[fallback_index % len(_PROJECT_THEME_CATALOG)].root_name
 
     return mapping
 
@@ -190,7 +236,7 @@ def anonymize_label_names(active_projects: list[Project]) -> dict[str, str]:
 
     label_mapping: dict[str, str] = {
         original: str(replacement)
-        for original, replacement in zip(all_labels_names, _LABEL_NAMES, strict=True)
+        for original, replacement in zip(all_labels_names, _LABEL_NAMES)
     }
 
     for project in active_projects:

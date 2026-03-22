@@ -1131,7 +1131,7 @@ textarea.textInput {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 24px;
-  align-items: start;
+  align-items: flex-start;
   margin-top: 4px;
 }
 
@@ -1139,7 +1139,7 @@ textarea.textInput {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  align-content: start;
+  align-content: flex-start;
   min-width: 0;
 }
 
@@ -1172,7 +1172,7 @@ textarea.textInput {
 }
 
 .hierarchyCardHeader {
-  gap: 8px;
+  gap: 12px;
 }
 
 .hierarchyCardHeaderTop {
@@ -1187,10 +1187,11 @@ textarea.textInput {
   font-size: 12px;
   line-height: 1.55;
   max-width: 62ch;
+  margin-top: 4px;
 }
 
 .hierarchyCardBody {
-  padding: 10px;
+  padding: 14px 10px 10px;
 }
 
 .hierarchyPlotStage {
@@ -1249,7 +1250,7 @@ textarea.textInput {
   box-shadow: var(--glow);
   display: grid;
   gap: 15px;
-  align-content: start;
+  align-content: flex-start;
   min-height: 214px;
 }
 
@@ -1306,7 +1307,7 @@ textarea.textInput {
   gap: 14px;
   padding-top: 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  align-items: start;
+  align-items: flex-start;
 }
 
 .statPeriodBlock {
@@ -1445,7 +1446,7 @@ textarea.textInput {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr);
   gap: 18px;
-  align-items: start;
+  align-items: flex-start;
 }
 
 .adjustmentsPool {
@@ -1479,7 +1480,7 @@ textarea.textInput {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  align-content: start;
+  align-content: flex-start;
   padding-right: 4px;
 }
 
@@ -1523,7 +1524,7 @@ textarea.textInput {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 14px;
-  align-items: start;
+  align-items: flex-start;
 }
 
 .adjustmentsBucket {
@@ -1552,7 +1553,7 @@ textarea.textInput {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  align-content: start;
+  align-content: flex-start;
   padding-right: 4px;
 }
 

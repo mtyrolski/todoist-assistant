@@ -139,6 +139,66 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     assert loaded is False
 
 
+def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": True,
+            "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION - 1,
+            "activity_cache_signature": web_api._activity_cache_signature(),
+            "df_activity": _single_event_df(),
+            "active_projects": [],
+            "project_colors": {"A": "#123456"},
+        }
+    )
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=True)
+    assert loaded is False
+
+
+def test_load_state_from_disk_cache_restores_current_demo_snapshot(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    df = _single_event_df()
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": True,
+            "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION,
+            "activity_cache_signature": web_api._activity_cache_signature(),
+            "df_activity": df,
+            "active_projects": [],
+            "project_colors": {"A": "#123456"},
+        }
+    )
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=True)
+    assert loaded is True
+    assert web_api._state.df_activity is not None
+    assert len(web_api._state.df_activity) == 1
+    assert web_api._state.project_colors == {"A": "#123456"}
+    assert web_api._state.active_projects == []
+    assert web_api._state.demo_mode is True
+
+
 def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) -> None:
     _stub_all_figures(monkeypatch)
     _clear_dashboard_state()

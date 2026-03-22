@@ -88,7 +88,7 @@ See `core/README.md` for full details.
 ## Screenshots
 ![Dashboard overview](img/fig1.png)
 ![Activity trends](img/fig2.png)
-![Automation controls](img/fig3.png)
+![Plots](img/fig3.png)
 
 ## Quick start (dev)
 ```bash
@@ -122,6 +122,9 @@ make check
 - Todoist request retries now wait only after an actual `429` response, using Todoist's `Retry-After` value when available and a small RPM-based fallback otherwise.
 - On startup, legacy runtime files found in old locations are migrated to the cache dir and backed up in `.cache-migration-backup/`.
 - Migration backups are temporary and will be removed once the `v0.3` line is finalized.
+
+![Automation controls](img/fig4.png)
+
 
 ## Quick start (Docker)
 ```bash
