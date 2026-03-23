@@ -44,6 +44,13 @@ RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIM
 _MIGRATED_CACHE_DIRS: set[str] = set()
 DEFAULT_LOG_LEVEL = "INFO"
 VALID_LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
+API_KEY_PLACEHOLDERS = frozenset(
+    {
+        "put your api here",
+        "put your api key here",
+        "your todoist api key",
+    }
+)
 
 TqdmProgressCallback = Callable[[str, int, int, str | None], None]
 
@@ -364,8 +371,17 @@ def last_n_years_in_weeks(n_years: int) -> int:
 
 
 def get_api_key() -> str:
-    """Assuming that ENV variables are set"""
-    return getenv('API_KEY') or ""
+    """Return a normalized Todoist API token or an empty string when unset."""
+
+    raw_value = getenv("API_KEY")
+    if raw_value is None:
+        return ""
+    value = str(raw_value).strip().strip("'\"")
+    if not value:
+        return ""
+    if value.lower() in API_KEY_PLACEHOLDERS:
+        return ""
+    return value
 
 
 U = TypeVar('U')

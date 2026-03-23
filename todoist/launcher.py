@@ -16,6 +16,7 @@ import zipfile
 from todoist import telemetry
 from todoist.env import EnvVar
 from todoist.dashboard_settings import load_dashboard_config, observer_settings_payload
+from todoist.utils import get_api_key
 
 
 def _default_data_dir() -> Path:
@@ -239,6 +240,13 @@ def _start_dashboard_observer() -> threading.Thread:
     return thread
 
 
+def _maybe_start_dashboard_observer() -> threading.Thread | None:
+    if not get_api_key():
+        print("Dashboard observer disabled until a Todoist API token is configured.")
+        return None
+    return _start_dashboard_observer()
+
+
 def _win_long_path(path: Path) -> str:
     if os.name != "nt":
         return str(path)
@@ -303,7 +311,7 @@ def main() -> int:
     frontend_running = False
     try:
         api_app = _load_api_app()
-        _start_dashboard_observer()
+        _maybe_start_dashboard_observer()
         if not args.no_frontend:
             try:
                 frontend_proc = _start_frontend(install_dir, data_dir, args.frontend_host, args.frontend_port)

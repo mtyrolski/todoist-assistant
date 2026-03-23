@@ -322,6 +322,9 @@ def test_last_n_years_in_weeks(years: int, expected_weeks: int):
         ({"API_KEY": "test_api_key_12345"}, "test_api_key_12345"),
         ({}, ""),
         ({"API_KEY": ""}, ""),
+        ({"API_KEY": "PUT YOUR API HERE"}, ""),
+        ({"API_KEY": "'PUT YOUR API HERE'"}, ""),
+        ({"API_KEY": "  your todoist api key  "}, ""),
     ],
 )
 def test_get_api_key(env_payload: dict[str, str], expected: str):
