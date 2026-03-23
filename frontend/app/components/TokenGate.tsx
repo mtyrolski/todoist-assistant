@@ -50,8 +50,8 @@ export function TokenGate({
   const [saving, setSaving] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [setupComplete, setSetupComplete] = useState(false);
+  const [setupLoaded, setSetupLoaded] = useState(false);
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
-  const [reloading, setReloading] = useState(false);
 
   const refreshStatus = async () => {
     setChecking(true);
@@ -91,6 +91,7 @@ export function TokenGate({
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(SETUP_COMPLETE_KEY) === "1";
     setSetupComplete(stored);
+    setSetupLoaded(true);
   }, []);
 
   const saveToken = async () => {
@@ -147,7 +148,7 @@ export function TokenGate({
   };
 
   const ready = Boolean(validation?.valid);
-  const setupActive = !setupComplete || !ready;
+  const setupActive = setupLoaded && !checking && (!setupComplete || !ready);
 
   useEffect(() => {
     if (!ready) {
@@ -166,12 +167,8 @@ export function TokenGate({
     }
   };
 
-  const completeSetupAndReload = () => {
+  const completeSetup = () => {
     finishSetup();
-    if (typeof window !== "undefined") {
-      setReloading(true);
-      window.setTimeout(() => window.location.reload(), 250);
-    }
   };
 
   const connectionSummary = useMemo(() => {
@@ -300,22 +297,21 @@ export function TokenGate({
                   <div>
                     <h3>Project adjustments</h3>
                     <p className="muted tiny" style={{ margin: 0 }}>
-                      Can be changed later in Control Panel → Project Adjustments. Saving reloads the app to refresh caches.
+                      Can be changed later in Control Panel → Project Adjustments. Saving updates the mapping without a full app reload.
                     </p>
                   </div>
                 </div>
-                <ProjectAdjustmentsBoard variant="embedded" showWhenEmpty onAfterSave={completeSetupAndReload} />
+                <ProjectAdjustmentsBoard variant="embedded" showWhenEmpty onAfterSave={completeSetup} />
                 <div className="setupStepActions">
                   <button
                     className="button buttonSmall buttonGhost"
                     type="button"
                     onClick={() => setCurrentStep(1)}
-                    disabled={reloading}
                   >
                     Back
                   </button>
-                  <button className="button buttonSmall" type="button" onClick={completeSetupAndReload} disabled={reloading}>
-                    {reloading ? "Reloading…" : "Finish & Reload"}
+                  <button className="button buttonSmall" type="button" onClick={completeSetup}>
+                    Open dashboard
                   </button>
                 </div>
               </section>

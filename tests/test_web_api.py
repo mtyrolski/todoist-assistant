@@ -529,6 +529,7 @@ def test_dashboard_status_returns_services() -> None:
     payload = res.json()
     assert isinstance(payload.get("services"), list)
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
+    assert payload["configurableItems"][0]["icon"] == "wrench"
 
 
 def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) -> None:
@@ -564,6 +565,113 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) 
         "Inbox",
     ]
     assert payload["unmappedSourceProjects"] == ["Archived Root", "Inbox"]
+
+
+def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "dashboard.yaml").write_text(
+        "urgency:\n  enabled: true\n  warn_priority_thresholds: [4, 3]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/dashboard/settings")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["settings"]["enabled"] is True
+    assert payload["editTargets"][0]["icon"] == "wrench"
+    assert payload["settings"]["fireLabels"] == [web_api.DEFAULT_URGENCY_SETTINGS["fire_label"]]
+
+    update = client.put(
+        "/api/admin/dashboard/settings",
+        json={
+            "enabled": False,
+            "fireLabels": ["fire 🧯🚒", "hot"],
+            "warnPriorityThresholds": [4],
+            "warnPriorityMinCount": 2,
+            "warnDueWithinDays": 2,
+            "warnDueMinCount": 3,
+            "warnDeadlineMinCount": 2,
+            "badgeLabels": {"warn": "Check"},
+        },
+    )
+    assert update.status_code == 200
+    updated = update.json()
+    assert updated["settings"]["enabled"] is False
+    assert updated["settings"]["fireLabels"] == ["fire 🧯🚒", "hot"]
+    assert updated["settings"]["warnPriorityThresholds"] == [4]
+    assert updated["settings"]["warnPriorityMinCount"] == 2
+    assert updated["settings"]["warnDueWithinDays"] == 2
+    assert updated["settings"]["warnDueMinCount"] == 3
+    assert updated["settings"]["warnDeadlineMinCount"] == 2
+    assert updated["settings"]["badgeLabels"]["warn"] == "Check"
+
+    saved_text = (config_dir / "dashboard.yaml").read_text(encoding="utf-8")
+    assert "fire_labels:" in saved_text
+    assert "- hot" in saved_text
+    assert "warn_priority_min_count: 2" in saved_text
+    assert "warn_due_within_days: 2" in saved_text
+    assert "warn_due_min_count: 3" in saved_text
+    assert "warn_deadline_min_count: 2" in saved_text
+    assert "enabled: false" in saved_text
+
+
+def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None:
+    class _FakeDatabase:
+        def __init__(self, dotenv_path: str) -> None:
+            _ = dotenv_path
+            self._items = [{"name": "zeta", "color": "red"}, {"name": "alpha", "color": "blue"}]
+
+        def fetch_label_colors(self) -> dict[str, str]:
+            return {"alpha": "#0000ff", "zeta": "#ff0000"}
+
+        def list_labels(self) -> list[dict[str, str]]:
+            return list(self._items)
+
+    monkeypatch.setattr(web_api, "Database", _FakeDatabase)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/dashboard/labels")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["labels"] == [
+        {"name": "alpha", "color": "#0000ff"},
+        {"name": web_api.DEFAULT_URGENCY_SETTINGS["fire_label"], "color": None},
+        {"name": "zeta", "color": "#ff0000"},
+    ]
+
+
+def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "dashboard.yaml").write_text(
+        "observer:\n  enabled: true\n  refresh_interval_minutes: 0.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/observer")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["settings"]["enabled"] is True
+    assert payload["settings"]["refreshIntervalMinutes"] == 0.5
+    assert payload["editTargets"][0]["icon"] == "wrench"
+
+    update = client.post(
+        "/api/admin/observer",
+        json={"enabled": False, "refreshIntervalMinutes": 2},
+    )
+    assert update.status_code == 200
+    updated = update.json()
+    assert updated["state"]["enabled"] is False
+    assert updated["settings"]["refreshIntervalMinutes"] == 2.0
+
+    saved_text = (config_dir / "dashboard.yaml").read_text(encoding="utf-8")
+    assert "refresh_interval_minutes: 2.0" in saved_text or "refresh_interval_minutes: 2" in saved_text
+    assert "enabled: false" in saved_text
 
 
 def test_admin_timezone_status_uses_system_timezone_when_not_configured(
@@ -852,6 +960,7 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
         return None
 
     monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", web_api._REPO_ROOT / "configs" / "dashboard.yaml")
     _stub_all_figures(monkeypatch)
 
     df = _single_event_df()
@@ -886,6 +995,7 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
     assert urgency_status["counts"]["p1Tasks"] == 1
     assert urgency_status["counts"]["dueTasks"] == 1
     assert urgency_status["counts"]["fireTasks"] == 0
+    assert payload["configurableItems"][0]["icon"] == "wrench"
     assert isinstance(payload["figures"]["activeProjectHierarchy"], dict)
 
 

@@ -6,6 +6,7 @@ from omegaconf import DictConfig
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
+from todoist.dashboard_settings import load_dashboard_config, observer_settings_payload
 from todoist.database.base import Database
 from todoist.utils import automation_log_path, configure_runtime_logging
 
@@ -27,7 +28,15 @@ def main(config: DictConfig) -> None:
         automations=short_automations,
         activity=activity_automation,
     )
-    observer.run_forever()
+    def _settings_provider() -> dict[str, object]:
+        config = load_dashboard_config()
+        payload = observer_settings_payload(config)
+        return {
+            "enabled": payload["enabled"],
+            "refreshIntervalSeconds": float(payload["refreshIntervalMinutes"]) * 60.0,
+        }
+
+    observer.run_forever(settings_provider=_settings_provider)
 
 
 if __name__ == "__main__":

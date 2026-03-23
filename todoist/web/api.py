@@ -56,7 +56,14 @@ from todoist.llm import (
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.dashboard_settings import (
+    load_dashboard_config,
+    observer_settings_payload,
+    resolve_dashboard_config_path,
+    update_observer_settings,
+)
 from todoist.web.dashboard_payload import (
+    DEFAULT_URGENCY_SETTINGS,
     build_habit_tracker_payload as _build_habit_tracker_payload,
     completed_share_leaderboard as _completed_share_leaderboard,
     compute_insights as _compute_insights,
@@ -184,6 +191,7 @@ def _resolve_config_dir() -> Path:
 _DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
 _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
+_DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -772,8 +780,11 @@ def _service_statuses() -> list[dict[str, Any]]:
     api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file(_cache_runtime_path("activity.joblib"))
     automation_log = _stat_file(automation_log_path())
-    observer_state = _load_observer_state()
-    observer_enabled = bool(observer_state.get("enabled", True))
+    observer_settings = observer_settings_payload(
+        load_dashboard_config(_DASHBOARD_CONFIG_PATH),
+        path=_DASHBOARD_CONFIG_PATH,
+    )
+    observer_enabled = bool(observer_settings["enabled"])
 
     observer_recent = False
     if automation_log and automation_log.get("mtime"):
@@ -791,7 +802,7 @@ def _service_statuses() -> list[dict[str, Any]]:
         observer_detail = "recent activity"
     else:
         observer_status = "neutral"
-        observer_detail = "not detected"
+        observer_detail = "enabled, waiting for first tick"
 
     return [
         {
@@ -820,8 +831,19 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     """
     # Intentionally ignore refresh: this endpoint must stay non-blocking and avoid Todoist API calls.
     _ = refresh
+    dashboard_config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
+    observer_settings = observer_settings_payload(dashboard_config, path=_DASHBOARD_CONFIG_PATH)
     return {
         "services": _service_statuses(),
+        "configurableItems": [
+            {
+                "key": "observer",
+                "label": "Dashboard observer",
+                "icon": "wrench",
+                "configPath": observer_settings["configPath"],
+                "anchor": "observer-control",
+            }
+        ],
         "apiCache": {
             "lastRefresh": datetime.fromtimestamp(_state.last_refresh_s).isoformat(
                 timespec="seconds"
@@ -1774,6 +1796,8 @@ async def dashboard_home(
         }
 
     df_activity = _normalize_activity_df(df_activity)
+    dashboard_settings_cfg = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
+    dashboard_settings = _dashboard_settings_payload(dashboard_settings_cfg)
 
     no_data = df_activity.empty
     beg_range, end_range = _compute_plot_range(
@@ -1785,7 +1809,11 @@ async def dashboard_home(
     periods = _period_bounds(df_activity, granularity)
     metrics = _extract_metrics_dict(df_activity, periods)
     today = datetime.now().date()
-    urgency_status = _evaluate_urgency_status(active_projects, today=today)
+    urgency_status = _evaluate_urgency_status(
+        active_projects,
+        today=today,
+        settings=dashboard_settings_cfg.get("urgency") if hasattr(dashboard_settings_cfg, "get") else None,
+    )
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
@@ -1883,6 +1911,20 @@ async def dashboard_home(
             "previousPeriod": periods["previousLabel"],
         },
         "urgencyStatus": urgency_status,
+        "configurableItems": [
+            {
+                "key": "urgency",
+                "label": "Urgency watch badge",
+                "icon": "wrench",
+                "configPath": dashboard_settings["configPath"],
+                "anchor": "dashboard-settings",
+                "summary": (
+                    f"Priority thresholds {dashboard_settings['warnPriorityThresholds']}; "
+                    f"due within {dashboard_settings['warnDueWithinDays']} days; "
+                    f"deadline within {dashboard_settings['warnDeadlineWithinDays']} days."
+                ),
+            }
+        ],
         "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
         "habitTracker": habit_tracker,
         "insights": {
@@ -2261,6 +2303,8 @@ def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     enabled = bool(payload.get("enabled", True))
     return {
         "enabled": enabled,
+        "refreshIntervalMinutes": payload.get("refreshIntervalMinutes"),
+        "refreshIntervalSeconds": payload.get("refreshIntervalSeconds"),
         "updatedAt": payload.get("updatedAt"),
         "lastRunAt": payload.get("lastRunAt"),
         "lastDurationSeconds": payload.get("lastDurationSeconds"),
@@ -2286,24 +2330,78 @@ def _build_observer(db: Database) -> AutomationObserver:
 
 @app.get("/api/admin/observer", tags=["admin"])
 async def admin_observer_state() -> dict[str, Any]:
-    return _serialize_observer_state(_load_observer_state())
+    config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
+    state = _load_observer_state()
+    observer_settings = observer_settings_payload(config, path=_DASHBOARD_CONFIG_PATH)
+    state["enabled"] = bool(observer_settings["enabled"])
+    state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
+    state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+    return {
+        "state": _serialize_observer_state(state),
+        "settings": observer_settings,
+        "editTargets": [
+            {
+                "key": "observer",
+                "label": "Dashboard observer",
+                "icon": "wrench",
+                "configPath": observer_settings["configPath"],
+                "anchor": "observer-control",
+            }
+        ],
+    }
 
 
 @app.post("/api/admin/observer", tags=["admin"])
-async def admin_set_observer(enabled: bool = Body(..., embed=True)) -> dict[str, Any]:
+async def admin_set_observer(payload: Any = Body(...)) -> dict[str, Any]:
+    if isinstance(payload, bool):
+        update_payload: dict[str, Any] = {"enabled": payload}
+    elif isinstance(payload, dict):
+        update_payload = payload
+    else:
+        raise HTTPException(status_code=400, detail="Body must be a JSON object or boolean")
+
     async with _ADMIN_LOCK:
-        state = _load_observer_state()
-        state["enabled"] = bool(enabled)
-        state["updatedAt"] = _now_iso()
-        Cache().observer_state.save(state)
-    return _serialize_observer_state(state)
+        config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
+        try:
+            observer_settings = update_observer_settings(config, update_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        cache_state = _load_observer_state()
+        cache_state["enabled"] = bool(observer_settings["enabled"])
+        cache_state["refreshIntervalMinutes"] = observer_settings["refreshIntervalMinutes"]
+        cache_state["refreshIntervalSeconds"] = float(
+            observer_settings["refreshIntervalMinutes"]
+        ) * 60.0
+        cache_state["updatedAt"] = _now_iso()
+        Cache().observer_state.save(cache_state)
+        _save_yaml_config(_DASHBOARD_CONFIG_PATH, config)
+    return {
+        "state": _serialize_observer_state(cache_state),
+        "settings": observer_settings,
+        "editTargets": [
+            {
+                "key": "observer",
+                "label": "Dashboard observer",
+                "icon": "wrench",
+                "configPath": observer_settings["configPath"],
+                "anchor": "observer-control",
+            }
+        ],
+    }
 
 
 @app.post("/api/admin/observer/run", tags=["admin"])
 async def admin_run_observer(force: bool = False) -> dict[str, Any]:
     async with _ADMIN_LOCK:
         state = _load_observer_state()
-        enabled = bool(state.get("enabled", True))
+        observer_settings = observer_settings_payload(
+            load_dashboard_config(_DASHBOARD_CONFIG_PATH),
+            path=_DASHBOARD_CONFIG_PATH,
+        )
+        enabled = bool(observer_settings["enabled"])
+        state["enabled"] = enabled
+        state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
+        state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
         if not enabled and not force:
             raise HTTPException(status_code=409, detail="Observer is disabled")
 
@@ -2917,6 +3015,221 @@ def _multiplication_settings_payload(config: DictConfig) -> dict[str, Any]:
         "deepLabelRegex": config_data.get(
             "deep_label_regex", defaults.deep_label_regex
         ),
+    }
+
+
+def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
+    raw = config.get("urgency") if hasattr(config, "get") else None
+    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
+    if not isinstance(data, dict):
+        data = {}
+    defaults = DEFAULT_URGENCY_SETTINGS
+    badge_labels = data.get("badge_labels") if isinstance(data.get("badge_labels"), Mapping) else {}
+    badge_labels = badge_labels if isinstance(badge_labels, Mapping) else {}
+    thresholds = data.get("warn_priority_thresholds")
+    if not isinstance(thresholds, list):
+        thresholds = list(defaults["warn_priority_thresholds"])
+    fire_labels = data.get("fire_labels")
+    if not isinstance(fire_labels, list):
+        fire_label_value = str(data.get("fire_label", defaults["fire_label"])).strip()
+        fire_labels = [fire_label_value] if fire_label_value else list(defaults["fire_labels"])
+    try:
+        config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
+    except ValueError:
+        config_path = str(_DASHBOARD_CONFIG_PATH)
+
+    return {
+        "enabled": bool(data.get("enabled", defaults["enabled"])),
+        "fireLabel": data.get("fire_label", defaults["fire_label"]),
+        "fireLabels": fire_labels,
+        "warnPriorityThresholds": thresholds,
+        "warnPriorityMinCount": data.get(
+            "warn_priority_min_count", defaults["warn_priority_min_count"]
+        ),
+        "warnDueWithinDays": data.get(
+            "warn_due_within_days", defaults["warn_due_within_days"]
+        ),
+        "warnDueMinCount": data.get(
+            "warn_due_min_count", defaults["warn_due_min_count"]
+        ),
+        "warnDeadlineWithinDays": data.get(
+            "warn_deadline_within_days", defaults["warn_deadline_within_days"]
+        ),
+        "warnDeadlineMinCount": data.get(
+            "warn_deadline_min_count", defaults["warn_deadline_min_count"]
+        ),
+        "dangerOnFireLabel": bool(
+            data.get("danger_on_fire_label", defaults["danger_on_fire_label"])
+        ),
+        "warnOnPriority": bool(
+            data.get("warn_on_priority", defaults["warn_on_priority"])
+        ),
+        "warnOnDue": bool(data.get("warn_on_due", defaults["warn_on_due"])),
+        "warnOnDeadline": bool(
+            data.get("warn_on_deadline", defaults["warn_on_deadline"])
+        ),
+        "warnSummaryLabel": data.get(
+            "warn_summary_label", defaults["warn_summary_label"]
+        ),
+        "dangerSummaryLabel": data.get(
+            "danger_summary_label", defaults["danger_summary_label"]
+        ),
+        "badgeLabels": {
+            "good": badge_labels.get("good", defaults["badge_labels"]["good"]),
+            "warn": badge_labels.get("warn", defaults["badge_labels"]["warn"]),
+            "danger": badge_labels.get("danger", defaults["badge_labels"]["danger"]),
+        },
+        "configPath": config_path,
+    }
+
+
+@app.get("/api/admin/dashboard/settings", tags=["admin"])
+async def admin_dashboard_settings() -> dict[str, Any]:
+    config = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
+    try:
+        config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
+    except ValueError:
+        config_path = str(_DASHBOARD_CONFIG_PATH)
+    return {
+        "settings": _dashboard_settings_payload(config),
+        "editTargets": [
+            {
+                "key": "urgency",
+                "label": "Urgency watch badge",
+                "icon": "wrench",
+                "configPath": config_path,
+                "anchor": "dashboard-settings",
+            }
+        ],
+    }
+
+
+@app.get("/api/admin/dashboard/labels", tags=["admin"])
+async def admin_dashboard_labels() -> dict[str, Any]:
+    dbio = Database(str(_resolve_env_path()))
+    label_colors = dbio.fetch_label_colors()
+    labels: list[dict[str, Any]] = []
+    for item in dbio.list_labels():
+        name = item["name"].strip()
+        labels.append(
+            {
+                "name": name,
+                "color": label_colors.get(name),
+            }
+        )
+    if not any(item["name"] == DEFAULT_URGENCY_SETTINGS["fire_label"] for item in labels):
+        labels.append(
+            {
+                "name": DEFAULT_URGENCY_SETTINGS["fire_label"],
+                "color": label_colors.get(DEFAULT_URGENCY_SETTINGS["fire_label"]),
+            }
+        )
+    labels.sort(key=lambda item: item["name"].lower())
+    return {"labels": labels}
+
+
+@app.put("/api/admin/dashboard/settings", tags=["admin"])
+async def admin_update_dashboard_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    config = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
+    urgency = config.get("urgency") or {}
+    if not isinstance(urgency, Mapping):
+        urgency = {}
+    urgency = dict(urgency)
+
+    def _coerce_int(value: Any, field: str) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
+
+    if "enabled" in payload:
+        urgency["enabled"] = bool(payload["enabled"])
+    if "fireLabel" in payload:
+        urgency["fire_label"] = str(payload["fireLabel"]).strip()
+    if "fireLabels" in payload:
+        fire_labels = payload["fireLabels"]
+        if not isinstance(fire_labels, Sequence) or isinstance(fire_labels, str):
+            raise HTTPException(status_code=400, detail="fireLabels must be a list")
+        urgency["fire_labels"] = [
+            str(value).strip() for value in fire_labels if str(value).strip()
+        ]
+        if urgency["fire_labels"]:
+            urgency["fire_label"] = urgency["fire_labels"][0]
+    if "warnPriorityThresholds" in payload:
+        thresholds = payload["warnPriorityThresholds"]
+        if not isinstance(thresholds, Sequence):
+            raise HTTPException(status_code=400, detail="warnPriorityThresholds must be a list")
+        urgency["warn_priority_thresholds"] = [
+            _coerce_int(value, "warnPriorityThresholds") for value in thresholds
+        ]
+    if "warnPriorityMinCount" in payload:
+        urgency["warn_priority_min_count"] = max(
+            1, _coerce_int(payload["warnPriorityMinCount"], "warnPriorityMinCount")
+        )
+    if "warnDueWithinDays" in payload:
+        urgency["warn_due_within_days"] = _coerce_int(
+            payload["warnDueWithinDays"], "warnDueWithinDays"
+        )
+    if "warnDueMinCount" in payload:
+        urgency["warn_due_min_count"] = max(
+            1, _coerce_int(payload["warnDueMinCount"], "warnDueMinCount")
+        )
+    if "warnDeadlineWithinDays" in payload:
+        urgency["warn_deadline_within_days"] = _coerce_int(
+            payload["warnDeadlineWithinDays"], "warnDeadlineWithinDays"
+        )
+    if "warnDeadlineMinCount" in payload:
+        urgency["warn_deadline_min_count"] = max(
+            1, _coerce_int(payload["warnDeadlineMinCount"], "warnDeadlineMinCount")
+        )
+    if "dangerOnFireLabel" in payload:
+        urgency["danger_on_fire_label"] = bool(payload["dangerOnFireLabel"])
+    if "warnOnPriority" in payload:
+        urgency["warn_on_priority"] = bool(payload["warnOnPriority"])
+    if "warnOnDue" in payload:
+        urgency["warn_on_due"] = bool(payload["warnOnDue"])
+    if "warnOnDeadline" in payload:
+        urgency["warn_on_deadline"] = bool(payload["warnOnDeadline"])
+    if "warnSummaryLabel" in payload:
+        urgency["warn_summary_label"] = str(payload["warnSummaryLabel"]).strip()
+    if "dangerSummaryLabel" in payload:
+        urgency["danger_summary_label"] = str(payload["dangerSummaryLabel"]).strip()
+    if "badgeLabels" in payload:
+        badge_labels = payload["badgeLabels"]
+        if not isinstance(badge_labels, Mapping):
+            raise HTTPException(status_code=400, detail="badgeLabels must be an object")
+        urgency["badge_labels"] = {
+            "good": str(badge_labels.get("good") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]).strip(),
+            "warn": str(badge_labels.get("warn") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]).strip(),
+            "danger": str(badge_labels.get("danger") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]).strip(),
+        }
+
+    config["urgency"] = urgency
+    async with _ADMIN_LOCK:
+        _save_yaml_config(_DASHBOARD_CONFIG_PATH, config)
+
+    try:
+        config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
+    except ValueError:
+        config_path = str(_DASHBOARD_CONFIG_PATH)
+
+    return {
+        "saved": True,
+        "settings": _dashboard_settings_payload(config),
+        "editTargets": [
+            {
+                "key": "urgency",
+                "label": "Urgency watch badge",
+                "icon": "wrench",
+                "configPath": config_path,
+                "anchor": "dashboard-settings",
+            }
+        ],
     }
 
 

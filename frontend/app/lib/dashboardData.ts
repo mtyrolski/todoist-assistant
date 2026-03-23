@@ -18,6 +18,15 @@ export type DashboardFigures = {
   activeProjectHierarchy?: PlotlyFigure;
 };
 
+export type ConfigurableItem = {
+  key: string;
+  label: string;
+  icon?: string;
+  configPath?: string;
+  anchor?: string;
+  summary?: string;
+};
+
 export type DashboardHome = {
   noData?: boolean;
   range: { beg: string; end: string; granularity: Granularity; weeks: number };
@@ -62,12 +71,14 @@ export type DashboardHome = {
     };
   };
   figures: DashboardFigures;
+  configurableItems?: ConfigurableItem[];
   refreshedAt: string;
   error?: string;
 };
 
 export type DashboardStatus = {
   services: ServiceStatus[];
+  configurableItems?: ConfigurableItem[];
   apiCache: { lastRefresh: string | null };
   activityCache: { path: string; mtime: string | null; size: number | null } | null;
   now: string;
