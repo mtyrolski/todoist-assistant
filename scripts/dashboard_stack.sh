@@ -10,6 +10,9 @@ PID_DIR="${DASHBOARD_PID_DIR:-${STATE_DIR}/pids}"
 TRITON_MODE_FILE="${STATE_DIR}/triton.mode"
 TRITON_LOG_FILE="${STATE_DIR}/triton.log"
 TRITON_LOG_PID_FILE="${PID_DIR}/triton-log.pid"
+API_LOG_FILE="${STATE_DIR}/api.log"
+OBSERVER_LOG_FILE="${STATE_DIR}/observer.log"
+FRONTEND_LOG_FILE="${STATE_DIR}/frontend.log"
 
 FRONTEND_PORT="${DASHBOARD_FRONTEND_PORT:-3000}"
 API_PORT="${DASHBOARD_API_PORT:-8000}"
@@ -20,6 +23,28 @@ TRITON_MODEL_NAME="${TRITON_MODEL_NAME:-todoist_llm}"
 TRITON_URL="${TRITON_URL:-http://127.0.0.1:${TRITON_HTTP_PORT}}"
 
 mkdir -p "${PID_DIR}" "${STATE_DIR}"
+
+timestamp() {
+    date +"%H:%M:%S"
+}
+
+log_note() {
+    printf '[dashboard %s] %s\n' "$(timestamp)" "$*"
+}
+
+print_recent_log() {
+    local label="${1}"
+    local path="${2}"
+    local lines="${3:-8}"
+    [[ -f "${path}" ]] || return 0
+    local excerpt
+    excerpt="$(tail -n "${lines}" "${path}" 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
+    [[ -n "${excerpt}" ]] || return 0
+    log_note "${label} recent log lines:"
+    while IFS= read -r line; do
+        printf '    %s\n' "${line}"
+    done <<< "${excerpt}"
+}
 
 compose_files_for_mode() {
     local mode="${1}"
@@ -59,10 +84,12 @@ clear_stale_pid() {
 
 stop_pid_target() {
     local pid_file="${1}"
+    local label="${2:-service}"
     [[ -f "${pid_file}" ]] || return 0
     local pid
     pid="$(cat "${pid_file}" 2>/dev/null || true)"
     [[ -n "${pid}" ]] || { rm -f "${pid_file}"; return 0; }
+    log_note "Stopping ${label} (pid ${pid})..."
 
     local pgid
     pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d ' ' || true)"
@@ -85,6 +112,7 @@ stop_pid_target() {
         fi
     fi
     rm -f "${pid_file}"
+    log_note "${label} stopped."
 }
 
 wait_for_process() {
@@ -93,7 +121,10 @@ wait_for_process() {
     local tries=0
     while kill -0 "${pid}" 2>/dev/null; do
         tries=$((tries + 1))
-        [[ ${tries} -ge 10 ]] && return 0
+        if [[ ${tries} -ge 10 ]]; then
+            log_note "${label} process is alive (pid ${pid})."
+            return 0
+        fi
         sleep 0.2
     done
     echo "${label} exited before startup completed."
@@ -106,7 +137,7 @@ wait_for_http() {
     local max_tries="${3:-120}"
     local sleep_s="${4:-0.5}"
     local tries=0
-    echo "Waiting for ${label} to be ready..."
+    log_note "Waiting for ${label} to be ready..."
     if command -v curl >/dev/null 2>&1; then
         until curl -fsS "${url}" >/dev/null 2>&1; do
             tries=$((tries + 1))
@@ -114,11 +145,15 @@ wait_for_http() {
                 echo "${label} readiness check timed out."
                 return 1
             fi
+            if (( tries % 10 == 0 )); then
+                log_note "${label} still not ready after ${tries} checks..."
+            fi
             sleep "${sleep_s}"
         done
     else
         sleep 5
     fi
+    log_note "${label} is ready."
 }
 
 wait_for_api() {
@@ -164,6 +199,7 @@ require_gpu_runtime() {
 
 start_triton() {
     local mode="${1}"
+    log_note "Starting Triton (${mode}) for model ${TRITON_MODEL_NAME} <- ${TRITON_MODEL_ID}..."
     require_docker
     if [[ "${mode}" == "gpu" ]]; then
         require_gpu_runtime
@@ -198,6 +234,7 @@ start_triton() {
     echo "$!" > "${TRITON_LOG_PID_FILE}"
     echo "${mode}" > "${TRITON_MODE_FILE}"
     wait_for_http "http://127.0.0.1:${TRITON_HTTP_PORT}/v2/health/ready" "Triton" 900 1
+    print_recent_log "Triton" "${TRITON_LOG_FILE}" 10
 }
 
 stop_triton() {
@@ -206,12 +243,13 @@ stop_triton() {
         mode="$(cat "${TRITON_MODE_FILE}" 2>/dev/null || echo "${mode}")"
     fi
     compose_files_for_mode "${mode}"
+    log_note "Stopping Triton (${mode})..."
 
     if [[ -f "${TRITON_LOG_PID_FILE}" ]]; then
         local triton_log_pid
         triton_log_pid="$(cat "${TRITON_LOG_PID_FILE}" 2>/dev/null || true)"
         if [[ -n "${triton_log_pid}" ]] && kill -0 "${triton_log_pid}" 2>/dev/null; then
-            echo "Stopping Triton log tail (${triton_log_pid})..."
+            log_note "Stopping Triton log tail (${triton_log_pid})..."
             kill "${triton_log_pid}" 2>/dev/null || true
         fi
         rm -f "${TRITON_LOG_PID_FILE}"
@@ -220,18 +258,25 @@ stop_triton() {
     docker_compose "${mode}" stop triton >/dev/null 2>&1 || true
     docker_compose "${mode}" rm -f triton >/dev/null 2>&1 || true
     rm -f "${TRITON_MODE_FILE}"
+    log_note "Triton stopped."
 }
 
 cleanup_failed_launch() {
     local mode="${1}"
+    log_note "Dashboard startup failed. Recent logs:"
+    print_recent_log "Triton" "${TRITON_LOG_FILE}" 20
+    print_recent_log "API" "${API_LOG_FILE}" 20
+    print_recent_log "Observer" "${OBSERVER_LOG_FILE}" 20
+    print_recent_log "Frontend" "${FRONTEND_LOG_FILE}" 20
     stop_triton "${mode}"
-    for service in frontend observer api; do
-        stop_pid_target "${PID_DIR}/${service}.pid"
-    done
+    stop_pid_target "${PID_DIR}/frontend.pid" "Frontend"
+    stop_pid_target "${PID_DIR}/observer.pid" "Observer"
+    stop_pid_target "${PID_DIR}/api.pid" "API"
 }
 
 start_dashboard() {
     local mode="${1}"
+    log_note "Launching dashboard stack in ${mode} mode..."
     for service in api observer frontend triton; do
         clear_stale_pid "${PID_DIR}/${service}.pid"
     done
@@ -247,37 +292,44 @@ start_dashboard() {
 
     start_triton "${mode}"
 
-    nohup env TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${STATE_DIR}/api.log" 2>&1 &
+    log_note "Starting API on 127.0.0.1:${API_PORT}..."
+    nohup env TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
     local api_pid="$!"
     echo "${api_pid}" > "${PID_DIR}/api.pid"
     wait_for_process "${api_pid}" "API"
 
-    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${STATE_DIR}/observer.log" 2>&1 &
+    log_note "Starting observer..."
+    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
     local observer_pid="$!"
     echo "${observer_pid}" > "${PID_DIR}/observer.pid"
     wait_for_process "${observer_pid}" "Observer"
+    print_recent_log "Observer" "${OBSERVER_LOG_FILE}" 8
 
     wait_for_api
+    print_recent_log "API" "${API_LOG_FILE}" 8
 
-    nohup setsid npm --prefix frontend run dev -- --port "${FRONTEND_PORT}" </dev/null > "${STATE_DIR}/frontend.log" 2>&1 &
+    log_note "Starting frontend on 127.0.0.1:${FRONTEND_PORT}..."
+    nohup setsid npm --prefix frontend run dev -- --port "${FRONTEND_PORT}" </dev/null > "${FRONTEND_LOG_FILE}" 2>&1 &
     local frontend_pid="$!"
     echo "${frontend_pid}" > "${PID_DIR}/frontend.pid"
     wait_for_process "${frontend_pid}" "Frontend"
 
     wait_for_frontend
+    print_recent_log "Frontend" "${FRONTEND_LOG_FILE}" 8
 
     trap - ERR
 
-    echo "Dashboard running (${mode} Triton):"
+    log_note "Dashboard running (${mode} Triton)."
     echo "  Triton:   http://127.0.0.1:${TRITON_HTTP_PORT}"
     echo "  API:      http://127.0.0.1:${API_PORT}"
     echo "  Observer: enabled with dashboard startup"
     echo "  Frontend: http://127.0.0.1:${FRONTEND_PORT}"
-    echo "Logs: ${STATE_DIR}"
+    echo "  Logs:     ${STATE_DIR}"
 }
 
 stop_dashboard() {
     local stopped=0
+    log_note "Stopping dashboard stack..."
 
     if [[ -f "${TRITON_LOG_PID_FILE}" ]] || [[ -f "${TRITON_MODE_FILE}" ]]; then
         stopped=1
@@ -291,13 +343,15 @@ stop_dashboard() {
         if [[ -f "${PID_DIR}/${service}.pid" ]]; then
             stopped=1
         fi
-        stop_pid_target "${PID_DIR}/${service}.pid"
     done
+    stop_pid_target "${PID_DIR}/frontend.pid" "Frontend"
+    stop_pid_target "${PID_DIR}/observer.pid" "Observer"
+    stop_pid_target "${PID_DIR}/api.pid" "API"
 
     if [[ ${stopped} -eq 0 ]]; then
-        echo "Dashboard stack is not running."
+        log_note "Dashboard stack is not running."
     else
-        echo "Dashboard stack stopped."
+        log_note "Dashboard stack stopped."
     fi
 }
 
