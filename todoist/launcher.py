@@ -13,10 +13,12 @@ import webbrowser
 import threading
 import zipfile
 
+from loguru import logger
+
 from todoist import telemetry
 from todoist.env import EnvVar
 from todoist.dashboard_settings import load_dashboard_config, observer_settings_payload
-from todoist.utils import get_api_key
+from todoist.utils import configure_runtime_logging, get_api_key
 
 
 def _default_data_dir() -> Path:
@@ -32,6 +34,9 @@ def _default_data_dir() -> Path:
 
 
 def _log_startup_paths(install_dir: Path, data_dir: Path, config_dir: Path) -> None:
+    logger.info("Install dir: {}", install_dir)
+    logger.info("Data dir: {}", data_dir)
+    logger.info("Config dir: {}", config_dir)
     print(f"Install dir: {install_dir}")
     print(f"Data dir: {data_dir}")
     print(f"Config dir: {config_dir}")
@@ -97,6 +102,13 @@ def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | 
     os.environ[str(EnvVar.AGENT_INSTRUCTIONS_DIR)] = str(config_dir / "agent_instructions")
 
 
+def _launcher_log_path() -> str | None:
+    logs_dir = os.getenv(str(EnvVar.LOGS_DIR))
+    if not logs_dir:
+        return None
+    return str(Path(logs_dir).expanduser().resolve() / "launcher.log")
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Launch the Todoist Assistant dashboard.")
     parser.add_argument("--api-host", default=os.getenv(str(EnvVar.API_HOST), "127.0.0.1"))
@@ -159,6 +171,7 @@ def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
         cached = _load_frontend_manifest(manifest_path)
         needs_extract = (cached != current) or (not _frontend_ready(extracted_dir))
         if needs_extract:
+            logger.info("Extracting frontend bundle {} to {}", frontend_zip, extracted_dir)
             print(f"Extracting frontend from {frontend_zip} to {extracted_dir}")
             temp_dir = data_dir / f"frontend.tmp-{os.getpid()}"
             if temp_dir.exists():
@@ -176,9 +189,11 @@ def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
                 if temp_dir.exists():
                     shutil.rmtree(temp_dir)
         else:
+            logger.info("Using cached frontend at {}", extracted_dir)
             print(f"Using cached frontend at {extracted_dir}")
         return extracted_dir
     if (install_dir / "frontend" / "server.js").exists():
+        logger.info("Using unpacked frontend at {}", install_dir / "frontend")
         print(f"Using unpacked frontend at {install_dir / 'frontend'}")
         return install_dir / "frontend"
     return install_dir
@@ -211,6 +226,7 @@ def _start_frontend(install_dir: Path, data_dir: Path, host: str, port: int) -> 
     env["PORT"] = str(port)
     env["HOSTNAME"] = host
 
+    logger.info("Starting frontend server on {}:{} from {}", host, port, frontend_dir)
     return subprocess.Popen([node_cmd, str(server_js)], cwd=str(frontend_dir), env=env)
 
 
@@ -237,11 +253,13 @@ def _start_dashboard_observer() -> threading.Thread:
         daemon=True,
     )
     thread.start()
+    logger.info("Started dashboard observer thread {}", thread.name)
     return thread
 
 
 def _maybe_start_dashboard_observer() -> threading.Thread | None:
     if not get_api_key():
+        logger.warning("Dashboard observer disabled until a Todoist API token is configured.")
         print("Dashboard observer disabled until a Todoist API token is configured.")
         return None
     return _start_dashboard_observer()
@@ -293,17 +311,18 @@ def main() -> int:
     config_dir = _resolve_config_dir(data_dir, install_dir, args.config_dir)
     _log_startup_paths(install_dir, data_dir, config_dir)
     _ensure_env_and_files(data_dir, config_dir, install_dir=install_dir)
+    configure_runtime_logging(log_path=_launcher_log_path())
     try:
         telemetry.bootstrap_config(config_dir)
     except Exception:
         # Telemetry is best-effort; avoid blocking launch.
-        pass
+        logger.exception("Telemetry bootstrap failed")
 
     try:
         telemetry.maybe_send_install_success(config_dir, data_dir)
     except Exception:
         # Telemetry is best-effort; avoid blocking launch.
-        pass
+        logger.exception("Install-success telemetry failed")
 
     os.chdir(data_dir)
 
@@ -320,6 +339,11 @@ def main() -> int:
                 if frontend_proc.poll() is not None:
                     raise RuntimeError("Frontend process exited during startup")
             except Exception as exc:
+                logger.warning(
+                    "Failed to start frontend ({}: {}). Continuing with API only.",
+                    type(exc).__name__,
+                    exc,
+                )
                 print(
                     f"WARNING: Failed to start frontend ({type(exc).__name__}: {exc}). "
                     "Continuing with API only.",
@@ -328,6 +352,7 @@ def main() -> int:
         if not args.no_browser:
             target = f"http://{args.frontend_host}:{args.frontend_port}" if frontend_running else None
             if target:
+                logger.info("Opening browser at {}", target)
                 webbrowser.open(target)
 
         import uvicorn
@@ -339,12 +364,13 @@ def main() -> int:
             log_level="info",
         )
     except Exception:
+        logger.exception("Launcher startup failed")
         traceback.print_exc()
         try:
             telemetry.maybe_send_install_failure(config_dir, data_dir)
         except Exception:
             # Telemetry is best-effort; avoid masking the original error.
-            pass
+            logger.exception("Install-failure telemetry failed")
         if getattr(sys, "frozen", False) and os.name == "nt":
             print("\nApplication failed to start or crashed.")
             print("Press Enter to exit...")
