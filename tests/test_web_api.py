@@ -737,7 +737,14 @@ def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> N
     payload = res.json()
 
     ids = [item["id"] for item in payload["sources"]]
-    assert ids == ["api", "frontend", "observer", "triton", "automation"]
+    assert ids == [
+        "api",
+        "frontend",
+        "observer",
+        "triton",
+        "triton_inference",
+        "automation",
+    ]
     assert "rogue" not in ids
     assert all(item["inspectOnly"] is True for item in payload["sources"])
 
@@ -784,6 +791,7 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> Non
         "frontend",
         "observer",
         "triton",
+        "triton_inference",
         "automation",
     ]
     assert payload["logs"][0]["available"] is True

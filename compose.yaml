@@ -65,7 +65,7 @@ services:
       - --grpc-port=8001
       - --metrics-port=8002
       - --backend-config=python,shm-region-prefix-name=${TODOIST_TRITON_PYTHON_SHM_PREFIX:-todoist-triton}
-      - --log-verbose=0
+      - --log-verbose=${TODOIST_TRITON_LOG_VERBOSE:-1}
     ports:
       - "${TODOIST_TRITON_HTTP_PORT:-8003}:8000"
       - "${TODOIST_TRITON_GRPC_PORT:-8004}:8001"
@@ -82,9 +82,12 @@ services:
       TODOIST_TRITON_TEMPERATURE: ${TODOIST_TRITON_TEMPERATURE:-0.2}
       TODOIST_TRITON_TOP_P: ${TODOIST_TRITON_TOP_P:-0.95}
       TODOIST_TRITON_TRUST_REMOTE_CODE: ${TODOIST_TRITON_TRUST_REMOTE_CODE:-false}
+      TODOIST_TRITON_LOG_VERBOSE: ${TODOIST_TRITON_LOG_VERBOSE:-1}
+      TODOIST_TRITON_REQUEST_LOG_PATH: /runtime-logs/triton-inference.log
     volumes:
       - ./deploy/triton/model_repository:/models:ro
       - ${HOME:-/home/mtyrolski}/.cache/huggingface:/root/.cache/huggingface
+      - ${TODOIST_DASHBOARD_LOG_DIR:-./.cache/todoist-assistant/dashboard}:/runtime-logs
     shm_size: 2gb
     ulimits:
       memlock: -1
