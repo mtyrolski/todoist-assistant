@@ -3,6 +3,7 @@
 import datetime as dt
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from threading import Event
 from typing import Any
 
@@ -15,6 +16,12 @@ from todoist.utils import Cache
 
 POLL_INTERVAL_SECONDS = 30.0
 RECENT_ACTIVITY_PAGES = 1
+
+
+@dataclass(frozen=True)
+class ObserverRunResult:
+    new_events: int
+    automations_ran: int
 
 
 class AutomationObserver:
@@ -64,22 +71,44 @@ class AutomationObserver:
         except KeyboardInterrupt:
             logger.info("Observer interrupted by user. Exiting.")
 
-    def run_once(self) -> int:
+    def run_once(self) -> ObserverRunResult:
         new_events = self._refresh_activity_cache()
-        if not new_events:
-            logger.debug("Observer tick: no new activity events returned.")
-            return 0
+
+        automations_to_run = self._eligible_automations(has_new_events=bool(new_events))
+        if not automations_to_run:
+            logger.debug("Observer tick: no new activity events or polling automations to run.")
+            return ObserverRunResult(new_events=0, automations_ran=0)
 
         # Refresh DB caches so automations work on up-to-date tasks/labels.
         self._db.reset()
 
-        logger.debug(
-            f"Observer tick: {len(new_events)} new events; running {len(self._automations)} automations."
-        )
-        for automation in self._automations:
+        if new_events:
+            logger.debug(
+                "Observer tick: {} new events; running {} automations.",
+                len(new_events),
+                len(automations_to_run),
+            )
+        else:
+            logger.debug(
+                "Observer tick: no new events; running {} polling automations.",
+                len(automations_to_run),
+            )
+        for automation in automations_to_run:
             logger.info(f"Observer triggering automation {automation}")
             automation.tick(self._db)
-        return len(new_events)
+        return ObserverRunResult(
+            new_events=len(new_events),
+            automations_ran=len(automations_to_run),
+        )
+
+    def _eligible_automations(self, *, has_new_events: bool) -> list[Automation]:
+        if has_new_events:
+            return list(self._automations)
+        return [
+            automation
+            for automation in self._automations
+            if automation.should_run_without_new_activity()
+        ]
 
     def _refresh_activity_cache(self) -> set:
         events, stats = self._activity.fetch_recent_events(self._db, max_pages=RECENT_ACTIVITY_PAGES)

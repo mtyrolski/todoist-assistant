@@ -6,10 +6,20 @@ from .openai_llm import (
     OpenAIChatConfig,
     OpenAIResponsesChatModel,
 )
+from .triton_llm import (
+    DEFAULT_TRITON_MODEL_ID,
+    DEFAULT_TRITON_MODEL_NAME,
+    DEFAULT_TRITON_URL,
+    TritonChatConfig,
+    TritonGenerateChatModel,
+)
 from .types import MessageRole, PromptToken
 
 __all__ = [
     "DEFAULT_OPENAI_MODEL",
+    "DEFAULT_TRITON_MODEL_ID",
+    "DEFAULT_TRITON_MODEL_NAME",
+    "DEFAULT_TRITON_URL",
     "DType",
     "Device",
     "LocalChatConfig",
@@ -17,5 +27,7 @@ __all__ = [
     "OpenAIChatConfig",
     "OpenAIResponsesChatModel",
     "PromptToken",
+    "TritonChatConfig",
+    "TritonGenerateChatModel",
     "TransformersMistral3ChatModel",
 ]

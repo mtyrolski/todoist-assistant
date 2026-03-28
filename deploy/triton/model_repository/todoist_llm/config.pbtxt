@@ -1,0 +1,51 @@
+name: "todoist_llm"
+backend: "python"
+max_batch_size: 4
+
+dynamic_batching {
+  preferred_batch_size: [ 1, 2, 4 ]
+  max_queue_delay_microseconds: 2000
+}
+
+input [
+  {
+    name: "text_input"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  },
+  {
+    name: "do_sample"
+    data_type: TYPE_BOOL
+    dims: [ 1 ]
+  },
+  {
+    name: "max_output_tokens"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "temperature"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  },
+  {
+    name: "top_p"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "text_output"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_CPU
+  }
+]

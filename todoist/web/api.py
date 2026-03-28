@@ -20,6 +20,7 @@ import time
 import pandas as pd
 import numpy as np
 import hydra
+import httpx
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
@@ -50,9 +51,14 @@ from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import (
     DEFAULT_OPENAI_MODEL,
+    DEFAULT_TRITON_MODEL_ID,
+    DEFAULT_TRITON_MODEL_NAME,
+    DEFAULT_TRITON_URL,
     MessageRole,
     OpenAIChatConfig,
     OpenAIResponsesChatModel,
+    TritonChatConfig,
+    TritonGenerateChatModel,
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
@@ -375,6 +381,7 @@ _LLM_CHAT_TIMEOUT_S = 60 * 60
 _LLM_CHAT_BACKEND_DEFAULT = "transformers_local"
 _LLM_CHAT_BACKEND_LABELS = {
     "transformers_local": "Transformers local",
+    "triton_local": "Triton local",
     "openai": "OpenAI",
 }
 _LLM_CHAT_DEVICE_DEFAULT = "cpu"
@@ -388,7 +395,7 @@ _CHAT_SYSTEM_PROMPT = (
 )
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
-_LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel
+_LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel
 
 _LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
@@ -780,6 +787,10 @@ def _service_statuses() -> list[dict[str, Any]]:
     api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file(_cache_runtime_path("activity.joblib"))
     automation_log = _stat_file(automation_log_path())
+    env_path = _resolve_env_path()
+    file_values = dotenv_values(env_path) if env_path.exists() else {}
+    triton_settings = _resolve_triton_settings(file_values)
+    triton_ready = _triton_ready(triton_settings)
     observer_settings = observer_settings_payload(
         load_dashboard_config(_DASHBOARD_CONFIG_PATH),
         path=_DASHBOARD_CONFIG_PATH,
@@ -819,6 +830,15 @@ def _service_statuses() -> list[dict[str, Any]]:
             "name": "Automation log",
             "status": "ok" if automation_log else "warn",
             "detail": automation_log or "automation.log missing",
+        },
+        {
+            "name": "Triton",
+            "status": "ok" if triton_ready else "warn",
+            "detail": (
+                f"{triton_settings['modelName']} ready at {triton_settings['baseUrl']}"
+                if triton_ready
+                else f"not ready at {triton_settings['baseUrl']}"
+            ),
         },
         {"name": "Observer", "status": observer_status, "detail": observer_detail},
     ]
@@ -1137,6 +1157,43 @@ def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
+    base_url = _sanitize_text(
+        os.getenv(str(EnvVar.AGENT_TRITON_URL)) or file_values.get(str(EnvVar.AGENT_TRITON_URL))
+    ) or DEFAULT_TRITON_URL
+    model_name = _sanitize_text(
+        os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
+        or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
+    ) or DEFAULT_TRITON_MODEL_NAME
+    model_id = _sanitize_text(
+        os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID))
+        or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_ID))
+    ) or DEFAULT_TRITON_MODEL_ID
+    os.environ[str(EnvVar.AGENT_TRITON_URL)] = base_url
+    os.environ[str(EnvVar.AGENT_TRITON_MODEL_NAME)] = model_name
+    os.environ[str(EnvVar.AGENT_TRITON_MODEL_ID)] = model_id
+    return {
+        "baseUrl": base_url,
+        "modelName": model_name,
+        "modelId": model_id,
+    }
+
+
+def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
+    base_url = _sanitize_text(triton_settings.get("baseUrl"))
+    if not base_url:
+        return False
+    try:
+        response = httpx.get(
+            f"{base_url.rstrip('/')}/v2/health/ready",
+            timeout=0.5,
+        )
+        response.raise_for_status()
+    except (httpx.HTTPError, ValueError):
+        return False
+    return True
+
+
 def _resolve_llm_chat_settings() -> dict[str, Any]:
     env_path = _resolve_env_path()
     backend_key = str(EnvVar.AGENT_BACKEND)
@@ -1144,6 +1201,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     file_values = dotenv_values(env_path) if env_path.exists() else {}
     available_devices = _available_llm_chat_devices()
     openai_settings = _resolve_openai_settings(file_values)
+    triton_settings = _resolve_triton_settings(file_values)
 
     backend = _normalize_llm_chat_backend(
         os.getenv(backend_key) or file_values.get(backend_key)
@@ -1168,6 +1226,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
                 "label": label,
                 "available": (
                     backend_id == "transformers_local"
+                    or backend_id == "triton_local"
                     or (backend_id == "openai" and openai_settings["configured"])
                 ),
             }
@@ -1186,6 +1245,13 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "keyName": openai_settings["keyName"],
             "model": openai_settings["model"],
             "secretKey": openai_settings["secretKey"],
+        },
+        "triton": {
+            "configured": True,
+            "healthy": _triton_ready(triton_settings),
+            "baseUrl": triton_settings["baseUrl"],
+            "modelName": triton_settings["modelName"],
+            "modelId": triton_settings["modelId"],
         },
         "envPath": str(env_path),
     }
@@ -1230,6 +1296,17 @@ async def _load_llm_chat_model_task() -> None:
         if backend == "transformers_local":
             config = coerce_model_config({"device": settings["device"]})
             model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
+        elif backend == "triton_local":
+            triton_settings = settings["triton"]
+            model = await asyncio.to_thread(
+                TritonGenerateChatModel,
+                TritonChatConfig(
+                    base_url=str(triton_settings["baseUrl"]),
+                    model_name=str(triton_settings["modelName"]),
+                    model_id=str(triton_settings["modelId"]),
+                    max_output_tokens=256,
+                ),
+            )
         elif backend == "openai":
             openai_settings = settings["openai"]
             secret_key = _sanitize_text(openai_settings.get("secretKey"))
@@ -1552,6 +1629,13 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
                 "configured": settings["openai"]["configured"],
                 "keyName": settings["openai"]["keyName"],
                 "model": settings["openai"]["model"],
+            },
+            "triton": {
+                "configured": settings["triton"]["configured"],
+                "healthy": settings["triton"]["healthy"],
+                "baseUrl": settings["triton"]["baseUrl"],
+                "modelName": settings["triton"]["modelName"],
+                "modelId": settings["triton"]["modelId"],
             },
             "envPath": settings["envPath"],
         },
@@ -2309,6 +2393,7 @@ def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
         "lastRunAt": payload.get("lastRunAt"),
         "lastDurationSeconds": payload.get("lastDurationSeconds"),
         "lastEvents": payload.get("lastEvents"),
+        "lastAutomationsRan": payload.get("lastAutomationsRan"),
         "lastStatus": payload.get("lastStatus"),
         "lastError": payload.get("lastError"),
     }
@@ -2410,12 +2495,13 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
         try:
             dbio.pull()
             observer = _build_observer(dbio)
-            new_events = await asyncio.to_thread(observer.run_once)
-            status = "ran" if new_events > 0 else "idle"
+            result = await asyncio.to_thread(observer.run_once)
+            status = "ran" if result.automations_ran > 0 else "idle"
             state.update(
                 {
                     "lastStatus": status,
-                    "lastEvents": int(new_events),
+                    "lastEvents": int(result.new_events),
+                    "lastAutomationsRan": int(result.automations_ran),
                     "lastError": None,
                 }
             )
@@ -2424,6 +2510,7 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
                 {
                     "lastStatus": "failed",
                     "lastEvents": None,
+                    "lastAutomationsRan": None,
                     "lastError": f"{type(exc).__name__}: {exc}",
                 }
             )
@@ -2442,41 +2529,176 @@ async def admin_run_observer(force: bool = False) -> dict[str, Any]:
 
 
 def _log_files() -> list[dict[str, Any]]:
-    log_files: list[dict[str, Any]] = []
-    search_roots: list[Path] = []
-    for root in (_DATA_DIR.resolve(), Path(Cache().path).resolve()):
-        if root.exists() and root not in search_roots:
-            search_roots.append(root)
+    logs: list[dict[str, Any]] = []
+    for item in _runtime_log_sources():
+        logs.append(
+            {
+                "source": item["id"],
+                "label": item["label"],
+                "category": item["kind"],
+                "description": item["description"],
+                "path": item["path"],
+                "available": item["available"],
+                "inspectOnly": item["inspectOnly"],
+                "size": item["size"],
+                "mtime": item["mtime"],
+            }
+        )
+    return logs
 
-    seen_paths: set[Path] = set()
-    for root in search_roots:
-        for log_path in root.rglob("*.log"):
-            resolved = log_path.resolve()
-            if resolved in seen_paths:
-                continue
-            seen_paths.add(resolved)
-            if not log_path.is_file():
-                continue
+
+@dataclass(frozen=True)
+class _RuntimeLogSpec:
+    key: str
+    label: str
+    category: str
+    description: str
+    relative_path: str
+
+
+def _display_log_path(path: Path) -> str:
+    resolved = path.resolve()
+    for root in (_DATA_DIR.resolve(), Path(Cache().path).resolve()):
+        try:
+            return str(resolved.relative_to(root))
+        except ValueError:
+            continue
+    return str(resolved)
+
+
+def _runtime_log_specs() -> tuple[_RuntimeLogSpec, ...]:
+    return (
+        _RuntimeLogSpec(
+            key="api",
+            label="Backend API",
+            category="backend",
+            description="FastAPI and Uvicorn application output.",
+            relative_path="dashboard/api.log",
+        ),
+        _RuntimeLogSpec(
+            key="frontend",
+            label="Frontend",
+            category="frontend",
+            description="Next.js dashboard server output.",
+            relative_path="dashboard/frontend.log",
+        ),
+        _RuntimeLogSpec(
+            key="observer",
+            label="Observer",
+            category="observer",
+            description="Background observer polling and automation trigger output.",
+            relative_path="dashboard/observer.log",
+        ),
+        _RuntimeLogSpec(
+            key="triton",
+            label="Triton",
+            category="triton",
+            description="Triton container logs tailed by the dashboard launcher.",
+            relative_path="dashboard/triton.log",
+        ),
+        _RuntimeLogSpec(
+            key="automation",
+            label="Automation Jobs",
+            category="automation",
+            description="Shared automation runner output outside the dashboard stack.",
+            relative_path="automation.log",
+        ),
+    )
+
+
+def _runtime_log_path(spec: _RuntimeLogSpec) -> Path:
+    return (Path(Cache().path) / spec.relative_path).resolve()
+
+
+def _runtime_log_sources() -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for spec in _runtime_log_specs():
+        path = _runtime_log_path(spec)
+        available = path.is_file()
+        size: int | None = None
+        mtime: str | None = None
+        if available:
             try:
-                stat = log_path.stat()
+                stat = path.stat()
             except OSError:
-                continue
-            if stat.st_size <= 0:
-                continue
-            try:
-                rel_path = resolved.relative_to(_DATA_DIR.resolve())
-            except ValueError:
-                rel_path = resolved
-            log_files.append(
-                {
-                    "path": str(rel_path),
-                    "size": stat.st_size,
-                    "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(
-                        timespec="seconds"
-                    ),
-                }
-            )
-    return sorted(log_files, key=lambda x: x["path"])
+                available = False
+            else:
+                size = stat.st_size
+                mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+        sources.append(
+            {
+                "id": spec.key,
+                "label": spec.label,
+                "kind": spec.category,
+                "description": spec.description,
+                "path": _display_log_path(path),
+                "available": available,
+                "inspectOnly": True,
+                "size": size,
+                "mtime": mtime,
+            }
+        )
+    return sources
+
+
+def _resolve_runtime_log_source(source: str) -> tuple[_RuntimeLogSpec, Path]:
+    key = source.strip().lower()
+    for spec in _runtime_log_specs():
+        if spec.key == key:
+            return spec, _runtime_log_path(spec)
+    raise HTTPException(status_code=404, detail=f"Unknown runtime log source: {source}")
+
+
+def _resolve_runtime_log_request(
+    *, source: str | None = None, path: str | None = None
+) -> tuple[_RuntimeLogSpec, Path]:
+    if source is not None and source.strip():
+        return _resolve_runtime_log_source(source)
+    if path is not None and path.strip():
+        normalized = path.strip()
+        for spec in _runtime_log_specs():
+            candidate = _runtime_log_path(spec)
+            if normalized in {spec.relative_path, _display_log_path(candidate)}:
+                return spec, candidate
+        raise HTTPException(status_code=404, detail=f"Unknown runtime log path: {path}")
+    raise HTTPException(status_code=400, detail="Missing runtime log source")
+
+
+@app.get("/api/runtime/logs", tags=["runtime"])
+async def runtime_logs() -> dict[str, Any]:
+    return {"inspectOnly": True, "sources": _runtime_log_sources()}
+
+
+@app.get("/api/runtime/logs/read", tags=["runtime"])
+async def runtime_read_log(
+    source: str | None = None,
+    path: str | None = None,
+    tail_lines: int = 120,
+    page: int = 1,
+) -> dict[str, Any]:
+    spec, abs_path = _resolve_runtime_log_request(source=source, path=path)
+    if not abs_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Runtime log is not available yet: {spec.label}",
+        )
+
+    stat = abs_path.stat()
+    payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
+    return {
+        "id": spec.key,
+        "source": spec.key,
+        "label": spec.label,
+        "kind": spec.category,
+        "category": spec.category,
+        "description": spec.description,
+        "path": _display_log_path(abs_path),
+        "available": True,
+        "inspectOnly": True,
+        "size": stat.st_size,
+        "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        **payload,
+    }
 
 
 def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
@@ -2526,20 +2748,25 @@ def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
 
 @app.get("/api/admin/logs/read", tags=["admin"])
 async def admin_read_log(
-    path: str, tail_lines: int = 40, page: int = 1
+    source: str | None = None,
+    path: str | None = None,
+    tail_lines: int = 40,
+    page: int = 1,
 ) -> dict[str, Any]:
-    abs_path = _safe_data_path(path, suffix=".log")
+    spec, abs_path = _resolve_runtime_log_request(source=source, path=path)
+    if not abs_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Runtime log is not available yet: {spec.label}",
+        )
     stat = abs_path.stat()
     payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
-    try:
-        display_path = abs_path.relative_to(_DATA_DIR.resolve())
-    except ValueError:
-        try:
-            display_path = abs_path.relative_to(Path(Cache().path).resolve())
-        except ValueError:
-            display_path = abs_path
     return {
-        "path": str(display_path),
+        "source": spec.key,
+        "label": spec.label,
+        "category": spec.category,
+        "description": spec.description,
+        "path": _display_log_path(abs_path),
         "size": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         **payload,

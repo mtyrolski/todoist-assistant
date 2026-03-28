@@ -8,8 +8,8 @@ export default function LlmAgentChatPage() {
     <>
       <PageHeader
         eyebrow="LLM-Agent Chat"
-        title="Local Chat (Beta)"
-        lede="Use the local agent to draft breakdowns, summaries, and next steps. Messages are queued and stored on this machine."
+        title="Chat (Beta)"
+        lede="Use the chat surface to draft breakdowns, summaries, and next steps. Messages are queued and stored on this machine, while the selected LLM backend can run locally or on Triton."
       />
       <LlmChatPanel />
     </>

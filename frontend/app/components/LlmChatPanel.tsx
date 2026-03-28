@@ -79,13 +79,18 @@ type ChatStatus = {
 };
 
 const POLL_MS = 5000;
+const LOCAL_BACKEND_ID = "transformers_local";
+const TRITON_BACKEND_ID = "triton_local";
+const SERVER_HOSTED_BACKENDS = new Set(["openai", TRITON_BACKEND_ID]);
 const CHAT_HELP = `**LLM Chat**
-Local model for quick analysis and summaries.
+Local or hosted model for quick analysis and summaries.
 
 - Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
-- Pick a backend and device before loading the model.
+- Pick a backend before loading the model.
+- Device selection only applies to the in-process local Transformers backend.
 - Enable loads the selected backend on demand.
 - OpenAI uses the credentials configured in your local \`.env\`.
+- Triton hosts the Hugging Face model server-side and can batch requests dynamically.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
 
@@ -105,6 +110,17 @@ function modelLabel(enabled: boolean, loading: boolean): { label: string; tone: 
   if (enabled) return { label: "Model loaded", tone: "good" };
   if (loading) return { label: "Loading model", tone: "neutral" };
   return { label: "Model offline", tone: "warn" };
+}
+
+function isServerHostedBackend(backendId?: string | null): boolean {
+  return !!backendId && SERVER_HOSTED_BACKENDS.has(backendId);
+}
+
+function backendDisplayName(backendId: string, fallbackLabel?: string): string {
+  if (backendId === TRITON_BACKEND_ID) return "Triton Inference Server";
+  if (backendId === "openai") return "OpenAI";
+  if (backendId === LOCAL_BACKEND_ID) return "Transformers local";
+  return fallbackLabel ?? backendId;
 }
 
 export function LlmChatPanel() {
@@ -173,7 +189,7 @@ export function LlmChatPanel() {
     if (!status) return;
     setBackendDraft(status.backend.selected);
     setDeviceDraft(status.device.selected);
-  }, [status?.backend.selected, status?.device.selected]);
+  }, [status]);
 
   useEffect(() => {
     if (didAutoSelect.current) return;
@@ -210,7 +226,7 @@ export function LlmChatPanel() {
     if (!selectedConversationId || !selectedSummary) return;
     if (conversation?.id === selectedConversationId && conversation?.updatedAt === selectedSummary.updatedAt) return;
     loadConversation(selectedConversationId);
-  }, [selectedConversationId, selectedSummary?.updatedAt, loadConversation, conversation?.id, conversation?.updatedAt]);
+  }, [selectedConversationId, selectedSummary, loadConversation, conversation?.id, conversation?.updatedAt]);
 
   useEffect(() => {
     if (selectedConversationId) {
@@ -297,20 +313,30 @@ export function LlmChatPanel() {
     : "Queue unavailable";
   const backendOptions = status?.backend.options ?? [];
   const deviceOptions = status?.device.options ?? [];
+  const currentBackendId = status?.backend.selected ?? LOCAL_BACKEND_ID;
+  const selectedBackendId = backendDraft || status?.backend.selected || LOCAL_BACKEND_ID;
+  const backendIsServerHosted = isServerHostedBackend(selectedBackendId);
+  const currentBackendIsServerHosted = isServerHostedBackend(currentBackendId);
+  const deviceControlDisabled = savingSettings || loading || backendIsServerHosted;
   const settingsChanged =
     !!status && (backendDraft !== status.backend.selected || deviceDraft !== status.device.selected);
-  const backendStatusLabel =
-    status?.backend.selected === "openai"
-      ? `Backend: ${status.backend.label}${status.backend.openai?.model ? ` (${status.backend.openai.model})` : ""}`
-      : status
-        ? `Backend: ${status.backend.label}`
-        : null;
-  const deviceStatusLabel =
-    status?.backend.selected === "openai"
-      ? "Device: remote"
-      : status
-        ? `Device: ${status.device.label}`
-        : null;
+  const backendStatusLabel = status
+    ? `Backend: ${backendDisplayName(currentBackendId, status.backend.label)}${
+        currentBackendId === "openai" && status.backend.openai?.model
+          ? ` (${status.backend.openai.model})`
+          : ""
+      }`
+    : null;
+  const deviceStatusLabel = status
+    ? currentBackendIsServerHosted
+      ? `Device: managed by ${currentBackendId === TRITON_BACKEND_ID ? "Triton" : "remote backend"}`
+      : `Device: ${status.device.label}`
+    : null;
+  const deviceHelpText = backendIsServerHosted
+    ? selectedBackendId === TRITON_BACKEND_ID
+      ? "Triton hosts the model server-side, so local device selection does not apply."
+      : "This backend runs remotely, so local device selection does not apply."
+    : "Local Transformers uses the selected device on this machine.";
 
   const pendingForSelected = useMemo(() => {
     if (!selectedConversationId || !queue?.items) return [];
@@ -329,7 +355,7 @@ export function LlmChatPanel() {
             <span className="pill pill-beta">Beta</span>
           </div>
           <p className="muted tiny">
-            Local agentic chat model (beta). Load on demand, queue prompts, and review past conversations. For the
+            Chat model orchestration (beta). Load on demand, queue prompts, and review past conversations. For the
             full local agent experience, use <code>make chat_agent</code>.
           </p>
         </div>
@@ -378,14 +404,14 @@ export function LlmChatPanel() {
         </div>
         <div className="chatSettingControl">
           <label className="muted tiny" htmlFor="llm-device-select">
-            Device
+            Device {backendIsServerHosted ? "(managed remotely)" : "(local runtime)"}
           </label>
           <select
             id="llm-device-select"
             className="select"
             value={deviceDraft}
             onChange={(event) => setDeviceDraft(event.target.value)}
-            disabled={savingSettings || loading}
+            disabled={deviceControlDisabled}
           >
             {deviceOptions.map((option) => (
               <option key={option.id} value={option.id} disabled={!option.available}>
@@ -393,6 +419,7 @@ export function LlmChatPanel() {
               </option>
             ))}
           </select>
+          <p className="muted tiny">{deviceHelpText}</p>
         </div>
         <div className="chatSettingsActions">
           <button

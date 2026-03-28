@@ -1,6 +1,9 @@
 """Tests for FastAPI web dashboard endpoints."""
 
+# pylint: disable=too-many-lines
+
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -674,6 +677,188 @@ def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
     assert "enabled: false" in saved_text
 
 
+def test_admin_run_observer_reports_idle_polling_automations(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "dashboard.yaml").write_text(
+        "observer:\n  enabled: true\n  refresh_interval_minutes: 0.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml")
+
+    class _FakeDatabase:
+        def __init__(self, dotenv_path: str) -> None:
+            self.dotenv_path = dotenv_path
+
+        def pull(self) -> None:
+            return None
+
+        def reset(self) -> None:
+            return None
+
+    class _FakeRunResult:
+        def __init__(self) -> None:
+            self.new_events = 0
+            self.automations_ran = 1
+
+    class _FakeObserver:
+        def run_once(self) -> _FakeRunResult:
+            return _FakeRunResult()
+
+    monkeypatch.setattr(web_api, "Database", _FakeDatabase)
+    monkeypatch.setattr(web_api, "_build_observer", lambda db: _FakeObserver())
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/admin/observer/run")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["state"]["lastStatus"] == "ran"
+    assert payload["state"]["lastEvents"] == 0
+    assert payload["state"]["lastAutomationsRan"] == 1
+
+
+def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> None:
+    cache_dir = tmp_path / "cache"
+    dashboard_dir = cache_dir / "dashboard"
+    dashboard_dir.mkdir(parents=True)
+    (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
+    (dashboard_dir / "frontend.log").write_text("frontend line\n", encoding="utf-8")
+    (dashboard_dir / "rogue.log").write_text("rogue line\n", encoding="utf-8")
+
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
+    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/runtime/logs")
+    assert res.status_code == 200
+    payload = res.json()
+
+    ids = [item["id"] for item in payload["sources"]]
+    assert ids == ["api", "frontend", "observer", "triton", "automation"]
+    assert "rogue" not in ids
+    assert all(item["inspectOnly"] is True for item in payload["sources"])
+
+
+def test_runtime_log_read_accepts_allowlisted_source_only(monkeypatch, tmp_path) -> None:
+    cache_dir = tmp_path / "cache"
+    dashboard_dir = cache_dir / "dashboard"
+    dashboard_dir.mkdir(parents=True)
+    (dashboard_dir / "observer.log").write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
+
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
+    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
+
+    client = TestClient(web_api.app)
+
+    ok = client.get("/api/runtime/logs/read?source=observer&tail_lines=2&page=1")
+    assert ok.status_code == 200
+    payload = ok.json()
+    assert payload["source"] == "observer"
+    assert payload["inspectOnly"] is True
+    assert payload["content"] == "line-2\nline-3\n"
+
+    missing = client.get("/api/runtime/logs/read?source=rogue")
+    assert missing.status_code == 404
+
+
+def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    dashboard_dir = tmp_path / "dashboard"
+    dashboard_dir.mkdir(parents=True)
+    (dashboard_dir / "api.log").write_text("api ready\n", encoding="utf-8")
+    (tmp_path / "automation.log").write_text("automation ready\n", encoding="utf-8")
+    (tmp_path / "dashboard" / "unexpected.log").write_text("should not be listed\n", encoding="utf-8")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/logs")
+    assert res.status_code == 200
+    payload = res.json()
+
+    assert [item["source"] for item in payload["logs"]] == [
+        "api",
+        "frontend",
+        "observer",
+        "triton",
+        "automation",
+    ]
+    assert payload["logs"][0]["available"] is True
+    assert payload["logs"][0]["path"] == "dashboard/api.log"
+    assert payload["logs"][-1]["available"] is True
+    assert payload["logs"][-1]["path"] == "automation.log"
+    assert all(item["path"] != "dashboard/unexpected.log" for item in payload["logs"])
+
+
+def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    dashboard_dir = tmp_path / "dashboard"
+    dashboard_dir.mkdir(parents=True)
+    (dashboard_dir / "observer.log").write_text("line-a\nline-b\n", encoding="utf-8")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/logs/read", params={"source": "observer", "tail_lines": 20, "page": 1})
+    assert res.status_code == 200
+    payload = res.json()
+
+    assert payload["source"] == "observer"
+    assert payload["label"] == "Observer"
+    assert payload["path"] == "dashboard/observer.log"
+    assert "line-a" in payload["content"]
+    assert payload["totalLines"] == 2
+
+    missing = client.get("/api/admin/logs/read", params={"source": "frontend"})
+    assert missing.status_code == 404
+    assert "not available yet" in missing.json()["detail"]
+
+
+def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
+
+    dashboard_dir = tmp_path / "dashboard"
+    dashboard_dir.mkdir(parents=True)
+    (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
+    (tmp_path / "automation.log").write_text("automation line\n", encoding="utf-8")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/runtime/logs")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["inspectOnly"] is True
+
+    by_id = {item["id"]: item for item in payload["sources"]}
+    assert by_id["api"]["available"] is True
+    assert by_id["api"]["inspectOnly"] is True
+    assert by_id["frontend"]["available"] is False
+    assert by_id["automation"]["available"] is True
+
+
+def test_runtime_read_log_reads_curated_source(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
+
+    dashboard_dir = tmp_path / "dashboard"
+    dashboard_dir.mkdir(parents=True)
+    (dashboard_dir / "triton.log").write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/runtime/logs/read", params={"source": "triton", "tail_lines": 2, "page": 1})
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["id"] == "triton"
+    assert payload["inspectOnly"] is True
+    assert payload["content"] == "line 2\nline 3\n"
+    assert payload["totalLines"] == 3
+
+
 def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     monkeypatch, tmp_path
 ) -> None:
@@ -911,6 +1096,8 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["enabled"] is False
     assert payload["loading"] is False
     assert payload["backend"]["selected"] == "transformers_local"
+    assert payload["backend"]["triton"]["configured"] is True
+    assert payload["backend"]["triton"]["modelId"] == "Qwen/Qwen2.5-0.5B-Instruct"
     assert payload["device"]["selected"] == "cpu"
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
@@ -1036,6 +1223,44 @@ def test_llm_chat_update_settings_supports_openai_backend(
     assert payload["openai"]["model"] == "gpt-5-mini"
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
+
+
+def test_llm_chat_update_settings_supports_triton_backend(
+    monkeypatch, tmp_path
+) -> None:
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
+    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/llm_chat/settings",
+        json={"backend": "triton_local", "device": "cpu"},
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["backend"] == "triton_local"
+    assert payload["triton"]["healthy"] is True
+    assert payload["triton"]["modelName"] == "todoist_llm"
+    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-0.5B-Instruct"
+    saved = env_path.read_text(encoding="utf-8")
+    assert "TODOIST_AGENT_BACKEND='triton_local'" in saved
+
+
+def test_dashboard_status_includes_triton_service(monkeypatch) -> None:
+    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/status")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert any(svc.get("name") == "Triton" for svc in payload["services"])
 
 
 def test_llm_chat_send_requires_message() -> None:

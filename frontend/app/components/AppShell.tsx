@@ -22,7 +22,7 @@ const NAV_GROUPS = [
   },
   {
     title: "Beta",
-    items: [{ href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Local chat and queued prompts" }]
+    items: [{ href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Hosted chat and queued prompts" }]
   },
   {
     title: "Experimental",
@@ -33,7 +33,8 @@ const NAV_GROUPS = [
   {
     title: "Operations",
     items: [
-      { href: "/control-panel", label: "Control Panel", hint: "Runs, logs, and status" }
+      { href: "/live-logs", label: "Live Logs", hint: "Read-only runtime inspection" },
+      { href: "/control-panel", label: "Control Panel", hint: "Runs, settings, and status" }
     ]
   }
 ];

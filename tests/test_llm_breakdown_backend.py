@@ -92,3 +92,32 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     assert isinstance(llm, _FakeOpenAI)
     config = captured["config"]
     assert getattr(config, "key_name") == "cache-key"
+
+
+def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
+    monkeypatch.setenv(str(EnvVar.AGENT_TRITON_URL), "http://127.0.0.1:9100")
+    monkeypatch.setenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), "todoist_llm")
+    monkeypatch.setenv(str(EnvVar.AGENT_TRITON_MODEL_ID), "Qwen/Qwen2.5-0.5B-Instruct")
+
+    captured: dict[str, object] = {}
+
+    class _FakeTriton:
+        def __init__(self, config):
+            captured["config"] = config
+
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.TritonGenerateChatModel",
+        _FakeTriton,
+    )
+
+    automation = LLMBreakdown()
+    llm = automation.get_llm()
+
+    assert isinstance(llm, _FakeTriton)
+    config = captured["config"]
+    assert getattr(config, "base_url") == "http://127.0.0.1:9100"
+    assert getattr(config, "model_name") == "todoist_llm"
+    assert getattr(config, "model_id") == "Qwen/Qwen2.5-0.5B-Instruct"

@@ -17,6 +17,7 @@ scripts/*
 !scripts/get_version.py
 !scripts/check_versions.py
 !scripts/check_explicit_any.py
+!scripts/dashboard_stack.sh
 !scripts/macos/
 !scripts/macos/**
 storage

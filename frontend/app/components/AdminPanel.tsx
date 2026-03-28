@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { InfoTip } from "./InfoTip";
 import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 
-type Tab = "automations" | "logs" | "adjustments" | "settings";
+type Tab = "automations" | "adjustments" | "settings";
 
 type AutomationInfo = {
   name: string;
@@ -27,18 +28,6 @@ type RunResult = {
 
 type RunAllResult = { results: RunResult[] };
 
-type LogFile = { path: string; size: number; mtime: string };
-type LogsResponse = { logs: LogFile[] };
-
-type LogReadResponse = LogFile & {
-  content: string;
-  page: number;
-  perPage: number;
-  totalPages: number;
-  totalLines: number;
-};
-
-
 type AdminJob = {
   id: string;
   kind: string;
@@ -52,10 +41,9 @@ type AdminJob = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const ADMIN_HELP = `**Dashboard Admin**
-Manage automations, logs, and project mappings.
+Manage automations, project mappings, and local dashboard settings.
 
 - Automations follow the same cooldown rules as the observer.
-- Logs read from local files for quick debugging.
 - Adjustments map archived projects to active roots.
 - Settings updates your local Todoist API token.`;
 
@@ -92,12 +80,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
 
-  const [logs, setLogs] = useState<LogFile[] | null>(null);
-  const [selectedLog, setSelectedLog] = useState<string>("");
-  const [logRead, setLogRead] = useState<LogReadResponse | null>(null);
-  const [logLines, setLogLines] = useState<number>(80);
-  const [logPage, setLogPage] = useState<number>(1);
-
   const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>("");
   const [tokenSaving, setTokenSaving] = useState(false);
@@ -128,24 +110,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       }
     };
     loadAutomations();
-  }, []);
-
-  useEffect(() => {
-    const loadLogs = async () => {
-      try {
-        const res = await fetch("/api/admin/logs");
-        const payload = (await res.json()) as LogsResponse;
-        if (!res.ok) throw new Error("logs");
-        setLogs(payload.logs);
-        if (!selectedLog && payload.logs.length) {
-          setSelectedLog(payload.logs[0].path);
-        }
-      } catch {
-        setLogs(null);
-      }
-    };
-    loadLogs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadApiToken = async () => {
@@ -254,35 +218,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     }
   };
 
-  const readLog = async (path: string, page: number) => {
-    try {
-      const qs = new URLSearchParams({
-        path,
-        tail_lines: String(logLines),
-        page: String(page)
-      });
-      const res = await fetch(`/api/admin/logs/read?${qs.toString()}`);
-      const payload = (await res.json()) as LogReadResponse;
-      if (!res.ok) throw new Error("read_log");
-      setLogRead(payload);
-      setLogPage(payload.page);
-    } catch {
-      setLogRead(null);
-    }
-  };
-
-  useEffect(() => {
-    if (!selectedLog) return;
-    readLog(selectedLog, 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLog]);
-
-  useEffect(() => {
-    if (!selectedLog) return;
-    readLog(selectedLog, logPage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logLines, logPage]);
-
   const saveApiToken = async () => {
     if (!tokenDraft.trim()) {
       setTokenError("Paste your Todoist API token.");
@@ -385,19 +320,21 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
           <h2>Dashboard Admin</h2>
           <InfoTip label="About dashboard admin" content={ADMIN_HELP} />
         </div>
-        <div className="segmented">
-          <button className={`seg ${tab === "automations" ? "segActive" : ""}`} onClick={() => setTab("automations")} type="button">
-            Automations
-          </button>
-          <button className={`seg ${tab === "logs" ? "segActive" : ""}`} onClick={() => setTab("logs")} type="button">
-            Logs
-          </button>
-          <button className={`seg ${tab === "adjustments" ? "segActive" : ""}`} onClick={() => setTab("adjustments")} type="button">
-            Project Adjustments
-          </button>
-          <button className={`seg ${tab === "settings" ? "segActive" : ""}`} onClick={() => setTab("settings")} type="button">
-            Settings
-          </button>
+        <div className="adminRowRight">
+          <div className="segmented">
+            <button className={`seg ${tab === "automations" ? "segActive" : ""}`} onClick={() => setTab("automations")} type="button">
+              Automations
+            </button>
+            <button className={`seg ${tab === "adjustments" ? "segActive" : ""}`} onClick={() => setTab("adjustments")} type="button">
+              Project Adjustments
+            </button>
+            <button className={`seg ${tab === "settings" ? "segActive" : ""}`} onClick={() => setTab("settings")} type="button">
+              Settings
+            </button>
+          </div>
+          <Link className="button buttonSmall buttonGhost" href="/live-logs">
+            Open Live Logs
+          </Link>
         </div>
       </header>
 
@@ -447,79 +384,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
               ))
             )}
           </div>
-        </div>
-      ) : null}
-
-      {tab === "logs" ? (
-        <div className="stack">
-          <div className="adminRow">
-            <div className="control" style={{ margin: 0 }}>
-              <label className="muted tiny" htmlFor="log-select">
-                Log file
-              </label>
-              <select
-                id="log-select"
-                value={selectedLog}
-                onChange={(e) => setSelectedLog(e.target.value)}
-                className="select"
-              >
-                {(logs ?? []).map((l) => (
-                  <option key={l.path} value={l.path}>
-                    {l.path}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="adminRowRight">
-              <label className="muted tiny" htmlFor="log-lines">
-                Lines/page
-              </label>
-              <input
-                id="log-lines"
-                className="dateInput"
-                type="number"
-                min={10}
-                max={2000}
-                value={logLines}
-                onChange={(e) => setLogLines(Number(e.target.value))}
-              />
-              <button className="button buttonSmall" type="button" onClick={() => selectedLog && readLog(selectedLog, logPage)}>
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          {!logRead ? (
-            <div className="skeleton" style={{ minHeight: 180 }} />
-          ) : (
-            <div className="stack">
-              <div className="adminRow">
-                <p className="muted tiny" style={{ margin: 0 }}>
-                  {logRead.path} • {Math.round(logRead.size / 1024)} KB • modified {logRead.mtime}
-                </p>
-                <div className="adminRowRight">
-                  <button className="button buttonSmall" type="button" disabled={logRead.page <= 1} onClick={() => setLogPage(1)}>
-                    First
-                  </button>
-                  <button className="button buttonSmall" type="button" disabled={logRead.page <= 1} onClick={() => setLogPage((p) => Math.max(1, p - 1))}>
-                    Prev
-                  </button>
-                  <span className="muted tiny">
-                    Page {logRead.page} / {logRead.totalPages}
-                  </span>
-                  <button className="button buttonSmall" type="button" disabled={logRead.page >= logRead.totalPages} onClick={() => setLogPage((p) => p + 1)}>
-                    Next
-                  </button>
-                  <button className="button buttonSmall" type="button" disabled={logRead.page >= logRead.totalPages} onClick={() => setLogPage(logRead.totalPages)}>
-                    Last
-                  </button>
-                </div>
-              </div>
-              <pre className="codeBlock" style={{ maxHeight: 420, overflow: "auto" }}>
-                {logRead.content || "(empty)"}
-              </pre>
-            </div>
-          )}
         </div>
       ) : null}
 

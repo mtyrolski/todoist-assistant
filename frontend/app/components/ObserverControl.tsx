@@ -10,6 +10,7 @@ type ObserverState = {
   lastRunAt?: string | null;
   lastDurationSeconds?: number | null;
   lastEvents?: number | null;
+  lastAutomationsRan?: number | null;
   lastStatus?: string | null;
   lastError?: string | null;
 };
@@ -184,8 +185,11 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
   const statusTone = enabled === null ? "neutral" : enabled ? "good" : "warn";
   const statusLabel = enabled === null ? "Unknown" : enabled ? "Enabled" : "Disabled";
   const lastStatus = state?.lastStatus ? `Status: ${state.lastStatus}` : loading ? "Loading..." : "No runs yet";
-  const lastEvents =
-    typeof state?.lastEvents === "number" ? `${state.lastEvents} new events` : "No activity yet";
+  const lastEvents = typeof state?.lastEvents === "number" ? `${state.lastEvents} new events` : "No activity yet";
+  const lastAutomations =
+    typeof state?.lastAutomationsRan === "number"
+      ? `${state.lastAutomationsRan} automations ran`
+      : null;
 
   return (
     <section id="observer-control" className="card">
@@ -233,6 +237,7 @@ export function ObserverControl({ onAfterMutation }: { onAfterMutation: () => vo
               <p className="rowTitle">Latest tick</p>
               <p className="muted tiny">
                 {lastEvents}
+                {lastAutomations ? ` · ${lastAutomations}` : ""}
                 {state?.refreshIntervalMinutes ? ` · every ${state.refreshIntervalMinutes} min` : ""}
               </p>
             </div>
