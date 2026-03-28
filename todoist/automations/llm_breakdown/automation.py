@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
 import os
@@ -45,7 +46,7 @@ class BreakdownSettings:
     allow_existing_children: bool = False
     remove_label_after_processing: bool = True
     propagate_labels: bool = True
-    max_tasks_per_tick: int = 1
+    max_tasks_per_tick: int = 4
     max_queue_depth: int = 1
     auto_queue_children: bool = True
     track_progress: bool = True
@@ -295,6 +296,23 @@ class LLMBreakdown(Automation):
         self,
     ) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel:
         return self._get_llm()
+
+    def selected_backend(self) -> str:
+        backend, _values = self._resolve_selected_backend()
+        if backend in {"openai", "triton_local"}:
+            return backend
+        return "transformers_local"
+
+    def llm_request_parallelism(self, task_count: int) -> int:
+        if task_count <= 0:
+            return 1
+        if self.selected_backend() != "triton_local":
+            return 1
+        return max(1, min(int(self.max_tasks_per_tick), int(task_count)))
+
+    @staticmethod
+    def concurrent_executor(max_workers: int) -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(max_workers=max_workers)
 
     def resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
         return self._resolve_variant(label)

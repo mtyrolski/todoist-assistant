@@ -47,6 +47,28 @@ class CandidateSelection:
     drop_queue_ids: set[str]
 
 
+@dataclass(frozen=True)
+class PreparedBreakdownRequest:
+    task: Task
+    label: str
+    variant_key: str
+    variant_cfg: dict[str, Any]
+    depth: int
+    source: str
+    max_depth: int
+    max_children: int
+    max_total_tasks: int
+    queue_depth_limit: int
+    messages: list[dict[str, str]]
+
+
+@dataclass(frozen=True)
+class BreakdownGenerationResult:
+    request: PreparedBreakdownRequest
+    breakdown: TaskBreakdown | None
+    error: str | None = None
+
+
 def run_breakdown(automation: Any, db: Database) -> None:
     logger.info("Running LLM Breakdown automation")
     projects = db.fetch_projects(include_tasks=True)
@@ -144,16 +166,31 @@ def run_breakdown(automation: Any, db: Database) -> None:
             automation.queue_save(remaining)
         return
 
+    prepared_requests = [
+        prepare_breakdown_request(
+            automation=automation,
+            item=item,
+            tasks_by_id=tasks_by_id,
+            fetch_task=fetch_task,
+        )
+        for item in tasks_to_process
+    ]
+    generation_results = generate_breakdowns(
+        automation=automation,
+        llm=llm,
+        prepared_requests=prepared_requests,
+    )
+
     completed = 0
     failed = 0
     processed_queue_ids: set[str] = set()
 
-    for item in tasks_to_process:
-        task = item.task
-        label = item.label
-        variant_key = item.variant
-        depth = item.depth
-        source = item.source
+    for result in generation_results:
+        request = result.request
+        task = request.task
+        label = request.label
+        depth = request.depth
+        source = request.source
 
         progress[ProgressKey.CURRENT.value] = {
             CurrentKey.TASK_ID.value: task.id,
@@ -164,46 +201,15 @@ def run_breakdown(automation: Any, db: Database) -> None:
         progress[ProgressKey.UPDATED_AT.value] = automation.now_iso()
         automation.progress_save(progress)
 
-        variant_cfg = automation.variants.get(variant_key)
-        if variant_cfg is None:
-            variant_key, variant_cfg = automation.resolve_variant(label)
-        variant_cfg = dict(variant_cfg)
-        max_depth = int(variant_cfg.get("max_depth", automation.max_depth))
-        max_children = int(variant_cfg.get("max_children", automation.max_children))
-        max_total_tasks = int(variant_cfg.get("max_total_tasks", automation.max_total_tasks))
-        queue_depth_limit = int(variant_cfg.get("queue_depth", automation.max_queue_depth))
-        instruction = variant_cfg.get("instruction")
-        if queue_depth_limit > 0:
-            max_allowed = max(1, queue_depth_limit - depth + 1)
-            max_depth = min(max_depth, max_allowed)
-
-        system_prompt = automation.build_system_prompt(
-            max_depth=max_depth,
-            max_children=max_children,
-            instruction=instruction,
-        )
-
-        messages = build_messages(
-            task=task,
-            tasks_by_id=tasks_by_id,
-            fetch_task=fetch_task,
-            system_prompt=system_prompt,
-            variant_key=variant_key,
-            max_depth=max_depth,
-            max_children=max_children,
-        )
-
-        try:
-            breakdown = llm.structured_chat(messages, TaskBreakdown)
-        except ValueError as exc:
-            logger.error(f"LLM breakdown failed for task {task.id}: {exc}")
+        if result.error is not None or result.breakdown is None:
+            logger.error("LLM breakdown failed for task {}: {}", task.id, result.error)
             failed += 1
             processed_ids.add(task.id)
             append_progress_result(
                 progress,
                 task=task,
                 status="failed",
-                error=str(exc),
+                error=result.error or "unknown error",
                 depth=depth,
             )
             pending = tasks_total - (completed + failed)
@@ -221,7 +227,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
             automation.progress_save(progress)
             continue
 
-        nodes = breakdown.children
+        nodes = result.breakdown.children
         created_count = 0
         if not nodes:
             logger.info(f"LLM returned no subtasks for task {task.id}")
@@ -234,9 +240,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 items=queue_additions,
                 ids=queued_ids,
                 next_depth=depth + 1,
-                limit=queue_depth_limit,
+                limit=request.queue_depth_limit,
                 label=label,
-                variant=variant_key,
+                variant=request.variant_key,
                 enabled=automation.auto_queue_children,
             )
             automation.insert_children(
@@ -246,9 +252,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 nodes=nodes,
                 depth=1,
                 context=InsertContext(
-                    max_depth=max_depth,
-                    max_children=max_children,
-                    max_total_tasks=max_total_tasks,
+                    max_depth=request.max_depth,
+                    max_children=request.max_children,
+                    max_total_tasks=request.max_total_tasks,
                     labels=automation.child_labels(task),
                     created=created,
                     queue_ctx=queue_ctx if automation.auto_queue_children else None,
@@ -287,7 +293,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
             "Expanded task {} with label '{}' (variant={}, created={}, pending={})",
             task.id,
             label,
-            variant_key,
+            request.variant_key,
             created_count,
             pending,
         )
@@ -313,6 +319,104 @@ def run_breakdown(automation: Any, db: Database) -> None:
         track_processed=track_processed,
     )
     automation.progress_save(progress)
+
+
+def prepare_breakdown_request(
+    *,
+    automation: Any,
+    item: BreakdownCandidate,
+    tasks_by_id: Mapping[str, Task],
+    fetch_task: TaskFetcher,
+) -> PreparedBreakdownRequest:
+    task = item.task
+    label = item.label
+    variant_key = item.variant
+    depth = item.depth
+    source = item.source
+
+    variant_cfg = automation.variants.get(variant_key)
+    if variant_cfg is None:
+        variant_key, variant_cfg = automation.resolve_variant(label)
+    resolved_variant_cfg = dict(variant_cfg)
+    max_depth = int(resolved_variant_cfg.get("max_depth", automation.max_depth))
+    max_children = int(resolved_variant_cfg.get("max_children", automation.max_children))
+    max_total_tasks = int(resolved_variant_cfg.get("max_total_tasks", automation.max_total_tasks))
+    queue_depth_limit = int(resolved_variant_cfg.get("queue_depth", automation.max_queue_depth))
+    instruction = resolved_variant_cfg.get("instruction")
+    if queue_depth_limit > 0:
+        max_allowed = max(1, queue_depth_limit - depth + 1)
+        max_depth = min(max_depth, max_allowed)
+
+    system_prompt = automation.build_system_prompt(
+        max_depth=max_depth,
+        max_children=max_children,
+        instruction=instruction,
+    )
+    messages = build_messages(
+        task=task,
+        tasks_by_id=tasks_by_id,
+        fetch_task=fetch_task,
+        system_prompt=system_prompt,
+        variant_key=variant_key,
+        max_depth=max_depth,
+        max_children=max_children,
+    )
+    return PreparedBreakdownRequest(
+        task=task,
+        label=label,
+        variant_key=variant_key,
+        variant_cfg=resolved_variant_cfg,
+        depth=depth,
+        source=source,
+        max_depth=max_depth,
+        max_children=max_children,
+        max_total_tasks=max_total_tasks,
+        queue_depth_limit=queue_depth_limit,
+        messages=messages,
+    )
+
+
+def generate_breakdowns(
+    *,
+    automation: Any,
+    llm: Any,
+    prepared_requests: list[PreparedBreakdownRequest],
+) -> list[BreakdownGenerationResult]:
+    if not prepared_requests:
+        return []
+
+    parallelism = automation.llm_request_parallelism(len(prepared_requests))
+    if parallelism <= 1:
+        return [
+            _generate_breakdown_result(llm=llm, request=request)
+            for request in prepared_requests
+        ]
+
+    logger.info(
+        "Dispatching {} concurrent Triton LLM breakdown requests (tasks_per_tick={})",
+        parallelism,
+        len(prepared_requests),
+    )
+    with automation.concurrent_executor(max_workers=parallelism) as executor:
+        futures = [
+            executor.submit(_generate_breakdown_result, llm=llm, request=request)
+            for request in prepared_requests
+        ]
+        return [future.result() for future in futures]
+
+
+def _generate_breakdown_result(*, llm: Any, request: PreparedBreakdownRequest) -> BreakdownGenerationResult:
+    try:
+        return BreakdownGenerationResult(
+            request=request,
+            breakdown=llm.structured_chat(request.messages, TaskBreakdown),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return BreakdownGenerationResult(
+            request=request,
+            breakdown=None,
+            error=str(exc),
+        )
 
 
 # === CANDIDATE SELECTION ====================================================
