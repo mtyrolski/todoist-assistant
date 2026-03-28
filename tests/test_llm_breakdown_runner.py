@@ -1,6 +1,5 @@
 """Tests for LLM breakdown runner batching behavior."""
 
-from __future__ import annotations
 
 from threading import Lock
 import time

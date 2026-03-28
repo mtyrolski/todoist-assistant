@@ -1,6 +1,5 @@
 """Triton chat adapter for the dashboard-hosted model."""
 
-from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable, Sequence
