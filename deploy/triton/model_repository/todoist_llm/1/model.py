@@ -1,12 +1,12 @@
 import json
 import os
-import sys
-from datetime import datetime
+from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 import torch
+from loguru import logger
 import triton_python_backend_utils as pb_utils
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -146,33 +146,35 @@ def _coerce_float(value: Any | None, default: float) -> float:
         return default
 
 
-def _log_info(message: str) -> None:
-    formatted = f"[todoist_llm] {message}"
-    print(formatted, file=sys.stderr, flush=True)
-    logger = getattr(pb_utils, "Logger", None)
-    if logger is not None and hasattr(logger, "log_info"):
-        logger.log_info(formatted)
+_LOGGING_CONFIGURED = False
 
 
-def _append_runtime_log(message: str) -> None:
+def _configure_logging() -> None:
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+
     log_path = os.getenv("TODOIST_TRITON_REQUEST_LOG_PATH", "").strip()
-    if not log_path:
-        return
-    timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
-    try:
-        with open(log_path, "a", encoding="utf-8") as handle:
-            handle.write(f"{timestamp} {message}\n")
-    except OSError:
-        return
+    log_level = os.getenv("TODOIST_TRITON_LOG_LEVEL", os.getenv("TODOIST_LOG_LEVEL", "INFO")).strip().upper()
+    if log_path:
+        path = Path(log_path).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        logger.add(
+            path,
+            level=log_level,
+            rotation="500 MB",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {message}",
+            enqueue=False,
+            backtrace=False,
+            diagnose=False,
+        )
 
-
-def _log_runtime(message: str) -> None:
-    _log_info(message)
-    _append_runtime_log(message)
+    _LOGGING_CONFIGURED = True
 
 
 class TritonPythonModel:
     def initialize(self, args: dict[str, Any]) -> None:
+        _configure_logging()
         self._model_config = json.loads(args["model_config"])
         self._model_id = _env(
             "TODOIST_AGENT_TRITON_MODEL_ID",
@@ -208,7 +210,7 @@ class TritonPythonModel:
         self._pad_token_id = self._tokenizer.pad_token_id
         if self._pad_token_id is None and self._tokenizer.eos_token_id is not None:
             self._pad_token_id = self._tokenizer.eos_token_id
-        _log_runtime(
+        logger.info(
             "todoist_llm initialized "
             f"(model_id={self._model_id}, device={self._device.type}, dtype={self._dtype}, "
             f"default_max_tokens={self._max_tokens}, temperature={self._temperature}, top_p={self._top_p})"
@@ -251,6 +253,7 @@ class TritonPythonModel:
                         (request_index, item_index, prompt)
                     )
         except Exception as exc:
+            logger.exception("todoist_llm failed while preparing Triton requests")
             return [
                 pb_utils.InferenceResponse(error=pb_utils.TritonError(str(exc)))
                 for _ in requests
@@ -258,14 +261,14 @@ class TritonPythonModel:
 
         try:
             total_prompts = sum(len(rows) for rows in response_rows)
-            _log_runtime(
+            logger.info(
                 "todoist_llm received "
                 f"{len(requests)} Triton request(s) carrying {total_prompts} prompt(s); "
                 f"grouped into {len(grouped_requests)} execution batch(es)"
             )
             for (do_sample, max_tokens, temperature, top_p), items in grouped_requests.items():
                 prompt_lengths = [len(prompt) for _, _, prompt in items]
-                _log_runtime(
+                logger.info(
                     "todoist_llm dispatching batch "
                     f"(batch_size={len(items)}, do_sample={do_sample}, max_tokens={max_tokens}, "
                     f"temperature={temperature}, top_p={top_p}, prompt_chars={prompt_lengths})"
@@ -280,6 +283,7 @@ class TritonPythonModel:
                 for (request_index, item_index, _prompt), text in zip(items, texts, strict=True):
                     response_rows[request_index][item_index] = text
         except Exception as exc:
+            logger.exception("todoist_llm failed while generating Triton responses")
             return [
                 pb_utils.InferenceResponse(error=pb_utils.TritonError(str(exc)))
                 for _ in requests
@@ -296,6 +300,7 @@ class TritonPythonModel:
 
     def finalize(self) -> None:
         # Triton handles lifecycle; the transformers model is released with the process.
+        logger.info("todoist_llm finalize called")
         return None
 
     def _generate_batch(
@@ -309,6 +314,14 @@ class TritonPythonModel:
     ) -> list[str]:
         if not prompts:
             return []
+        logger.debug(
+            "todoist_llm generating batch (batch_size={}, do_sample={}, max_tokens={}, temperature={}, top_p={})",
+            len(prompts),
+            do_sample,
+            max_tokens,
+            temperature,
+            top_p,
+        )
         encodings = self._tokenizer(
             prompts,
             return_tensors="pt",
@@ -330,7 +343,7 @@ class TritonPythonModel:
         if do_sample:
             generate_kwargs["temperature"] = temperature
             generate_kwargs["top_p"] = top_p
-        _log_runtime(
+        logger.info(
             "todoist_llm generating "
             f"(batch_size={len(prompts)}, input_tokens={input_lengths}, max_new_tokens={max_tokens}, "
             f"sampling={'on' if do_sample else 'off'})"
@@ -344,7 +357,7 @@ class TritonPythonModel:
             new_tokens = generation[prompt_length:]
             texts.append(self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip())
         output_lengths = [len(text) for text in texts]
-        _log_runtime(
+        logger.info(
             "todoist_llm completed batch "
             f"(batch_size={len(prompts)}, output_chars={output_lengths})"
         )

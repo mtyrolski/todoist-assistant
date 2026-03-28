@@ -47,6 +47,13 @@
   The dashboard and control panel are the stable paths. LLM-Agent Chat is beta. Habit Tracker Lab is experimental and intentionally separate from the main dashboard flow.
 </p>
 
+### Triton-backed local LLM
+- Set `TODOIST_AGENT_BACKEND=triton_local` to route the LLM breakdown/chat stack through the local Triton server.
+- Start the stack with `make run_dashboard_cpu` for CPU or `make run_dashboard_gpu` for GPU. `make triton_shell` opens a shell inside the running Triton container.
+- Defaults: HTTP `http://127.0.0.1:8003`, model name `todoist_llm`, model id `Qwen/Qwen2.5-0.5B-Instruct`.
+- Logs: container output is tailed to `.cache/todoist-assistant/dashboard/triton.log`, and per-request inference logs go to `.cache/todoist-assistant/dashboard/triton-inference.log`.
+- The backend model lives in [`deploy/triton/model_repository/todoist_llm/1/model.py`](deploy/triton/model_repository/todoist_llm/1/model.py), with the GPU override in [`compose.triton.gpu.yaml`](compose.triton.gpu.yaml).
+
 ## Highlights
 - Fast, local dashboard from your cached Todoist data (reproducible analytics, works offline after sync).
 - Guided first-run setup with token validation and project hierarchy cleanup.

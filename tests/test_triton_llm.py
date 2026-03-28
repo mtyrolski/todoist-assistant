@@ -2,6 +2,7 @@
 
 import json
 from typing import Any, cast
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ from todoist.automations.llm_breakdown.models import TaskBreakdown
 from todoist.llm.triton_llm import (
     DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
+    DEFAULT_TRITON_URL,
     TritonChatConfig,
     TritonGenerateChatModel,
 )
@@ -59,20 +61,43 @@ def test_triton_chat_posts_infer_request(monkeypatch) -> None:
             request=request,
         )
 
-    model = TritonGenerateChatModel(TritonChatConfig())
-    setattr(
-        model,
-        "_client",
-        httpx.Client(
-            transport=httpx.MockTransport(_handler),
-            timeout=model.config.timeout_seconds,
-        ),
-    )
+    with patch("todoist.llm.triton_llm.logger") as mock_logger:
+        model = TritonGenerateChatModel(TritonChatConfig())
+        setattr(
+            model,
+            "_client",
+            httpx.Client(
+                transport=httpx.MockTransport(_handler),
+                timeout=model.config.timeout_seconds,
+            ),
+        )
 
-    payload = model.chat([{"role": "user", "content": "Hello"}])
+        payload = model.chat([{"role": "user", "content": "Hello"}])
     inputs = cast(list[dict[str, Any]], captured_payload["inputs"])
 
     assert payload == "completion"
+    mock_logger.info.assert_any_call(
+        "Triton chat backend ready (base_url={}, model_name={}, model_id={})",
+        DEFAULT_TRITON_URL,
+        DEFAULT_TRITON_MODEL_NAME,
+        DEFAULT_TRITON_MODEL_ID,
+    )
+    mock_logger.debug.assert_any_call(
+        "Triton chat request (messages={}, base_url={})",
+        1,
+        DEFAULT_TRITON_URL,
+    )
+    mock_logger.debug.assert_any_call("Triton chat rendered prompt (chars={})", len("PROMPT:user=Hello"))
+    mock_logger.debug.assert_any_call(
+        "Posting Triton infer request (model_name={}, prompt_chars={}, do_sample={}, temperature={}, top_p={}, max_output_tokens={})",
+        DEFAULT_TRITON_MODEL_NAME,
+        len("PROMPT:user=Hello"),
+        True,
+        0.2,
+        0.95,
+        256,
+    )
+    mock_logger.debug.assert_any_call("Received Triton infer response (text_chars={})", len("completion"))
     assert inputs[0]["name"] == "text_input"
     assert inputs[0]["datatype"] == "BYTES"
     assert inputs[0]["shape"] == [1, 1]
@@ -250,18 +275,25 @@ def test_triton_post_raises_api_message_for_http_errors(monkeypatch) -> None:
             request=request,
         )
 
-    model = TritonGenerateChatModel(TritonChatConfig())
-    setattr(
-        model,
-        "_client",
-        httpx.Client(
-            transport=httpx.MockTransport(_handler),
-            timeout=model.config.timeout_seconds,
-        ),
-    )
+    with patch("todoist.llm.triton_llm.logger") as mock_logger:
+        model = TritonGenerateChatModel(TritonChatConfig())
+        setattr(
+            model,
+            "_client",
+            httpx.Client(
+                transport=httpx.MockTransport(_handler),
+                timeout=model.config.timeout_seconds,
+            ),
+        )
 
-    with pytest.raises(ValueError, match="model loading"):
-        model.chat([{"role": "user", "content": "Hello"}])
+        with pytest.raises(ValueError, match="model loading"):
+            model.chat([{"role": "user", "content": "Hello"}])
+
+    mock_logger.warning.assert_any_call(
+        "Triton infer request failed (status={}, detail={})",
+        503,
+        "model loading",
+    )
 
 
 def test_triton_chat_falls_back_for_legacy_chat_template(monkeypatch) -> None:

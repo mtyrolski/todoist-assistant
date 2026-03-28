@@ -51,10 +51,21 @@ class TritonGenerateChatModel:
         )
 
     def chat(self, messages: Sequence[dict[str, str]]) -> str:
+        logger.debug(
+            "Triton chat request (messages={}, base_url={})",
+            len(messages),
+            self.config.base_url,
+        )
         prompt = self._render_prompt(messages)
+        logger.debug("Triton chat rendered prompt (chars={})", len(prompt))
         return self._generate_text(prompt)
 
     def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
+        logger.debug(
+            "Triton structured_chat request (schema={}, messages={})",
+            schema.__name__,
+            len(messages),
+        )
         schema_instruction = _schema_instructions(schema)
         prompt_messages = list(messages)
         system_parts = [
@@ -75,6 +86,11 @@ class TritonGenerateChatModel:
                 *non_system_messages,
             ]
         prompt = self._render_prompt(non_system_messages)
+        logger.debug(
+            "Triton structured_chat rendered prompt (schema={}, chars={})",
+            schema.__name__,
+            len(prompt),
+        )
         raw = self._generate_text(
             prompt,
             do_sample=False,
@@ -82,16 +98,22 @@ class TritonGenerateChatModel:
         )
         parsed = _try_parse_structured_output(raw, schema)
         if parsed is not None:
+            logger.debug("Triton structured_chat parsed schema={} without repair", schema.__name__)
             return parsed
+        logger.warning("Triton structured_chat repairing malformed output for schema={}", schema.__name__)
         repaired = self._repair_structured_output(raw, schema)
         parsed = _try_parse_structured_output(repaired, schema)
         if parsed is not None:
+            logger.debug("Triton structured_chat repair succeeded for schema={}", schema.__name__)
             return parsed
+        logger.error("Triton structured_chat failed for schema={}", schema.__name__)
         raise ValueError(f"Invalid structured output for {schema.__name__}: {raw}")
 
     def ready(self) -> bool:
+        logger.debug("Checking Triton readiness at {}", self._health_url())
         response = self._client.get(self._health_url())
         response.raise_for_status()
+        logger.debug("Triton readiness check succeeded at {}", self._health_url())
         return True
 
     def _render_prompt(self, messages: Sequence[dict[str, str]]) -> str:
@@ -144,6 +166,15 @@ class TritonGenerateChatModel:
             self.config.max_output_tokens if max_output_tokens is None else max_output_tokens
         )
 
+        logger.debug(
+            "Posting Triton infer request (model_name={}, prompt_chars={}, do_sample={}, temperature={}, top_p={}, max_output_tokens={})",
+            self.config.model_name,
+            len(prompt),
+            resolved_do_sample,
+            resolved_temperature,
+            resolved_top_p,
+            resolved_max_output_tokens,
+        )
         response = self._client.post(
             self._infer_url(),
             json={
@@ -185,16 +216,28 @@ class TritonGenerateChatModel:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = _extract_error_detail(exc.response)
+            logger.warning(
+                "Triton infer request failed (status={}, detail={})",
+                exc.response.status_code,
+                detail,
+            )
             raise ValueError(
                 f"Triton infer request failed ({exc.response.status_code}): {detail}"
             ) from exc
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            logger.exception("Triton response payload is not valid JSON")
+            raise ValueError("Triton response payload is not valid JSON") from exc
         if not isinstance(payload, dict):
+            logger.error("Triton response payload is not a JSON object")
             raise ValueError("Triton response payload is not a JSON object")
         text_output = _normalize_generated_text(_extract_infer_text_output(payload))
         if not text_output.strip():
+            logger.error("Triton response did not include text_output")
             raise ValueError("Triton response did not include text_output")
+        logger.debug("Received Triton infer response (text_chars={})", len(text_output))
         return text_output.strip()
 
     def _max_output_tokens_for_schema(self, schema: type[BaseModel]) -> int:
