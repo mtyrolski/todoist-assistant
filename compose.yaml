@@ -47,5 +47,54 @@ services:
       api:
         condition: service_healthy
 
+  triton:
+    build:
+      context: ./deploy/triton
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${TODOIST_TRITON_BASE_IMAGE:-nvcr.io/nvidia/tritonserver:23.08-py3}
+        TORCH_INSTALL_FLAVOR: ${TODOIST_TRITON_TORCH_INSTALL_FLAVOR:-cpu}
+        TORCH_VERSION: ${TODOIST_TRITON_TORCH_VERSION:-2.10.0}
+    image: todoist-assistant-triton:latest
+    profiles:
+      - dashboard
+    command:
+      - tritonserver
+      - --model-repository=/models
+      - --http-port=8000
+      - --grpc-port=8001
+      - --metrics-port=8002
+      - --backend-config=python,shm-region-prefix-name=${TODOIST_TRITON_PYTHON_SHM_PREFIX:-todoist-triton}
+      - --log-verbose=0
+    ports:
+      - "${TODOIST_TRITON_HTTP_PORT:-8003}:8000"
+      - "${TODOIST_TRITON_GRPC_PORT:-8004}:8001"
+      - "${TODOIST_TRITON_METRICS_PORT:-8005}:8002"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
+      TRANSFORMERS_CACHE: /root/.cache/huggingface/transformers
+      TODOIST_AGENT_TRITON_MODEL_ID: ${TODOIST_AGENT_TRITON_MODEL_ID:-Qwen/Qwen2.5-0.5B-Instruct}
+      TODOIST_AGENT_TRITON_MODEL_NAME: ${TODOIST_AGENT_TRITON_MODEL_NAME:-todoist_llm}
+      TODOIST_TRITON_DEVICE: ${TODOIST_TRITON_DEVICE:-cpu}
+      TODOIST_TRITON_MODEL_DTYPE: ${TODOIST_TRITON_MODEL_DTYPE:-float32}
+      TODOIST_TRITON_MAX_TOKENS: ${TODOIST_TRITON_MAX_TOKENS:-256}
+      TODOIST_TRITON_TEMPERATURE: ${TODOIST_TRITON_TEMPERATURE:-0.2}
+      TODOIST_TRITON_TOP_P: ${TODOIST_TRITON_TOP_P:-0.95}
+      TODOIST_TRITON_TRUST_REMOTE_CODE: ${TODOIST_TRITON_TRUST_REMOTE_CODE:-false}
+    volumes:
+      - ./deploy/triton/model_repository:/models:ro
+      - ${HOME:-/home/mtyrolski}/.cache/huggingface:/root/.cache/huggingface
+    shm_size: 2gb
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v2/health/ready').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 300s
+
 volumes:
   todoist-data:

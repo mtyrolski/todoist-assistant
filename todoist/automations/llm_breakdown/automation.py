@@ -17,6 +17,8 @@ from todoist.llm import (
     LocalChatConfig,
     OpenAIChatConfig,
     OpenAIResponsesChatModel,
+    TritonChatConfig,
+    TritonGenerateChatModel,
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
@@ -102,7 +104,9 @@ class LLMBreakdown(Automation):
         self.track_progress = settings_obj.track_progress
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
-        self._llm: TransformersMistral3ChatModel | OpenAIResponsesChatModel | None = None
+        self._llm: (
+            TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel | None
+        ) = None
         self._llm_backend: str | None = None
         self._progress_storage = Cache().llm_breakdown_progress
         self._queue_storage = Cache().llm_breakdown_queue
@@ -220,11 +224,38 @@ class LLMBreakdown(Automation):
             OpenAIChatConfig(api_key=api_key, key_name=key_name, model=model)
         )
 
-    def _get_llm(self) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel:
+    def _build_triton_llm(self, values: Mapping[str, Any]) -> TritonGenerateChatModel:
+        base_url = _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_TRITON_URL)) or values.get(str(EnvVar.AGENT_TRITON_URL))
+        )
+        model_name = _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
+            or values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
+        )
+        model_id = _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID))
+            or values.get(str(EnvVar.AGENT_TRITON_MODEL_ID))
+        )
+        return TritonGenerateChatModel(
+            TritonChatConfig(
+                base_url=base_url or TritonChatConfig().base_url,
+                model_name=model_name or TritonChatConfig().model_name,
+                model_id=model_id or TritonChatConfig().model_id,
+                temperature=float(self.model_config.temperature),
+                top_p=float(self.model_config.top_p),
+                max_output_tokens=int(self.model_config.max_new_tokens),
+            )
+        )
+
+    def _get_llm(
+        self,
+    ) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel:
         backend, values = self._resolve_selected_backend()
         if self._llm is None or self._llm_backend != backend:
             if backend == "openai":
                 self._llm = self._build_openai_llm(values)
+            elif backend == "triton_local":
+                self._llm = self._build_triton_llm(values)
             else:
                 self._llm = self._build_transformers_llm(values)
                 backend = "transformers_local"
@@ -260,7 +291,9 @@ class LLMBreakdown(Automation):
     def queue_save(self, items: list[QueueItem]) -> None:
         self._queue_save(items)
 
-    def get_llm(self) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel:
+    def get_llm(
+        self,
+    ) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel:
         return self._get_llm()
 
     def resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
@@ -268,6 +301,10 @@ class LLMBreakdown(Automation):
 
     def build_system_prompt(self, *, max_depth: int, max_children: int, instruction: str | None) -> str:
         return self._build_system_prompt(max_depth=max_depth, max_children=max_children, instruction=instruction)
+
+    def should_run_without_new_activity(self) -> bool:
+        """Allow observer polling to process labeled tasks even without fresh activity."""
+        return True
 
     @staticmethod
     def _normalize_queue_depth(value: Any) -> int:

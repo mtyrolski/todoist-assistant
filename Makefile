@@ -1,7 +1,12 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard triton_shell run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
+DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
+DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
+TRITON_MODEL_ID := Qwen/Qwen2.5-0.5B-Instruct
+TRITON_MODEL_NAME := todoist_llm
+TRITON_URL := http://127.0.0.1:8003
 
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
@@ -32,45 +37,41 @@ reinstall_frontend: # force reinstall frontend deps (clean node_modules)
 reinstall: reinstall_frontend # convenience alias
 
 run_api:
+	@TODOIST_AGENT_TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	TODOIST_AGENT_TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TODOIST_AGENT_TRITON_URL="$(TRITON_URL)" \
 	uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
 
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-# New meaning: run the "pretty" web dashboard stack (API + frontend)
-run_dashboard: ensure_frontend_deps
-	@bash -c '\
-		set -euo pipefail; \
-		pids=""; api_pid=""; fe_pid=""; observer_pid=""; \
-		wait_for_api() { \
-			local tries=0; \
-			echo "Waiting for API to be ready..."; \
-			if command -v curl >/dev/null 2>&1; then \
-				until curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; do \
-					tries=$$((tries+1)); \
-					[ $$tries -ge 60 ] && break; \
-					sleep 0.5; \
-				done; \
-			else \
-				sleep 2; \
-			fi; \
-		}; \
-		cleanup() { \
-			echo "Stopping dashboard servers..."; \
-			[ -n "$$pids" ] && kill $$pids 2>/dev/null || true; \
-			wait 2>/dev/null || true; \
-		}; \
-		trap cleanup INT TERM EXIT; \
-		uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
-		HYDRA_FULL_ERROR=1 uv run python3 -m todoist.run_observer --config-dir configs --config-name automations & observer_pid="$$!"; pids="$$pids $$observer_pid"; \
-		wait_for_api; \
-		npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
-		echo "Dashboard running:"; \
-		echo "  API:      http://127.0.0.1:8000"; \
-		echo "  Observer: enabled with dashboard startup"; \
-		echo "  Frontend: http://127.0.0.1:3000"; \
-		wait -n $$api_pid $$observer_pid $$fe_pid; \
-	'
+run_dashboard: run_dashboard_cpu
+
+run_dashboard_cpu: ensure_frontend_deps
+	@TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start cpu
+
+run_dashboard_gpu: ensure_frontend_deps
+	@TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start gpu
+
+stop_dashboard:
+	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh stop
+
+triton_shell:
+	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh triton-shell
 
 run_demo: ensure_frontend_deps
 	@bash -c '\
@@ -105,7 +106,10 @@ run_demo: ensure_frontend_deps
 	'
 
 run_observer:
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
+	@HYDRA_FULL_ERROR=1 TODOIST_AGENT_TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	TODOIST_AGENT_TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TODOIST_AGENT_TRITON_URL="$(TRITON_URL)" \
+	uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
 
 clear_local_env:
 	@cache_dir="$${TODOIST_CACHE_DIR:-.cache/todoist-assistant}"; \

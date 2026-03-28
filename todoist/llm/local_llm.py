@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 import json
 from pathlib import Path
+import re
 from typing import Any, Literal, Protocol, Sequence, TypeVar, cast
 
 import torch
@@ -268,11 +269,67 @@ def _try_parse_structured_output(raw: str, schema: type[T]) -> T | None:
 
     extracted = _extract_json_payload(cleaned)
     if extracted is None:
-        return None
+        return _try_parse_schema_fallback(cleaned, schema)
 
     with suppress(ValidationError):
         return schema.model_validate_json(extracted)
+    return _try_parse_schema_fallback(cleaned, schema)
+
+
+def _try_parse_schema_fallback(raw: str, schema: type[T]) -> T | None:
+    if schema.__name__ != "TaskBreakdown":
+        return None
+
+    content_lines = _extract_breakdown_content_lines(raw)
+    if content_lines:
+        with suppress(ValidationError):
+            return schema.model_validate({"children": [{"content": line} for line in content_lines]})
+
+    numbered_lines = _extract_numbered_breakdown_lines(raw)
+    if numbered_lines:
+        with suppress(ValidationError):
+            return schema.model_validate({"children": [{"content": line} for line in numbered_lines]})
     return None
+
+
+def _extract_breakdown_content_lines(raw: str) -> list[str]:
+    items: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = re.match(r"^(?:[-*]\s*)?content\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        candidate = _normalize_breakdown_line(match.group(1))
+        if candidate and candidate not in items:
+            items.append(candidate)
+    return items
+
+
+def _extract_numbered_breakdown_lines(raw: str) -> list[str]:
+    ignored_prefixes = ("task:", "ancestors:", "children:", "expand:", "break down tasks:")
+    items: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lowered = stripped.lower()
+        if lowered.startswith(ignored_prefixes):
+            continue
+        match = re.match(r"^(?:[-*]|\d+[.)])\s+(.+)$", stripped)
+        if match is None:
+            continue
+        candidate = _normalize_breakdown_line(match.group(1))
+        if candidate and candidate not in items:
+            items.append(candidate)
+    return items
+
+
+def _normalize_breakdown_line(value: str) -> str | None:
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", value).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" -:\t") or None
 
 
 def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:

@@ -1,0 +1,9 @@
+services:
+  triton:
+    build:
+      args:
+        TORCH_INSTALL_FLAVOR: gpu
+    environment:
+      TODOIST_TRITON_DEVICE: ${TODOIST_TRITON_DEVICE:-cuda}
+      TODOIST_TRITON_MODEL_DTYPE: ${TODOIST_TRITON_MODEL_DTYPE:-float16}
+    gpus: all

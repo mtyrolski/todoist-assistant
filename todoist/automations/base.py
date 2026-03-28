@@ -49,6 +49,10 @@ class Automation(ABC):
 
         return task_delegations
 
+    def should_run_without_new_activity(self) -> bool:
+        """Return whether the observer may run this automation without fresh activity."""
+        return False
+
     @abstractmethod
     def _tick(self, db: Database) -> Any:
         """

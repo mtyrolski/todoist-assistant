@@ -24,7 +24,7 @@ export default function ControlPanelPage() {
       <PageHeader
         eyebrow="Control Panel"
         title="Operations & Monitoring"
-        lede="Run automations, inspect logs, and keep track of service health in one place."
+        lede="Run automations, tune settings, and keep track of service health."
       >
         <StatusPills
           items={[

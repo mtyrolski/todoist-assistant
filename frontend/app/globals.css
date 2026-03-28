@@ -1406,6 +1406,280 @@ textarea.textInput {
   gap: 10px;
 }
 
+.logInspectorHero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.logToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logSourceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.logSourceCard {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.logSourceCard:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 227, 255, 0.4);
+  background: linear-gradient(145deg, rgba(106, 227, 255, 0.1), rgba(255, 255, 255, 0.03));
+}
+
+.logSourceCard:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.logSourceCardActive {
+  border-color: rgba(106, 227, 255, 0.55);
+  background: linear-gradient(145deg, rgba(106, 227, 255, 0.16), rgba(140, 123, 255, 0.08), rgba(255, 255, 255, 0.04));
+}
+
+.logSourceHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.logSourceTitle {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.logViewerControls .dateInput {
+  width: 96px;
+}
+
+.runtimeLogBlock {
+  margin-top: 0;
+  min-height: 420px;
+  max-height: 70vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.cardSection {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.liveLogsIntro {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.liveLogsControls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.liveLogsLayout {
+  display: grid;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.liveLogsRail {
+  display: grid;
+  gap: 10px;
+}
+
+.liveLogSource {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.liveLogSource:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 227, 255, 0.35);
+  background: rgba(106, 227, 255, 0.08);
+}
+
+.liveLogSource:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.5);
+  outline-offset: 2px;
+}
+
+.liveLogSourceActive {
+  border-color: rgba(106, 227, 255, 0.55);
+  background: linear-gradient(145deg, rgba(106, 227, 255, 0.14), rgba(140, 123, 255, 0.06));
+}
+
+.liveLogSourceHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.liveLogsViewer {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.liveLogsMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.liveLogsCodeBlock {
+  margin-top: 0;
+  min-height: 420px;
+  max-height: 72vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.liveLogsToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding-bottom: 8px;
+}
+
+.logInspectorLayout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.logInspectorRail,
+.logInspectorViewer {
+  min-width: 0;
+}
+
+.logInspectorRailHeader,
+.logInspectorViewerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.logInspectorSectionTitle {
+  margin: 4px 0 0;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.logSourceButton {
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.logSourceButtonDisabled {
+  opacity: 0.72;
+}
+
+.logSourceMeta {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.logInspectorViewerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.logInspectorToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.logInspectorToolbar {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.logInspectorMetaPanel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.logInspectorEmpty {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  border-radius: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 18px;
+}
+
+.logInspectorOutput {
+  margin-top: 0;
+  min-height: 420px;
+  max-height: 72vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 980px) {
+  .logInspectorLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .logInspectorToolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
 .adjustmentsBoard {
   display: grid;
   gap: 16px;
@@ -2341,6 +2615,10 @@ textarea.textInput {
   .adjustmentsBuckets {
     grid-template-columns: 1fr;
   }
+
+  .liveLogsLayout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 980px) {
@@ -2369,6 +2647,10 @@ textarea.textInput {
 
   .adjustmentsSelect {
     min-width: 160px;
+  }
+
+  .liveLogsControls {
+    align-items: stretch;
   }
 }
 

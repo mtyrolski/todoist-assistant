@@ -40,9 +40,13 @@ class _StubDb:
 
 
 class _StubAutomation(Automation):
-    def __init__(self, name: str):
+    def __init__(self, name: str, *, poll_without_activity: bool = False):
         super().__init__(name, frequency=0)
         self.tick_calls: list[Database] = []
+        self.poll_without_activity = poll_without_activity
+
+    def should_run_without_new_activity(self) -> bool:
+        return self.poll_without_activity
 
     def _tick(self, db: Database):
         self.tick_calls.append(db)
@@ -68,19 +72,23 @@ def test_observer_runs_automations_on_new_events(tmp_path: Path, monkeypatch):
     automation = _StubAutomation("Auto")
 
     observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
-    observer.run_once()
+    result = observer.run_once()
 
     assert db.reset_calls == 1
     assert len(automation.tick_calls) == 1
+    assert result.new_events == 1
+    assert result.automations_ran == 1
     # Cache should contain the event now
     from todoist.utils import Cache
     cached = Cache().activity.load()
     assert len(cached) == 1
 
     # Running again with the same events should not trigger automations
-    observer.run_once()
+    result = observer.run_once()
     assert db.reset_calls == 1  # unchanged
     assert len(automation.tick_calls) == 1
+    assert result.new_events == 0
+    assert result.automations_ran == 0
 
 
 def test_observer_no_new_events_noop(tmp_path: Path, monkeypatch):
@@ -90,10 +98,12 @@ def test_observer_no_new_events_noop(tmp_path: Path, monkeypatch):
     automation = _StubAutomation("Auto")
 
     observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
-    observer.run_once()
+    result = observer.run_once()
 
     assert db.reset_calls == 0
     assert len(automation.tick_calls) == 0
+    assert result.new_events == 0
+    assert result.automations_ran == 0
 
 
 def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
@@ -110,8 +120,25 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
     automation = _StubAutomation("Auto")
 
     observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
-    observer.run_once()
+    result = observer.run_once()
 
     # Should still process despite corrupted cache
     assert db.reset_calls == 1
     assert len(automation.tick_calls) == 1
+    assert result.new_events == 1
+    assert result.automations_ran == 1
+
+
+def test_observer_runs_polling_automation_without_new_events(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db = _StubDb()
+    activity = _StubActivity([], {"total": 100})
+    automation = _StubAutomation("Poller", poll_without_activity=True)
+
+    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
+    result = observer.run_once()
+
+    assert db.reset_calls == 1
+    assert len(automation.tick_calls) == 1
+    assert result.new_events == 0
+    assert result.automations_ran == 1
