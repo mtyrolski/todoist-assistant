@@ -9,6 +9,7 @@ STATE_DIR="${DASHBOARD_STATE_DIR:-${REPO_ROOT}/.cache/todoist-assistant/dashboar
 PID_DIR="${DASHBOARD_PID_DIR:-${STATE_DIR}/pids}"
 TRITON_MODE_FILE="${STATE_DIR}/triton.mode"
 TRITON_LOG_FILE="${STATE_DIR}/triton.log"
+TRITON_INFERENCE_LOG_FILE="${STATE_DIR}/triton-inference.log"
 TRITON_LOG_PID_FILE="${PID_DIR}/triton-log.pid"
 API_LOG_FILE="${STATE_DIR}/api.log"
 OBSERVER_LOG_FILE="${STATE_DIR}/observer.log"
@@ -228,6 +229,7 @@ start_triton() {
         export TODOIST_TRITON_MODEL_DTYPE="${TODOIST_TRITON_MODEL_DTYPE:-${triton_dtype}}"
         export TODOIST_TRITON_TORCH_INSTALL_FLAVOR="${mode}"
         export TODOIST_TRITON_PYTHON_SHM_PREFIX="todoist_$(date +%s)"
+        export TODOIST_DASHBOARD_LOG_DIR="${STATE_DIR}"
         docker_compose "${mode}" up -d --build triton
     )
     nohup bash -lc "cd '${REPO_ROOT}' && COMPOSE_PROFILES=dashboard docker compose ${COMPOSE_FILES[*]} logs -f --no-color triton" > "${TRITON_LOG_FILE}" 2>&1 &
@@ -235,6 +237,7 @@ start_triton() {
     echo "${mode}" > "${TRITON_MODE_FILE}"
     wait_for_http "http://127.0.0.1:${TRITON_HTTP_PORT}/v2/health/ready" "Triton" 900 1
     print_recent_log "Triton" "${TRITON_LOG_FILE}" 10
+    print_recent_log "Triton inference" "${TRITON_INFERENCE_LOG_FILE}" 10
 }
 
 stop_triton() {
