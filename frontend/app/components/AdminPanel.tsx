@@ -26,6 +26,13 @@ type AutomationInfo = {
     tokenPath: string;
     detail: string;
     setupDocPath: string;
+    pendingAuth?: {
+      active: boolean;
+      authUrl: string;
+      redirectUri: string;
+      startedAt: string;
+      error?: string | null;
+    };
   };
 };
 
@@ -117,6 +124,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [automationMutationKey, setAutomationMutationKey] = useState<string | null>(null);
+  const [gmailAuthUrl, setGmailAuthUrl] = useState<string | null>(null);
 
   const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>("");
@@ -147,10 +155,12 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
         if (!res.ok) throw new Error("automations");
         if (payload.error) {
           setAutomations(payload.automations ?? []);
+          setGmailAuthUrl(payload.automations?.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
           setAdminError(payload.error);
           return;
         }
         setAutomations(payload.automations);
+        setGmailAuthUrl(payload.automations.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
       } catch {
         setAutomations(null);
         setAdminError("Failed to load automations (check API logs).");
@@ -158,6 +168,27 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     };
     loadAutomations();
   }, []);
+
+  useEffect(() => {
+    if (!gmailAuthUrl) return undefined;
+    const timer = window.setInterval(async () => {
+      try {
+        const refreshed = await fetch("/api/admin/automations");
+        if (!refreshed.ok) return;
+        const list = (await refreshed.json()) as AutomationListResponse;
+        setAutomations(list.automations);
+        const gmail = list.automations.find((automation) => automation.key === "gmail_tasks");
+        const pendingUrl = gmail?.connection?.pendingAuth?.authUrl ?? null;
+        setGmailAuthUrl(pendingUrl);
+        if (gmail?.connection?.connected) {
+          setAdminNotice("Gmail connected. Future Gmail syncs can now run from the observer.");
+        }
+      } catch {
+        return;
+      }
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [gmailAuthUrl]);
 
   const loadApiToken = async () => {
     try {
@@ -309,8 +340,15 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       if (refreshed.ok) {
         const list = (await refreshed.json()) as AutomationListResponse;
         setAutomations(list.automations);
+        setGmailAuthUrl(list.automations.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
       }
-      setAdminNotice("Gmail connected. Future Gmail syncs can now run from the observer.");
+      const authUrl = (payload as { authUrl?: string }).authUrl;
+      if (authUrl) {
+        setGmailAuthUrl(authUrl);
+        setAdminNotice("Gmail authorization link is ready. Open it in your preferred browser, then come back here.");
+      } else {
+        setAdminNotice("Gmail connected. Future Gmail syncs can now run from the observer.");
+      }
       onAfterMutation();
     } catch (e) {
       setAdminError(e instanceof Error ? e.message : "Failed to connect Gmail");
@@ -334,6 +372,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
         const list = (await refreshed.json()) as AutomationListResponse;
         setAutomations(list.automations);
       }
+      setGmailAuthUrl(null);
       setAdminNotice("Gmail disconnected. Reconnect later to resume Gmail automation.");
       onAfterMutation();
     } catch (e) {
@@ -518,6 +557,19 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                       <p className={`muted tiny automationDetailNote${a.connection.connected ? " automationDetailNoteGood" : ""}`}>
                         Gmail: {a.connection.connected ? "connected" : a.connection.detail}
                       </p>
+                    ) : null}
+                    {a.key === "gmail_tasks" && (gmailAuthUrl || a.connection?.pendingAuth?.authUrl) ? (
+                      <div className="automationStatusLine" style={{ marginTop: 6 }}>
+                        <a
+                          className="button buttonSmall"
+                          href={gmailAuthUrl ?? a.connection?.pendingAuth?.authUrl ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open Gmail authorization link
+                        </a>
+                        <span className="pill pill-beta">Use your preferred browser</span>
+                      </div>
                     ) : null}
                   </div>
                   <div className="rowActions">

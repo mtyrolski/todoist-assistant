@@ -742,15 +742,36 @@ def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None
 def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
     (tmp_path / web_api.GMAIL_CREDENTIALS_FILE).write_text("{}", encoding="utf-8")
-    (tmp_path / web_api.GMAIL_TOKEN_FILE).write_text("{}", encoding="utf-8")
-
-    class _FakeCreds:
-        valid = True
-        expired = False
-        refresh_token = "rt"
-
-    monkeypatch.setattr(web_api.Credentials, "from_authorized_user_file", lambda *args, **kwargs: _FakeCreds())
-    monkeypatch.setattr(web_api.GmailTasksAutomation, "_authenticate_gmail", lambda self: object())
+    monkeypatch.setattr(
+        web_api,
+        "_start_gmail_manual_auth_session",
+        lambda: web_api._PendingGmailAuthSession(
+            state="state-1",
+            auth_url="http://127.0.0.1:9999/auth",
+            redirect_uri="http://127.0.0.1:9999/",
+            started_at="2026-03-29T12:00:00",
+        ),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "_gmail_automation_status",
+        lambda: {
+            "credentialsPresent": True,
+            "tokenPresent": False,
+            "connected": False,
+            "credentialsPath": str(tmp_path / web_api.GMAIL_CREDENTIALS_FILE),
+            "tokenPath": str(tmp_path / web_api.GMAIL_TOKEN_FILE),
+            "detail": "Pending authorization",
+            "setupDocPath": str(tmp_path / "docs" / "gmail_setup.md"),
+            "pendingAuth": {
+                "active": True,
+                "authUrl": "http://127.0.0.1:9999/auth",
+                "redirectUri": "http://127.0.0.1:9999/",
+                "startedAt": "2026-03-29T12:00:00",
+                "error": None,
+            },
+        },
+    )
 
     client = TestClient(web_api.app)
     res = client.post("/api/admin/automations/gmail/connect")
@@ -758,7 +779,9 @@ def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
     assert res.status_code == 200
     payload = res.json()
     assert payload["credentialsPresent"] is True
-    assert payload["connected"] is True
+    assert payload["connected"] is False
+    assert payload["authUrl"] == "http://127.0.0.1:9999/auth"
+    assert payload["pendingAuth"]["active"] is True
 
 
 def test_admin_task_ingest_projects_returns_sorted_projects(monkeypatch) -> None:
