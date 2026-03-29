@@ -1,31 +1,24 @@
 defaults:
-  - templates
-  - _self_
-
-# Activity automation configurations
+- templates
+- _self_
 activity:
   _target_: todoist.automations.activity.Activity
   name: Activity Fetching Automation
   early_stop_after_n_windows: 2
-  nweeks_window_size: 4 # 4-week window per fetch batch
-
-# Multiply automation configuration
+  nweeks_window_size: 4
 multiply:
   _target_: todoist.automations.multiplicate.Multiply
   frequency_in_minutes: 0.1
-
 gmail_tasks:
   _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
   name: Gmail Tasks
   frequency_in_minutes: 0.1
-
 habit_tracker:
   _target_: todoist.automations.habit_tracker.HabitTracker
   name: Habit Tracker
   frequency_in_minutes: 10080
-  label_name: "track_habit"
+  label_name: track_habit
   history_weeks: 8
-
 stale_tasks:
   _target_: todoist.automations.stale_tasks.StaleTasksAutomation
   name: Stale Tasks
@@ -33,30 +26,27 @@ stale_tasks:
   config:
     old_after_days: 30
     very_old_after_days: 90
-    old_label: "old"
-    very_old_label: "very-old"
-    exempt_labels: ["no_stale", "track_habit"]
+    old_label: old
+    very_old_label: very-old
+    exempt_labels:
+    - no_stale
+    - track_habit
     exclude_recurring: true
     exclude_due_within_days: 7
     exclude_overdue: true
     apply_to_subtasks: false
   dry_run: true
   max_updates_per_tick: 25
-
-# Template automation
 template:
   _target_: todoist.automations.template.Template
   task_templates:
-    # Development templates
     pr: ${development.pr}
     feature: ${development.feature}
-
-
 llm_breakdown:
   _target_: todoist.automations.llm_breakdown.LLMBreakdown
   frequency_in_minutes: 0.1
-  label_prefix: "llm-"
-  default_variant: "breakdown"
+  label_prefix: llm-
+  default_variant: breakdown
   max_depth: 3
   max_children: 6
   max_total_tasks: 60
@@ -68,29 +58,27 @@ llm_breakdown:
   auto_queue_children: true
   variants:
     breakdown:
-      instruction: "Balanced breakdown with 4-6 top-level tasks."
+      instruction: Balanced breakdown with 4-6 top-level tasks.
       queue_depth: 1
     breakdown-lite:
-      instruction: "Keep it short and light."
+      instruction: Keep it short and light.
       max_depth: 2
       max_children: 4
       queue_depth: 1
     breakdown-deep:
-      instruction: "Provide more detail and intermediate steps."
+      instruction: Provide more detail and intermediate steps.
       max_depth: 2
       max_children: 6
       queue_depth: 2
-
 automations:
-  - ${template}
-  - ${activity}
-  - ${multiply}
-  - ${llm_breakdown}
-  - ${habit_tracker}
-  # - ${stale_tasks}  # Enable after validating dry-run output on real data.
-  # - ${gmail_tasks}  # Enable Gmail Tasks automation explicitly when needed
-
+- ${activity}
+- ${multiply}
+- ${gmail_tasks}
+- ${habit_tracker}
+- ${stale_tasks}
+- ${template}
+- ${llm_breakdown}
 hydra:
   searchpath:
-    - file://configs
-    - file://configs/templates
+  - file://configs
+  - file://configs/templates

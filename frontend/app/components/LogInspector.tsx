@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type LogSource = {
   id: string;
@@ -74,6 +75,8 @@ function formatSize(size: number | null): string {
 }
 
 export function LogInspector() {
+  const searchParams = useSearchParams();
+  const requestedSource = searchParams?.get("source") ?? "";
   const [sources, setSources] = useState<LogSource[]>([]);
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [logRead, setLogRead] = useState<LogReadResponse | null>(null);
@@ -92,7 +95,7 @@ export function LogInspector() {
         const payload = await fetchLogSources();
         if (!active) return;
         setSources(payload.sources);
-        setSelectedSource((current) => preferredSourceId(payload.sources, current));
+        setSelectedSource((current) => preferredSourceId(payload.sources, current || requestedSource));
         setError(null);
       } catch (err) {
         if (!active) return;
@@ -109,7 +112,15 @@ export function LogInspector() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [requestedSource]);
+
+  useEffect(() => {
+    if (!requestedSource || !sources.some((source) => source.id === requestedSource)) {
+      return;
+    }
+    setSelectedSource(requestedSource);
+    setPage(1);
+  }, [requestedSource, sources]);
 
   useEffect(() => {
     if (!selectedSource) {
@@ -238,6 +249,15 @@ export function LogInspector() {
             <p className="muted tiny">
               {selectedMeta?.description ?? "Choose a runtime source to inspect its live output."}
             </p>
+            {selectedMeta ? (
+              <div className="automationStatusLine" style={{ marginTop: 10 }}>
+                <span className={`pill ${selectedMeta.available ? "pill-good" : "pill-warn"}`}>
+                  {selectedMeta.available ? "Available now" : "Unavailable"}
+                </span>
+                <span className="pill pill-neutral">{selectedMeta.kind}</span>
+                {selectedMeta.inspectOnly ? <span className="pill pill-beta">Inspect only</span> : null}
+              </div>
+            ) : null}
           </div>
           <div className="logInspectorViewerActions">
             <label className="logInspectorToggle">
@@ -283,6 +303,11 @@ export function LogInspector() {
                 ? `Updated ${selectedMeta.mtime ?? "unknown"}`
                 : "Waiting for this service to produce a log file."}
             </p>
+            {selectedMeta?.available ? (
+              <p className="muted tiny" style={{ margin: 0 }}>
+                Opened source mirrors the current automation feed. Keep auto-refresh on to watch live starts and finishes.
+              </p>
+            ) : null}
           </div>
         </div>
 
