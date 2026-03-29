@@ -3,19 +3,31 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { InfoTip } from "./InfoTip";
+import { LlmRuntimeSettings } from "./LlmRuntimeSettings";
 import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 
 type Tab = "automations" | "adjustments" | "settings";
 
 type AutomationInfo = {
+  key: string;
   name: string;
   frequencyMinutes: number;
   isLong: boolean;
   launchCount: number;
   lastLaunch: string | null;
+  enabled: boolean;
+  connection?: {
+    credentialsPresent: boolean;
+    tokenPresent: boolean;
+    connected: boolean;
+    credentialsPath: string;
+    tokenPath: string;
+    detail: string;
+    setupDocPath: string;
+  };
 };
 
-type AutomationListResponse = { automations: AutomationInfo[] };
+type AutomationListResponse = { automations: AutomationInfo[]; configPath?: string };
 
 type RunResult = {
   name: string;
@@ -64,37 +76,6 @@ type TimezoneStatus = {
   invalidOverride?: string;
 };
 
-type LlmOption = {
-  id: string;
-  label: string;
-  available: boolean;
-};
-
-type LlmSettingsStatus = {
-  backend: string;
-  backendLabel: string;
-  device: string;
-  deviceLabel: string;
-  availableBackends: LlmOption[];
-  availableDevices: LlmOption[];
-  openai: {
-    configured: boolean;
-    keyName?: string | null;
-    model?: string | null;
-  };
-  triton: {
-    configured: boolean;
-    healthy?: boolean;
-    baseUrl?: string;
-    modelName?: string;
-    modelId?: string;
-  };
-  envPath?: string;
-  enabled?: boolean;
-  loading?: boolean;
-  reloadedRequired?: boolean;
-};
-
 function formatLaunchMeta(a: AutomationInfo): string {
   const last = a.lastLaunch ? `last: ${a.lastLaunch}` : "never run";
   const freq = `freq: ${a.frequencyMinutes}m`;
@@ -110,6 +91,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [runOutput, setRunOutput] = useState<Record<string, RunResult>>({});
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
+  const [automationMutationKey, setAutomationMutationKey] = useState<string | null>(null);
 
   const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>("");
@@ -122,12 +104,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [timezoneSaving, setTimezoneSaving] = useState(false);
   const [timezoneError, setTimezoneError] = useState<string | null>(null);
   const [timezoneNotice, setTimezoneNotice] = useState<string | null>(null);
-  const [llmStatus, setLlmStatus] = useState<LlmSettingsStatus | null>(null);
-  const [llmBackendDraft, setLlmBackendDraft] = useState("transformers_local");
-  const [llmDeviceDraft, setLlmDeviceDraft] = useState("cpu");
-  const [llmSaving, setLlmSaving] = useState(false);
-  const [llmError, setLlmError] = useState<string | null>(null);
-  const [llmNotice, setLlmNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const loadAutomations = async () => {
@@ -172,31 +148,12 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     }
   };
 
-  const loadLlmSettings = async () => {
-    try {
-      const res = await fetch("/api/llm_chat/settings");
-      const payload = (await res.json()) as LlmSettingsStatus & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to load LLM settings");
-      }
-      setLlmStatus(payload);
-      setLlmBackendDraft(payload.backend);
-      setLlmDeviceDraft(payload.device);
-    } catch {
-      setLlmStatus(null);
-    }
-  };
-
   useEffect(() => {
     loadApiToken();
   }, []);
 
   useEffect(() => {
     loadTimezone();
-  }, []);
-
-  useEffect(() => {
-    loadLlmSettings();
   }, []);
 
   const waitForJob = async (jobId: string): Promise<AdminJob> => {
@@ -271,6 +228,78 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAdminError(e instanceof Error ? e.message : "Failed to run automations");
     } finally {
       setRunning(null);
+    }
+  };
+
+  const setAutomationEnabled = async (automation: AutomationInfo, enabled: boolean) => {
+    try {
+      setAdminError(null);
+      setAdminNotice(null);
+      setAutomationMutationKey(`${automation.key}:${enabled ? "enable" : "disable"}`);
+      const res = await fetch(`/api/admin/automations/${encodeURIComponent(automation.key)}/enabled`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled })
+      });
+      const payload = (await res.json()) as AutomationListResponse & { detail?: string };
+      if (!res.ok) {
+        throw new Error(payload.detail ?? "Failed to update automation");
+      }
+      setAutomations(payload.automations);
+      setAdminNotice(`${automation.name} ${enabled ? "enabled" : "disabled"}.`);
+      onAfterMutation();
+    } catch (e) {
+      setAdminError(e instanceof Error ? e.message : "Failed to update automation");
+    } finally {
+      setAutomationMutationKey(null);
+    }
+  };
+
+  const connectGmail = async () => {
+    try {
+      setAdminError(null);
+      setAdminNotice(null);
+      setAutomationMutationKey("gmail:connect");
+      const res = await fetch("/api/admin/automations/gmail/connect", { method: "POST" });
+      const payload = (await res.json()) as { detail?: string };
+      if (!res.ok) {
+        throw new Error(payload.detail ?? "Failed to connect Gmail");
+      }
+      const refreshed = await fetch("/api/admin/automations");
+      if (refreshed.ok) {
+        const list = (await refreshed.json()) as AutomationListResponse;
+        setAutomations(list.automations);
+      }
+      setAdminNotice("Gmail connected.");
+      onAfterMutation();
+    } catch (e) {
+      setAdminError(e instanceof Error ? e.message : "Failed to connect Gmail");
+    } finally {
+      setAutomationMutationKey(null);
+    }
+  };
+
+  const disconnectGmail = async () => {
+    try {
+      setAdminError(null);
+      setAdminNotice(null);
+      setAutomationMutationKey("gmail:disconnect");
+      const res = await fetch("/api/admin/automations/gmail/connect", { method: "DELETE" });
+      const payload = (await res.json()) as { detail?: string };
+      if (!res.ok) {
+        throw new Error(payload.detail ?? "Failed to disconnect Gmail");
+      }
+      const refreshed = await fetch("/api/admin/automations");
+      if (refreshed.ok) {
+        const list = (await refreshed.json()) as AutomationListResponse;
+        setAutomations(list.automations);
+      }
+      setAdminNotice("Gmail disconnected.");
+      onAfterMutation();
+    } catch (e) {
+      setAdminError(e instanceof Error ? e.message : "Failed to disconnect Gmail");
+    } finally {
+      setAutomationMutationKey(null);
     }
   };
 
@@ -369,43 +398,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     }
   };
 
-  const saveLlmSettings = async () => {
-    try {
-      setLlmSaving(true);
-      setLlmError(null);
-      setLlmNotice(null);
-      const res = await fetch("/api/llm_chat/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backend: llmBackendDraft, device: llmDeviceDraft })
-      });
-      const payload = (await res.json()) as LlmSettingsStatus & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to save LLM settings");
-      }
-      setLlmStatus(payload);
-      setLlmBackendDraft(payload.backend);
-      setLlmDeviceDraft(payload.device);
-      setLlmNotice(payload.reloadedRequired ? "LLM backend updated. Re-enable chat to load the new backend." : "LLM backend updated.");
-      onAfterMutation();
-    } catch (e) {
-      setLlmError(e instanceof Error ? e.message : "Failed to save LLM settings");
-    } finally {
-      setLlmSaving(false);
-    }
-  };
-
-  const llmSettingsChanged =
-    !!llmStatus && (llmBackendDraft !== llmStatus.backend || llmDeviceDraft !== llmStatus.device);
-  const selectedLlmBackend = llmBackendDraft || llmStatus?.backend || "transformers_local";
-  const llmUsesRemoteDevice = selectedLlmBackend === "openai" || selectedLlmBackend === "triton_local";
-  const currentLlmSummary =
-    llmStatus?.backend === "openai"
-      ? `OpenAI${llmStatus.openai.model ? ` (${llmStatus.openai.model})` : ""}`
-      : llmStatus?.backend === "triton_local"
-        ? `Triton${llmStatus.triton.modelId ? ` (${llmStatus.triton.modelId})` : ""}`
-        : "Local Transformers runtime";
-
   return (
     <section className="card">
       <header className="cardHeader">
@@ -452,17 +444,49 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
             ) : (
               automations.map((a) => (
                 <div key={a.name} className="row rowTight">
-                  <div className="dot dot-neutral" />
+                  <div className={`dot ${a.enabled ? "dot-ok" : "dot-warn"}`} />
                   <div className="rowMain">
                     <p className="rowTitle">{a.name}</p>
                     <p className="muted tiny">{formatLaunchMeta(a)}</p>
+                    <p className="muted tiny">{a.enabled ? "Enabled in observer" : "Disabled in observer"}</p>
+                    {a.connection ? (
+                      <p className="muted tiny">
+                        Gmail: {a.connection.connected ? "connected" : a.connection.detail}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="rowActions">
                     <button
                       className="button buttonSmall"
+                      onClick={() => setAutomationEnabled(a, !a.enabled)}
+                      type="button"
+                      disabled={running !== null || automationMutationKey !== null}
+                    >
+                      {automationMutationKey === `${a.key}:${a.enabled ? "disable" : "enable"}`
+                        ? "Saving…"
+                        : a.enabled
+                          ? "Disable"
+                          : "Enable"}
+                    </button>
+                    {a.key === "gmail_tasks" ? (
+                      <button
+                        className="button buttonSmall"
+                        onClick={() => (a.connection?.connected ? disconnectGmail() : connectGmail())}
+                        type="button"
+                        disabled={automationMutationKey !== null}
+                      >
+                        {automationMutationKey === (a.connection?.connected ? "gmail:disconnect" : "gmail:connect")
+                          ? "Working…"
+                          : a.connection?.connected
+                            ? "Disconnect Gmail"
+                            : "Connect Gmail"}
+                      </button>
+                    ) : null}
+                    <button
+                      className="button buttonSmall"
                       onClick={() => runAutomation(a.name)}
                       type="button"
-                      disabled={running !== null}
+                      disabled={running !== null || !a.enabled}
                     >
                       {running === a.name ? "Running…" : "Run"}
                     </button>
@@ -471,6 +495,24 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                     <details className="rowDetails">
                       <summary className="muted tiny">Output</summary>
                       <pre className="codeBlock">{runOutput[a.name].output || "(no output)"}</pre>
+                    </details>
+                  ) : null}
+                  {a.key === "gmail_tasks" && a.connection ? (
+                    <details className="rowDetails">
+                      <summary className="muted tiny">Connection</summary>
+                      <div className="stack">
+                        <p className="muted tiny" style={{ margin: 0 }}>
+                          Credentials file: {a.connection.credentialsPresent ? "present" : "missing"}
+                        </p>
+                        <p className="muted tiny" style={{ margin: 0 }}>{a.connection.credentialsPath}</p>
+                        <p className="muted tiny" style={{ margin: 0 }}>
+                          Token file: {a.connection.tokenPresent ? "present" : "missing"}
+                        </p>
+                        <p className="muted tiny" style={{ margin: 0 }}>{a.connection.tokenPath}</p>
+                        <p className="muted tiny" style={{ margin: 0 }}>
+                          Setup guide: {a.connection.setupDocPath}
+                        </p>
+                      </div>
                     </details>
                   ) : null}
                 </div>
@@ -600,81 +642,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
             </div>
           </div>
 
-          <div className="card cardInner">
-            <header className="cardHeader">
-              <h3>Underlying LLM</h3>
-            </header>
-            <div className="stack">
-              <p className="muted tiny" style={{ margin: 0 }}>
-                Choose which LLM backend powers the dashboard chat under the hood. This uses the same runtime settings as the LLM chat page.
-              </p>
-              <div className="adminRow">
-                <span className="pill pill-neutral">{llmStatus ? currentLlmSummary : "LLM settings unavailable"}</span>
-                {llmStatus?.envPath ? (
-                  <span className="muted tiny" style={{ marginLeft: 8 }}>
-                    {llmStatus.envPath}
-                  </span>
-                ) : null}
-              </div>
-              <div className="control">
-                <label className="muted tiny" htmlFor="llm-backend-admin-select">
-                  Backend
-                </label>
-                <select
-                  id="llm-backend-admin-select"
-                  className="dateInput"
-                  value={llmBackendDraft}
-                  onChange={(e) => setLlmBackendDraft(e.target.value)}
-                  disabled={llmSaving || !llmStatus}
-                >
-                  {(llmStatus?.availableBackends ?? []).map((option) => (
-                    <option key={option.id} value={option.id} disabled={!option.available}>
-                      {option.label}{option.available ? "" : " (unavailable)"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="control">
-                <label className="muted tiny" htmlFor="llm-device-admin-select">
-                  Device {llmUsesRemoteDevice ? "(managed by backend)" : "(local runtime)"}
-                </label>
-                <select
-                  id="llm-device-admin-select"
-                  className="dateInput"
-                  value={llmDeviceDraft}
-                  onChange={(e) => setLlmDeviceDraft(e.target.value)}
-                  disabled={llmSaving || !llmStatus || llmUsesRemoteDevice}
-                >
-                  {(llmStatus?.availableDevices ?? []).map((option) => (
-                    <option key={option.id} value={option.id} disabled={!option.available}>
-                      {option.label}{option.available ? "" : " (unavailable)"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="adminRow">
-                <span className="muted tiny">
-                  {selectedLlmBackend === "openai"
-                    ? `OpenAI model: ${llmStatus?.openai.model ?? "unknown"}${llmStatus?.openai.keyName ? ` | key: ${llmStatus.openai.keyName}` : ""}`
-                    : selectedLlmBackend === "triton_local"
-                      ? `Triton model: ${llmStatus?.triton.modelId ?? "unknown"} | endpoint: ${llmStatus?.triton.baseUrl ?? "unknown"}`
-                      : `Local device: ${llmStatus?.deviceLabel ?? llmDeviceDraft}`}
-                </span>
-              </div>
-              <div className="adminRow">
-                <div className="adminRowRight">
-                  <button className="button buttonSmall" type="button" onClick={saveLlmSettings} disabled={llmSaving || !llmSettingsChanged}>
-                    {llmSaving ? "Saving…" : "Save LLM"}
-                  </button>
-                  <button className="button buttonSmall" type="button" onClick={loadLlmSettings} disabled={llmSaving}>
-                    Refresh
-                  </button>
-                </div>
-              </div>
-              {llmError ? <p className="pill pill-warn">{llmError}</p> : null}
-              {llmNotice ? <p className="pill">{llmNotice}</p> : null}
-            </div>
-          </div>
+          <LlmRuntimeSettings compact onAfterMutation={onAfterMutation} />
         </div>
       ) : null}
     </section>

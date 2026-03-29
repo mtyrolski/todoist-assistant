@@ -646,6 +646,108 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None
     ]
 
 
+def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        web_api,
+        "_load_automation_inventory",
+        lambda: [
+            {
+                "key": "gmail_tasks",
+                "name": "Gmail Tasks",
+                "frequencyMinutes": 60,
+                "isLong": False,
+                "launchCount": 0,
+                "lastLaunch": None,
+                "enabled": False,
+                "target": "todoist.automations.gmail_tasks.GmailTasksAutomation",
+                "connection": {
+                    "credentialsPresent": False,
+                    "tokenPresent": False,
+                    "connected": False,
+                    "credentialsPath": "/tmp/gmail_credentials.json",
+                    "tokenPath": "/tmp/gmail_token.json",
+                    "detail": "Missing Gmail credentials file",
+                    "setupDocPath": "/tmp/docs/gmail_setup.md",
+                },
+            }
+        ],
+    )
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/automations")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["automations"][0]["key"] == "gmail_tasks"
+    assert payload["automations"][0]["enabled"] is False
+    assert payload["automations"][0]["connection"]["connected"] is False
+
+
+def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "activity:",
+                "  _target_: todoist.automations.activity.Activity",
+                "  name: Activity Fetching Automation",
+                "  early_stop_after_n_windows: 2",
+                "  nweeks_window_size: 4",
+                "gmail_tasks:",
+                "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+                "  name: Gmail Tasks",
+                "  frequency_in_minutes: 60",
+                "automations:",
+                "  - ${activity}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+    monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/admin/automations/gmail_tasks/enabled", json={"enabled": True})
+
+    assert res.status_code == 200
+    saved = config_path.read_text(encoding="utf-8")
+    assert "- ${gmail_tasks}" in saved
+
+
+def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/admin/automations/gmail/connect")
+
+    assert res.status_code == 400
+    assert "gmail_credentials.json is required" in res.json()["detail"]
+
+
+def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+    (tmp_path / web_api.GMAIL_CREDENTIALS_FILE).write_text("{}", encoding="utf-8")
+    (tmp_path / web_api.GMAIL_TOKEN_FILE).write_text("{}", encoding="utf-8")
+
+    class _FakeCreds:
+        valid = True
+        expired = False
+        refresh_token = "rt"
+
+    monkeypatch.setattr(web_api.Credentials, "from_authorized_user_file", lambda *args, **kwargs: _FakeCreds())
+    monkeypatch.setattr(web_api.GmailTasksAutomation, "_authenticate_gmail", lambda self: object())
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/admin/automations/gmail/connect")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["credentialsPresent"] is True
+    assert payload["connected"] is True
+
+
 def test_admin_task_ingest_projects_returns_sorted_projects(monkeypatch) -> None:
     monkeypatch.setattr(
         web_api,
@@ -1177,6 +1279,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["backend"]["selected"] == "transformers_local"
     assert payload["backend"]["triton"]["configured"] is True
     assert payload["backend"]["triton"]["modelId"] == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert payload["model"]["selected"] == "mistralai/Ministral-3-3B-Instruct-2512"
     assert payload["device"]["selected"] == "cpu"
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
@@ -1195,15 +1298,21 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     client = TestClient(web_api.app)
     res = client.put(
         "/api/llm_chat/settings",
-        json={"backend": "transformers_local", "device": "cuda"},
+        json={
+            "backend": "transformers_local",
+            "device": "cuda",
+            "localModelId": "Qwen/Qwen2.5-1.5B-Instruct",
+        },
     )
 
     assert res.status_code == 200
     payload = res.json()
     assert payload["backend"] == "transformers_local"
     assert payload["device"] == "cuda"
+    assert payload["localModelId"] == "Qwen/Qwen2.5-1.5B-Instruct"
     assert payload["reloadedRequired"] is True
     assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_DEVICE='cuda'") >= 0
+    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-1.5B-Instruct'") >= 0
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
 
@@ -1318,7 +1427,11 @@ def test_llm_chat_update_settings_supports_triton_backend(
     client = TestClient(web_api.app)
     res = client.put(
         "/api/llm_chat/settings",
-        json={"backend": "triton_local", "device": "cpu"},
+        json={
+            "backend": "triton_local",
+            "device": "cpu",
+            "tritonModelId": "Qwen/Qwen2.5-1.5B-Instruct",
+        },
     )
 
     assert res.status_code == 200
@@ -1326,9 +1439,10 @@ def test_llm_chat_update_settings_supports_triton_backend(
     assert payload["backend"] == "triton_local"
     assert payload["triton"]["healthy"] is True
     assert payload["triton"]["modelName"] == "todoist_llm"
-    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-1.5B-Instruct"
     saved = env_path.read_text(encoding="utf-8")
     assert "TODOIST_AGENT_BACKEND='triton_local'" in saved
+    assert "TODOIST_AGENT_TRITON_MODEL_ID='Qwen/Qwen2.5-1.5B-Instruct'" in saved
 
 
 def test_dashboard_status_includes_triton_service(monkeypatch) -> None:
