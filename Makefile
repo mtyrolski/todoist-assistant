@@ -1,4 +1,4 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard triton_shell run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -67,6 +67,9 @@ stop_dashboard:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh stop
+
+status: ## Show local dashboard/API/frontend runtime status
+	@python3 scripts/status.py
 
 triton_shell:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \

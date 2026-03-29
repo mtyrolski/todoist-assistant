@@ -1,6 +1,8 @@
 """Gmail Tasks automation: turn inbox emails into Todoist tasks."""
 
+import contextlib
 from datetime import date
+import os
 import os.path
 from typing import cast
 
@@ -44,6 +46,20 @@ from .helpers import (
 
 GMAIL_CREDENTIALS_FILE = 'gmail_credentials.json'
 GMAIL_TOKEN_FILE = 'gmail_token.json'
+_OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
+
+
+@contextlib.contextmanager
+def _allow_insecure_oauth_transport():
+    previous = os.environ.get(_OAUTHLIB_INSECURE_TRANSPORT)
+    os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_OAUTHLIB_INSECURE_TRANSPORT, None)
+        else:
+            os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = previous
 
 
 class GmailTasksAutomation(Automation):
@@ -134,7 +150,8 @@ class GmailTasksAutomation(Automation):
 
                 if os.path.exists(GMAIL_CREDENTIALS_FILE):
                     flow = InstalledAppFlow.from_client_secrets_file(GMAIL_CREDENTIALS_FILE, self.SCOPES)
-                    creds = cast(GmailAuthCredentials, flow.run_local_server(port=0))
+                    with _allow_insecure_oauth_transport():
+                        creds = cast(GmailAuthCredentials, flow.run_local_server(port=0))
                 else:
                     logger.error(f"Gmail credentials file {GMAIL_CREDENTIALS_FILE} not found. "
                                "Please follow the setup instructions to configure Gmail API access.")

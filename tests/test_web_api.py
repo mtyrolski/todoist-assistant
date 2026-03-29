@@ -2,8 +2,10 @@
 
 # pylint: disable=too-many-lines
 
+import os
 from datetime import date
 from pathlib import Path
+from unittest.mock import Mock
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -696,6 +698,32 @@ def test_enabled_automation_keys_defaults_non_auth_sections() -> None:
     assert web_api._enabled_automation_keys(config) == ["activity", "habit_tracker"]
 
 
+def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "activity:",
+                "  _target_: todoist.automations.activity.Activity",
+                "gmail_tasks:",
+                "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+                "habit_tracker:",
+                "  _target_: todoist.automations.habit_tracker.HabitTracker",
+                "automations:",
+                "  - ${activity}",
+                "  - ${gmail_tasks}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = web_api._read_yaml_config(config_path)
+
+    assert web_api._configured_enabled_automation_keys(config) == ["activity", "gmail_tasks"]
+
+
 def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "automations.yaml"
     config_path.write_text(
@@ -727,6 +755,55 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> N
     assert res.status_code == 200
     saved = config_path.read_text(encoding="utf-8")
     assert "- ${gmail_tasks}" in saved
+
+
+def test_set_automation_enabled_disables_config_entry(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "activity:",
+                "  _target_: todoist.automations.activity.Activity",
+                "gmail_tasks:",
+                "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+                "automations:",
+                "  - ${activity}",
+                "  - ${gmail_tasks}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+
+    changed = web_api._set_automation_enabled("gmail_tasks", enabled=False)
+
+    assert changed is True
+    saved = config_path.read_text(encoding="utf-8")
+    assert "- ${gmail_tasks}" not in saved
+
+
+def test_set_automation_enabled_returns_false_for_unknown_key(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "activity:",
+                "  _target_: todoist.automations.activity.Activity",
+                "automations:",
+                "  - ${activity}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+
+    changed = web_api._set_automation_enabled("gmail_tasks", enabled=True)
+
+    assert changed is False
 
 
 def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None:
@@ -782,6 +859,35 @@ def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
     assert payload["connected"] is False
     assert payload["authUrl"] == "http://127.0.0.1:9999/auth"
     assert payload["pendingAuth"]["active"] is True
+
+
+def test_start_gmail_manual_auth_session_enables_insecure_transport_temporarily(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+    monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
+    (tmp_path / web_api.GMAIL_CREDENTIALS_FILE).write_text("{}", encoding="utf-8")
+
+    flow = Mock()
+
+    def _authorization_url(**kwargs):
+        assert kwargs["access_type"] == "offline"
+        assert kwargs["include_granted_scopes"] == "true"
+        assert kwargs["prompt"] == "consent"
+        assert os.environ["OAUTHLIB_INSECURE_TRANSPORT"] == "1"
+        return ("http://127.0.0.1:9999/auth", "state-1")
+
+    flow.authorization_url.side_effect = _authorization_url
+    monkeypatch.setattr(
+        web_api.InstalledAppFlow,
+        "from_client_secrets_file",
+        lambda *_args, **_kwargs: flow,
+    )
+
+    session = web_api._start_gmail_manual_auth_session()
+
+    assert session.auth_url == "http://127.0.0.1:9999/auth"
+    assert "OAUTHLIB_INSECURE_TRANSPORT" not in os.environ
 
 
 def test_admin_task_ingest_projects_returns_sorted_projects(monkeypatch) -> None:
@@ -1433,6 +1539,13 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
     assert urgency_status["counts"]["p1Tasks"] == 1
     assert urgency_status["counts"]["dueTasks"] == 1
     assert urgency_status["counts"]["fireTasks"] == 0
+    assert urgency_status["visibleChips"] == [
+        "fireTasks",
+        "p1Tasks",
+        "p2Tasks",
+        "dueTasks",
+        "deadlineTasks",
+    ]
     assert payload["configurableItems"][0]["icon"] == "wrench"
     assert isinstance(payload["figures"]["activeProjectHierarchy"], dict)
 

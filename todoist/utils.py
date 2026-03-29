@@ -5,6 +5,7 @@ import random
 import os
 import shutil
 import sys
+import tempfile
 from lzma import LZMAError
 from os import getenv
 from os.path import exists, join
@@ -119,9 +120,30 @@ def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
     return default.upper()
 
 
+def _should_isolate_runtime_log_path_for_pytest(resolved_log_path: str | None) -> bool:
+    if resolved_log_path is None:
+        return False
+    if "pytest" not in sys.modules:
+        return False
+    if getenv(str(EnvVar.CACHE_DIR)):
+        return False
+
+    default_runtime_log = str((Path.cwd() / DEFAULT_CACHE_SUBDIR / "automation.log").resolve())
+    return resolved_log_path == default_runtime_log
+
+
+def _resolve_runtime_log_path(log_path: str | None) -> str | None:
+    resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
+    if not _should_isolate_runtime_log_path_for_pytest(resolved_log_path):
+        return resolved_log_path
+
+    isolated_root = Path(tempfile.gettempdir()) / "todoist-assistant-pytest" / str(os.getpid())
+    return str((isolated_root / "automation.log").resolve())
+
+
 def configure_runtime_logging(log_path: str | None = None, level: str | None = None) -> None:
     resolved_level = get_log_level(level or DEFAULT_LOG_LEVEL)
-    resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
+    resolved_log_path = _resolve_runtime_log_path(log_path)
     signature = (resolved_log_path, resolved_level)
     if _STATE.runtime_logging_signature == signature:
         return

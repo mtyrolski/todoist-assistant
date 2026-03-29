@@ -39,6 +39,8 @@ const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
+type UrgencyChipKey = "fireTasks" | "p1Tasks" | "p2Tasks" | "p3Tasks" | "p4Tasks" | "dueTasks" | "deadlineTasks";
+
 type UrgencyStatusPayload = {
   state: "good" | "warn" | "danger";
   title: string;
@@ -57,6 +59,7 @@ type UrgencyStatusPayload = {
   };
   badgeLabel: string;
   helpKey: string;
+  visibleChips?: UrgencyChipKey[];
 };
 
 type DashboardHomeWithUrgency = DashboardHome & {
@@ -343,16 +346,17 @@ export function DashboardView({
     }
   } as const;
   const urgencyStatusTheme = urgencyStatus ? urgencyTheme[urgencyStatus.state] : urgencyTheme.good;
+  const urgencyVisibleChips = urgencyStatus?.visibleChips ? new Set<UrgencyChipKey>(urgencyStatus.visibleChips) : null;
   const urgencyChips = urgencyStatus
     ? [
         { key: "fireTasks", label: "Fire", value: urgencyStatus.counts.fireTasks },
         { key: "p1Tasks", label: "P1", value: urgencyStatus.counts.p1Tasks },
         { key: "p2Tasks", label: "P2", value: urgencyStatus.counts.p2Tasks },
         { key: "p3Tasks", label: "P3", value: urgencyStatus.counts.p3Tasks },
-        { key: "p4Tasks", label: "P4", value: urgencyStatus.counts.p4Tasks },
-        { key: "dueTasks", label: "Due today", value: urgencyStatus.counts.dueTasks },
-        { key: "deadlineTasks", label: "Deadline", value: urgencyStatus.counts.deadlineTasks }
-      ]
+      { key: "p4Tasks", label: "P4", value: urgencyStatus.counts.p4Tasks },
+      { key: "dueTasks", label: "Due today", value: urgencyStatus.counts.dueTasks },
+      { key: "deadlineTasks", label: "Deadline", value: urgencyStatus.counts.deadlineTasks }
+      ].filter((chip) => !urgencyVisibleChips || urgencyVisibleChips.has(chip.key))
     : [];
   const labelPlots = [
     {

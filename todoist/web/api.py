@@ -15,6 +15,8 @@ import os
 import re
 import os.path
 from pathlib import Path
+import signal
+import subprocess
 import threading
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -218,6 +220,20 @@ _API_KEY_PLACEHOLDERS = {
 _API_KEY_MIN_LENGTH = 20
 _API_KEY_HEX_RE = re.compile(r"^[a-fA-F0-9]{32,64}$")
 _API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
+
+
+def _dashboard_state_dir() -> Path:
+    override = os.getenv("DASHBOARD_STATE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT / ".cache" / "todoist-assistant" / "dashboard"
+
+
+def _dashboard_pid_dir() -> Path:
+    override = os.getenv("DASHBOARD_PID_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _dashboard_state_dir() / "pids"
 _LOCAL_MODEL_OPTIONS = [
     {"id": DEFAULT_MODEL_ID, "label": "Ministral 3 3B Instruct"},
     {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
@@ -2189,11 +2205,25 @@ def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
     raw = config.get("automations")
     if not isinstance(raw, Sequence):
         return []
+    target_to_keys: dict[str, list[str]] = {}
+    for key in _available_automation_keys(config):
+        section = config.get(key)
+        if isinstance(section, Mapping):
+            target = section.get("_target_")
+            if isinstance(target, str) and target:
+                target_to_keys.setdefault(target, []).append(key)
     keys: list[str] = []
     for item in raw:
-        if not isinstance(item, str):
+        if isinstance(item, Mapping):
+            target = item.get("_target_")
+            if isinstance(target, str):
+                matched_keys = target_to_keys.get(target, [])
+                if len(matched_keys) == 1:
+                    keys.append(matched_keys[0])
+                    continue
             continue
-        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item.strip())
+        item_str = str(item).strip()
+        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item_str)
         if match:
             keys.append(match.group(1))
     return keys
@@ -2218,6 +2248,7 @@ class _PendingGmailAuthSession:
 
 _GMAIL_AUTH_LOCK = threading.Lock()
 _GMAIL_AUTH_SESSION: _PendingGmailAuthSession | None = None
+_OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
 
 
 def _clear_gmail_auth_session() -> None:
@@ -2236,6 +2267,19 @@ def _write_gmail_token(credentials: Credentials) -> None:
     token_path.write_text(credentials.to_json(), encoding="utf-8")
 
 
+@contextlib.contextmanager
+def _allow_insecure_oauth_transport() -> Any:
+    previous = os.environ.get(_OAUTHLIB_INSECURE_TRANSPORT)
+    os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_OAUTHLIB_INSECURE_TRANSPORT, None)
+        else:
+            os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = previous
+
+
 def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
     global _GMAIL_AUTH_SESSION
 
@@ -2251,9 +2295,12 @@ def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
             server = cast(ThreadingHTTPServer, self.server)
             current_url = f"http://127.0.0.1:{server.server_address[1]}{self.path}"
             try:
-                flow.fetch_token(authorization_response=current_url)
+                with _allow_insecure_oauth_transport():
+                    flow.fetch_token(authorization_response=current_url)
                 credentials = cast(Credentials, flow.credentials)
                 _write_gmail_token(credentials)
+                _set_automation_enabled("gmail_tasks", enabled=True)
+                _restart_dashboard_observer_if_managed()
                 with _GMAIL_AUTH_LOCK:
                     if _GMAIL_AUTH_SESSION is not None:
                         _GMAIL_AUTH_SESSION.completed = True
@@ -2282,12 +2329,18 @@ def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
             self.wfile.write(body.encode("utf-8"))
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A003  # pylint: disable=redefined-builtin
-            logger.info("Gmail OAuth callback: " + format, *args)
+            message = format % args if args else format
+            logger.info("Gmail OAuth callback: {}", message)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _OAuthCallbackHandler)
     server.timeout = 300
     flow.redirect_uri = f"http://127.0.0.1:{server.server_port}/"
-    auth_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
+    with _allow_insecure_oauth_transport():
+        auth_url, state = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+        )
 
     session = _PendingGmailAuthSession(
         state=str(state),
@@ -2399,6 +2452,85 @@ def _save_enabled_automations(keys: Sequence[str]) -> None:
     _save_yaml_config(_AUTOMATIONS_PATH, config)
 
 
+def _set_automation_enabled(key: str, *, enabled: bool) -> bool:
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    available_keys = _available_automation_keys(config)
+    if key not in available_keys:
+        return False
+
+    enabled_keys = _enabled_automation_keys(config)
+    next_keys = [item for item in enabled_keys if item != key]
+    if enabled:
+        insert_at = max(0, available_keys.index(key))
+        ordered = [item for item in available_keys if item in next_keys]
+        if key not in ordered:
+            ordered.insert(insert_at, key)
+        next_keys = ordered
+
+    config["automations"] = [_automation_ref(item) for item in next_keys]
+    _save_yaml_config(_AUTOMATIONS_PATH, config)
+    return True
+
+
+def _restart_dashboard_observer_if_managed() -> bool:
+    pid_dir = _dashboard_pid_dir()
+    observer_pid_path = pid_dir / "observer.pid"
+    if not observer_pid_path.exists():
+        return False
+
+    try:
+        observer_pid = int(observer_pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        logger.warning("Dashboard observer PID file is unreadable: {}", observer_pid_path)
+        return False
+
+    try:
+        os.kill(observer_pid, 0)
+    except OSError:
+        logger.warning("Dashboard observer PID is stale: {}", observer_pid)
+        return False
+
+    try:
+        os.kill(observer_pid, signal.SIGTERM)
+    except OSError as exc:
+        logger.warning("Failed to stop dashboard observer {}: {}", observer_pid, exc)
+        return False
+
+    observer_log_path = _dashboard_state_dir() / "observer.log"
+    observer_log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["HYDRA_FULL_ERROR"] = "1"
+    env["TODOIST_AGENT_TRITON_MODEL_ID"] = os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID), DEFAULT_TRITON_MODEL_ID)
+    env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
+        str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
+    )
+    env["TODOIST_AGENT_TRITON_URL"] = os.getenv(str(EnvVar.AGENT_TRITON_URL), DEFAULT_TRITON_URL)
+
+    with observer_log_path.open("ab") as observer_log:
+        process = subprocess.Popen(  # noqa: S603  # pylint: disable=consider-using-with
+            [
+                "uv",
+                "run",
+                "python3",
+                "-m",
+                "todoist.run_observer",
+                "--config-dir",
+                str(_CONFIG_DIR),
+                "--config-name",
+                "automations",
+            ],
+            cwd=str(_REPO_ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=observer_log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    observer_pid_path.write_text(str(process.pid), encoding="utf-8")
+    logger.info("Restarted managed dashboard observer with pid {}", process.pid)
+    return True
+
+
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
     launches = Cache().automation_launches.load().get(automation.name, [])
     last_launch = launches[-1] if launches else None
@@ -2435,15 +2567,8 @@ async def admin_set_automation_enabled(
         available_keys = _available_automation_keys(config)
         if key not in available_keys:
             raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
-        enabled_keys = _enabled_automation_keys(config)
-        next_keys = [item for item in enabled_keys if item != key]
-        if enabled:
-            insert_at = max(0, available_keys.index(key))
-            ordered = [item for item in available_keys if item in next_keys]
-            if key not in ordered:
-                ordered.insert(insert_at, key)
-            next_keys = ordered
-        _save_enabled_automations(next_keys)
+        _set_automation_enabled(key, enabled=enabled)
+        _restart_dashboard_observer_if_managed()
     return await admin_automations()
 
 

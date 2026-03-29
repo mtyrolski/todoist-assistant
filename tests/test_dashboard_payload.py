@@ -78,6 +78,13 @@ def test_evaluate_urgency_status_returns_good_when_clear() -> None:
         "dueTasks": 0,
         "deadlineTasks": 0,
     }
+    assert status["visibleChips"] == [
+        "fireTasks",
+        "p1Tasks",
+        "p2Tasks",
+        "dueTasks",
+        "deadlineTasks",
+    ]
     assert status["todayLabel"] == "2026-03-20"
 
 
@@ -166,6 +173,8 @@ def test_evaluate_urgency_status_respects_custom_settings() -> None:
     assert status["counts"]["p1Tasks"] == 1
     assert status["counts"]["priorityTasks"] == 1
     assert status["counts"]["dueTasks"] == 1
+    assert status["visibleChips"] == ["p1Tasks", "dueTasks"]
+    assert status["summary"] == "2 active tasks match the configured priority and due date thresholds."
 
 
 def test_evaluate_urgency_status_supports_multi_labels_and_minimum_thresholds() -> None:

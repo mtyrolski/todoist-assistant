@@ -144,6 +144,17 @@ def _normalize_urgency_settings(
     return normalized
 
 
+def _join_condition_labels(labels: Sequence[str]) -> str:
+    visible = [label for label in labels if label]
+    if not visible:
+        return ""
+    if len(visible) == 1:
+        return visible[0]
+    if len(visible) == 2:
+        return f"{visible[0]} and {visible[1]}"
+    return f"{', '.join(visible[:-1])}, and {visible[-1]}"
+
+
 def evaluate_urgency_status(
     active_projects: Sequence[Project] | None,
     *,
@@ -152,6 +163,8 @@ def evaluate_urgency_status(
 ) -> dict[str, Any]:
     reference_day = today or datetime.now().date()
     urgency_settings = _normalize_urgency_settings(settings)
+    visible_chips: list[str] = []
+    active_condition_labels: list[str] = []
     if not bool(urgency_settings["enabled"]):
         return {
             "state": "good",
@@ -172,6 +185,7 @@ def evaluate_urgency_status(
             "badgeLabel": str(urgency_settings["badge_labels"]["good"]),
             "helpKey": "Urgency Status",
             "configurable": True,
+            "visibleChips": visible_chips,
         }
     counts = {
         "fireTasks": 0,
@@ -188,6 +202,28 @@ def evaluate_urgency_status(
     warn_deadline_within_days = int(urgency_settings["warn_deadline_within_days"])
     fire_labels = tuple(str(value) for value in urgency_settings["fire_labels"] if str(value).strip())
     task_matches: list[dict[str, bool]] = []
+
+    if bool(urgency_settings["danger_on_fire_label"]) and fire_labels:
+        visible_chips.append("fireTasks")
+    if bool(urgency_settings["warn_on_priority"]):
+        priority_enabled = False
+        for chip_key, threshold in (
+            ("p1Tasks", 4),
+            ("p2Tasks", 3),
+            ("p3Tasks", 2),
+            ("p4Tasks", 1),
+        ):
+            if threshold in warn_priority_thresholds:
+                visible_chips.append(chip_key)
+                priority_enabled = True
+        if priority_enabled:
+            active_condition_labels.append("priority")
+    if bool(urgency_settings["warn_on_due"]):
+        visible_chips.append("dueTasks")
+        active_condition_labels.append("due date")
+    if bool(urgency_settings["warn_on_deadline"]):
+        visible_chips.append("deadlineTasks")
+        active_condition_labels.append("deadline")
 
     for project in active_projects or []:
         for task in project.tasks or []:
@@ -263,9 +299,15 @@ def evaluate_urgency_status(
     elif priority_triggered or due_triggered or deadline_triggered:
         state = "warn"
         title = str(urgency_settings["warn_summary_label"])
+        condition_labels = _join_condition_labels(active_condition_labels)
+        condition_phrase = (
+            f" the configured {condition_labels} thresholds"
+            if condition_labels
+            else " the configured urgency thresholds"
+        )
         summary = (
             f"{active_match_count} active task{'s' if active_match_count != 1 else ''}"
-            " match the configured priority, due date, or deadline thresholds."
+            f" match{condition_phrase}."
         )
     else:
         state = "good"
@@ -286,6 +328,7 @@ def evaluate_urgency_status(
         }[state],
         "helpKey": "Urgency Status",
         "configurable": True,
+        "visibleChips": visible_chips,
     }
 
 

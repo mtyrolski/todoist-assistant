@@ -2,6 +2,7 @@
 
 # pylint: disable=protected-access
 
+import os
 from unittest.mock import Mock, mock_open, patch
 
 from google.auth.exceptions import RefreshError
@@ -253,6 +254,47 @@ def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
     mock_flow_cls.from_client_secrets_file.assert_called_once_with('gmail_credentials.json', automation.SCOPES)
     flow.run_local_server.assert_called_once_with(port=0)
     mock_build.assert_called_once_with('gmail', 'v1', credentials=fresh_creds)
+
+
+@patch('builtins.open', new_callable=mock_open)
+@patch('todoist.automations.gmail_tasks.automation.build')
+@patch('todoist.automations.gmail_tasks.automation.InstalledAppFlow')
+@patch('todoist.automations.gmail_tasks.automation.Credentials')
+@patch('os.path.exists')
+def test_authenticate_gmail_interactive_oauth_enables_insecure_transport_temporarily(
+    mock_exists,
+    mock_credentials,
+    mock_flow_cls,
+    mock_build,
+    _mock_file,
+    monkeypatch,
+):
+    monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
+    automation = GmailTasksAutomation()
+
+    mock_exists.side_effect = [False, True]
+    mock_credentials.from_authorized_user_file.return_value = None
+
+    fresh_creds = Mock()
+    fresh_creds.valid = True
+    fresh_creds.to_json.return_value = '{"token": "new"}'
+    flow = Mock()
+
+    def _run_local_server(*, port):
+        assert port == 0
+        assert os.environ["OAUTHLIB_INSECURE_TRANSPORT"] == "1"
+        return fresh_creds
+
+    flow.run_local_server.side_effect = _run_local_server
+    mock_flow_cls.from_client_secrets_file.return_value = flow
+
+    mock_service = Mock()
+    mock_build.return_value = mock_service
+
+    result = automation._authenticate_gmail()
+
+    assert result == mock_service
+    assert "OAUTHLIB_INSECURE_TRANSPORT" not in os.environ
 
 
 def test_task_keywords_coverage():
