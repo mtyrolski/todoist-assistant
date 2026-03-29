@@ -3,6 +3,7 @@
 import { AdminPanel } from "../components/AdminPanel";
 import { DashboardSettings } from "../components/DashboardSettings";
 import { LlmBreakdownStatus } from "../components/LlmBreakdownStatus";
+import { LlmRuntimeSettings } from "../components/LlmRuntimeSettings";
 import { LoadingBar } from "../components/LoadingBar";
 import { ObserverControl } from "../components/ObserverControl";
 import { PageHeader } from "../components/PageHeader";
@@ -46,6 +47,12 @@ export default function ControlPanelPage() {
           />
         </div>
         <div className="stack">
+          <LlmRuntimeSettings
+            onAfterMutation={() => {
+              refreshStatus();
+              refresh();
+            }}
+          />
           <DashboardSettings
             onAfterMutation={() => {
               refreshStatus();

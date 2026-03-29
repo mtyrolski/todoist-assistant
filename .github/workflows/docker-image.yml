@@ -25,6 +25,10 @@ jobs:
             context: .
             dockerfile: Dockerfile.api
             image: ghcr.io/${{ github.repository_owner }}/todoist-assistant-api
+          - name: triton
+            context: deploy/triton
+            dockerfile: deploy/triton/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/todoist-assistant-triton
           - name: frontend
             context: frontend
             dockerfile: frontend/Dockerfile

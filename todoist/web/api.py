@@ -12,6 +12,7 @@ import contextlib
 import io
 import os
 import re
+import os.path
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -21,6 +22,7 @@ import pandas as pd
 import numpy as np
 import hydra
 import httpx
+from google.oauth2.credentials import Credentials
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field
@@ -43,6 +45,7 @@ from todoist.dashboard.plots import (
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
+from todoist.automations.gmail_tasks import GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GmailTasksAutomation
 from todoist.automations.observer import AutomationObserver
 from todoist.automations.llm_breakdown.config import (
     BASE_SYSTEM_PROMPT,
@@ -52,6 +55,7 @@ from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import (
+    DEFAULT_MODEL_ID,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
@@ -211,6 +215,21 @@ _API_KEY_PLACEHOLDERS = {
 _API_KEY_MIN_LENGTH = 20
 _API_KEY_HEX_RE = re.compile(r"^[a-fA-F0-9]{32,64}$")
 _API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
+_LOCAL_MODEL_OPTIONS = [
+    {"id": DEFAULT_MODEL_ID, "label": "Ministral 3 3B Instruct"},
+    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
+    {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
+]
+_OPENAI_MODEL_OPTIONS = [
+    {"id": "gpt-5-mini", "label": "GPT-5 mini"},
+    {"id": "gpt-5", "label": "GPT-5"},
+    {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
+]
+_TRITON_MODEL_OPTIONS = [
+    {"id": DEFAULT_TRITON_MODEL_ID, "label": "Qwen 2.5 0.5B Instruct"},
+    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
+    {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
+]
 
 
 def _resolve_env_path() -> Path:
@@ -1120,6 +1139,28 @@ def _available_llm_chat_devices() -> list[str]:
     return devices
 
 
+def _llm_model_options_payload(
+    options: Sequence[Mapping[str, str]], selected: str
+) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    payload: list[dict[str, Any]] = []
+    for option in options:
+        option_id = _sanitize_text(option.get("id"))
+        if not option_id or option_id in seen:
+            continue
+        seen.add(option_id)
+        payload.append(
+            {
+                "id": option_id,
+                "label": _sanitize_text(option.get("label")) or option_id,
+                "selected": option_id == selected,
+            }
+        )
+    if selected and selected not in seen:
+        payload.insert(0, {"id": selected, "label": selected, "selected": True})
+    return payload
+
+
 def _normalize_llm_chat_backend(raw: Any) -> str:
     value = str(raw or "").strip().lower()
     if value in _LLM_CHAT_BACKEND_LABELS:
@@ -1156,6 +1197,7 @@ def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         "keyName": key_name,
         "model": model,
         "secretKey": secret_key,
+        "modelOptions": _llm_model_options_payload(_OPENAI_MODEL_OPTIONS, model),
     }
 
 
@@ -1178,6 +1220,7 @@ def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         "baseUrl": base_url,
         "modelName": model_name,
         "modelId": model_id,
+        "modelOptions": _llm_model_options_payload(_TRITON_MODEL_OPTIONS, model_id),
     }
 
 
@@ -1200,10 +1243,14 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     env_path = _resolve_env_path()
     backend_key = str(EnvVar.AGENT_BACKEND)
     device_key = str(EnvVar.AGENT_DEVICE)
+    local_model_key = str(EnvVar.AGENT_MODEL_ID)
     file_values = dotenv_values(env_path) if env_path.exists() else {}
     available_devices = _available_llm_chat_devices()
     openai_settings = _resolve_openai_settings(file_values)
     triton_settings = _resolve_triton_settings(file_values)
+    local_model_id = _sanitize_text(
+        os.getenv(local_model_key) or file_values.get(local_model_key)
+    ) or DEFAULT_MODEL_ID
 
     backend = _normalize_llm_chat_backend(
         os.getenv(backend_key) or file_values.get(backend_key)
@@ -1216,12 +1263,15 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
         backend = _LLM_CHAT_BACKEND_DEFAULT
     os.environ[backend_key] = backend
     os.environ[device_key] = device
+    os.environ[local_model_key] = local_model_id
 
     return {
         "backend": backend,
         "backendLabel": _LLM_CHAT_BACKEND_LABELS[backend],
         "device": device,
         "deviceLabel": _LLM_CHAT_DEVICE_LABELS[device],
+        "localModelId": local_model_id,
+        "localModelOptions": _llm_model_options_payload(_LOCAL_MODEL_OPTIONS, local_model_id),
         "availableBackends": [
             {
                 "id": backend_id,
@@ -1247,6 +1297,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "keyName": openai_settings["keyName"],
             "model": openai_settings["model"],
             "secretKey": openai_settings["secretKey"],
+            "modelOptions": openai_settings["modelOptions"],
         },
         "triton": {
             "configured": True,
@@ -1254,6 +1305,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "baseUrl": triton_settings["baseUrl"],
             "modelName": triton_settings["modelName"],
             "modelId": triton_settings["modelId"],
+            "modelOptions": triton_settings["modelOptions"],
         },
         "envPath": str(env_path),
     }
@@ -1296,7 +1348,9 @@ async def _load_llm_chat_model_task() -> None:
         settings = _resolve_llm_chat_settings()
         backend = settings["backend"]
         if backend == "transformers_local":
-            config = coerce_model_config({"device": settings["device"]})
+            config = coerce_model_config(
+                {"device": settings["device"], "model_id": settings["localModelId"]}
+            )
             model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
         elif backend == "triton_local":
             triton_settings = settings["triton"]
@@ -1631,6 +1685,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
                 "configured": settings["openai"]["configured"],
                 "keyName": settings["openai"]["keyName"],
                 "model": settings["openai"]["model"],
+                "modelOptions": settings["openai"]["modelOptions"],
             },
             "triton": {
                 "configured": settings["triton"]["configured"],
@@ -1638,6 +1693,45 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
                 "baseUrl": settings["triton"]["baseUrl"],
                 "modelName": settings["triton"]["modelName"],
                 "modelId": settings["triton"]["modelId"],
+                "modelOptions": settings["triton"]["modelOptions"],
+            },
+            "envPath": settings["envPath"],
+        },
+        "model": {
+            "selected": (
+                settings["openai"]["model"]
+                if settings["backend"] == "openai"
+                else settings["triton"]["modelId"]
+                if settings["backend"] == "triton_local"
+                else settings["localModelId"]
+            ),
+            "label": (
+                settings["openai"]["model"]
+                if settings["backend"] == "openai"
+                else settings["triton"]["modelId"]
+                if settings["backend"] == "triton_local"
+                else settings["localModelId"]
+            ),
+            "active": (
+                settings["openai"]["model"]
+                if (enabled or loading) and settings["backend"] == "openai"
+                else settings["triton"]["modelId"]
+                if (enabled or loading) and settings["backend"] == "triton_local"
+                else settings["localModelId"]
+                if (enabled or loading) and settings["backend"] == "transformers_local"
+                else None
+            ),
+            "local": {
+                "selected": settings["localModelId"],
+                "options": settings["localModelOptions"],
+            },
+            "openai": {
+                "selected": settings["openai"]["model"],
+                "options": settings["openai"]["modelOptions"],
+            },
+            "triton": {
+                "selected": settings["triton"]["modelId"],
+                "options": settings["triton"]["modelOptions"],
             },
             "envPath": settings["envPath"],
         },
@@ -1708,6 +1802,9 @@ async def llm_chat_update_settings(
             detail="Requested device is not available on this machine.",
         )
     device = _normalize_llm_chat_device(requested_device, available_devices=available_devices)
+    local_model_id = _sanitize_text(payload.get("localModelId")) or settings["localModelId"]
+    openai_model = _sanitize_text(payload.get("openaiModel")) or settings["openai"]["model"]
+    triton_model_id = _sanitize_text(payload.get("tritonModelId")) or settings["triton"]["modelId"]
 
     enabled, loading = await _llm_chat_model_status()
     if loading:
@@ -1720,8 +1817,14 @@ async def llm_chat_update_settings(
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
     set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
+    set_key(str(env_path), str(EnvVar.AGENT_MODEL_ID), local_model_id)
+    set_key(str(env_path), "OPEN_AI_MODEL", openai_model)
+    set_key(str(env_path), str(EnvVar.AGENT_TRITON_MODEL_ID), triton_model_id)
     os.environ[str(EnvVar.AGENT_BACKEND)] = backend
     os.environ[str(EnvVar.AGENT_DEVICE)] = device
+    os.environ[str(EnvVar.AGENT_MODEL_ID)] = local_model_id
+    os.environ["OPEN_AI_MODEL"] = openai_model
+    os.environ[str(EnvVar.AGENT_TRITON_MODEL_ID)] = triton_model_id
 
     if enabled:
         await _reset_llm_chat_runtime()
@@ -2056,6 +2159,99 @@ def _load_automations() -> list[Automation]:
     return automations
 
 
+def _available_automation_keys(config: Mapping[str, Any]) -> list[str]:
+    reserved = {"defaults", "automations", "hydra"}
+    keys: list[str] = []
+    for key, value in config.items():
+        if key in reserved or not isinstance(key, str):
+            continue
+        if isinstance(value, Mapping) and value.get("_target_"):
+            keys.append(key)
+    return keys
+
+
+def _automation_ref(key: str) -> str:
+    return f"${{{key}}}"
+
+
+def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+    raw = config.get("automations")
+    if not isinstance(raw, Sequence):
+        return []
+    keys: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item.strip())
+        if match:
+            keys.append(match.group(1))
+    return keys
+
+
+def _gmail_automation_status() -> dict[str, Any]:
+    credentials_path = _REPO_ROOT / GMAIL_CREDENTIALS_FILE
+    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    credentials_present = credentials_path.exists()
+    token_present = token_path.exists()
+    connected = False
+    token_detail = "Missing token"
+    if token_present:
+        try:
+            creds = Credentials.from_authorized_user_file(str(token_path), GmailTasksAutomation.SCOPES)
+            connected = bool(getattr(creds, "valid", False))
+            if connected:
+                token_detail = "Authorized"
+            elif getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
+                token_detail = "Token expired but refreshable"
+            else:
+                token_detail = "Token present but invalid"
+        except Exception as exc:  # pragma: no cover - defensive
+            token_detail = f"Token unreadable ({type(exc).__name__})"
+    return {
+        "credentialsPresent": credentials_present,
+        "tokenPresent": token_present,
+        "connected": connected,
+        "credentialsPath": str(credentials_path),
+        "tokenPath": str(token_path),
+        "detail": token_detail if credentials_present else "Missing Gmail credentials file",
+        "setupDocPath": str(_REPO_ROOT / "docs" / "gmail_setup.md"),
+    }
+
+
+def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool) -> dict[str, Any]:
+    section = config.get(key)
+    if not isinstance(section, Mapping):
+        raise ValueError(f"Automation section missing or invalid: {key}")
+    automation = cast(Automation, hydra.utils.instantiate(section))
+    payload = {
+        **_automation_launch_metadata(automation),
+        "key": key,
+        "enabled": enabled,
+        "target": str(section.get("_target_") or ""),
+    }
+    if key == "gmail_tasks":
+        payload["connection"] = _gmail_automation_status()
+    return payload
+
+
+def _load_automation_inventory() -> list[dict[str, Any]]:
+    config = cast(DictConfig, load_config("automations", str(_CONFIG_DIR.resolve())))
+    available_keys = _available_automation_keys(config)
+    enabled_keys = set(_enabled_automation_keys(config))
+    inventory: list[dict[str, Any]] = []
+    for key in available_keys:
+        inventory.append(_automation_metadata_for_key(config, key, enabled=key in enabled_keys))
+    return inventory
+
+
+def _save_enabled_automations(keys: Sequence[str]) -> None:
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    available_keys = _available_automation_keys(config)
+    normalized = [key for key in available_keys if key in set(keys)]
+    config["automations"] = [_automation_ref(key) for key in normalized]
+    _save_yaml_config(_AUTOMATIONS_PATH, config)
+
+
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
     launches = Cache().automation_launches.load().get(automation.name, [])
     last_launch = launches[-1] if launches else None
@@ -2074,11 +2270,62 @@ async def admin_automations() -> dict[str, Any]:
     """List configured automations plus cached launch metadata."""
 
     try:
-        automations = _load_automations()
+        automations = _load_automation_inventory()
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Failed to load automations: {exc}")
         return {"automations": [], "error": f"{type(exc).__name__}: {exc}"}
-    return {"automations": [_automation_launch_metadata(a) for a in automations]}
+    return {"automations": automations, "configPath": str(_AUTOMATIONS_PATH)}
+
+
+@app.post("/api/admin/automations/{key}/enabled", tags=["admin"])
+async def admin_set_automation_enabled(
+    key: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    enabled = bool(payload.get("enabled"))
+    async with _ADMIN_LOCK:
+        config = _read_yaml_config(_AUTOMATIONS_PATH)
+        available_keys = _available_automation_keys(config)
+        if key not in available_keys:
+            raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
+        enabled_keys = _enabled_automation_keys(config)
+        next_keys = [item for item in enabled_keys if item != key]
+        if enabled:
+            insert_at = max(0, available_keys.index(key))
+            ordered = [item for item in available_keys if item in next_keys]
+            if key not in ordered:
+                ordered.insert(insert_at, key)
+            next_keys = ordered
+        _save_enabled_automations(next_keys)
+    return await admin_automations()
+
+
+@app.get("/api/admin/automations/gmail/status", tags=["admin"])
+async def admin_gmail_automation_status() -> dict[str, Any]:
+    return _gmail_automation_status()
+
+
+@app.post("/api/admin/automations/gmail/connect", tags=["admin"])
+async def admin_gmail_automation_connect() -> dict[str, Any]:
+    status = _gmail_automation_status()
+    if not status["credentialsPresent"]:
+        raise HTTPException(
+            status_code=400,
+            detail="gmail_credentials.json is required before connecting Gmail.",
+        )
+    automation = GmailTasksAutomation(allow_interactive_auth=True)
+    service = await asyncio.to_thread(automation._authenticate_gmail)  # pylint: disable=protected-access
+    if service is None:
+        raise HTTPException(status_code=500, detail="Gmail authorization did not complete.")
+    return _gmail_automation_status()
+
+
+@app.delete("/api/admin/automations/gmail/connect", tags=["admin"])
+async def admin_gmail_automation_disconnect() -> dict[str, Any]:
+    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    if token_path.exists():
+        token_path.unlink()
+    return _gmail_automation_status()
 
 
 @app.get("/api/admin/api_token", tags=["admin"])
