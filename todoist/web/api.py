@@ -23,6 +23,7 @@ import hydra
 import httpx
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
+from pydantic import BaseModel, Field
 
 from todoist.api.client import RequestSpec, TodoistAPIClient, TimeoutSettings
 from todoist.api.endpoints import TodoistEndpoints
@@ -48,6 +49,7 @@ from todoist.automations.llm_breakdown.config import (
     coerce_model_config,
 )
 from todoist.automations.llm_breakdown.models import ProgressKey
+from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
 from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import (
     DEFAULT_OPENAI_MODEL,
@@ -2988,6 +2990,386 @@ def _template_to_camel(raw: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(child, Mapping)
         ]
     return payload
+
+
+class _TaskIngestNode(BaseModel):
+    content: str
+    description: str | None = None
+    children: list["_TaskIngestNode"] = Field(default_factory=list)
+
+
+class _TaskIngestTree(BaseModel):
+    tasks: list[_TaskIngestNode] = Field(default_factory=list)
+
+
+_TaskIngestNode.model_rebuild()
+
+
+_BULLET_LINE_RE = re.compile(r"^(?P<indent>\s*)(?:[-*+]|(?:\d+|[A-Za-z])[.)])\s+(?P<content>.+?)\s*$")
+
+
+def _task_ingest_db() -> Database:
+    if _state.db is not None:
+        return _state.db
+    return Database(str(_resolve_env_path()))
+
+
+def _task_ingest_project_payload(projects: Sequence[Project]) -> list[dict[str, Any]]:
+    by_id = {project.id: project for project in projects}
+
+    def project_path(project: Project) -> list[str]:
+        names: list[str] = []
+        current: Project | None = project
+        seen: set[str] = set()
+        while current is not None and current.id not in seen:
+            seen.add(current.id)
+            names.append(current.project_entry.name)
+            parent_id = current.project_entry.parent_id
+            current = by_id.get(str(parent_id)) if parent_id else None
+        return list(reversed(names))
+
+    payload = []
+    for project in projects:
+        path = project_path(project)
+        payload.append(
+            {
+                "id": project.id,
+                "name": project.project_entry.name,
+                "label": " / ".join(path),
+                "parentId": project.project_entry.parent_id,
+            }
+        )
+    payload.sort(key=lambda item: str(item["label"]).lower())
+    return payload
+
+
+def _load_task_ingest_projects_sync(refresh: bool) -> list[dict[str, Any]]:
+    dbio = _task_ingest_db() if not refresh else Database(str(_resolve_env_path()))
+    return _task_ingest_project_payload(dbio.fetch_projects(include_tasks=False))
+
+
+def _task_ingest_total_nodes(tasks: Sequence[Mapping[str, Any]]) -> int:
+    total = 0
+    for task in tasks:
+        total += 1
+        children = task.get("children")
+        if isinstance(children, list):
+            total += _task_ingest_total_nodes(
+                [child for child in children if isinstance(child, Mapping)]
+            )
+    return total
+
+
+def _task_ingest_trim_text(value: Any) -> str:
+    return _sanitize_text(value) or ""
+
+
+def _normalize_task_ingest_node(
+    raw: Mapping[str, Any], *, depth: int = 1, max_depth: int = 3
+) -> dict[str, Any] | None:
+    content = _task_ingest_trim_text(raw.get("content"))
+    if not content:
+        return None
+    node: dict[str, Any] = {"content": content}
+    description = _task_ingest_trim_text(raw.get("description"))
+    if description:
+        node["description"] = description
+    if depth < max_depth:
+        raw_children = raw.get("children")
+        if isinstance(raw_children, list):
+            children = [
+                normalized
+                for child in raw_children
+                if isinstance(child, Mapping)
+                for normalized in [_normalize_task_ingest_node(child, depth=depth + 1, max_depth=max_depth)]
+                if normalized is not None
+            ]
+            if children:
+                node["children"] = children
+    return node
+
+
+def _task_ingest_tree_payload(tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        normalized
+        for task in tasks
+        if isinstance(task, Mapping)
+        for normalized in [_normalize_task_ingest_node(task)]
+        if normalized is not None
+    ]
+
+
+def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
+    lines = raw_content.splitlines()
+    roots: list[dict[str, Any]] = []
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, {"children": roots})]
+    current_node: dict[str, Any] | None = None
+    preamble: list[str] = []
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            current_node = None
+            continue
+        match = _BULLET_LINE_RE.match(line)
+        if match:
+            indent = len(match.group("indent").replace("\t", "    "))
+            content = _task_ingest_trim_text(match.group("content"))
+            if not content:
+                continue
+            node = {"content": content, "children": []}
+            while len(stack) > 1 and indent <= stack[-1][0]:
+                stack.pop()
+            parent = stack[-1][1]
+            parent.setdefault("children", []).append(node)
+            stack.append((indent, node))
+            current_node = node
+            continue
+        if current_node is not None:
+            description = _task_ingest_trim_text(current_node.get("description"))
+            current_node["description"] = f"{description}\n{stripped}".strip() if description else stripped
+        else:
+            preamble.append(stripped)
+
+    if roots:
+        heading = _task_ingest_trim_text(preamble[0]) if preamble else ""
+        if heading:
+            wrapper = {"content": heading, "children": roots}
+            if len(preamble) > 1:
+                wrapper["description"] = "\n".join(preamble[1:])
+            return [wrapper]
+        return roots
+
+    paragraphs = [segment.strip() for segment in re.split(r"\n\s*\n+", raw_content) if segment.strip()]
+    if len(paragraphs) > 1:
+        tasks: list[dict[str, Any]] = []
+        for paragraph in paragraphs:
+            paragraph_lines = [part.strip() for part in paragraph.splitlines() if part.strip()]
+            if not paragraph_lines:
+                continue
+            node: dict[str, Any] = {"content": paragraph_lines[0]}
+            if len(paragraph_lines) > 1:
+                node["description"] = "\n".join(paragraph_lines[1:])
+            tasks.append(node)
+        if tasks:
+            return tasks
+
+    sentences = [
+        sentence.strip(" -\t")
+        for sentence in re.split(r"(?:\n|;|(?<=\.)\s+)", raw_content)
+        if sentence.strip(" -\t")
+    ]
+    if not sentences:
+        return []
+    if len(sentences) == 1:
+        return [{"content": sentences[0]}]
+    return [{"content": sentence} for sentence in sentences[:8]]
+
+
+def _task_ingest_from_breakdown(nodes: Sequence[BreakdownNode]) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for node in nodes:
+        item: dict[str, Any] = {"content": _task_ingest_trim_text(node.content)}
+        if not item["content"]:
+            continue
+        description = _task_ingest_trim_text(node.description)
+        if description:
+            item["description"] = description
+        children = _task_ingest_from_breakdown(node.children)
+        if children:
+            item["children"] = children
+        payload.append(item)
+    return payload
+
+
+def _task_ingest_build_llm_messages(raw_content: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": MessageRole.SYSTEM.value,
+            "content": (
+                "Rewrite the pasted source into an actionable Todoist task tree. "
+                "Return only concrete tasks. Keep titles concise and imperative. "
+                "Use descriptions only for supporting context. Keep nesting to at most 3 levels total."
+            ),
+        },
+        {
+            "role": MessageRole.USER.value,
+            "content": raw_content,
+        },
+    ]
+
+
+def _task_ingest_rewrite_with_llm_sync(raw_content: str) -> tuple[list[dict[str, Any]], str] | None:
+    async_loaded_model = _LLM_CHAT_MODEL
+    model: _LlmChatModel | None = async_loaded_model
+    created_model = False
+    if model is None:
+        settings = _resolve_llm_chat_settings()
+        backend = settings["backend"]
+        if backend == "openai" and settings["openai"]["configured"]:
+            secret_key = _task_ingest_trim_text(settings["openai"].get("secretKey"))
+            if secret_key:
+                model = OpenAIResponsesChatModel(
+                    OpenAIChatConfig(
+                        api_key=secret_key,
+                        key_name=_task_ingest_trim_text(settings["openai"].get("keyName")),
+                        model=str(settings["openai"].get("model") or DEFAULT_OPENAI_MODEL),
+                        max_output_tokens=768,
+                    )
+                )
+                created_model = True
+        elif backend == "triton_local":
+            triton_settings = settings["triton"]
+            model = TritonGenerateChatModel(
+                TritonChatConfig(
+                    base_url=str(triton_settings["baseUrl"]),
+                    model_name=str(triton_settings["modelName"]),
+                    model_id=str(triton_settings["modelId"]),
+                    max_output_tokens=768,
+                )
+            )
+            created_model = True
+    if model is None:
+        return None
+    try:
+        breakdown = model.structured_chat(
+            _task_ingest_build_llm_messages(raw_content),
+            TaskBreakdown,
+        )
+        tasks = _task_ingest_tree_payload(_task_ingest_from_breakdown(breakdown.children))
+        if tasks:
+            source = "llm"
+            if created_model and isinstance(model, TritonGenerateChatModel):
+                source = "triton"
+            elif created_model and isinstance(model, OpenAIResponsesChatModel):
+                source = "openai"
+            elif not created_model:
+                source = "loaded-model"
+            return tasks, source
+    except Exception as exc:  # pragma: no cover - fallback path
+        logger.warning(f"Task ingest LLM rewrite failed: {type(exc).__name__}: {exc}")
+    return None
+
+
+def _task_ingest_preview_sync(raw_content: str) -> tuple[list[dict[str, Any]], str]:
+    llm_result = _task_ingest_rewrite_with_llm_sync(raw_content)
+    if llm_result is not None:
+        return llm_result
+    return _task_ingest_tree_payload(_heuristic_task_ingest_tree(raw_content)), "outline"
+
+
+def _task_ingest_create_node_sync(
+    dbio: Database,
+    *,
+    project_id: str,
+    node: Mapping[str, Any],
+    parent_id: str | None = None,
+    created: list[dict[str, Any]],
+) -> None:
+    payload = dbio.insert_task(
+        content=str(node["content"]),
+        description=_task_ingest_trim_text(node.get("description")) or None,
+        project_id=project_id if parent_id is None else None,
+        parent_id=parent_id,
+    )
+    task_id = _task_ingest_trim_text(payload.get("id"))
+    if not task_id:
+        raise RuntimeError(f"Failed to create task: {node['content']}")
+    created.append(
+        {
+            "id": task_id,
+            "content": str(node["content"]),
+            "parentId": parent_id,
+            "projectId": project_id,
+        }
+    )
+    children = node.get("children")
+    if not isinstance(children, list):
+        return
+    for child in children:
+        if isinstance(child, Mapping):
+            _task_ingest_create_node_sync(
+                dbio,
+                project_id=project_id,
+                node=child,
+                parent_id=task_id,
+                created=created,
+            )
+
+
+def _task_ingest_create_sync(project_id: str, tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    dbio = _task_ingest_db()
+    created: list[dict[str, Any]] = []
+    for task in tasks:
+        _task_ingest_create_node_sync(
+            dbio,
+            project_id=project_id,
+            node=task,
+            created=created,
+        )
+    return created
+
+
+@app.get("/api/admin/task_ingest/projects", tags=["admin"])
+async def admin_task_ingest_projects(refresh: bool = False) -> dict[str, Any]:
+    try:
+        projects = await asyncio.to_thread(_load_task_ingest_projects_sync, refresh)
+    except Exception as exc:  # pragma: no cover - network safety
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load projects: {type(exc).__name__}"
+        ) from exc
+    return {"projects": projects}
+
+
+@app.post("/api/admin/task_ingest/preview", tags=["admin"])
+async def admin_task_ingest_preview(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    raw_content = _task_ingest_trim_text(payload.get("rawContent"))
+    if not raw_content:
+        raise HTTPException(status_code=400, detail="rawContent is required")
+    tasks, source = await asyncio.to_thread(_task_ingest_preview_sync, raw_content)
+    if not tasks:
+        raise HTTPException(status_code=400, detail="Could not derive any tasks from the pasted content.")
+    return {
+        "source": source,
+        "tasks": tasks,
+        "topLevelCount": len(tasks),
+        "totalCount": _task_ingest_total_nodes(tasks),
+    }
+
+
+@app.post("/api/admin/task_ingest/create", tags=["admin"])
+async def admin_task_ingest_create(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    project_id = _task_ingest_trim_text(payload.get("projectId"))
+    raw_content = _task_ingest_trim_text(payload.get("rawContent"))
+    tasks_payload = payload.get("tasks")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId is required")
+    if isinstance(tasks_payload, list):
+        tasks = _task_ingest_tree_payload(
+            [task for task in tasks_payload if isinstance(task, Mapping)]
+        )
+    elif raw_content:
+        tasks, _ = await asyncio.to_thread(_task_ingest_preview_sync, raw_content)
+    else:
+        raise HTTPException(status_code=400, detail="tasks or rawContent is required")
+    if not tasks:
+        raise HTTPException(status_code=400, detail="No tasks to create")
+    try:
+        created = await asyncio.to_thread(_task_ingest_create_sync, project_id, tasks)
+    except Exception as exc:  # pragma: no cover - network safety
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create tasks: {exc}"
+        ) from exc
+    return {
+        "created": created,
+        "createdCount": len(created),
+        "topLevelCount": len(tasks),
+    }
 
 
 @app.get("/api/admin/project_adjustments", tags=["admin"])

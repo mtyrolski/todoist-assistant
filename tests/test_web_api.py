@@ -646,6 +646,77 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None
     ]
 
 
+def test_admin_task_ingest_projects_returns_sorted_projects(monkeypatch) -> None:
+    monkeypatch.setattr(
+        web_api,
+        "_load_task_ingest_projects_sync",
+        lambda refresh: [
+            {"id": "p1", "name": "Alpha", "label": "Work / Alpha", "parentId": "root"},
+            {"id": "p2", "name": "Inbox", "label": "Inbox", "parentId": None},
+        ],
+    )
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/task_ingest/projects")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["projects"][0]["label"] == "Work / Alpha"
+    assert payload["projects"][1]["label"] == "Inbox"
+
+
+def test_admin_task_ingest_preview_builds_nested_outline(monkeypatch) -> None:
+    monkeypatch.setattr(web_api, "_task_ingest_rewrite_with_llm_sync", lambda raw: None)
+
+    client = TestClient(web_api.app)
+    res = client.post(
+        "/api/admin/task_ingest/preview",
+        json={
+            "rawContent": "Launch update\n- Prepare release notes\n  - Draft internal note\n- QA pass"
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["source"] == "outline"
+    assert payload["topLevelCount"] == 1
+    assert payload["totalCount"] == 4
+    assert payload["tasks"][0]["content"] == "Launch update"
+    assert payload["tasks"][0]["children"][0]["content"] == "Prepare release notes"
+    assert payload["tasks"][0]["children"][0]["children"][0]["content"] == "Draft internal note"
+
+
+def test_admin_task_ingest_create_uses_explicit_tasks_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        web_api,
+        "_task_ingest_create_sync",
+        lambda project_id, tasks: [
+            {"id": "1", "content": "Top level", "projectId": project_id, "parentId": None},
+            {"id": "2", "content": "Child", "projectId": project_id, "parentId": "1"},
+        ],
+    )
+
+    client = TestClient(web_api.app)
+    res = client.post(
+        "/api/admin/task_ingest/create",
+        json={
+            "projectId": "project-1",
+            "tasks": [
+                {
+                    "content": "Top level",
+                    "children": [{"content": "Child"}],
+                }
+            ],
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["createdCount"] == 2
+    assert payload["topLevelCount"] == 1
+    assert payload["created"][1]["parentId"] == "1"
+
+
 def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
