@@ -2174,7 +2174,15 @@ def _automation_ref(key: str) -> str:
     return f"${{{key}}}"
 
 
-def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+def _automation_requires_auth(key: str) -> bool:
+    return key in {"gmail_tasks"}
+
+
+def _default_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+    return [key for key in _available_automation_keys(config) if not _automation_requires_auth(key)]
+
+
+def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
     raw = config.get("automations")
     if not isinstance(raw, Sequence):
         return []
@@ -2186,6 +2194,13 @@ def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
         if match:
             keys.append(match.group(1))
     return keys
+
+
+def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+    configured = _configured_enabled_automation_keys(config)
+    if configured:
+        return configured
+    return _default_enabled_automation_keys(config)
 
 
 def _gmail_automation_status() -> dict[str, Any]:
@@ -2227,6 +2242,8 @@ def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool)
         **_automation_launch_metadata(automation),
         "key": key,
         "enabled": enabled,
+        "authRequired": _automation_requires_auth(key),
+        "defaultEnabled": key in _default_enabled_automation_keys(config),
         "target": str(section.get("_target_") or ""),
     }
     if key == "gmail_tasks":
@@ -3312,14 +3329,18 @@ def _task_ingest_trim_text(value: Any) -> str:
 
 
 def _normalize_task_ingest_node(
-    raw: Mapping[str, Any], *, depth: int = 1, max_depth: int = 3
+    raw: Mapping[str, Any],
+    *,
+    depth: int = 1,
+    max_depth: int = 3,
+    include_descriptions: bool = True,
 ) -> dict[str, Any] | None:
     content = _task_ingest_trim_text(raw.get("content"))
     if not content:
         return None
     node: dict[str, Any] = {"content": content}
     description = _task_ingest_trim_text(raw.get("description"))
-    if description:
+    if include_descriptions and description:
         node["description"] = description
     if depth < max_depth:
         raw_children = raw.get("children")
@@ -3328,7 +3349,14 @@ def _normalize_task_ingest_node(
                 normalized
                 for child in raw_children
                 if isinstance(child, Mapping)
-                for normalized in [_normalize_task_ingest_node(child, depth=depth + 1, max_depth=max_depth)]
+                for normalized in [
+                    _normalize_task_ingest_node(
+                        child,
+                        depth=depth + 1,
+                        max_depth=max_depth,
+                        include_descriptions=include_descriptions,
+                    )
+                ]
                 if normalized is not None
             ]
             if children:
@@ -3337,16 +3365,59 @@ def _normalize_task_ingest_node(
 
 
 def _task_ingest_tree_payload(tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return _task_ingest_tree_payload_with_options(tasks, max_depth=3, include_descriptions=True)
+
+
+def _task_ingest_tree_payload_with_options(
+    tasks: Sequence[Mapping[str, Any]], *, max_depth: int, include_descriptions: bool
+) -> list[dict[str, Any]]:
     return [
         normalized
         for task in tasks
         if isinstance(task, Mapping)
-        for normalized in [_normalize_task_ingest_node(task)]
+        for normalized in [
+            _normalize_task_ingest_node(
+                task,
+                max_depth=max_depth,
+                include_descriptions=include_descriptions,
+            )
+        ]
         if normalized is not None
     ]
 
 
-def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
+def _task_ingest_options(payload: Mapping[str, Any]) -> dict[str, Any]:
+    raw_options = payload.get("options")
+    options = raw_options if isinstance(raw_options, Mapping) else payload
+
+    requested_depth = options.get("maxDepth")
+    max_depth = 3
+    if isinstance(requested_depth, int):
+        max_depth = requested_depth
+    elif isinstance(requested_depth, str) and requested_depth.strip().isdigit():
+        max_depth = int(requested_depth.strip())
+    max_depth = min(4, max(2, max_depth))
+
+    granularity = _task_ingest_trim_text(options.get("granularity")).lower() or "balanced"
+    if granularity not in {"compact", "balanced", "detailed"}:
+        granularity = "balanced"
+
+    preference = _task_ingest_trim_text(options.get("preference")).lower() or "action-first"
+    if preference not in {"action-first", "milestone-driven", "checklist-heavy", "meeting-notes"}:
+        preference = "action-first"
+
+    include_descriptions_raw = options.get("includeDescriptions")
+    include_descriptions = True if include_descriptions_raw is None else bool(include_descriptions_raw)
+
+    return {
+        "maxDepth": max_depth,
+        "granularity": granularity,
+        "preference": preference,
+        "includeDescriptions": include_descriptions,
+    }
+
+
+def _heuristic_task_ingest_tree(raw_content: str, *, granularity: str) -> list[dict[str, Any]]:
     lines = raw_content.splitlines()
     roots: list[dict[str, Any]] = []
     stack: list[tuple[int, dict[str, Any]]] = [(-1, {"children": roots})]
@@ -3402,6 +3473,7 @@ def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
         if tasks:
             return tasks
 
+    sentence_limit = {"compact": 5, "balanced": 8, "detailed": 12}[granularity]
     sentences = [
         sentence.strip(" -\t")
         for sentence in re.split(r"(?:\n|;|(?<=\.)\s+)", raw_content)
@@ -3411,7 +3483,7 @@ def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
         return []
     if len(sentences) == 1:
         return [{"content": sentences[0]}]
-    return [{"content": sentence} for sentence in sentences[:8]]
+    return [{"content": sentence} for sentence in sentences[:sentence_limit]]
 
 
 def _task_ingest_from_breakdown(nodes: Sequence[BreakdownNode]) -> list[dict[str, Any]]:
@@ -3430,14 +3502,39 @@ def _task_ingest_from_breakdown(nodes: Sequence[BreakdownNode]) -> list[dict[str
     return payload
 
 
-def _task_ingest_build_llm_messages(raw_content: str) -> list[dict[str, str]]:
+def _task_ingest_build_llm_messages(
+    raw_content: str,
+    *,
+    max_depth: int,
+    granularity: str,
+    preference: str,
+    include_descriptions: bool,
+) -> list[dict[str, str]]:
+    granularity_instruction = {
+        "compact": "Prefer fewer, broader tasks and avoid over-splitting.",
+        "balanced": "Aim for a practical middle ground between clarity and brevity.",
+        "detailed": "Break the work down more aggressively into clear substeps when useful.",
+    }[granularity]
+    preference_instruction = {
+        "action-first": "Favor concrete next actions over abstract buckets.",
+        "milestone-driven": "Group subtasks under visible milestones when useful.",
+        "checklist-heavy": "Prefer crisp checklist-style subtasks.",
+        "meeting-notes": "Turn notes into decisions, follow-ups, and owners where possible.",
+    }[preference]
     return [
         {
             "role": MessageRole.SYSTEM.value,
             "content": (
                 "Rewrite the pasted source into an actionable Todoist task tree. "
                 "Return only concrete tasks. Keep titles concise and imperative. "
-                "Use descriptions only for supporting context. Keep nesting to at most 3 levels total."
+                + (
+                    "Use descriptions only for supporting context. "
+                    if include_descriptions
+                    else "Avoid descriptions unless absolutely required. "
+                )
+                + f"Keep nesting to at most {max_depth} levels total. "
+                f"{granularity_instruction} "
+                f"{preference_instruction}"
             ),
         },
         {
@@ -3447,7 +3544,14 @@ def _task_ingest_build_llm_messages(raw_content: str) -> list[dict[str, str]]:
     ]
 
 
-def _task_ingest_rewrite_with_llm_sync(raw_content: str) -> tuple[list[dict[str, Any]], str] | None:
+def _task_ingest_rewrite_with_llm_sync(
+    raw_content: str,
+    *,
+    max_depth: int,
+    granularity: str,
+    preference: str,
+    include_descriptions: bool,
+) -> tuple[list[dict[str, Any]], str] | None:
     async_loaded_model = _LLM_CHAT_MODEL
     model: _LlmChatModel | None = async_loaded_model
     created_model = False
@@ -3481,10 +3585,20 @@ def _task_ingest_rewrite_with_llm_sync(raw_content: str) -> tuple[list[dict[str,
         return None
     try:
         breakdown = model.structured_chat(
-            _task_ingest_build_llm_messages(raw_content),
+            _task_ingest_build_llm_messages(
+                raw_content,
+                max_depth=max_depth,
+                granularity=granularity,
+                preference=preference,
+                include_descriptions=include_descriptions,
+            ),
             TaskBreakdown,
         )
-        tasks = _task_ingest_tree_payload(_task_ingest_from_breakdown(breakdown.children))
+        tasks = _task_ingest_tree_payload_with_options(
+            _task_ingest_from_breakdown(breakdown.children),
+            max_depth=max_depth,
+            include_descriptions=include_descriptions,
+        )
         if tasks:
             source = "llm"
             if created_model and isinstance(model, TritonGenerateChatModel):
@@ -3499,11 +3613,31 @@ def _task_ingest_rewrite_with_llm_sync(raw_content: str) -> tuple[list[dict[str,
     return None
 
 
-def _task_ingest_preview_sync(raw_content: str) -> tuple[list[dict[str, Any]], str]:
-    llm_result = _task_ingest_rewrite_with_llm_sync(raw_content)
+def _task_ingest_preview_sync(
+    raw_content: str,
+    *,
+    max_depth: int,
+    granularity: str,
+    preference: str,
+    include_descriptions: bool,
+) -> tuple[list[dict[str, Any]], str]:
+    llm_result = _task_ingest_rewrite_with_llm_sync(
+        raw_content,
+        max_depth=max_depth,
+        granularity=granularity,
+        preference=preference,
+        include_descriptions=include_descriptions,
+    )
     if llm_result is not None:
         return llm_result
-    return _task_ingest_tree_payload(_heuristic_task_ingest_tree(raw_content)), "outline"
+    return (
+        _task_ingest_tree_payload_with_options(
+            _heuristic_task_ingest_tree(raw_content, granularity=granularity),
+            max_depth=max_depth,
+            include_descriptions=include_descriptions,
+        ),
+        "outline",
+    )
 
 
 def _task_ingest_create_node_sync(
@@ -3576,7 +3710,15 @@ async def admin_task_ingest_preview(
     raw_content = _task_ingest_trim_text(payload.get("rawContent"))
     if not raw_content:
         raise HTTPException(status_code=400, detail="rawContent is required")
-    tasks, source = await asyncio.to_thread(_task_ingest_preview_sync, raw_content)
+    options = _task_ingest_options(payload)
+    tasks, source = await asyncio.to_thread(
+        _task_ingest_preview_sync,
+        raw_content,
+        max_depth=int(options["maxDepth"]),
+        granularity=str(options["granularity"]),
+        preference=str(options["preference"]),
+        include_descriptions=bool(options["includeDescriptions"]),
+    )
     if not tasks:
         raise HTTPException(status_code=400, detail="Could not derive any tasks from the pasted content.")
     return {
@@ -3584,6 +3726,10 @@ async def admin_task_ingest_preview(
         "tasks": tasks,
         "topLevelCount": len(tasks),
         "totalCount": _task_ingest_total_nodes(tasks),
+        "maxDepth": options["maxDepth"],
+        "granularity": options["granularity"],
+        "preference": options["preference"],
+        "includeDescriptions": options["includeDescriptions"],
     }
 
 
@@ -3594,14 +3740,24 @@ async def admin_task_ingest_create(
     project_id = _task_ingest_trim_text(payload.get("projectId"))
     raw_content = _task_ingest_trim_text(payload.get("rawContent"))
     tasks_payload = payload.get("tasks")
+    options = _task_ingest_options(payload)
     if not project_id:
         raise HTTPException(status_code=400, detail="projectId is required")
     if isinstance(tasks_payload, list):
-        tasks = _task_ingest_tree_payload(
-            [task for task in tasks_payload if isinstance(task, Mapping)]
+        tasks = _task_ingest_tree_payload_with_options(
+            [task for task in tasks_payload if isinstance(task, Mapping)],
+            max_depth=int(options["maxDepth"]),
+            include_descriptions=bool(options["includeDescriptions"]),
         )
     elif raw_content:
-        tasks, _ = await asyncio.to_thread(_task_ingest_preview_sync, raw_content)
+        tasks, _ = await asyncio.to_thread(
+            _task_ingest_preview_sync,
+            raw_content,
+            max_depth=int(options["maxDepth"]),
+            granularity=str(options["granularity"]),
+            preference=str(options["preference"]),
+            include_descriptions=bool(options["includeDescriptions"]),
+        )
     else:
         raise HTTPException(status_code=400, detail="tasks or rawContent is required")
     if not tasks:

@@ -659,6 +659,8 @@ def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
                 "launchCount": 0,
                 "lastLaunch": None,
                 "enabled": False,
+                "authRequired": True,
+                "defaultEnabled": False,
                 "target": "todoist.automations.gmail_tasks.GmailTasksAutomation",
                 "connection": {
                     "credentialsPresent": False,
@@ -680,7 +682,18 @@ def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
     payload = res.json()
     assert payload["automations"][0]["key"] == "gmail_tasks"
     assert payload["automations"][0]["enabled"] is False
+    assert payload["automations"][0]["authRequired"] is True
     assert payload["automations"][0]["connection"]["connected"] is False
+
+
+def test_enabled_automation_keys_defaults_non_auth_sections() -> None:
+    config = {
+        "activity": {"_target_": "todoist.automations.activity.Activity"},
+        "gmail_tasks": {"_target_": "todoist.automations.gmail_tasks.GmailTasksAutomation"},
+        "habit_tracker": {"_target_": "todoist.automations.habit_tracker.HabitTracker"},
+    }
+
+    assert web_api._enabled_automation_keys(config) == ["activity", "habit_tracker"]
 
 
 def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> None:
@@ -768,34 +781,55 @@ def test_admin_task_ingest_projects_returns_sorted_projects(monkeypatch) -> None
 
 
 def test_admin_task_ingest_preview_builds_nested_outline(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "_task_ingest_rewrite_with_llm_sync", lambda raw: None)
+    monkeypatch.setattr(
+        web_api,
+        "_task_ingest_rewrite_with_llm_sync",
+        lambda raw, *, max_depth, granularity, preference, include_descriptions: None,
+    )
 
     client = TestClient(web_api.app)
     res = client.post(
         "/api/admin/task_ingest/preview",
         json={
-            "rawContent": "Launch update\n- Prepare release notes\n  - Draft internal note\n- QA pass"
+            "rawContent": "Launch update\n- Prepare release notes\n  - Draft internal note\n- QA pass",
+            "options": {
+                "maxDepth": 2,
+                "granularity": "detailed",
+                "preference": "milestone-driven",
+                "includeDescriptions": False,
+            },
         },
     )
 
     assert res.status_code == 200
     payload = res.json()
     assert payload["source"] == "outline"
+    assert payload["maxDepth"] == 2
+    assert payload["granularity"] == "detailed"
+    assert payload["preference"] == "milestone-driven"
+    assert payload["includeDescriptions"] is False
     assert payload["topLevelCount"] == 1
-    assert payload["totalCount"] == 4
+    assert payload["totalCount"] == 3
     assert payload["tasks"][0]["content"] == "Launch update"
     assert payload["tasks"][0]["children"][0]["content"] == "Prepare release notes"
-    assert payload["tasks"][0]["children"][0]["children"][0]["content"] == "Draft internal note"
+    assert "children" not in payload["tasks"][0]["children"][0]
 
 
 def test_admin_task_ingest_create_uses_explicit_tasks_payload(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_create(project_id: str, tasks: list[dict[str, object]]) -> list[dict[str, object]]:
+        captured["project_id"] = project_id
+        captured["tasks"] = tasks
+        return [
+            {"id": "1", "content": "Top level", "projectId": project_id, "parentId": None},
+            {"id": "2", "content": "Child", "projectId": project_id, "parentId": "1"},
+        ]
+
     monkeypatch.setattr(
         web_api,
         "_task_ingest_create_sync",
-        lambda project_id, tasks: [
-            {"id": "1", "content": "Top level", "projectId": project_id, "parentId": None},
-            {"id": "2", "content": "Child", "projectId": project_id, "parentId": "1"},
-        ],
+        _fake_create,
     )
 
     client = TestClient(web_api.app)
@@ -806,9 +840,11 @@ def test_admin_task_ingest_create_uses_explicit_tasks_payload(monkeypatch) -> No
             "tasks": [
                 {
                     "content": "Top level",
+                    "description": "ignored when descriptions are off",
                     "children": [{"content": "Child"}],
                 }
             ],
+            "options": {"maxDepth": 3, "granularity": "balanced", "includeDescriptions": False},
         },
     )
 
@@ -817,6 +853,8 @@ def test_admin_task_ingest_create_uses_explicit_tasks_payload(monkeypatch) -> No
     assert payload["createdCount"] == 2
     assert payload["topLevelCount"] == 1
     assert payload["created"][1]["parentId"] == "1"
+    assert captured["project_id"] == "project-1"
+    assert captured["tasks"] == [{"content": "Top level", "children": [{"content": "Child"}]}]
 
 
 def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
@@ -1278,7 +1316,9 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["loading"] is False
     assert payload["backend"]["selected"] == "transformers_local"
     assert payload["backend"]["triton"]["configured"] is True
-    assert payload["backend"]["triton"]["modelId"] == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert payload["backend"]["triton"]["modelId"] in {
+        option["id"] for option in payload["backend"]["triton"]["modelOptions"]
+    }
     assert payload["model"]["selected"] == "mistralai/Ministral-3-3B-Instruct-2512"
     assert payload["device"]["selected"] == "cpu"
     assert payload["queue"]["total"] == 0
