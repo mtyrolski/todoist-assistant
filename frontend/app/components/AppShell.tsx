@@ -15,6 +15,7 @@ const NAV_GROUPS = [
   {
     title: "Automation Studio",
     items: [
+      { href: "/task-ingest", label: "Task Ingest", hint: "Paste notes into task trees" },
       { href: "/task-rollout-rules", label: "Task Rollout Rules", hint: "LLM breakdown prompts" },
       { href: "/task-templates", label: "Task Templates", hint: "Create and edit templates" },
       { href: "/multiplication-labels", label: "Multiplication Labels", hint: "Tune Xn effects" }
