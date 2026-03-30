@@ -526,6 +526,7 @@ def test_cache_initialization_creates_expected_storages(tmp_path):
         "llm_breakdown_queue": "llm_breakdown_queue.joblib",
         "llm_chat_queue": "llm_chat_queue.joblib",
         "llm_chat_conversations": "llm_chat_conversations.joblib",
+        "llm_usage_stats": "llm_usage_stats.joblib",
     }
     for attr_name, filename in expected_files.items():
         storage = getattr(cache, attr_name)

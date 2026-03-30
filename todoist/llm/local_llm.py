@@ -35,6 +35,7 @@ from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from transformers.utils import logging as hf_logging
 
 from .types import MessageRole, PromptToken
+from .usage import record_llm_usage
 
 
 DEFAULT_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
@@ -112,7 +113,7 @@ class TransformersMistral3ChatModel:
         logger.info("LLM chat messages:\n{}", json.dumps(list(messages), ensure_ascii=False, indent=2))
         prompt = _render_mistral_instruct_prompt(messages, self._tokenizer)
         logger.debug("Rendered prompt ({} chars)", len(prompt))
-        return self._generate_text(prompt)
+        return self._generate_text(prompt, operation="chat")
 
     def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
         schema_instruction = _schema_instructions(schema)
@@ -141,6 +142,7 @@ class TransformersMistral3ChatModel:
             prompt,
             do_sample=False,
             max_new_tokens=self._max_new_tokens_for_schema(schema),
+            operation="structured_chat",
         )
         logger.debug("Raw model output:\n{}", raw)
         parsed = _try_parse_structured_output(raw, schema)
@@ -165,6 +167,7 @@ class TransformersMistral3ChatModel:
         temperature: float | None = None,
         top_p: float | None = None,
         max_new_tokens: int | None = None,
+        operation: str = "chat",
     ) -> str:
         inputs = self._tokenizer(prompt, return_tensors="pt")
         inputs.pop("token_type_ids", None)
@@ -190,7 +193,16 @@ class TransformersMistral3ChatModel:
             generated = self._model.generate(**generate_kwargs)
 
         new_tokens = generated[0][input_len:]
-        return self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        output_token_count = int(getattr(new_tokens, "shape", [len(new_tokens)])[-1]) if len(new_tokens) else 0
+        text = self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        record_llm_usage(
+            backend="transformers_local",
+            model_id=self.config.model_id,
+            operation=operation,
+            input_tokens=input_len,
+            output_tokens=output_token_count,
+        )
+        return text
 
 
 def _schema_instructions(schema: type[BaseModel]) -> str:

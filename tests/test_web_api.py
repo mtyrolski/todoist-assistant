@@ -1729,6 +1729,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_DEVICE), raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_MODEL_ID), raising=False)
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: tmp_path / ".env")
 
     # Mock the model status to be disabled
@@ -1752,6 +1753,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert "backend" in payload
     assert "device" in payload
     assert "queue" in payload
+    assert "usage" in payload
     assert "conversations" in payload
 
     # Verify queue structure
@@ -1773,6 +1775,8 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     }
     assert payload["model"]["selected"] == "mistralai/Ministral-3-3B-Instruct-2512"
     assert payload["device"]["selected"] == "cpu"
+    assert payload["usage"]["totals"]["inferenceCount"] == 0
+    assert payload["usage"]["current"]["modelId"] == "mistralai/Ministral-3-3B-Instruct-2512"
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
 

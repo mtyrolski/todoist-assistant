@@ -84,6 +84,7 @@ from todoist.llm import (
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.llm.usage import load_llm_usage_summary
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -1313,6 +1314,13 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     os.environ[backend_key] = backend
     os.environ[device_key] = device
     os.environ[local_model_key] = local_model_id
+    selected_model_id = (
+        openai_settings["model"]
+        if backend == "openai"
+        else triton_settings["modelId"]
+        if backend == "triton_local"
+        else local_model_id
+    )
 
     return {
         "backend": backend,
@@ -1355,6 +1363,10 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "modelId": triton_settings["modelId"],
             "modelOptions": triton_settings["modelOptions"],
         },
+        "usage": load_llm_usage_summary(
+            selected_backend=backend,
+            selected_model_id=str(selected_model_id or ""),
+        ),
         "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
 
@@ -1823,6 +1835,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "items": [_queue_item_payload(item) for item in items],
             "current": _queue_item_payload(current) if current else None,
         },
+        "usage": settings["usage"],
         "conversations": summaries,
     }
 

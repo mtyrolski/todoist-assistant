@@ -39,6 +39,7 @@ RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "llm_breakdown_queue.joblib",
     "llm_chat_queue.joblib",
     "llm_chat_conversations.joblib",
+    "llm_usage_stats.joblib",
 )
 RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
@@ -363,6 +364,7 @@ class Cache:
         self.llm_breakdown_queue = LocalStorage(join(self.path, 'llm_breakdown_queue.joblib'), dict)
         self.llm_chat_queue = LocalStorage(join(self.path, 'llm_chat_queue.joblib'), list)
         self.llm_chat_conversations = LocalStorage(join(self.path, 'llm_chat_conversations.joblib'), list)
+        self.llm_usage_stats = LocalStorage(join(self.path, 'llm_usage_stats.joblib'), dict)
 
 
 class Anonymizable(ABC):

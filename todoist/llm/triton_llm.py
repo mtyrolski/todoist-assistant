@@ -16,6 +16,7 @@ from .local_llm import (
     _schema_instructions,
     _try_parse_structured_output,
 )
+from .usage import record_llm_usage
 
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
@@ -57,7 +58,7 @@ class TritonGenerateChatModel:
         )
         prompt = self._render_prompt(messages)
         logger.debug("Triton chat rendered prompt (chars={})", len(prompt))
-        return self._generate_text(prompt)
+        return self._generate_text(prompt, operation="chat")
 
     def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
         logger.debug(
@@ -94,6 +95,7 @@ class TritonGenerateChatModel:
             prompt,
             do_sample=False,
             max_output_tokens=self._max_output_tokens_for_schema(schema),
+            operation="structured_chat",
         )
         parsed = _try_parse_structured_output(raw, schema)
         if parsed is not None:
@@ -157,6 +159,7 @@ class TritonGenerateChatModel:
         temperature: float | None = None,
         top_p: float | None = None,
         max_output_tokens: int | None = None,
+        operation: str = "chat",
     ) -> str:
         resolved_do_sample = (self.config.temperature > 0) if do_sample is None else do_sample
         resolved_temperature = self.config.temperature if temperature is None else temperature
@@ -236,6 +239,13 @@ class TritonGenerateChatModel:
         if not text_output.strip():
             logger.error("Triton response did not include text_output")
             raise ValueError("Triton response did not include text_output")
+        record_llm_usage(
+            backend="triton_local",
+            model_id=self.config.model_id,
+            operation=operation,
+            input_tokens=_estimate_token_count(self._tokenizer, prompt),
+            output_tokens=_estimate_token_count(self._tokenizer, text_output),
+        )
         logger.debug("Received Triton infer response (text_chars={})", len(text_output))
         return text_output.strip()
 
@@ -272,6 +282,7 @@ class TritonGenerateChatModel:
             repair_prompt,
             do_sample=False,
             max_output_tokens=self._max_output_tokens_for_schema(schema),
+            operation="repair",
         )
 
     def _infer_url(self) -> str:
@@ -329,3 +340,31 @@ def _normalize_generated_text(text: str) -> str:
     if closing < 0:
         return stripped
     return stripped[closing + len("</think>") :].strip()
+
+
+def _estimate_token_count(tokenizer: Any, text: str) -> int:
+    encode = getattr(tokenizer, "encode", None)
+    if callable(encode):
+        try:
+            encoded = encode(text, add_special_tokens=False)
+        except TypeError:
+            encoded = encode(text)
+        if isinstance(encoded, list):
+            return len(encoded)
+
+    call = getattr(tokenizer, "__call__", None)
+    if callable(call):
+        try:
+            encoded = call(text, return_tensors="pt")
+        except TypeError:
+            encoded = None
+        if isinstance(encoded, dict):
+            input_ids = encoded.get("input_ids")
+            shape = getattr(input_ids, "shape", None)
+            if shape is not None:
+                return int(shape[-1])
+
+    stripped = str(text or "").strip()
+    if not stripped:
+        return 0
+    return len(stripped.split())
