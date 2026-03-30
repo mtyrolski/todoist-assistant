@@ -97,6 +97,25 @@ def _triton_model_repository_path() -> Path:
     return _TRITON_MODEL_REPOSITORY
 
 
+def _extract_model_id_from_triton_entrypoint(model_dir: Path, versions: list[str]) -> str | None:
+    for version in versions:
+        model_path = model_dir / version / "model.py"
+        if not model_path.exists():
+            continue
+        try:
+            model_text = model_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        match = re.search(
+            r'TODOIST_AGENT_TRITON_MODEL_ID"\s*,\s*"([^"]+)"',
+            model_text,
+        )
+        if match:
+            return match.group(1).strip() or None
+    return None
+
+
 def discover_triton_models() -> list[dict[str, Any]]:
     repo_path = _triton_model_repository_path()
     if not repo_path.exists():
@@ -116,15 +135,15 @@ def discover_triton_models() -> list[dict[str, Any]]:
             match = re.search(rf'^\s*{field}:\s*"([^"]+)"', config_text, re.MULTILINE)
             return match.group(1) if match else None
 
+        versions = sorted(child.name for child in model_dir.iterdir() if child.is_dir() and child.name.isdigit())
         discovered.append(
             {
                 "name": _extract("name") or model_dir.name,
                 "backend": _extract("backend"),
                 "platform": _extract("platform"),
                 "directory": model_dir.name,
-                "versions": sorted(
-                    child.name for child in model_dir.iterdir() if child.is_dir() and child.name.isdigit()
-                ),
+                "versions": versions,
+                "model_id": _extract_model_id_from_triton_entrypoint(model_dir, versions),
             }
         )
     return discovered
@@ -247,8 +266,20 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
     backend_payload = backend if isinstance(backend, dict) else {}
     triton_payload = backend_payload.get("triton")
     triton = triton_payload if isinstance(triton_payload, dict) else {}
+    model_payload = llm_payload.get("model")
+    model = model_payload if isinstance(model_payload, dict) else {}
     triton_base_url = str(triton.get("baseUrl") or "").strip()
     served_models = discover_served_triton_models(triton_base_url) if triton_base_url else []
+    repo_path = _triton_model_repository_path()
+    models = discover_triton_models()
+
+    configured_model_id = str(
+        triton.get("modelId")
+        or model.get("selected")
+        or next((entry.get("model_id") for entry in models if entry.get("model_id")), "")
+        or ""
+    ).strip()
+    configured_model_label = str(model.get("label") or "").strip()
 
     if triton_base_url:
         detail = triton_base_url
@@ -257,6 +288,12 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
             _print_line("Endpoint", "ok", detail)
         else:
             _print_line("Endpoint", "warn", f"{detail} | served models unavailable")
+
+    if configured_model_id:
+        detail = configured_model_id
+        if configured_model_label and configured_model_label != configured_model_id:
+            detail = f"{configured_model_label} | id={configured_model_id}"
+        _print_line("Configured model", "neutral", detail)
 
     if served_models:
         for model in served_models:
@@ -269,8 +306,6 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
                 detail = f"{detail} | {reason}"
             _print_line(str(model.get("name") or "unknown"), status, detail, indent="  ")
 
-    repo_path = _triton_model_repository_path()
-    models = discover_triton_models()
     if not models and not served_models:
         _print_line("Repository", "warn", f"no model configs found under {repo_path}")
         return
@@ -280,6 +315,9 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
         version_text = _format_list([str(version) for version in model.get("versions", [])])
         backend = model.get("backend") or model.get("platform") or "unknown backend"
         detail = f"{backend} | dir={model.get('directory')} | versions={version_text}"
+        model_id = str(model.get("model_id") or "").strip()
+        if model_id:
+            detail = f"{detail} | model={model_id}"
         _print_line(str(model.get("name") or model.get("directory")), "neutral", detail, indent="  ")
 
 

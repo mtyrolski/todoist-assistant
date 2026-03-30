@@ -19,6 +19,15 @@ def test_discover_triton_models_reads_repository(monkeypatch, tmp_path) -> None:
     )
     (model_dir / "1").mkdir()
     (model_dir / "2").mkdir()
+    (model_dir / "1" / "model.py").write_text(
+        '\n'.join(
+            [
+                "def initialize() -> None:",
+                '    model_id = _env("TODOIST_AGENT_TRITON_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
+            ]
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(status, "_triton_model_repository_path", lambda: repo_root)
 
     models = status.discover_triton_models()
@@ -30,6 +39,7 @@ def test_discover_triton_models_reads_repository(monkeypatch, tmp_path) -> None:
             "platform": "python",
             "directory": "todoist_llm",
             "versions": ["1", "2"],
+            "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
         }
     ]
 
@@ -48,6 +58,15 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
         encoding="utf-8",
     )
     (model_dir / "1").mkdir()
+    (model_dir / "1" / "model.py").write_text(
+        '\n'.join(
+            [
+                "def initialize() -> None:",
+                '    model_id = _env("TODOIST_AGENT_TRITON_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
+            ]
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(status, "_triton_model_repository_path", lambda: repo_root)
     monkeypatch.setattr(status, "_supports_color", lambda: False)
     monkeypatch.setattr(
@@ -79,6 +98,7 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
                         "selected": "triton_local",
                         "triton": {
                             "baseUrl": "http://127.0.0.1:8003",
+                            "modelId": "Qwen/Qwen2.5-0.5B-Instruct",
                         },
                     },
                     "model": {"label": "Qwen 2.5 0.5B Instruct", "selected": "Qwen/Qwen2.5-0.5B-Instruct"},
@@ -111,5 +131,6 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     assert "Triton Models" in output
     assert "todoist_llm" in output
     assert "Qwen 2.5 0.5B Instruct" in output
+    assert "id=Qwen/Qwen2.5-0.5B-Instruct" in output
     assert "http://127.0.0.1:8003" in output
     assert "state=READY" in output
