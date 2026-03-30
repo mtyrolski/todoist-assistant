@@ -15,6 +15,9 @@ This folder contains the long-form docs. Start here and jump into the section yo
 
 If you are using the latest stable release, start with the stable docs above. If you are working on the in-progress v0.3 line, start with the release notes page and checklist.
 
+## Roadmaps
+- Status update automation plan: [docs/status_update_automation_plan.md](status_update_automation_plan.md)
+
 ## Windows installer details
 - MSI + bootstrapper guide: [docs/windows_installer.md](windows_installer.md)
 - Uninstall behavior: [docs/windows_uninstall_behavior.md](windows_uninstall_behavior.md)
