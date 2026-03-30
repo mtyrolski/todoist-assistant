@@ -301,6 +301,35 @@ class DatabaseTasks:
             return result
         return {"result": result}
 
+    def fetch_task_comments(self, task_id: str) -> list[dict[str, Any]]:
+        """Fetch all comments attached to a task."""
+
+        cursor: str | None = None
+        comments: list[dict[str, Any]] = []
+
+        while True:
+            params: dict[str, str | int] = {"task_id": task_id}
+            if cursor:
+                params["cursor"] = cursor
+            spec = RequestSpec(
+                endpoint=TodoistEndpoints.LIST_COMMENTS,
+                params=params,
+                rate_limited=True,
+            )
+            payload = self._api_client.request_json(
+                spec, operation_name=f"fetch task comments {task_id}"
+            )
+
+            page_comments, next_cursor = self._extract_comments_page(
+                payload, operation_name=f"fetch task comments {task_id}"
+            )
+            comments.extend(page_comments)
+            if not next_cursor:
+                break
+            cursor = next_cursor
+
+        return comments
+
     def fetch_task_by_id(self, task_id: str) -> dict[str, Any]:
         """
         Fetches a task by its ID from the Todoist API.
@@ -348,6 +377,32 @@ class DatabaseTasks:
         if isinstance(result, dict):
             return result
         return {"result": result}
+
+    @staticmethod
+    def _extract_comments_page(payload: object, *, operation_name: str) -> tuple[list[dict[str, Any]], str | None]:
+        if isinstance(payload, list):
+            comments = [item for item in payload if isinstance(item, dict)]
+            if len(comments) != len(payload):
+                raise RuntimeError(f"Unexpected non-object comment record in {operation_name} response")
+            return comments, None
+
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"Unexpected payload type returned from {operation_name}: {type(payload).__name__}"
+            )
+
+        raw_comments = payload.get("results")
+        if raw_comments is None:
+            raw_comments = payload.get("comments")
+        if not isinstance(raw_comments, list):
+            raise RuntimeError(f"Unexpected results payload returned from {operation_name}")
+
+        comments = [item for item in raw_comments if isinstance(item, dict)]
+        if len(comments) != len(raw_comments):
+            raise RuntimeError(f"Unexpected non-object comment record in {operation_name} response")
+
+        next_cursor = payload.get("next_cursor")
+        return comments, str(next_cursor) if isinstance(next_cursor, str) else None
 
     def insert_tasks(self, tasks_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
