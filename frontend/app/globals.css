@@ -3190,6 +3190,307 @@ textarea.textInput {
   flex-shrink: 0;
 }
 
+.statusUpdateStudio {
+  display: grid;
+  gap: 18px;
+}
+
+.statusUpdateHero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 20px;
+  padding: 22px 24px;
+  border-radius: 28px;
+  border: 1px solid rgba(106, 227, 255, 0.18);
+  background:
+    radial-gradient(circle at 10% 20%, rgba(97, 244, 179, 0.16), transparent 24%),
+    radial-gradient(circle at 90% 0%, rgba(106, 227, 255, 0.16), transparent 22%),
+    radial-gradient(circle at 45% 95%, rgba(255, 184, 108, 0.12), transparent 28%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+  box-shadow: var(--shadow-soft);
+}
+
+.statusUpdateHero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.05) 50%, transparent 100%),
+    radial-gradient(circle at 70% 20%, rgba(106, 227, 255, 0.09), transparent 18%);
+  pointer-events: none;
+}
+
+.statusUpdateHero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.statusUpdateHeroCopy {
+  display: grid;
+  gap: 16px;
+}
+
+.statusUpdateHero h2 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  max-width: 16ch;
+}
+
+.statusUpdateHeroPills,
+.statusUpdateMetaRow,
+.statusUpdateSelectedBar,
+.statusUpdateOutputMeta,
+.statusUpdateProjectActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.statusUpdateHeroPanel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.statusUpdateHeroMetrics {
+  display: grid;
+  gap: 10px;
+}
+
+.statusUpdateHeroMetric {
+  display: grid;
+  gap: 3px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 10, 16, 0.36);
+}
+
+.statusUpdateMetricLabel {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.statusUpdateHeroMetric strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.statusUpdateBanner {
+  margin: 0;
+}
+
+.statusUpdateLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.statusUpdateControls,
+.statusUpdateOutput,
+.statusUpdateEvidenceCard,
+.statusUpdateNotesCard {
+  display: grid;
+  gap: 14px;
+}
+
+.statusUpdatePresetRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.statusUpdatePreset {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.statusUpdatePreset:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 227, 255, 0.32);
+  background: rgba(106, 227, 255, 0.08);
+}
+
+.statusUpdatePreset:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.statusUpdatePreset span {
+  font-weight: 650;
+}
+
+.statusUpdatePreset small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.statusUpdatePresetActive {
+  border-color: rgba(97, 244, 179, 0.48);
+  background: linear-gradient(135deg, rgba(97, 244, 179, 0.14), rgba(106, 227, 255, 0.1));
+  box-shadow: 0 0 0 2px rgba(97, 244, 179, 0.08);
+}
+
+.statusUpdateDateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.statusUpdateProjectGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.statusUpdateProjectCard {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03)),
+    radial-gradient(circle at top right, rgba(140, 123, 255, 0.08), transparent 28%);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.statusUpdateProjectCard:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 227, 255, 0.3);
+  background:
+    linear-gradient(135deg, rgba(106, 227, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    radial-gradient(circle at top right, rgba(106, 227, 255, 0.12), transparent 28%);
+}
+
+.statusUpdateProjectCard:focus-visible {
+  outline: 2px solid rgba(106, 227, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.statusUpdateProjectCardActive {
+  border-color: rgba(97, 244, 179, 0.5);
+  background:
+    linear-gradient(135deg, rgba(97, 244, 179, 0.15), rgba(106, 227, 255, 0.09)),
+    radial-gradient(circle at top right, rgba(97, 244, 179, 0.12), transparent 28%);
+  box-shadow: 0 0 0 2px rgba(97, 244, 179, 0.08);
+}
+
+.statusUpdateProjectName {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.statusUpdateProjectLabel,
+.statusUpdateProjectMeta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.statusUpdateEmpty {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--muted);
+  border-radius: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 16px;
+}
+
+.statusUpdateEmptyTall {
+  min-height: 180px;
+}
+
+.statusUpdateOutput {
+  position: sticky;
+  top: 18px;
+}
+
+.statusUpdateMarkdown {
+  min-height: 320px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, "Liberation Mono", monospace;
+  line-height: 1.55;
+}
+
+.statusUpdateEvidenceList {
+  display: grid;
+  gap: 12px;
+}
+
+.statusUpdateEvidenceItem {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.statusUpdateEvidenceTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.statusUpdateEvidenceTitle {
+  margin: 0 0 4px;
+  font-weight: 650;
+}
+
+.statusUpdateEvidenceSummary {
+  margin: 0;
+  color: #dce7f4;
+}
+
+.statusUpdateCommentList {
+  display: grid;
+  gap: 8px;
+}
+
+.statusUpdateComment {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(7, 10, 16, 0.28);
+}
+
+.statusUpdateCommentBody {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.statusUpdateNotes {
+  display: grid;
+  gap: 10px;
+}
+
 .taskTreeRow {
   border-radius: 16px;
 }
@@ -3442,6 +3743,15 @@ textarea.textInput {
     max-width: none;
     justify-content: flex-start;
   }
+
+  .statusUpdateHero,
+  .statusUpdateLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .statusUpdateOutput {
+    position: static;
+  }
 }
 
 @media (max-width: 720px) {
@@ -3471,5 +3781,22 @@ textarea.textInput {
   .taskIngestStatus,
   .taskIngestHero {
     padding: 16px;
+  }
+
+  .statusUpdateHero,
+  .statusUpdateControls,
+  .statusUpdateOutput,
+  .statusUpdateEvidenceCard,
+  .statusUpdateNotesCard {
+    padding: 16px;
+  }
+
+  .statusUpdatePresetRow,
+  .statusUpdateDateGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .statusUpdateEvidenceTop {
+    flex-direction: column;
   }
 }
