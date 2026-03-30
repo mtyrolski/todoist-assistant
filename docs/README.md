@@ -9,11 +9,11 @@ This folder contains the long-form docs. Start here and jump into the section yo
 - Docker workflow: [docs/DOCKER.md](DOCKER.md)
 - Code layout and module boundaries: [docs/CODE_LAYOUT.md](CODE_LAYOUT.md)
 
-## v0.3 pre-release
-- v0.3 pre-release notes and compliance checklist: [v0.3 release notes](v0.3-release-notes.md)
+## v0.3.1 release notes
+- v0.3.1 release notes and compliance checklist: [v0.3.1 release notes](v0.3.1-release-notes.md)
 - Changelog: [CHANGELOG.md](../CHANGELOG.md)
 
-If you are using the latest stable release, start with the stable docs above. If you are working on the in-progress v0.3 line, start with the release notes page and checklist.
+If you are using the latest stable release v0.3.1, start with the stable docs above. If you are working through the release notes and checklist, start with the v0.3.1 release notes page.
 
 ## Roadmaps
 - Status update automation plan: [docs/status_update_automation_plan.md](status_update_automation_plan.md)
