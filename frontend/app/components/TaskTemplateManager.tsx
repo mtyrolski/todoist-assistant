@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type TemplateNode = {
   content: string;
@@ -176,7 +176,7 @@ export function TaskTemplateManager() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async (selectFirst = true) => {
     try {
       setLoadingList(true);
       setError(null);
@@ -184,8 +184,8 @@ export function TaskTemplateManager() {
       const payload = (await res.json()) as TemplatesResponse;
       if (!res.ok) throw new Error("Failed to load templates");
       setTemplates(payload.templates);
-      if (!selected && !creating && payload.templates.length) {
-        setSelected(payload.templates[0]);
+      if (selectFirst && payload.templates.length) {
+        setSelected((current) => current ?? payload.templates[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load templates");
@@ -193,9 +193,9 @@ export function TaskTemplateManager() {
     } finally {
       setLoadingList(false);
     }
-  };
+  }, []);
 
-  const loadTemplateDetail = async (category: string, name: string) => {
+  const loadTemplateDetail = useCallback(async (category: string, name: string) => {
     try {
       setLoadingEditor(true);
       setError(null);
@@ -213,17 +213,16 @@ export function TaskTemplateManager() {
     } finally {
       setLoadingEditor(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadTemplates();
-  }, []);
+  }, [loadTemplates]);
 
   useEffect(() => {
     if (!selected) return;
     loadTemplateDetail(selected.category, selected.name);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.category, selected?.name]);
+  }, [selected, loadTemplateDetail]);
 
   const handleNewTemplate = () => {
     setCreating(true);
@@ -261,7 +260,7 @@ export function TaskTemplateManager() {
         const payload = (await res.json()) as { detail?: string };
         if (!res.ok) throw new Error(payload.detail ?? "Failed to create template");
         setCreating(false);
-        await loadTemplates();
+        await loadTemplates(false);
         setSelected({
           category: safeCategory,
           name: safeName,
