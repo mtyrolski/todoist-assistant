@@ -986,6 +986,169 @@ def test_admin_task_ingest_create_uses_explicit_tasks_payload(monkeypatch) -> No
     assert captured["tasks"] == [{"content": "Top level", "children": [{"content": "Child"}]}]
 
 
+def test_admin_status_update_projects_returns_sorted_projects(monkeypatch) -> None:
+    monkeypatch.setattr(
+        web_api,
+        "load_status_update_projects",
+        lambda dbio: [
+            {"id": "p1", "name": "Alpha", "label": "Work / Alpha", "parentId": "root"},
+            {"id": "p2", "name": "Inbox", "label": "Inbox", "parentId": None},
+        ],
+    )
+    monkeypatch.setattr(web_api._state, "db", object())
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/status_update/projects")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["projects"][0]["label"] == "Work / Alpha"
+    assert payload["projects"][1]["label"] == "Inbox"
+
+
+def test_admin_status_update_generate_builds_report_and_validates_input(monkeypatch) -> None:
+    async def _noop_ensure_state(*, refresh: bool, demo_mode: bool | None = None) -> None:
+        _ = (refresh, demo_mode)
+        return None
+
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+
+    projects = [
+        make_project(project_id="root-a", name="Alpha"),
+        make_project(project_id="child-a", name="Alpha Child", parent_id="root-a"),
+        make_project(project_id="other", name="Other"),
+    ]
+
+    class _FakeDatabase:
+        def fetch_projects(self, include_tasks: bool = False):
+            _ = include_tasks
+            return list(projects)
+
+        def fetch_archived_projects(self):
+            return []
+
+        def fetch_task_comments(self, task_id: str):
+            comments_by_task = {
+                "task-1": [
+                    {
+                        "id": "c1",
+                        "content": "Shared the launch notes with the team",
+                        "posted_at": "2025-01-02T12:00:00Z",
+                    }
+                ],
+                "task-2": [
+                    {
+                        "id": "c2",
+                        "content": "Closed follow-up actions with QA",
+                        "posted_at": "2025-01-03T12:00:00Z",
+                    }
+                ],
+            }
+            return comments_by_task.get(task_id, [])
+
+    monkeypatch.setattr(web_api._state, "db", _FakeDatabase())
+    monkeypatch.setattr(web_api._state, "df_activity", None)
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2025-01-02T10:00:00",
+                "id": "e1",
+                "title": "Launch notes",
+                "type": "completed",
+                "parent_project_id": "root-a",
+                "parent_project_name": "Alpha",
+                "root_project_id": "root-a",
+                "root_project_name": "Alpha",
+                "task_id": "task-1",
+            },
+            {
+                "date": "2025-01-03T10:00:00",
+                "id": "e2",
+                "title": "Draft follow-up",
+                "type": "completed",
+                "parent_project_id": "child-a",
+                "parent_project_name": "Alpha Child",
+                "root_project_id": "root-a",
+                "root_project_name": "Alpha",
+                "task_id": "task-2",
+            },
+            {
+                "date": "2025-01-04T10:00:00",
+                "id": "e3",
+                "title": "Ignored task",
+                "type": "completed",
+                "parent_project_id": "other",
+                "parent_project_name": "Other",
+                "root_project_id": "other",
+                "root_project_name": "Other",
+                "task_id": "task-3",
+            },
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    activity_df = df.set_index("date")
+    monkeypatch.setattr("todoist.status_update.load_activity_data", lambda db: activity_df)
+
+    client = TestClient(web_api.app)
+    res = client.post(
+        "/api/admin/status_update/generate",
+        json={
+            "projectIds": ["root-a"],
+            "beg": "2025-01-01",
+            "end": "2025-01-05",
+            "syncLabel": "Weekly sync",
+            "preset": "weekly",
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["syncLabel"] == "Weekly sync"
+    assert payload["range"] == {
+        "beg": "2025-01-01T00:00:00",
+        "end": "2025-01-06T00:00:00",
+    }
+    assert payload["selection"]["syncLabel"] == "Weekly sync"
+    assert payload["selection"]["preset"] == "weekly"
+    assert payload["selection"]["projectIds"] == ["root-a"]
+    assert payload["selection"]["requestedProjectIds"] == ["root-a"]
+    assert payload["selection"]["requestedProjects"][0]["label"] == "Alpha"
+    assert payload["selection"]["expandedProjectIds"] == ["root-a", "child-a"]
+    assert payload["selection"]["expandedProjects"][1]["label"] == "Alpha / Alpha Child"
+    assert payload["selectedProjects"][0]["label"] == "Alpha"
+    assert payload["summary"] == {
+        "selectedProjectCount": 1,
+        "expandedProjectCount": 2,
+        "completedEventCount": 2,
+        "completedTaskCount": 2,
+        "commentedTaskCount": 2,
+        "commentCount": 2,
+    }
+    assert payload["summaryText"] == "Completed 2 tasks across 2 projects, grounded by 2 comments."
+    assert payload["stats"] == {
+        "completedCount": 2,
+        "commentCount": 2,
+        "projectCount": 2,
+        "activityCount": 2,
+    }
+    assert payload["completedTasks"][0]["content"] == "Launch notes"
+    assert payload["completedTasks"][0]["comments"][0]["content"] == "Shared the launch notes with the team"
+    assert "Weekly sync" in payload["markdown"]
+    assert "Alpha Child" in payload["markdown"]
+
+    invalid = client.post(
+        "/api/admin/status_update/generate",
+        json={"projectIds": [], "beg": "2025-01-01", "end": "2025-01-05"},
+    )
+    assert invalid.status_code == 400
+
+    reversed_range = client.post(
+        "/api/admin/status_update/generate",
+        json={"projectIds": ["root-a"], "beg": "2025-01-05", "end": "2025-01-01"},
+    )
+    assert reversed_range.status_code == 400
+
+
 def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
