@@ -1,6 +1,8 @@
 import datetime as dt
 from typing import cast
 
+import pytest
+
 import todoist.database.dataframe as dataframe_module
 from todoist.database.base import Database
 from todoist.types import Event, EventEntry, Project, ProjectEntry
@@ -189,3 +191,50 @@ def test_load_activity_data_keeps_original_root_id_for_ambiguous_adjusted_target
     assert len(df) == 1
     assert df.iloc[0]["root_project_name"] == "backlog"
     assert df.iloc[0]["root_project_id"] == "old-project"
+
+
+def test_get_adjusting_mapping_uses_env_personal_dir_and_safe_literals(
+    monkeypatch, tmp_path
+) -> None:
+    personal_dir = tmp_path / "personal"
+    personal_dir.mkdir()
+    adjustment_file = personal_dir / "archived_root_projects.py"
+    adjustment_file.write_text(
+        dataframe_module.render_adjustments_file_content(
+            {
+                'Archived "Research"': "Academy / North Wing",
+                "Line\nBreak": 'Target "Quoted"',
+            },
+            ['Parent "One"'],
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+
+    mapping = dataframe_module.get_adjusting_mapping()
+
+    assert mapping == {
+        'Archived "Research"': "Academy / North Wing",
+        "Line\nBreak": 'Target "Quoted"',
+    }
+
+
+def test_get_adjusting_mapping_rejects_non_literal_code(
+    monkeypatch, tmp_path
+) -> None:
+    personal_dir = tmp_path / "personal"
+    personal_dir.mkdir()
+    evil_file = personal_dir / "evil.py"
+    evil_file.write_text(
+        '\n'.join(
+            [
+                'link_adjustements = {"Safe": "Target"}',
+                'raise RuntimeError("boom")',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+
+    with pytest.raises(ValueError, match="literal assignments"):
+        dataframe_module.get_adjusting_mapping("evil.py")
