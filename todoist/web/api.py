@@ -35,8 +35,14 @@ from pydantic import BaseModel, Field
 from todoist.api.client import RequestSpec, TodoistAPIClient, TimeoutSettings
 from todoist.api.endpoints import TodoistEndpoints
 from todoist.database.base import Database
-from todoist.database.dataframe import load_activity_data
-from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
+from todoist.database.dataframe import (
+    DEFAULT_ADJUSTMENTS_FILENAME,
+    load_adjustments_file,
+    load_activity_data,
+    normalize_adjustment_filename,
+    render_adjustments_file_content,
+    resolve_personal_dir,
+)
 from todoist.status_update import build_status_update_report, load_status_update_projects
 from todoist.types import Event, Project
 from todoist.dashboard.plots import (
@@ -51,7 +57,11 @@ from todoist.dashboard.plots import (
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
-from todoist.automations.gmail_tasks import GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GmailTasksAutomation
+from todoist.automations.gmail_tasks import (
+    GmailTasksAutomation,
+    resolve_gmail_credentials_path,
+    resolve_gmail_token_path,
+)
 from todoist.automations.observer import AutomationObserver
 from todoist.automations.llm_breakdown.config import (
     BASE_SYSTEM_PROMPT,
@@ -350,7 +360,7 @@ def _resolve_timezone_status() -> dict[str, Any]:
         "override": None,
         "overrideValid": True,
         "system": system_timezone,
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
     if not override:
         return payload
@@ -373,6 +383,16 @@ def _mask_api_key(value: str) -> str:
     if len(value) <= 4:
         return "••••"
     return f"••••{value[-4:]}"
+
+
+def _safe_display_path(path: Path, *, root: Path | None = None) -> str:
+    if root is not None:
+        try:
+            return str(path.relative_to(root))
+        except ValueError:
+            pass
+    name = path.name.strip()
+    return name or str(path)
 
 
 def _validate_api_token(token: str) -> tuple[bool, str | None, int | None]:
@@ -1216,7 +1236,6 @@ def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         "configured": bool(secret_key),
         "keyName": key_name,
         "model": model,
-        "secretKey": secret_key,
         "modelOptions": _llm_model_options_payload(_OPENAI_MODEL_OPTIONS, model),
     }
 
@@ -1316,7 +1335,6 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "configured": openai_settings["configured"],
             "keyName": openai_settings["keyName"],
             "model": openai_settings["model"],
-            "secretKey": openai_settings["secretKey"],
             "modelOptions": openai_settings["modelOptions"],
         },
         "triton": {
@@ -1327,7 +1345,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "modelId": triton_settings["modelId"],
             "modelOptions": triton_settings["modelOptions"],
         },
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
 
 
@@ -1385,7 +1403,7 @@ async def _load_llm_chat_model_task() -> None:
             )
         elif backend == "openai":
             openai_settings = settings["openai"]
-            secret_key = _sanitize_text(openai_settings.get("secretKey"))
+            secret_key = _sanitize_text(os.getenv("OPEN_AI_SECRET_KEY"))
             if not secret_key:
                 raise ValueError("OpenAI backend is not configured.")
             model = await asyncio.to_thread(
@@ -2264,7 +2282,8 @@ def _current_gmail_auth_session() -> _PendingGmailAuthSession | None:
 
 
 def _write_gmail_token(credentials: Credentials) -> None:
-    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    token_path = resolve_gmail_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(credentials.to_json(), encoding="utf-8")
 
 
@@ -2284,7 +2303,7 @@ def _allow_insecure_oauth_transport() -> Any:
 def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
     global _GMAIL_AUTH_SESSION
 
-    credentials_path = _REPO_ROOT / GMAIL_CREDENTIALS_FILE
+    credentials_path = resolve_gmail_credentials_path()
     if not credentials_path.exists():
         raise FileNotFoundError("gmail_credentials.json is required before connecting Gmail.")
 
@@ -2363,8 +2382,8 @@ def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
 
 
 def _gmail_automation_status() -> dict[str, Any]:
-    credentials_path = _REPO_ROOT / GMAIL_CREDENTIALS_FILE
-    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    credentials_path = resolve_gmail_credentials_path()
+    token_path = resolve_gmail_token_path()
     credentials_present = credentials_path.exists()
     token_present = token_path.exists()
     connected = False
@@ -2407,10 +2426,10 @@ def _gmail_automation_status() -> dict[str, Any]:
         "credentialsPresent": credentials_present,
         "tokenPresent": token_present,
         "connected": connected,
-        "credentialsPath": str(credentials_path),
-        "tokenPath": str(token_path),
+        "credentialsPath": _safe_display_path(credentials_path, root=_REPO_ROOT),
+        "tokenPath": _safe_display_path(token_path, root=_REPO_ROOT),
         "detail": token_detail if credentials_present else "Missing Gmail credentials file",
-        "setupDocPath": str(_REPO_ROOT / "docs" / "gmail_setup.md"),
+        "setupDocPath": _safe_display_path(_REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT),
     }
     if pending_auth is not None:
         status["pendingAuth"] = pending_auth
@@ -2602,7 +2621,7 @@ async def admin_gmail_automation_connect() -> dict[str, Any]:
 
 @app.delete("/api/admin/automations/gmail/connect", tags=["admin"])
 async def admin_gmail_automation_disconnect() -> dict[str, Any]:
-    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    token_path = resolve_gmail_token_path()
     if token_path.exists():
         token_path.unlink()
     _clear_gmail_auth_session()
@@ -2616,7 +2635,7 @@ async def admin_api_token_status() -> dict[str, Any]:
     return {
         "configured": bool(token),
         "masked": _mask_api_key(token),
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
 
 
@@ -2646,7 +2665,7 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
     return {
         "configured": True,
         "masked": _mask_api_key(token),
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
         "validated": bool(validate),
         "labelsCount": labels_count,
     }
@@ -2675,7 +2694,7 @@ async def admin_clear_api_token() -> dict[str, Any]:
     if env_path.exists():
         unset_key(str(env_path), "API_KEY")
     os.environ.pop("API_KEY", None)
-    return {"configured": False, "masked": "", "envPath": str(env_path)}
+    return {"configured": False, "masked": "", "envPath": _safe_display_path(env_path, root=_REPO_ROOT)}
 
 
 @app.get("/api/admin/timezone", tags=["admin"])
@@ -3311,81 +3330,46 @@ async def admin_read_log(
 
 
 def _available_mapping_files() -> list[str]:
-    personal_dir = _DATA_DIR / "personal"
+    personal_dir = resolve_personal_dir()
     if not personal_dir.exists():
-        return ["archived_root_projects.py"]
+        return [DEFAULT_ADJUSTMENTS_FILENAME]
 
     mapping_files: list[str] = []
-    for file in personal_dir.glob("*.py"):
-        if file.name.startswith("__"):
+    for file in sorted(personal_dir.iterdir()):
+        if not file.is_file() or file.name.startswith("__") or file.suffix != ".py":
             continue
         try:
-            content = file.read_text(encoding="utf-8")
-        except OSError:
+            normalized = normalize_adjustment_filename(file.name)
+            load_adjustments_file(file)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Skipping invalid project adjustment file {}: {}", file, exc)
             continue
-        if ADJUSTMENTS_VARIABLE_NAME in content:
-            mapping_files.append(file.name)
+        mapping_files.append(normalized)
 
-    return sorted(mapping_files) if mapping_files else ["archived_root_projects.py"]
-
-
-def _generate_adjustment_file_content(
-    mappings: dict[str, str], archived_parents: list[str] | None = None
-) -> str:
-    archived_parents = archived_parents or []
-    content = [
-        "# Adjustments for archived root projects",
-        "# This file was generated by the web dashboard admin UI",
-        "",
-        f"{ADJUSTMENTS_VARIABLE_NAME} = {{",
-    ]
-    for archived_name, active_name in sorted(mappings.items()):
-        content.append(f'    "{archived_name}": "{active_name}",')
-    content.append("}")
-    content.append("")
-    content.append("# Archived projects allowed as parent/root targets in the UI")
-    content.append("archived_parent_projects = [")
-    for name in sorted(set(archived_parents)):
-        content.append(f'    "{name}",')
-    content.append("]")
-    content.append("")
-    return "\n".join(content)
+    return sorted(mapping_files) if mapping_files else [DEFAULT_ADJUSTMENTS_FILENAME]
 
 
 def _load_mapping_file(filename: str) -> tuple[dict[str, str], list[str]]:
-    personal_dir = _DATA_DIR / "personal"
+    safe_filename = normalize_adjustment_filename(filename)
+    personal_dir = resolve_personal_dir()
     personal_dir.mkdir(parents=True, exist_ok=True)
-    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
+    target = personal_dir / safe_filename
     if not target.exists():
-        target.write_text(_generate_adjustment_file_content({}, []), encoding="utf-8")
+        target.write_text(render_adjustments_file_content({}, []), encoding="utf-8")
         return {}, []
-
-    # Match dataframe.py behavior (exec python file) so the UI shows the effective mapping.
-    import importlib.util
-    import sys
-
-    module_name = "dashboard_adjustments"
-    spec = importlib.util.spec_from_file_location(module_name, target)
-    if spec is None or spec.loader is None:
-        return {}, []
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    mapping = getattr(module, ADJUSTMENTS_VARIABLE_NAME, {})
-    archived_parents = getattr(module, "archived_parent_projects", [])
-    if not isinstance(archived_parents, list) or not all(
-        isinstance(name, str) for name in archived_parents
-    ):
-        archived_parents = []
-    return (mapping if isinstance(mapping, dict) else {}), archived_parents
+    return load_adjustments_file(target)
 
 
 def _save_mapping_file(
     filename: str, mappings: dict[str, str], archived_parents: list[str]
 ) -> None:
-    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
+    safe_filename = normalize_adjustment_filename(filename)
+    personal_dir = resolve_personal_dir()
+    personal_dir.mkdir(parents=True, exist_ok=True)
+    target = personal_dir / safe_filename
     target.write_text(
-        _generate_adjustment_file_content(mappings, archived_parents), encoding="utf-8"
+        render_adjustments_file_content(mappings, archived_parents),
+        encoding="utf-8",
     )
 
 
@@ -3395,7 +3379,7 @@ def _load_projects_for_adjustments_sync(
     if not refresh and _state.db is not None:
         dbio = _state.db
     else:
-        dbio = Database(".env")
+        dbio = Database(str(_resolve_env_path()))
     if dbio is None:
         raise RuntimeError("Database unavailable")
     active_projects = dbio.fetch_projects(include_tasks=False)
@@ -3823,7 +3807,7 @@ def _task_ingest_rewrite_with_llm_sync(
         settings = _resolve_llm_chat_settings()
         backend = settings["backend"]
         if backend == "openai" and settings["openai"]["configured"]:
-            secret_key = _task_ingest_trim_text(settings["openai"].get("secretKey"))
+            secret_key = _task_ingest_trim_text(os.getenv("OPEN_AI_SECRET_KEY"))
             if secret_key:
                 model = OpenAIResponsesChatModel(
                     OpenAIChatConfig(
@@ -4186,8 +4170,11 @@ async def admin_project_adjustments(
 ) -> dict[str, Any]:
     """Return mapping files, current mapping content, and project lists for building adjustments."""
 
-    selected = file or _available_mapping_files()[0]
-    mappings, archived_parents = _load_mapping_file(selected)
+    try:
+        selected = normalize_adjustment_filename(file) if file else _available_mapping_files()[0]
+        mappings, archived_parents = _load_mapping_file(selected)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     warning: str | None = None
     try:
         (
@@ -4261,13 +4248,17 @@ async def admin_save_project_adjustments(
             status_code=400, detail="archivedParents must be a list of strings"
         )
 
-    async with _ADMIN_LOCK:
-        _save_mapping_file(file, mappings, archived_parents)
-        if refresh:
-            await _ensure_state(refresh=True)
+    try:
+        safe_filename = normalize_adjustment_filename(file)
+        async with _ADMIN_LOCK:
+            _save_mapping_file(safe_filename, mappings, archived_parents)
+            if refresh:
+                await _ensure_state(refresh=True)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "saved": True,
-        "file": file,
+        "file": safe_filename,
         "count": len(mappings),
         "archivedParents": len(archived_parents),
     }

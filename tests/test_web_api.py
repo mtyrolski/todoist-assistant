@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from tests.factories import make_project, make_project_entry, make_task
 import todoist
+import todoist.database.dataframe as dataframe_module
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
@@ -572,6 +573,52 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) 
     assert payload["unmappedSourceProjects"] == ["Archived Root", "Inbox"]
 
 
+def test_admin_project_adjustments_rejects_path_traversal(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(tmp_path / "personal"))
+    client = TestClient(web_api.app)
+
+    invalid = client.get("/api/admin/project_adjustments", params={"file": "../evil.py"})
+    assert invalid.status_code == 400
+    assert "path separators" in invalid.json()["detail"]
+
+    saved = client.put(
+        "/api/admin/project_adjustments",
+        params={"file": "../evil.py"},
+        json={"mappings": {}},
+    )
+    assert saved.status_code == 400
+    assert "path separators" in saved.json()["detail"]
+
+
+def test_admin_save_project_adjustments_roundtrips_safe_literals(
+    monkeypatch, tmp_path
+) -> None:
+    personal_dir = tmp_path / "personal"
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+    client = TestClient(web_api.app)
+
+    response = client.put(
+        "/api/admin/project_adjustments",
+        params={"file": "adj_private.py"},
+        json={
+            "mappings": {'Archived "Research"': "Academy / North Wing"},
+            "archivedParents": ['Parent "One"'],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["file"] == "adj_private.py"
+
+    saved = (personal_dir / "adj_private.py").read_text(encoding="utf-8")
+    assert "link_adjustements =" in saved
+    assert "archived_parent_projects =" in saved
+
+    loaded_mapping, archived_parents = dataframe_module.load_adjustments_file(
+        personal_dir / "adj_private.py"
+    )
+    assert loaded_mapping == {'Archived "Research"': "Academy / North Wing"}
+    assert archived_parents == ['Parent "One"']
+
+
 def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
@@ -668,10 +715,10 @@ def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
                     "credentialsPresent": False,
                     "tokenPresent": False,
                     "connected": False,
-                    "credentialsPath": "/tmp/gmail_credentials.json",
-                    "tokenPath": "/tmp/gmail_token.json",
+                    "credentialsPath": "gmail_credentials.json",
+                    "tokenPath": "gmail_token.json",
                     "detail": "Missing Gmail credentials file",
-                    "setupDocPath": "/tmp/docs/gmail_setup.md",
+                    "setupDocPath": "docs/gmail_setup.md",
                 },
             }
         ],
@@ -808,6 +855,7 @@ def test_set_automation_enabled_returns_false_for_unknown_key(monkeypatch, tmp_p
 
 def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
 
     client = TestClient(web_api.app)
     res = client.post("/api/admin/automations/gmail/connect")
@@ -818,7 +866,8 @@ def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None
 
 def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    (tmp_path / web_api.GMAIL_CREDENTIALS_FILE).write_text("{}", encoding="utf-8")
+    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         web_api,
         "_start_gmail_manual_auth_session",
@@ -836,10 +885,10 @@ def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
             "credentialsPresent": True,
             "tokenPresent": False,
             "connected": False,
-            "credentialsPath": str(tmp_path / web_api.GMAIL_CREDENTIALS_FILE),
-            "tokenPath": str(tmp_path / web_api.GMAIL_TOKEN_FILE),
+            "credentialsPath": "gmail_credentials.json",
+            "tokenPath": "gmail_token.json",
             "detail": "Pending authorization",
-            "setupDocPath": str(tmp_path / "docs" / "gmail_setup.md"),
+            "setupDocPath": "docs/gmail_setup.md",
             "pendingAuth": {
                 "active": True,
                 "authUrl": "http://127.0.0.1:9999/auth",
@@ -861,12 +910,26 @@ def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
     assert payload["pendingAuth"]["active"] is True
 
 
+def test_gmail_automation_status_uses_safe_path_labels(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "gmail_token.json").write_text("{}", encoding="utf-8")
+
+    payload = web_api._gmail_automation_status()
+
+    assert payload["credentialsPath"] == "gmail_credentials.json"
+    assert payload["tokenPath"] == "gmail_token.json"
+    assert payload["setupDocPath"] == "docs/gmail_setup.md"
+
+
 def test_start_gmail_manual_auth_session_enables_insecure_transport_temporarily(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
     monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
-    (tmp_path / web_api.GMAIL_CREDENTIALS_FILE).write_text("{}", encoding="utf-8")
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
 
     flow = Mock()
 
@@ -1386,6 +1449,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     assert payload["timezone"] == "UTC"
     assert payload["source"] == "system"
     assert payload["override"] is None
+    assert payload["envPath"] == ".env"
     assert payload["overrideValid"] is True
 
 
@@ -1407,6 +1471,7 @@ def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
     assert set_payload["source"] == "env"
     assert set_payload["override"] == "Europe/Warsaw"
     assert set_payload["overrideValid"] is True
+    assert set_payload["envPath"] == ".env"
     assert web_api.os.getenv(str(web_api.EnvVar.TIMEZONE)) == "Europe/Warsaw"
 
     env_path = tmp_path / ".env"
@@ -1422,6 +1487,7 @@ def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
     assert clear_payload["timezone"] == "UTC"
     assert clear_payload["source"] == "system"
     assert clear_payload["override"] is None
+    assert clear_payload["envPath"] == ".env"
     assert web_api.os.getenv(str(web_api.EnvVar.TIMEZONE)) is None
 
     env_text_after_clear = env_path.read_text(encoding="utf-8")
@@ -1441,6 +1507,21 @@ def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
     assert response.status_code == 400
     payload = response.json()
     assert "Invalid timezone" in payload["detail"]
+
+
+def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path) -> None:
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setenv("API_KEY", "test_api_key_12345")
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/admin/api_token")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["configured"] is True
+    assert payload["masked"] == "••••2345"
+    assert payload["envPath"] == ".env"
 
 
 def test_openapi_includes_app_version() -> None:
@@ -1569,6 +1650,9 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("OPEN_AI_SECRET_KEY", raising=False)
     monkeypatch.delenv("OPEN_AI_KEY_NAME", raising=False)
     monkeypatch.delenv("OPEN_AI_MODEL", raising=False)
+    monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
+    monkeypatch.delenv(str(web_api.EnvVar.AGENT_DEVICE), raising=False)
+    monkeypatch.delenv(str(web_api.EnvVar.AGENT_MODEL_ID), raising=False)
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: tmp_path / ".env")
 
     # Mock the model status to be disabled
@@ -1647,6 +1731,39 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-1.5B-Instruct'") >= 0
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
+
+
+def test_llm_chat_settings_response_does_not_expose_secret_key(
+    monkeypatch, tmp_path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "OPEN_AI_SECRET_KEY='sk-test'",
+                "OPEN_AI_KEY_NAME='primary-key'",
+                "OPEN_AI_MODEL='gpt-5-mini'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPEN_AI_SECRET_KEY", "sk-test")
+    monkeypatch.setenv("OPEN_AI_KEY_NAME", "primary-key")
+    monkeypatch.setenv("OPEN_AI_MODEL", "gpt-5-mini")
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
+    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/llm_chat/settings")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["openai"]["configured"] is True
+    assert payload["openai"]["keyName"] == "primary-key"
+    assert payload["openai"]["model"] == "gpt-5-mini"
+    assert "secretKey" not in payload["openai"]
+    assert payload["envPath"] == ".env"
 
 
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
@@ -1748,6 +1865,8 @@ def test_llm_chat_update_settings_supports_openai_backend(
     assert payload["openai"]["configured"] is True
     assert payload["openai"]["keyName"] == "primary-key"
     assert payload["openai"]["model"] == "gpt-5-mini"
+    assert "secretKey" not in payload["openai"]
+    assert payload["envPath"] == ".env"
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
 

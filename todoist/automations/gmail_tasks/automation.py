@@ -4,6 +4,7 @@ import contextlib
 from datetime import date
 import os
 import os.path
+from pathlib import Path
 from typing import cast
 
 from google.auth.transport.requests import Request
@@ -43,6 +44,7 @@ from .helpers import (
     gmail_message_id_marker,
     normalize_gmail_headers,
 )
+from todoist.env import EnvVar
 
 GMAIL_CREDENTIALS_FILE = 'gmail_credentials.json'
 GMAIL_TOKEN_FILE = 'gmail_token.json'
@@ -60,6 +62,21 @@ def _allow_insecure_oauth_transport():
             os.environ.pop(_OAUTHLIB_INSECURE_TRANSPORT, None)
         else:
             os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = previous
+
+
+def _gmail_secret_dir() -> Path:
+    override = os.getenv(str(EnvVar.CONFIG_DIR))
+    if override:
+        return Path(override).expanduser().resolve()
+    return (Path.cwd() / "configs").resolve()
+
+
+def resolve_gmail_credentials_path() -> Path:
+    return _gmail_secret_dir() / GMAIL_CREDENTIALS_FILE
+
+
+def resolve_gmail_token_path() -> Path:
+    return _gmail_secret_dir() / GMAIL_TOKEN_FILE
 
 
 class GmailTasksAutomation(Automation):
@@ -124,12 +141,14 @@ class GmailTasksAutomation(Automation):
     def _authenticate_gmail(self) -> GmailService | None:
         """Authenticate with Gmail API using stored credentials."""
         creds: GmailAuthCredentials | None = None
+        token_path = resolve_gmail_token_path()
+        credentials_path = resolve_gmail_credentials_path()
 
         # Check for existing token
-        if os.path.exists(GMAIL_TOKEN_FILE):
+        if token_path.exists():
             creds = cast(
                 GmailAuthCredentials,
-                Credentials.from_authorized_user_file(GMAIL_TOKEN_FILE, self.SCOPES),
+                Credentials.from_authorized_user_file(str(token_path), self.SCOPES),
             )
 
         # If there are no (valid) credentials available, let the user log in
@@ -148,18 +167,19 @@ class GmailTasksAutomation(Automation):
                     )
                     return None
 
-                if os.path.exists(GMAIL_CREDENTIALS_FILE):
-                    flow = InstalledAppFlow.from_client_secrets_file(GMAIL_CREDENTIALS_FILE, self.SCOPES)
+                if credentials_path.exists():
+                    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), self.SCOPES)
                     with _allow_insecure_oauth_transport():
                         creds = cast(GmailAuthCredentials, flow.run_local_server(port=0))
                 else:
-                    logger.error(f"Gmail credentials file {GMAIL_CREDENTIALS_FILE} not found. "
+                    logger.error(f"Gmail credentials file {credentials_path} not found. "
                                "Please follow the setup instructions to configure Gmail API access.")
                     return None
 
             # Save the credentials for the next run
             assert creds is not None
-            with open(GMAIL_TOKEN_FILE, 'w') as token:
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(token_path, 'w', encoding='utf-8') as token:
                 token.write(creds.to_json())
 
         return cast(GmailService, build('gmail', 'v1', credentials=creds))
