@@ -18,6 +18,7 @@ scripts/*
 !scripts/check_versions.py
 !scripts/check_explicit_any.py
 !scripts/dashboard_stack.sh
+!scripts/status.py
 !scripts/macos/
 !scripts/macos/**
 storage
@@ -30,6 +31,8 @@ personal/*.py
 credentials.json
 gmail_credentials.json
 gmail_token.json
+configs/gmail_credentials.json
+configs/gmail_token.json
 token.json
 *.pem
 *.p12

@@ -3,7 +3,9 @@ from unittest.mock import patch
 import torch
 from pydantic import BaseModel
 
+from todoist.env import EnvVar
 from todoist.llm import LocalChatConfig, MessageRole, PromptToken, TransformersMistral3ChatModel
+from todoist.llm.usage import load_llm_usage_summary
 
 
 class FakeTokenizer:
@@ -65,7 +67,8 @@ class DummySchema(BaseModel):
     value: str
 
 
-def test_local_llm_initializes_and_generates():
+def test_local_llm_initializes_and_generates(monkeypatch, tmp_path):
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     cfg = LocalChatConfig(model_id="fake/model", max_new_tokens=4)
     with patch("todoist.llm.local_llm.AutoTokenizer", new=FakeTokenizer), \
          patch("todoist.llm.local_llm.AutoConfig.from_pretrained", new=lambda *_a, **_k: FakeConfig()), \
@@ -74,3 +77,9 @@ def test_local_llm_initializes_and_generates():
         assert llm.chat([{"role": MessageRole.USER, "content": "hi"}]) == "OK"
         parsed = llm.structured_chat([{"role": MessageRole.USER, "content": "hi"}], DummySchema)
         assert parsed.value == "ok"
+    usage = load_llm_usage_summary(selected_backend="transformers_local", selected_model_id="fake/model")
+    assert usage["totals"]["inferenceCount"] == 2
+    assert usage["totals"]["chatCount"] == 1
+    assert usage["totals"]["structuredCount"] == 1
+    assert usage["totals"]["inputTokens"] == 6
+    assert usage["totals"]["outputTokens"] == 2

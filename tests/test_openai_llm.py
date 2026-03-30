@@ -6,7 +6,9 @@ import pytest
 
 import httpx
 
+from todoist.env import EnvVar
 from todoist.automations.llm_breakdown.models import TaskBreakdown
+from todoist.llm.usage import load_llm_usage_summary
 from todoist.llm.openai_llm import (
     DEFAULT_OPENAI_MODEL,
     OpenAIChatConfig,
@@ -15,12 +17,17 @@ from todoist.llm.openai_llm import (
 )
 
 
-def test_gpt5_payload_omits_sampling_controls() -> None:
+def test_gpt5_payload_omits_sampling_controls(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     captured_payload: dict[str, object] = {}
 
     def _handler(request: httpx.Request) -> httpx.Response:
         captured_payload.update(json.loads(request.content))
-        return httpx.Response(200, json={"output_text": "ok"}, request=request)
+        return httpx.Response(
+            200,
+            json={"output_text": "ok", "usage": {"input_tokens": 11, "output_tokens": 7}},
+            request=request,
+        )
 
     model = OpenAIResponsesChatModel(OpenAIChatConfig(api_key="sk-test"))
     setattr(
@@ -39,6 +46,10 @@ def test_gpt5_payload_omits_sampling_controls() -> None:
     assert captured_payload["model"] == DEFAULT_OPENAI_MODEL
     assert "temperature" not in captured_payload
     assert "top_p" not in captured_payload
+    usage = load_llm_usage_summary(selected_backend="openai", selected_model_id=DEFAULT_OPENAI_MODEL)
+    assert usage["totals"]["inferenceCount"] == 1
+    assert usage["totals"]["inputTokens"] == 11
+    assert usage["totals"]["outputTokens"] == 7
 
 
 def test_non_gpt5_payload_keeps_sampling_controls() -> None:

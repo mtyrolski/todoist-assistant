@@ -1,24 +1,19 @@
 "use client";
 
 import { HabitTrackerCard } from "./HabitTrackerCard";
+import { HabitTrackerPlots } from "./HabitTrackerPlots";
+import { InfoTip } from "./InfoTip";
 import { LoadingBar } from "./LoadingBar";
 import { PageHeader } from "./PageHeader";
-import { PlotCard } from "./PlotCard";
 import type { StatusPill } from "./StatusPills";
 import { StatusPills } from "./StatusPills";
+import { HABIT_TRACKER_LAB_HELP } from "../lib/dashboardCopy";
 import { useApiHealth, useDashboardHome } from "../lib/dashboardHooks";
-
-function formatReliability(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "N/A";
-  return `${value.toFixed(2)}%`;
-}
 
 export function ExperimentalHabitTrackerView() {
   const { health, loadingHealth } = useApiHealth();
-  const { dashboard, loadingDashboard, dashboardError, retrying, refresh } =
-    useDashboardHome();
+  const { dashboard, loadingDashboard, dashboardError, retrying, refresh } = useDashboardHome();
   const habitTracker = dashboard?.habitTracker ?? null;
-  const topHabits = habitTracker?.items.slice(0, 5) ?? [];
 
   const statusItems: StatusPill[] = [
     {
@@ -53,19 +48,22 @@ export function ExperimentalHabitTrackerView() {
         <StatusPills items={statusItems} />
       </PageHeader>
 
-      <section className="experimentToolbar card">
-        <div>
-          <p className="eyebrow">Lab controls</p>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            This page reads the same habit-tracker payload as the main app, but renders it with more exploratory
-            components.
-          </p>
-        </div>
-        <div className="actionRow">
-          <button className="button buttonSmall" type="button" onClick={refresh} disabled={loadingDashboard}>
-            {loadingDashboard ? "Refreshing..." : retrying ? "Retrying..." : "Refresh lab"}
-          </button>
-        </div>
+      <section className="card">
+        <header className="cardHeader">
+          <div className="cardTitleRow">
+            <h2>About this lab</h2>
+            <InfoTip label="About Habit Tracker Lab" content={HABIT_TRACKER_LAB_HELP} />
+          </div>
+          <div className="actionRow">
+            <button className="button buttonSmall" type="button" onClick={refresh} disabled={loadingDashboard}>
+              {loadingDashboard ? "Refreshing..." : retrying ? "Retrying..." : "Refresh lab"}
+            </button>
+          </div>
+        </header>
+        <p className="muted" style={{ margin: 0 }}>
+          The overview comes first, then a single rate-focused plots section, then a roster and notes that stay readable
+          without turning the page into a chart dump.
+        </p>
       </section>
 
       {dashboardError ? (
@@ -74,80 +72,12 @@ export function ExperimentalHabitTrackerView() {
         </section>
       ) : null}
 
-      <section className="experimentHero">
-        <article className="experimentMetricCard">
-          <p className="eyebrow">Tracked habits</p>
-          <h2>{habitTracker?.trackedCount ?? 0}</h2>
-          <p className="muted">Tasks labeled <code>@track_habit</code> that currently participate in the weekly rollup.</p>
-        </article>
-        <article className="experimentMetricCard">
-          <p className="eyebrow">Weekly completions</p>
-          <h2>{habitTracker?.totals.weeklyCompleted ?? 0}</h2>
-          <p className="muted">Completions recorded in the most recent finished week.</p>
-        </article>
-        <article className="experimentMetricCard">
-          <p className="eyebrow">Weekly reschedules</p>
-          <h2>{habitTracker?.totals.weeklyRescheduled ?? 0}</h2>
-          <p className="muted">Reschedules recorded for tracked habits over the same weekly window.</p>
-        </article>
-      </section>
+      <HabitTrackerPlots habitTracker={habitTracker} />
 
       <section className="grid2">
         <HabitTrackerCard habitTracker={habitTracker} />
-        <PlotCard title="Habit trend" figure={habitTracker?.figure} height={360} />
-      </section>
 
-      <section className="grid2">
         <section className="card">
-          <header className="cardHeader">
-            <div className="cardTitleRow">
-              <h2>Top habit signals</h2>
-            </div>
-          </header>
-          {topHabits.length ? (
-            <div className="experimentSignalList">
-              {topHabits.map((item) => {
-                const total = Math.max(1, item.weeklyCompleted + item.weeklyRescheduled);
-                const completedWidth = Math.round((item.weeklyCompleted / total) * 100);
-                const rescheduledWidth = 100 - completedWidth;
-                return (
-                  <div key={item.taskId} className="experimentSignalRow">
-                    <div className="habitRowMain">
-                      <div className="habitTitle">
-                        <span className="swatch" style={{ background: item.color }} />
-                        <span className="truncate">{item.name}</span>
-                      </div>
-                      <span className="pill pill-neutral">{formatReliability(item.reliability)}</span>
-                    </div>
-                    <div className="experimentSignalBar">
-                      <div
-                        className="experimentSignalBarGood"
-                        style={{ width: `${completedWidth}%` }}
-                        title={`Completed ${item.weeklyCompleted}`}
-                      />
-                      <div
-                        className="experimentSignalBarWarn"
-                        style={{ width: `${rescheduledWidth}%` }}
-                        title={`Rescheduled ${item.weeklyRescheduled}`}
-                      />
-                    </div>
-                    <div className="habitStats">
-                      <span className="pill pill-good">Completed {item.weeklyCompleted}</span>
-                      <span className="pill pill-warn">Rescheduled {item.weeklyRescheduled}</span>
-                      <span className="pill pill-neutral">{item.projectName}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="muted">
-              Add the <code>@track_habit</code> label to recurring tasks to light up this experimental view.
-            </p>
-          )}
-        </section>
-
-        <section className="card experimentNarrative">
           <header className="cardHeader">
             <div className="cardTitleRow">
               <h2>Lab notes</h2>
@@ -171,8 +101,8 @@ export function ExperimentalHabitTrackerView() {
             <div>
               <p className="eyebrow">Why this page is separate</p>
               <p className="muted">
-                The overview dashboard stays focused on broad activity. This lab is intentionally narrower and gives us a
-                place to try richer habit-specific components without crowding the home page.
+                The overview dashboard stays focused on broad activity. This lab is intentionally narrower and leaves room
+                for richer habit-specific components without crowding the home page.
               </p>
             </div>
           </div>

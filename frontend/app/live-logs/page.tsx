@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { LogInspector } from "../components/LogInspector";
 import { PageHeader } from "../components/PageHeader";
 
@@ -11,7 +12,9 @@ export default function LiveLogsPage() {
         title="Live Log Inspector"
         lede="Read-only inspection for backend, frontend, Triton, observer, and automation runtime logs."
       />
-      <LogInspector />
+      <Suspense fallback={<div className="card">Loading runtime logs…</div>}>
+        <LogInspector />
+      </Suspense>
     </>
   );
 }

@@ -66,6 +66,19 @@ def read_uv_lock_version(path: Path) -> str | None:
     return None
 
 
+def read_formula_version(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("version "):
+            continue
+        parts = stripped.split('"')
+        if len(parts) >= 2 and parts[1].strip():
+            return parts[1].strip()
+    return None
+
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     root_pyproject = repo_root / "pyproject.toml"
@@ -110,6 +123,15 @@ def main() -> int:
         mismatches.append("uv.lock is missing todoist-assistant version")
     elif uv_lock_version and uv_lock_version != version:
         mismatches.append(f"uv.lock todoist-assistant version {uv_lock_version} != pyproject {version}")
+
+    formula = repo_root / "Formula" / "todoist-assistant.rb"
+    formula_version = read_formula_version(formula)
+    if formula.exists() and formula_version is None:
+        mismatches.append("Formula/todoist-assistant.rb is missing version")
+    elif formula_version and formula_version != version:
+        mismatches.append(
+            f"Formula/todoist-assistant.rb version {formula_version} != pyproject {version}"
+        )
 
     if mismatches:
         print("Version mismatch detected:")

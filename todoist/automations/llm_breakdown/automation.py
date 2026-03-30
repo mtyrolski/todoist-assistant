@@ -198,14 +198,19 @@ class LLMBreakdown(Automation):
         return backend.lower(), values
 
     def _build_transformers_llm(self, values: Mapping[str, Any]) -> TransformersMistral3ChatModel:
+        updates: dict[str, Any] = {}
         device = _sanitize_text(
             os.getenv(str(EnvVar.AGENT_DEVICE)) or values.get(str(EnvVar.AGENT_DEVICE))
         )
         if device:
             normalized_device = "cuda" if device.lower() == "gpu" else device.lower()
-            config = replace(self.model_config, device=cast(Any, normalized_device))
-        else:
-            config = self.model_config
+            updates["device"] = cast(Any, normalized_device)
+        model_id = _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_MODEL_ID)) or values.get(str(EnvVar.AGENT_MODEL_ID))
+        )
+        if model_id:
+            updates["model_id"] = model_id
+        config = replace(self.model_config, **updates) if updates else self.model_config
         return TransformersMistral3ChatModel(config)
 
     @staticmethod

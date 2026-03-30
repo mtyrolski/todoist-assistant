@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from .types import MessageRole
+from .usage import record_llm_usage
 
 
 DEFAULT_OPENAI_MODEL = "gpt-5-mini"
@@ -49,7 +50,7 @@ class OpenAIResponsesChatModel:
 
     def chat(self, messages: Sequence[dict[str, str]]) -> str:
         payload = self._create_payload(messages)
-        response = self._post(payload)
+        response = self._post(payload, operation="chat")
         return _extract_response_text(response)
 
     def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
@@ -57,7 +58,7 @@ class OpenAIResponsesChatModel:
             messages,
             text_format=_build_text_format(schema),
         )
-        response = self._post(payload)
+        response = self._post(payload, operation="structured_chat")
         text = _extract_response_text(response)
         parsed = json.loads(text)
         return schema.model_validate(parsed)
@@ -84,7 +85,7 @@ class OpenAIResponsesChatModel:
             payload["instructions"] = instructions
         return payload
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any], *, operation: str) -> dict[str, Any]:
         response = self._client.post(self.config.base_url, json=payload)
         try:
             response.raise_for_status()
@@ -96,6 +97,14 @@ class OpenAIResponsesChatModel:
         data = response.json()
         if not isinstance(data, dict):
             raise ValueError("OpenAI response payload is not a JSON object")
+        input_tokens, output_tokens = _extract_usage_tokens(data)
+        record_llm_usage(
+            backend="openai",
+            model_id=self.config.model,
+            operation=operation,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
         return data
 
 
@@ -204,3 +213,20 @@ def _extract_error_detail(response: httpx.Response) -> str:
             return message
     message = str(payload.get("message") or "").strip()
     return message or "No error details returned"
+
+
+def _extract_usage_tokens(payload: dict[str, Any]) -> tuple[int, int]:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return 0, 0
+    return (
+        _coerce_non_negative_int(usage.get("input_tokens") or usage.get("prompt_tokens")),
+        _coerce_non_negative_int(usage.get("output_tokens") or usage.get("completion_tokens")),
+    )
+
+
+def _coerce_non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0

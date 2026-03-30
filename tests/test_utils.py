@@ -4,6 +4,7 @@
 
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, KeysView
@@ -525,6 +526,7 @@ def test_cache_initialization_creates_expected_storages(tmp_path):
         "llm_breakdown_queue": "llm_breakdown_queue.joblib",
         "llm_chat_queue": "llm_chat_queue.joblib",
         "llm_chat_conversations": "llm_chat_conversations.joblib",
+        "llm_usage_stats": "llm_usage_stats.joblib",
     }
     for attr_name, filename in expected_files.items():
         storage = getattr(cache, attr_name)
@@ -577,6 +579,26 @@ def test_configure_runtime_logging_is_idempotent(monkeypatch):
 
     mock_remove.assert_called_once()
     assert mock_add.call_count == 1
+
+
+def test_configure_runtime_logging_isolates_default_runtime_log_under_pytest(tmp_path, monkeypatch):
+    from todoist import utils
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
+    monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
+    default_log_path = str((tmp_path / DEFAULT_CACHE_SUBDIR / "automation.log").resolve())
+
+    with (
+        patch("todoist.utils.logger.remove") as mock_remove,
+        patch("todoist.utils.logger.add") as mock_add,
+    ):
+        configure_runtime_logging(default_log_path, level="info")
+
+    mock_remove.assert_called_once()
+    isolated_log_path = mock_add.call_args_list[1].args[0]
+    assert isolated_log_path != default_log_path
+    assert isolated_log_path.startswith(str(Path(tempfile.gettempdir()) / "todoist-assistant-pytest"))
 
 
 def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):

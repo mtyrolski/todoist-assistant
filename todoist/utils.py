@@ -5,6 +5,7 @@ import random
 import os
 import shutil
 import sys
+import tempfile
 from lzma import LZMAError
 from os import getenv
 from os.path import exists, join
@@ -25,7 +26,7 @@ LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, Fil
                             OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
 DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
 MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
-MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.0"
+MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.1"
 RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "activity.joblib",
     "observer_state.joblib",
@@ -38,6 +39,7 @@ RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "llm_breakdown_queue.joblib",
     "llm_chat_queue.joblib",
     "llm_chat_conversations.joblib",
+    "llm_usage_stats.joblib",
 )
 RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
@@ -119,9 +121,30 @@ def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
     return default.upper()
 
 
+def _should_isolate_runtime_log_path_for_pytest(resolved_log_path: str | None) -> bool:
+    if resolved_log_path is None:
+        return False
+    if "pytest" not in sys.modules:
+        return False
+    if getenv(str(EnvVar.CACHE_DIR)):
+        return False
+
+    default_runtime_log = str((Path.cwd() / DEFAULT_CACHE_SUBDIR / "automation.log").resolve())
+    return resolved_log_path == default_runtime_log
+
+
+def _resolve_runtime_log_path(log_path: str | None) -> str | None:
+    resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
+    if not _should_isolate_runtime_log_path_for_pytest(resolved_log_path):
+        return resolved_log_path
+
+    isolated_root = Path(tempfile.gettempdir()) / "todoist-assistant-pytest" / str(os.getpid())
+    return str((isolated_root / "automation.log").resolve())
+
+
 def configure_runtime_logging(log_path: str | None = None, level: str | None = None) -> None:
     resolved_level = get_log_level(level or DEFAULT_LOG_LEVEL)
-    resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
+    resolved_log_path = _resolve_runtime_log_path(log_path)
     signature = (resolved_log_path, resolved_level)
     if _STATE.runtime_logging_signature == signature:
         return
@@ -341,6 +364,7 @@ class Cache:
         self.llm_breakdown_queue = LocalStorage(join(self.path, 'llm_breakdown_queue.joblib'), dict)
         self.llm_chat_queue = LocalStorage(join(self.path, 'llm_chat_queue.joblib'), list)
         self.llm_chat_conversations = LocalStorage(join(self.path, 'llm_chat_conversations.joblib'), list)
+        self.llm_usage_stats = LocalStorage(join(self.path, 'llm_usage_stats.joblib'), dict)
 
 
 class Anonymizable(ABC):

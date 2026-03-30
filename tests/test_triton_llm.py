@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from todoist.automations.llm_breakdown.models import TaskBreakdown
+from todoist.env import EnvVar
 from todoist.llm.triton_llm import (
     DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
@@ -15,6 +16,7 @@ from todoist.llm.triton_llm import (
     TritonChatConfig,
     TritonGenerateChatModel,
 )
+from todoist.llm.usage import load_llm_usage_summary
 
 
 class _FakeTokenizer:
@@ -38,7 +40,8 @@ class _LegacyFakeTokenizer:
         return "PROMPT:" + " | ".join(f"{item['role']}={item['content']}" for item in messages)
 
 
-def test_triton_chat_posts_infer_request(monkeypatch) -> None:
+def test_triton_chat_posts_infer_request(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     captured_payload: dict[str, object] = {}
     monkeypatch.setattr("todoist.llm.triton_llm._load_tokenizer", lambda _model_id: _FakeTokenizer())
 
@@ -126,6 +129,10 @@ def test_triton_chat_posts_infer_request(monkeypatch) -> None:
         "shape": [1, 1],
         "data": [[0.95]],
     }
+    usage = load_llm_usage_summary(selected_backend="triton_local", selected_model_id=DEFAULT_TRITON_MODEL_ID)
+    assert usage["totals"]["inferenceCount"] == 1
+    assert usage["totals"]["inputTokens"] == 1
+    assert usage["totals"]["outputTokens"] == 1
 
 
 def test_triton_structured_chat_parses_json(monkeypatch) -> None:

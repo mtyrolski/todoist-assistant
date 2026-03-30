@@ -9,6 +9,34 @@ type LlmOption = {
   selected?: boolean;
 };
 
+type LlmUsageCounter = {
+  backend?: string | null;
+  modelId?: string | null;
+  inferenceCount: number;
+  chatCount: number;
+  structuredCount: number;
+  repairCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  lastUsedAt?: string | null;
+};
+
+type LlmUsageSnapshot = {
+  totals: LlmUsageCounter;
+  current: LlmUsageCounter;
+  updatedAt?: string | null;
+  lastRequest?: {
+    at?: string | null;
+    backend?: string | null;
+    modelId?: string | null;
+    operation?: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } | null;
+};
+
 type LlmSettingsStatus = {
   backend: string;
   backendLabel: string;
@@ -32,11 +60,22 @@ type LlmSettingsStatus = {
     modelId?: string;
     modelOptions: LlmOption[];
   };
+  usage?: LlmUsageSnapshot;
   envPath?: string;
   enabled?: boolean;
   loading?: boolean;
   reloadedRequired?: boolean;
 };
+
+function formatMetricCount(value?: number | null): string {
+  const normalized = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat("en-US").format(normalized);
+}
+
+function formatUsageTimestamp(value?: string | null): string {
+  if (!value) return "Never";
+  return value.replace("T", " ");
+}
 
 export function LlmRuntimeSettings({
   onAfterMutation,
@@ -167,7 +206,7 @@ export function LlmRuntimeSettings({
         <div>
           <h2>{compact ? "Underlying LLM" : "Underlying LLM"}</h2>
           <p className="muted tiny" style={{ margin: "6px 0 0" }}>
-            Pick the backend and actual model used under the hood. This controls the dashboard chat runtime and related AI flows.
+            Pick the backend and actual model used under the hood. This controls dashboard chat, task ingest, and the LLM task rollout automation.
           </p>
         </div>
       </header>
@@ -175,6 +214,94 @@ export function LlmRuntimeSettings({
         <div className="adminRow">
           <span className="pill pill-beta">{currentSummary}</span>
           {llmStatus?.envPath ? <span className="muted tiny">{llmStatus.envPath}</span> : null}
+        </div>
+        <div className="chatSection">
+          <div className="chatSectionHeader">
+            <div className="chatSectionHeaderMain">
+              <p className="rowTitle">AI usage</p>
+              <p className="muted tiny">
+                Local cumulative stats across dashboard chat, task ingest, and LLM breakdown work.
+              </p>
+            </div>
+            <div className="chatSectionMeta">
+              <span className="pill pill-neutral">
+                {formatMetricCount(llmStatus?.usage?.totals.inferenceCount)} inferences
+              </span>
+              <span className="muted tiny">
+                Updated {formatUsageTimestamp(llmStatus?.usage?.updatedAt)}
+              </span>
+            </div>
+          </div>
+          <div className="pillRow" style={{ marginTop: 0 }}>
+            <span className="pill pill-good">
+              Input {formatMetricCount(llmStatus?.usage?.totals.inputTokens)} tokens
+            </span>
+            <span className="pill pill-good">
+              Output {formatMetricCount(llmStatus?.usage?.totals.outputTokens)} tokens
+            </span>
+            <span className="pill pill-neutral">
+              Total {formatMetricCount(llmStatus?.usage?.totals.totalTokens)} tokens
+            </span>
+            <span className="pill pill-neutral">
+              Structured {formatMetricCount(llmStatus?.usage?.totals.structuredCount)}
+            </span>
+            <span className="pill pill-neutral">
+              Repairs {formatMetricCount(llmStatus?.usage?.totals.repairCount)}
+            </span>
+          </div>
+          <div className="grid2" style={{ marginTop: 12 }}>
+            <div className="control">
+              <label className="muted tiny">Selected model usage</label>
+              <p className="muted tiny" style={{ margin: "4px 0 0" }}>
+                {(llmStatus?.usage?.current.backend ?? selectedLlmBackend) || "unknown"} •{" "}
+                {llmStatus?.usage?.current.modelId || llmModelDraft || "unknown model"}
+              </p>
+              <div className="pillRow">
+                <span className="pill pill-neutral">
+                  {formatMetricCount(llmStatus?.usage?.current.inferenceCount)} inferences
+                </span>
+                <span className="pill pill-neutral">
+                  {formatMetricCount(llmStatus?.usage?.current.inputTokens)} in
+                </span>
+                <span className="pill pill-neutral">
+                  {formatMetricCount(llmStatus?.usage?.current.outputTokens)} out
+                </span>
+              </div>
+              <p className="muted tiny" style={{ margin: "6px 0 0" }}>
+                Last used {formatUsageTimestamp(llmStatus?.usage?.current.lastUsedAt)}
+              </p>
+            </div>
+            <div className="control">
+              <label className="muted tiny">Last recorded request</label>
+              {llmStatus?.usage?.lastRequest ? (
+                <>
+                  <p className="muted tiny" style={{ margin: "4px 0 0" }}>
+                    {llmStatus.usage.lastRequest.backend ?? "unknown"} •{" "}
+                    {llmStatus.usage.lastRequest.modelId ?? "unknown model"} •{" "}
+                    {llmStatus.usage.lastRequest.operation ?? "chat"}
+                  </p>
+                  <div className="pillRow">
+                    <span className="pill pill-neutral">
+                      {formatMetricCount(llmStatus.usage.lastRequest.inputTokens)} in
+                    </span>
+                    <span className="pill pill-neutral">
+                      {formatMetricCount(llmStatus.usage.lastRequest.outputTokens)} out
+                    </span>
+                    <span className="pill pill-neutral">
+                      {formatMetricCount(llmStatus.usage.lastRequest.totalTokens)} total
+                    </span>
+                  </div>
+                  <p className="muted tiny" style={{ margin: "6px 0 0" }}>
+                    {formatUsageTimestamp(llmStatus.usage.lastRequest.at)}
+                  </p>
+                </>
+              ) : (
+                <p className="muted tiny" style={{ margin: "4px 0 0" }}>
+                  No AI usage recorded yet on this machine.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
         <div className="grid2">
           <div className="control">

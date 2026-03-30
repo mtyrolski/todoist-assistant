@@ -6,6 +6,8 @@ __all__ = [
     "GMAIL_CREDENTIALS_FILE",
     "GMAIL_TOKEN_FILE",
     "build",
+    "resolve_gmail_credentials_path",
+    "resolve_gmail_token_path",
 ]
 
 if TYPE_CHECKING:
@@ -15,6 +17,8 @@ if TYPE_CHECKING:
         GMAIL_CREDENTIALS_FILE,
         GMAIL_TOKEN_FILE,
         build,
+        resolve_gmail_credentials_path,
+        resolve_gmail_token_path,
     )
 
 

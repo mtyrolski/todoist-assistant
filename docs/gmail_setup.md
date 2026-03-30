@@ -49,6 +49,7 @@ The Gmail Tasks automation:
 
 1. After creating the OAuth 2.0 Client ID, click the download button (⬇️) next to your credential
 2. Save the downloaded JSON file as `gmail_credentials.json` in your Todoist Assistant root directory
+   - If you run with a custom `TODOIST_CONFIG_DIR`, you can place it there instead
 3. The file should be in the same directory as your `.env` file
 
 ## Step 5: Configure the Automation
@@ -133,6 +134,7 @@ todoist-assistant/
 ### "Gmail credentials file not found" Error
 
 - Ensure `gmail_credentials.json` is in the root directory
+- If you use `TODOIST_CONFIG_DIR`, ensure the file is in that directory instead
 - Verify the file was downloaded correctly from Google Cloud Console
 - Check that the file is not named `credentials.json` (it should be `gmail_credentials.json`)
 

@@ -5,7 +5,8 @@ from collections.abc import Mapping, Sequence
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 import contextlib
@@ -14,6 +15,9 @@ import os
 import re
 import os.path
 from pathlib import Path
+import signal
+import subprocess
+import threading
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import time
@@ -23,6 +27,7 @@ import numpy as np
 import hydra
 import httpx
 from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field
@@ -30,8 +35,15 @@ from pydantic import BaseModel, Field
 from todoist.api.client import RequestSpec, TodoistAPIClient, TimeoutSettings
 from todoist.api.endpoints import TodoistEndpoints
 from todoist.database.base import Database
-from todoist.database.dataframe import load_activity_data
-from todoist.database.dataframe import ADJUSTMENTS_VARIABLE_NAME
+from todoist.database.dataframe import (
+    DEFAULT_ADJUSTMENTS_FILENAME,
+    load_adjustments_file,
+    load_activity_data,
+    normalize_adjustment_filename,
+    render_adjustments_file_content,
+    resolve_personal_dir,
+)
+from todoist.status_update import build_status_update_report, load_status_update_projects
 from todoist.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
@@ -45,7 +57,11 @@ from todoist.dashboard.plots import (
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
-from todoist.automations.gmail_tasks import GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GmailTasksAutomation
+from todoist.automations.gmail_tasks import (
+    GmailTasksAutomation,
+    resolve_gmail_credentials_path,
+    resolve_gmail_token_path,
+)
 from todoist.automations.observer import AutomationObserver
 from todoist.automations.llm_breakdown.config import (
     BASE_SYSTEM_PROMPT,
@@ -68,6 +84,7 @@ from todoist.llm import (
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.llm.usage import load_llm_usage_summary
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -215,20 +232,44 @@ _API_KEY_PLACEHOLDERS = {
 _API_KEY_MIN_LENGTH = 20
 _API_KEY_HEX_RE = re.compile(r"^[a-fA-F0-9]{32,64}$")
 _API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
+
+
+def _dashboard_state_dir() -> Path:
+    override = os.getenv("DASHBOARD_STATE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT / ".cache" / "todoist-assistant" / "dashboard"
+
+
+def _dashboard_pid_dir() -> Path:
+    override = os.getenv("DASHBOARD_PID_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return _dashboard_state_dir() / "pids"
 _LOCAL_MODEL_OPTIONS = [
     {"id": DEFAULT_MODEL_ID, "label": "Ministral 3 3B Instruct"},
+    {"id": "mistralai/Mistral-7B-Instruct-v0.3", "label": "Mistral 7B Instruct v0.3"},
+    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
+    {"id": "mistralai/Mistral-Small-3.1-24B-Instruct-2503", "label": "Mistral Small 3.1 24B Instruct"},
+    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
+    {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
     {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
     {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
 ]
 _OPENAI_MODEL_OPTIONS = [
+    {"id": "gpt-5-nano", "label": "GPT-5 nano"},
     {"id": "gpt-5-mini", "label": "GPT-5 mini"},
     {"id": "gpt-5", "label": "GPT-5"},
     {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
+    {"id": "gpt-4.1", "label": "GPT-4.1"},
 ]
 _TRITON_MODEL_OPTIONS = [
     {"id": DEFAULT_TRITON_MODEL_ID, "label": "Qwen 2.5 0.5B Instruct"},
     {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
     {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
+    {"id": "mistralai/Ministral-3-3B-Instruct-2512", "label": "Ministral 3 3B Instruct"},
+    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
+    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
 ]
 
 
@@ -330,7 +371,7 @@ def _resolve_timezone_status() -> dict[str, Any]:
         "override": None,
         "overrideValid": True,
         "system": system_timezone,
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
     if not override:
         return payload
@@ -353,6 +394,16 @@ def _mask_api_key(value: str) -> str:
     if len(value) <= 4:
         return "••••"
     return f"••••{value[-4:]}"
+
+
+def _safe_display_path(path: Path, *, root: Path | None = None) -> str:
+    if root is not None:
+        try:
+            return str(path.relative_to(root))
+        except ValueError:
+            pass
+    name = path.name.strip()
+    return name or str(path)
 
 
 def _validate_api_token(token: str) -> tuple[bool, str | None, int | None]:
@@ -1196,7 +1247,6 @@ def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         "configured": bool(secret_key),
         "keyName": key_name,
         "model": model,
-        "secretKey": secret_key,
         "modelOptions": _llm_model_options_payload(_OPENAI_MODEL_OPTIONS, model),
     }
 
@@ -1264,6 +1314,13 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     os.environ[backend_key] = backend
     os.environ[device_key] = device
     os.environ[local_model_key] = local_model_id
+    selected_model_id = (
+        openai_settings["model"]
+        if backend == "openai"
+        else triton_settings["modelId"]
+        if backend == "triton_local"
+        else local_model_id
+    )
 
     return {
         "backend": backend,
@@ -1296,7 +1353,6 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "configured": openai_settings["configured"],
             "keyName": openai_settings["keyName"],
             "model": openai_settings["model"],
-            "secretKey": openai_settings["secretKey"],
             "modelOptions": openai_settings["modelOptions"],
         },
         "triton": {
@@ -1307,7 +1363,11 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             "modelId": triton_settings["modelId"],
             "modelOptions": triton_settings["modelOptions"],
         },
-        "envPath": str(env_path),
+        "usage": load_llm_usage_summary(
+            selected_backend=backend,
+            selected_model_id=str(selected_model_id or ""),
+        ),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
 
 
@@ -1328,6 +1388,54 @@ def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+def _build_llm_from_settings(
+    settings: Mapping[str, Any],
+    *,
+    max_output_tokens: int,
+) -> _LlmChatModel:
+    backend = str(settings.get("backend") or _LLM_CHAT_BACKEND_DEFAULT)
+    if backend == "transformers_local":
+        config = coerce_model_config(
+            {
+                "device": settings.get("device") or _LLM_CHAT_DEVICE_DEFAULT,
+                "model_id": settings.get("localModelId") or DEFAULT_MODEL_ID,
+                "max_new_tokens": max_output_tokens,
+            }
+        )
+        return TransformersMistral3ChatModel(config)
+
+    if backend == "triton_local":
+        triton_settings = settings.get("triton")
+        if not isinstance(triton_settings, Mapping):
+            raise ValueError("Triton settings are unavailable.")
+        return TritonGenerateChatModel(
+            TritonChatConfig(
+                base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
+                model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
+                model_id=str(triton_settings.get("modelId") or DEFAULT_TRITON_MODEL_ID),
+                max_output_tokens=max_output_tokens,
+            )
+        )
+
+    if backend == "openai":
+        openai_settings = settings.get("openai")
+        if not isinstance(openai_settings, Mapping):
+            raise ValueError("OpenAI settings are unavailable.")
+        secret_key = _sanitize_text(os.getenv("OPEN_AI_SECRET_KEY"))
+        if not secret_key:
+            raise ValueError("OpenAI backend is not configured.")
+        return OpenAIResponsesChatModel(
+            OpenAIChatConfig(
+                api_key=secret_key,
+                key_name=_sanitize_text(openai_settings.get("keyName")),
+                model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
+                max_output_tokens=max_output_tokens,
+            )
+        )
+
+    raise ValueError(f"Unsupported LLM backend: {backend}")
+
+
 async def _llm_chat_model_status() -> tuple[bool, bool]:
     async with _LLM_CHAT_MODEL_LOCK:
         return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
@@ -1346,39 +1454,11 @@ async def _load_llm_chat_model_task() -> None:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
     try:
         settings = _resolve_llm_chat_settings()
-        backend = settings["backend"]
-        if backend == "transformers_local":
-            config = coerce_model_config(
-                {"device": settings["device"], "model_id": settings["localModelId"]}
-            )
-            model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
-        elif backend == "triton_local":
-            triton_settings = settings["triton"]
-            model = await asyncio.to_thread(
-                TritonGenerateChatModel,
-                TritonChatConfig(
-                    base_url=str(triton_settings["baseUrl"]),
-                    model_name=str(triton_settings["modelName"]),
-                    model_id=str(triton_settings["modelId"]),
-                    max_output_tokens=256,
-                ),
-            )
-        elif backend == "openai":
-            openai_settings = settings["openai"]
-            secret_key = _sanitize_text(openai_settings.get("secretKey"))
-            if not secret_key:
-                raise ValueError("OpenAI backend is not configured.")
-            model = await asyncio.to_thread(
-                OpenAIResponsesChatModel,
-                OpenAIChatConfig(
-                    api_key=secret_key,
-                    key_name=_sanitize_text(openai_settings.get("keyName")),
-                    model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
-                    max_output_tokens=256,
-                ),
-            )
-        else:
-            raise ValueError(f"Unsupported LLM backend: {backend}")
+        model = await asyncio.to_thread(
+            _build_llm_from_settings,
+            settings,
+            max_output_tokens=256,
+        )
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model
         await asyncio.to_thread(_build_llm_chat_agent_sync, model)
@@ -1755,6 +1835,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "items": [_queue_item_payload(item) for item in items],
             "current": _queue_item_payload(current) if current else None,
         },
+        "usage": settings["usage"],
         "conversations": summaries,
     }
 
@@ -2174,23 +2255,178 @@ def _automation_ref(key: str) -> str:
     return f"${{{key}}}"
 
 
-def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+def _automation_requires_auth(key: str) -> bool:
+    return key in {"gmail_tasks"}
+
+
+def _default_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+    return [key for key in _available_automation_keys(config) if not _automation_requires_auth(key)]
+
+
+def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
     raw = config.get("automations")
     if not isinstance(raw, Sequence):
         return []
+    target_to_keys: dict[str, list[str]] = {}
+    for key in _available_automation_keys(config):
+        section = config.get(key)
+        if isinstance(section, Mapping):
+            target = section.get("_target_")
+            if isinstance(target, str) and target:
+                target_to_keys.setdefault(target, []).append(key)
     keys: list[str] = []
     for item in raw:
-        if not isinstance(item, str):
+        if isinstance(item, Mapping):
+            target = item.get("_target_")
+            if isinstance(target, str):
+                matched_keys = target_to_keys.get(target, [])
+                if len(matched_keys) == 1:
+                    keys.append(matched_keys[0])
+                    continue
             continue
-        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item.strip())
+        item_str = str(item).strip()
+        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item_str)
         if match:
             keys.append(match.group(1))
     return keys
 
 
+def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
+    configured = _configured_enabled_automation_keys(config)
+    if configured:
+        return configured
+    return _default_enabled_automation_keys(config)
+
+
+@dataclass
+class _PendingGmailAuthSession:
+    state: str
+    auth_url: str
+    redirect_uri: str
+    started_at: str
+    completed: bool = False
+    error: str | None = None
+
+
+_GMAIL_AUTH_LOCK = threading.Lock()
+_GMAIL_AUTH_SESSION: _PendingGmailAuthSession | None = None
+_OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
+
+
+def _clear_gmail_auth_session() -> None:
+    global _GMAIL_AUTH_SESSION
+    with _GMAIL_AUTH_LOCK:
+        _GMAIL_AUTH_SESSION = None
+
+
+def _current_gmail_auth_session() -> _PendingGmailAuthSession | None:
+    with _GMAIL_AUTH_LOCK:
+        return _GMAIL_AUTH_SESSION
+
+
+def _write_gmail_token(credentials: Credentials) -> None:
+    token_path = resolve_gmail_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(credentials.to_json(), encoding="utf-8")
+
+
+@contextlib.contextmanager
+def _allow_insecure_oauth_transport() -> Any:
+    previous = os.environ.get(_OAUTHLIB_INSECURE_TRANSPORT)
+    os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_OAUTHLIB_INSECURE_TRANSPORT, None)
+        else:
+            os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = previous
+
+
+def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
+    global _GMAIL_AUTH_SESSION
+
+    credentials_path = resolve_gmail_credentials_path()
+    if not credentials_path.exists():
+        raise FileNotFoundError("gmail_credentials.json is required before connecting Gmail.")
+
+    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), GmailTasksAutomation.SCOPES)
+
+    class _OAuthCallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            nonlocal flow
+            server = cast(ThreadingHTTPServer, self.server)
+            current_url = f"http://127.0.0.1:{server.server_address[1]}{self.path}"
+            try:
+                with _allow_insecure_oauth_transport():
+                    flow.fetch_token(authorization_response=current_url)
+                credentials = cast(Credentials, flow.credentials)
+                _write_gmail_token(credentials)
+                _set_automation_enabled("gmail_tasks", enabled=True)
+                _restart_dashboard_observer_if_managed()
+                with _GMAIL_AUTH_LOCK:
+                    if _GMAIL_AUTH_SESSION is not None:
+                        _GMAIL_AUTH_SESSION.completed = True
+                        _GMAIL_AUTH_SESSION.error = None
+                body = (
+                    "<html><body style='font-family:system-ui,sans-serif;padding:24px'>"
+                    "<h1>Gmail connected</h1>"
+                    "<p>You can return to the control panel and refresh the automation state.</p>"
+                    "</body></html>"
+                )
+                self.send_response(200)
+            except Exception as exc:  # pragma: no cover - callback failures are browser driven
+                with _GMAIL_AUTH_LOCK:
+                    if _GMAIL_AUTH_SESSION is not None:
+                        _GMAIL_AUTH_SESSION.error = f"{type(exc).__name__}: {exc}"
+                body = (
+                    "<html><body style='font-family:system-ui,sans-serif;padding:24px'>"
+                    "<h1>Gmail authorization failed</h1>"
+                    f"<p>{type(exc).__name__}: {exc}</p>"
+                    "</body></html>"
+                )
+                self.send_response(500)
+
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003  # pylint: disable=redefined-builtin
+            message = format % args if args else format
+            logger.info("Gmail OAuth callback: {}", message)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _OAuthCallbackHandler)
+    server.timeout = 300
+    flow.redirect_uri = f"http://127.0.0.1:{server.server_port}/"
+    with _allow_insecure_oauth_transport():
+        auth_url, state = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+        )
+
+    session = _PendingGmailAuthSession(
+        state=str(state),
+        auth_url=str(auth_url),
+        redirect_uri=str(flow.redirect_uri),
+        started_at=datetime.now().isoformat(timespec="seconds"),
+    )
+    with _GMAIL_AUTH_LOCK:
+        _GMAIL_AUTH_SESSION = session
+
+    def _serve_once() -> None:
+        try:
+            server.handle_request()
+        finally:
+            server.server_close()
+
+    threading.Thread(target=_serve_once, name="gmail-oauth-callback", daemon=True).start()
+    return session
+
+
 def _gmail_automation_status() -> dict[str, Any]:
-    credentials_path = _REPO_ROOT / GMAIL_CREDENTIALS_FILE
-    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    credentials_path = resolve_gmail_credentials_path()
+    token_path = resolve_gmail_token_path()
     credentials_present = credentials_path.exists()
     token_present = token_path.exists()
     connected = False
@@ -2201,21 +2437,46 @@ def _gmail_automation_status() -> dict[str, Any]:
             connected = bool(getattr(creds, "valid", False))
             if connected:
                 token_detail = "Authorized"
+                _clear_gmail_auth_session()
             elif getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
                 token_detail = "Token expired but refreshable"
             else:
                 token_detail = "Token present but invalid"
         except Exception as exc:  # pragma: no cover - defensive
             token_detail = f"Token unreadable ({type(exc).__name__})"
-    return {
+    session = _current_gmail_auth_session()
+    pending_auth: dict[str, Any] | None = None
+    if session is not None and not session.completed:
+        pending_auth = {
+            "active": True,
+            "authUrl": session.auth_url,
+            "redirectUri": session.redirect_uri,
+            "startedAt": session.started_at,
+            "error": session.error,
+        }
+    elif session is not None and session.error:
+        pending_auth = {
+            "active": False,
+            "authUrl": session.auth_url,
+            "redirectUri": session.redirect_uri,
+            "startedAt": session.started_at,
+            "error": session.error,
+        }
+        if token_present:
+            _clear_gmail_auth_session()
+
+    status = {
         "credentialsPresent": credentials_present,
         "tokenPresent": token_present,
         "connected": connected,
-        "credentialsPath": str(credentials_path),
-        "tokenPath": str(token_path),
+        "credentialsPath": _safe_display_path(credentials_path, root=_REPO_ROOT),
+        "tokenPath": _safe_display_path(token_path, root=_REPO_ROOT),
         "detail": token_detail if credentials_present else "Missing Gmail credentials file",
-        "setupDocPath": str(_REPO_ROOT / "docs" / "gmail_setup.md"),
+        "setupDocPath": _safe_display_path(_REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT),
     }
+    if pending_auth is not None:
+        status["pendingAuth"] = pending_auth
+    return status
 
 
 def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool) -> dict[str, Any]:
@@ -2227,6 +2488,8 @@ def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool)
         **_automation_launch_metadata(automation),
         "key": key,
         "enabled": enabled,
+        "authRequired": _automation_requires_auth(key),
+        "defaultEnabled": key in _default_enabled_automation_keys(config),
         "target": str(section.get("_target_") or ""),
     }
     if key == "gmail_tasks":
@@ -2250,6 +2513,85 @@ def _save_enabled_automations(keys: Sequence[str]) -> None:
     normalized = [key for key in available_keys if key in set(keys)]
     config["automations"] = [_automation_ref(key) for key in normalized]
     _save_yaml_config(_AUTOMATIONS_PATH, config)
+
+
+def _set_automation_enabled(key: str, *, enabled: bool) -> bool:
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    available_keys = _available_automation_keys(config)
+    if key not in available_keys:
+        return False
+
+    enabled_keys = _enabled_automation_keys(config)
+    next_keys = [item for item in enabled_keys if item != key]
+    if enabled:
+        insert_at = max(0, available_keys.index(key))
+        ordered = [item for item in available_keys if item in next_keys]
+        if key not in ordered:
+            ordered.insert(insert_at, key)
+        next_keys = ordered
+
+    config["automations"] = [_automation_ref(item) for item in next_keys]
+    _save_yaml_config(_AUTOMATIONS_PATH, config)
+    return True
+
+
+def _restart_dashboard_observer_if_managed() -> bool:
+    pid_dir = _dashboard_pid_dir()
+    observer_pid_path = pid_dir / "observer.pid"
+    if not observer_pid_path.exists():
+        return False
+
+    try:
+        observer_pid = int(observer_pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        logger.warning("Dashboard observer PID file is unreadable: {}", observer_pid_path)
+        return False
+
+    try:
+        os.kill(observer_pid, 0)
+    except OSError:
+        logger.warning("Dashboard observer PID is stale: {}", observer_pid)
+        return False
+
+    try:
+        os.kill(observer_pid, signal.SIGTERM)
+    except OSError as exc:
+        logger.warning("Failed to stop dashboard observer {}: {}", observer_pid, exc)
+        return False
+
+    observer_log_path = _dashboard_state_dir() / "observer.log"
+    observer_log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["HYDRA_FULL_ERROR"] = "1"
+    env["TODOIST_AGENT_TRITON_MODEL_ID"] = os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID), DEFAULT_TRITON_MODEL_ID)
+    env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
+        str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
+    )
+    env["TODOIST_AGENT_TRITON_URL"] = os.getenv(str(EnvVar.AGENT_TRITON_URL), DEFAULT_TRITON_URL)
+
+    with observer_log_path.open("ab") as observer_log:
+        process = subprocess.Popen(  # noqa: S603  # pylint: disable=consider-using-with
+            [
+                "uv",
+                "run",
+                "python3",
+                "-m",
+                "todoist.run_observer",
+                "--config-dir",
+                str(_CONFIG_DIR),
+                "--config-name",
+                "automations",
+            ],
+            cwd=str(_REPO_ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=observer_log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    observer_pid_path.write_text(str(process.pid), encoding="utf-8")
+    logger.info("Restarted managed dashboard observer with pid {}", process.pid)
+    return True
 
 
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
@@ -2288,15 +2630,8 @@ async def admin_set_automation_enabled(
         available_keys = _available_automation_keys(config)
         if key not in available_keys:
             raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
-        enabled_keys = _enabled_automation_keys(config)
-        next_keys = [item for item in enabled_keys if item != key]
-        if enabled:
-            insert_at = max(0, available_keys.index(key))
-            ordered = [item for item in available_keys if item in next_keys]
-            if key not in ordered:
-                ordered.insert(insert_at, key)
-            next_keys = ordered
-        _save_enabled_automations(next_keys)
+        _set_automation_enabled(key, enabled=enabled)
+        _restart_dashboard_observer_if_managed()
     return await admin_automations()
 
 
@@ -2313,18 +2648,26 @@ async def admin_gmail_automation_connect() -> dict[str, Any]:
             status_code=400,
             detail="gmail_credentials.json is required before connecting Gmail.",
         )
-    automation = GmailTasksAutomation(allow_interactive_auth=True)
-    service = await asyncio.to_thread(automation._authenticate_gmail)  # pylint: disable=protected-access
-    if service is None:
-        raise HTTPException(status_code=500, detail="Gmail authorization did not complete.")
-    return _gmail_automation_status()
+    if status["connected"]:
+        return status
+    pending_auth = status.get("pendingAuth")
+    if isinstance(pending_auth, Mapping) and pending_auth.get("active"):
+        status["authUrl"] = pending_auth.get("authUrl")
+        status["redirectUri"] = pending_auth.get("redirectUri")
+        return status
+    session = await asyncio.to_thread(_start_gmail_manual_auth_session)
+    next_status = _gmail_automation_status()
+    next_status["authUrl"] = session.auth_url
+    next_status["redirectUri"] = session.redirect_uri
+    return next_status
 
 
 @app.delete("/api/admin/automations/gmail/connect", tags=["admin"])
 async def admin_gmail_automation_disconnect() -> dict[str, Any]:
-    token_path = _REPO_ROOT / GMAIL_TOKEN_FILE
+    token_path = resolve_gmail_token_path()
     if token_path.exists():
         token_path.unlink()
+    _clear_gmail_auth_session()
     return _gmail_automation_status()
 
 
@@ -2335,7 +2678,7 @@ async def admin_api_token_status() -> dict[str, Any]:
     return {
         "configured": bool(token),
         "masked": _mask_api_key(token),
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
 
 
@@ -2365,7 +2708,7 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
     return {
         "configured": True,
         "masked": _mask_api_key(token),
-        "envPath": str(env_path),
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
         "validated": bool(validate),
         "labelsCount": labels_count,
     }
@@ -2394,7 +2737,7 @@ async def admin_clear_api_token() -> dict[str, Any]:
     if env_path.exists():
         unset_key(str(env_path), "API_KEY")
     os.environ.pop("API_KEY", None)
-    return {"configured": False, "masked": "", "envPath": str(env_path)}
+    return {"configured": False, "masked": "", "envPath": _safe_display_path(env_path, root=_REPO_ROOT)}
 
 
 @app.get("/api/admin/timezone", tags=["admin"])
@@ -3030,81 +3373,46 @@ async def admin_read_log(
 
 
 def _available_mapping_files() -> list[str]:
-    personal_dir = _DATA_DIR / "personal"
+    personal_dir = resolve_personal_dir()
     if not personal_dir.exists():
-        return ["archived_root_projects.py"]
+        return [DEFAULT_ADJUSTMENTS_FILENAME]
 
     mapping_files: list[str] = []
-    for file in personal_dir.glob("*.py"):
-        if file.name.startswith("__"):
+    for file in sorted(personal_dir.iterdir()):
+        if not file.is_file() or file.name.startswith("__") or file.suffix != ".py":
             continue
         try:
-            content = file.read_text(encoding="utf-8")
-        except OSError:
+            normalized = normalize_adjustment_filename(file.name)
+            load_adjustments_file(file)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Skipping invalid project adjustment file {}: {}", file, exc)
             continue
-        if ADJUSTMENTS_VARIABLE_NAME in content:
-            mapping_files.append(file.name)
+        mapping_files.append(normalized)
 
-    return sorted(mapping_files) if mapping_files else ["archived_root_projects.py"]
-
-
-def _generate_adjustment_file_content(
-    mappings: dict[str, str], archived_parents: list[str] | None = None
-) -> str:
-    archived_parents = archived_parents or []
-    content = [
-        "# Adjustments for archived root projects",
-        "# This file was generated by the web dashboard admin UI",
-        "",
-        f"{ADJUSTMENTS_VARIABLE_NAME} = {{",
-    ]
-    for archived_name, active_name in sorted(mappings.items()):
-        content.append(f'    "{archived_name}": "{active_name}",')
-    content.append("}")
-    content.append("")
-    content.append("# Archived projects allowed as parent/root targets in the UI")
-    content.append("archived_parent_projects = [")
-    for name in sorted(set(archived_parents)):
-        content.append(f'    "{name}",')
-    content.append("]")
-    content.append("")
-    return "\n".join(content)
+    return sorted(mapping_files) if mapping_files else [DEFAULT_ADJUSTMENTS_FILENAME]
 
 
 def _load_mapping_file(filename: str) -> tuple[dict[str, str], list[str]]:
-    personal_dir = _DATA_DIR / "personal"
+    safe_filename = normalize_adjustment_filename(filename)
+    personal_dir = resolve_personal_dir()
     personal_dir.mkdir(parents=True, exist_ok=True)
-    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
+    target = personal_dir / safe_filename
     if not target.exists():
-        target.write_text(_generate_adjustment_file_content({}, []), encoding="utf-8")
+        target.write_text(render_adjustments_file_content({}, []), encoding="utf-8")
         return {}, []
-
-    # Match dataframe.py behavior (exec python file) so the UI shows the effective mapping.
-    import importlib.util
-    import sys
-
-    module_name = "dashboard_adjustments"
-    spec = importlib.util.spec_from_file_location(module_name, target)
-    if spec is None or spec.loader is None:
-        return {}, []
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    mapping = getattr(module, ADJUSTMENTS_VARIABLE_NAME, {})
-    archived_parents = getattr(module, "archived_parent_projects", [])
-    if not isinstance(archived_parents, list) or not all(
-        isinstance(name, str) for name in archived_parents
-    ):
-        archived_parents = []
-    return (mapping if isinstance(mapping, dict) else {}), archived_parents
+    return load_adjustments_file(target)
 
 
 def _save_mapping_file(
     filename: str, mappings: dict[str, str], archived_parents: list[str]
 ) -> None:
-    target = _safe_data_path(str(Path("personal") / filename), suffix=".py")
+    safe_filename = normalize_adjustment_filename(filename)
+    personal_dir = resolve_personal_dir()
+    personal_dir.mkdir(parents=True, exist_ok=True)
+    target = personal_dir / safe_filename
     target.write_text(
-        _generate_adjustment_file_content(mappings, archived_parents), encoding="utf-8"
+        render_adjustments_file_content(mappings, archived_parents),
+        encoding="utf-8",
     )
 
 
@@ -3114,7 +3422,7 @@ def _load_projects_for_adjustments_sync(
     if not refresh and _state.db is not None:
         dbio = _state.db
     else:
-        dbio = Database(".env")
+        dbio = Database(str(_resolve_env_path()))
     if dbio is None:
         raise RuntimeError("Database unavailable")
     active_projects = dbio.fetch_projects(include_tasks=False)
@@ -3312,14 +3620,18 @@ def _task_ingest_trim_text(value: Any) -> str:
 
 
 def _normalize_task_ingest_node(
-    raw: Mapping[str, Any], *, depth: int = 1, max_depth: int = 3
+    raw: Mapping[str, Any],
+    *,
+    depth: int = 1,
+    max_depth: int = 3,
+    include_descriptions: bool = True,
 ) -> dict[str, Any] | None:
     content = _task_ingest_trim_text(raw.get("content"))
     if not content:
         return None
     node: dict[str, Any] = {"content": content}
     description = _task_ingest_trim_text(raw.get("description"))
-    if description:
+    if include_descriptions and description:
         node["description"] = description
     if depth < max_depth:
         raw_children = raw.get("children")
@@ -3328,7 +3640,14 @@ def _normalize_task_ingest_node(
                 normalized
                 for child in raw_children
                 if isinstance(child, Mapping)
-                for normalized in [_normalize_task_ingest_node(child, depth=depth + 1, max_depth=max_depth)]
+                for normalized in [
+                    _normalize_task_ingest_node(
+                        child,
+                        depth=depth + 1,
+                        max_depth=max_depth,
+                        include_descriptions=include_descriptions,
+                    )
+                ]
                 if normalized is not None
             ]
             if children:
@@ -3337,16 +3656,59 @@ def _normalize_task_ingest_node(
 
 
 def _task_ingest_tree_payload(tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return _task_ingest_tree_payload_with_options(tasks, max_depth=3, include_descriptions=True)
+
+
+def _task_ingest_tree_payload_with_options(
+    tasks: Sequence[Mapping[str, Any]], *, max_depth: int, include_descriptions: bool
+) -> list[dict[str, Any]]:
     return [
         normalized
         for task in tasks
         if isinstance(task, Mapping)
-        for normalized in [_normalize_task_ingest_node(task)]
+        for normalized in [
+            _normalize_task_ingest_node(
+                task,
+                max_depth=max_depth,
+                include_descriptions=include_descriptions,
+            )
+        ]
         if normalized is not None
     ]
 
 
-def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
+def _task_ingest_options(payload: Mapping[str, Any]) -> dict[str, Any]:
+    raw_options = payload.get("options")
+    options = raw_options if isinstance(raw_options, Mapping) else payload
+
+    requested_depth = options.get("maxDepth")
+    max_depth = 3
+    if isinstance(requested_depth, int):
+        max_depth = requested_depth
+    elif isinstance(requested_depth, str) and requested_depth.strip().isdigit():
+        max_depth = int(requested_depth.strip())
+    max_depth = min(4, max(2, max_depth))
+
+    granularity = _task_ingest_trim_text(options.get("granularity")).lower() or "balanced"
+    if granularity not in {"compact", "balanced", "detailed"}:
+        granularity = "balanced"
+
+    preference = _task_ingest_trim_text(options.get("preference")).lower() or "action-first"
+    if preference not in {"action-first", "milestone-driven", "checklist-heavy", "meeting-notes"}:
+        preference = "action-first"
+
+    include_descriptions_raw = options.get("includeDescriptions")
+    include_descriptions = True if include_descriptions_raw is None else bool(include_descriptions_raw)
+
+    return {
+        "maxDepth": max_depth,
+        "granularity": granularity,
+        "preference": preference,
+        "includeDescriptions": include_descriptions,
+    }
+
+
+def _heuristic_task_ingest_tree(raw_content: str, *, granularity: str) -> list[dict[str, Any]]:
     lines = raw_content.splitlines()
     roots: list[dict[str, Any]] = []
     stack: list[tuple[int, dict[str, Any]]] = [(-1, {"children": roots})]
@@ -3402,6 +3764,7 @@ def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
         if tasks:
             return tasks
 
+    sentence_limit = {"compact": 5, "balanced": 8, "detailed": 12}[granularity]
     sentences = [
         sentence.strip(" -\t")
         for sentence in re.split(r"(?:\n|;|(?<=\.)\s+)", raw_content)
@@ -3411,7 +3774,7 @@ def _heuristic_task_ingest_tree(raw_content: str) -> list[dict[str, Any]]:
         return []
     if len(sentences) == 1:
         return [{"content": sentences[0]}]
-    return [{"content": sentence} for sentence in sentences[:8]]
+    return [{"content": sentence} for sentence in sentences[:sentence_limit]]
 
 
 def _task_ingest_from_breakdown(nodes: Sequence[BreakdownNode]) -> list[dict[str, Any]]:
@@ -3430,14 +3793,39 @@ def _task_ingest_from_breakdown(nodes: Sequence[BreakdownNode]) -> list[dict[str
     return payload
 
 
-def _task_ingest_build_llm_messages(raw_content: str) -> list[dict[str, str]]:
+def _task_ingest_build_llm_messages(
+    raw_content: str,
+    *,
+    max_depth: int,
+    granularity: str,
+    preference: str,
+    include_descriptions: bool,
+) -> list[dict[str, str]]:
+    granularity_instruction = {
+        "compact": "Prefer fewer, broader tasks and avoid over-splitting.",
+        "balanced": "Aim for a practical middle ground between clarity and brevity.",
+        "detailed": "Break the work down more aggressively into clear substeps when useful.",
+    }[granularity]
+    preference_instruction = {
+        "action-first": "Favor concrete next actions over abstract buckets.",
+        "milestone-driven": "Group subtasks under visible milestones when useful.",
+        "checklist-heavy": "Prefer crisp checklist-style subtasks.",
+        "meeting-notes": "Turn notes into decisions, follow-ups, and owners where possible.",
+    }[preference]
     return [
         {
             "role": MessageRole.SYSTEM.value,
             "content": (
                 "Rewrite the pasted source into an actionable Todoist task tree. "
                 "Return only concrete tasks. Keep titles concise and imperative. "
-                "Use descriptions only for supporting context. Keep nesting to at most 3 levels total."
+                + (
+                    "Use descriptions only for supporting context. "
+                    if include_descriptions
+                    else "Avoid descriptions unless absolutely required. "
+                )
+                + f"Keep nesting to at most {max_depth} levels total. "
+                f"{granularity_instruction} "
+                f"{preference_instruction}"
             ),
         },
         {
@@ -3447,47 +3835,47 @@ def _task_ingest_build_llm_messages(raw_content: str) -> list[dict[str, str]]:
     ]
 
 
-def _task_ingest_rewrite_with_llm_sync(raw_content: str) -> tuple[list[dict[str, Any]], str] | None:
+def _task_ingest_rewrite_with_llm_sync(
+    raw_content: str,
+    *,
+    max_depth: int,
+    granularity: str,
+    preference: str,
+    include_descriptions: bool,
+) -> tuple[list[dict[str, Any]], str] | None:
     async_loaded_model = _LLM_CHAT_MODEL
     model: _LlmChatModel | None = async_loaded_model
     created_model = False
     if model is None:
         settings = _resolve_llm_chat_settings()
-        backend = settings["backend"]
-        if backend == "openai" and settings["openai"]["configured"]:
-            secret_key = _task_ingest_trim_text(settings["openai"].get("secretKey"))
-            if secret_key:
-                model = OpenAIResponsesChatModel(
-                    OpenAIChatConfig(
-                        api_key=secret_key,
-                        key_name=_task_ingest_trim_text(settings["openai"].get("keyName")),
-                        model=str(settings["openai"].get("model") or DEFAULT_OPENAI_MODEL),
-                        max_output_tokens=768,
-                    )
-                )
-                created_model = True
-        elif backend == "triton_local":
-            triton_settings = settings["triton"]
-            model = TritonGenerateChatModel(
-                TritonChatConfig(
-                    base_url=str(triton_settings["baseUrl"]),
-                    model_name=str(triton_settings["modelName"]),
-                    model_id=str(triton_settings["modelId"]),
-                    max_output_tokens=768,
-                )
-            )
+        try:
+            model = _build_llm_from_settings(settings, max_output_tokens=768)
             created_model = True
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"Task ingest LLM unavailable: {type(exc).__name__}: {exc}")
     if model is None:
         return None
     try:
         breakdown = model.structured_chat(
-            _task_ingest_build_llm_messages(raw_content),
+            _task_ingest_build_llm_messages(
+                raw_content,
+                max_depth=max_depth,
+                granularity=granularity,
+                preference=preference,
+                include_descriptions=include_descriptions,
+            ),
             TaskBreakdown,
         )
-        tasks = _task_ingest_tree_payload(_task_ingest_from_breakdown(breakdown.children))
+        tasks = _task_ingest_tree_payload_with_options(
+            _task_ingest_from_breakdown(breakdown.children),
+            max_depth=max_depth,
+            include_descriptions=include_descriptions,
+        )
         if tasks:
             source = "llm"
-            if created_model and isinstance(model, TritonGenerateChatModel):
+            if created_model and isinstance(model, TransformersMistral3ChatModel):
+                source = "transformers"
+            elif created_model and isinstance(model, TritonGenerateChatModel):
                 source = "triton"
             elif created_model and isinstance(model, OpenAIResponsesChatModel):
                 source = "openai"
@@ -3499,11 +3887,31 @@ def _task_ingest_rewrite_with_llm_sync(raw_content: str) -> tuple[list[dict[str,
     return None
 
 
-def _task_ingest_preview_sync(raw_content: str) -> tuple[list[dict[str, Any]], str]:
-    llm_result = _task_ingest_rewrite_with_llm_sync(raw_content)
+def _task_ingest_preview_sync(
+    raw_content: str,
+    *,
+    max_depth: int,
+    granularity: str,
+    preference: str,
+    include_descriptions: bool,
+) -> tuple[list[dict[str, Any]], str]:
+    llm_result = _task_ingest_rewrite_with_llm_sync(
+        raw_content,
+        max_depth=max_depth,
+        granularity=granularity,
+        preference=preference,
+        include_descriptions=include_descriptions,
+    )
     if llm_result is not None:
         return llm_result
-    return _task_ingest_tree_payload(_heuristic_task_ingest_tree(raw_content)), "outline"
+    return (
+        _task_ingest_tree_payload_with_options(
+            _heuristic_task_ingest_tree(raw_content, granularity=granularity),
+            max_depth=max_depth,
+            include_descriptions=include_descriptions,
+        ),
+        "outline",
+    )
 
 
 def _task_ingest_create_node_sync(
@@ -3558,6 +3966,21 @@ def _task_ingest_create_sync(project_id: str, tasks: Sequence[Mapping[str, Any]]
     return created
 
 
+def _load_status_update_projects_sync(refresh: bool) -> list[dict[str, Any]]:
+    dbio = _status_update_db() if not refresh else Database(str(_resolve_env_path()))
+    return load_status_update_projects(dbio)
+
+
+def _status_update_parse_date(value: Any, *, field: str) -> date:
+    parsed = _task_ingest_trim_text(value)
+    if not parsed:
+        raise HTTPException(status_code=400, detail=f"{field} is required")
+    try:
+        return date.fromisoformat(parsed)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DD") from exc
+
+
 @app.get("/api/admin/task_ingest/projects", tags=["admin"])
 async def admin_task_ingest_projects(refresh: bool = False) -> dict[str, Any]:
     try:
@@ -3576,7 +3999,15 @@ async def admin_task_ingest_preview(
     raw_content = _task_ingest_trim_text(payload.get("rawContent"))
     if not raw_content:
         raise HTTPException(status_code=400, detail="rawContent is required")
-    tasks, source = await asyncio.to_thread(_task_ingest_preview_sync, raw_content)
+    options = _task_ingest_options(payload)
+    tasks, source = await asyncio.to_thread(
+        _task_ingest_preview_sync,
+        raw_content,
+        max_depth=int(options["maxDepth"]),
+        granularity=str(options["granularity"]),
+        preference=str(options["preference"]),
+        include_descriptions=bool(options["includeDescriptions"]),
+    )
     if not tasks:
         raise HTTPException(status_code=400, detail="Could not derive any tasks from the pasted content.")
     return {
@@ -3584,6 +4015,10 @@ async def admin_task_ingest_preview(
         "tasks": tasks,
         "topLevelCount": len(tasks),
         "totalCount": _task_ingest_total_nodes(tasks),
+        "maxDepth": options["maxDepth"],
+        "granularity": options["granularity"],
+        "preference": options["preference"],
+        "includeDescriptions": options["includeDescriptions"],
     }
 
 
@@ -3594,14 +4029,24 @@ async def admin_task_ingest_create(
     project_id = _task_ingest_trim_text(payload.get("projectId"))
     raw_content = _task_ingest_trim_text(payload.get("rawContent"))
     tasks_payload = payload.get("tasks")
+    options = _task_ingest_options(payload)
     if not project_id:
         raise HTTPException(status_code=400, detail="projectId is required")
     if isinstance(tasks_payload, list):
-        tasks = _task_ingest_tree_payload(
-            [task for task in tasks_payload if isinstance(task, Mapping)]
+        tasks = _task_ingest_tree_payload_with_options(
+            [task for task in tasks_payload if isinstance(task, Mapping)],
+            max_depth=int(options["maxDepth"]),
+            include_descriptions=bool(options["includeDescriptions"]),
         )
     elif raw_content:
-        tasks, _ = await asyncio.to_thread(_task_ingest_preview_sync, raw_content)
+        tasks, _ = await asyncio.to_thread(
+            _task_ingest_preview_sync,
+            raw_content,
+            max_depth=int(options["maxDepth"]),
+            granularity=str(options["granularity"]),
+            preference=str(options["preference"]),
+            include_descriptions=bool(options["includeDescriptions"]),
+        )
     else:
         raise HTTPException(status_code=400, detail="tasks or rawContent is required")
     if not tasks:
@@ -3619,14 +4064,143 @@ async def admin_task_ingest_create(
     }
 
 
+def _status_update_db() -> Database:
+    if _state.db is not None:
+        return _state.db
+    return Database(str(_resolve_env_path()))
+
+
+@app.get("/api/admin/status_update/projects", tags=["admin"])
+async def admin_status_update_projects(refresh: bool = False) -> dict[str, Any]:
+    try:
+        projects = await asyncio.to_thread(_load_status_update_projects_sync, refresh)
+    except Exception as exc:  # pragma: no cover - network safety
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load projects: {type(exc).__name__}"
+        ) from exc
+    return {"projects": projects}
+
+
+@app.post("/api/admin/status_update/generate", tags=["admin"])
+async def admin_status_update_generate(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    raw_project_ids = payload.get("projectIds")
+    if not isinstance(raw_project_ids, Sequence) or isinstance(raw_project_ids, str):
+        raise HTTPException(status_code=400, detail="projectIds must be a list of strings")
+    project_ids = [str(value).strip() for value in raw_project_ids if str(value).strip()]
+    if not project_ids:
+        raise HTTPException(status_code=400, detail="projectIds must contain at least one project id")
+
+    beg = _status_update_parse_date(payload.get("beg"), field="beg")
+    end = _status_update_parse_date(payload.get("end"), field="end")
+    sync_label = _task_ingest_trim_text(payload.get("syncLabel"))
+    preset = _task_ingest_trim_text(payload.get("preset"))
+    await _ensure_state(refresh=False)
+    dbio = _status_update_db()
+    try:
+        beg_dt = datetime.combine(beg, datetime.min.time())
+        end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time())
+        report = await asyncio.to_thread(
+            build_status_update_report,
+            dbio,
+            project_ids=project_ids,
+            beg=beg_dt,
+            end=end_dt,
+            sync_label=sync_label,
+            df_activity=_state.df_activity,
+            preset=preset,
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - network safety
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate status update: {type(exc).__name__}"
+        ) from exc
+    selection = dict(report.get("selection") or {})
+    requested_projects = list(selection.get("requestedProjects") or [])
+    expanded_projects = list(selection.get("expandedProjects") or [])
+    tasks = list(report.get("completedTasks") or [])
+
+    project_payloads: list[dict[str, Any]] = []
+    for project in expanded_projects:
+        project_id = str(project.get("id") or "")
+        project_tasks = [task for task in tasks if str(task.get("projectId") or "") == project_id]
+        project_payloads.append(
+            {
+                "id": project_id,
+                "name": project.get("name"),
+                "label": project.get("label"),
+                "completedCount": sum(int(task.get("completionCount") or 0) for task in project_tasks),
+                "commentCount": sum(int(task.get("commentCount") or 0) for task in project_tasks),
+                "tasks": project_tasks,
+            }
+        )
+
+    selection.update(
+        {
+            "beg": beg.isoformat(),
+            "end": end_dt.isoformat(timespec="seconds"),
+            "projectIds": list(project_ids),
+            "syncLabel": report.get("syncLabel") or sync_label or "Status update",
+            "preset": preset or None,
+        }
+    )
+
+    comment_count = sum(int(task.get("commentCount") or 0) for task in tasks)
+    response = {
+        "generatedAt": report.get("generatedAt"),
+        "syncLabel": report.get("syncLabel") or sync_label or "Status update",
+        "range": {
+            "beg": beg_dt.isoformat(timespec="seconds"),
+            "end": end_dt.isoformat(timespec="seconds"),
+        },
+        "selection": selection,
+        "summary": {
+            "selectedProjectCount": len(requested_projects),
+            "expandedProjectCount": len(expanded_projects),
+            "completedEventCount": len(report.get("completedTaskEvents") or []),
+            "completedTaskCount": len(tasks),
+            "commentedTaskCount": sum(1 for task in tasks if int(task.get("commentCount") or 0) > 0),
+            "commentCount": comment_count,
+        },
+        "summaryText": (
+            f"Completed {len(tasks)} tasks across {len(project_payloads)} projects, "
+            f"grounded by {comment_count} comments."
+        ),
+        "stats": {
+            "completedCount": len(tasks),
+            "commentCount": comment_count,
+            "projectCount": len(project_payloads),
+            "activityCount": len(report.get("completedTaskEvents") or []),
+        },
+        "projects": project_payloads,
+        "tasks": tasks,
+        "selectedProjects": requested_projects,
+        "markdown": report.get("markdown"),
+        "warnings": report.get("warnings") or [],
+        "completedTasks": report.get("completedTasks") or [],
+        "completedTaskEvents": report.get("completedTaskEvents") or [],
+    }
+    return response
+
+
 @app.get("/api/admin/project_adjustments", tags=["admin"])
 async def admin_project_adjustments(
     file: str | None = None, refresh: bool = False
 ) -> dict[str, Any]:
     """Return mapping files, current mapping content, and project lists for building adjustments."""
 
-    selected = file or _available_mapping_files()[0]
-    mappings, archived_parents = _load_mapping_file(selected)
+    try:
+        selected = normalize_adjustment_filename(file) if file else _available_mapping_files()[0]
+        mappings, archived_parents = _load_mapping_file(selected)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     warning: str | None = None
     try:
         (
@@ -3634,9 +4208,12 @@ async def admin_project_adjustments(
             archived_root,
             archived_names,
             remappable_active_root,
-        ) = await asyncio.to_thread(
-            _load_projects_for_adjustments_sync,
-            refresh,
+        ) = cast(
+            tuple[list[str], list[str], list[str], list[str]],
+            await asyncio.to_thread(
+                _load_projects_for_adjustments_sync,
+                refresh,
+            ),
         )
     except Exception as exc:  # pragma: no cover - network safety
         logger.warning(f"Failed loading project lists for adjustments: {exc}")
@@ -3676,9 +4253,10 @@ async def admin_save_project_adjustments(
 
     mappings: dict[str, str]
     archived_parents: list[str]
+    refresh_warning: str | None = None
     if isinstance(payload.get("mappings"), dict) or "archivedParents" in payload:
-        mappings = payload.get("mappings") or {}
-        archived_parents = payload.get("archivedParents") or []
+        mappings = cast(dict[str, str], payload.get("mappings") or {})
+        archived_parents = cast(list[str], payload.get("archivedParents") or [])
     else:
         mappings = payload if isinstance(payload, dict) else {}
         archived_parents = []
@@ -3697,15 +4275,26 @@ async def admin_save_project_adjustments(
             status_code=400, detail="archivedParents must be a list of strings"
         )
 
-    async with _ADMIN_LOCK:
-        _save_mapping_file(file, mappings, archived_parents)
-        if refresh:
-            await _ensure_state(refresh=True)
+    try:
+        safe_filename = normalize_adjustment_filename(file)
+        async with _ADMIN_LOCK:
+            _save_mapping_file(safe_filename, mappings, archived_parents)
+            if refresh:
+                try:
+                    await _ensure_state(refresh=True)
+                except Exception as exc:  # pragma: no cover - network safety
+                    logger.warning(f"Failed refreshing dashboard state after saving adjustments: {exc}")
+                    refresh_warning = (
+                        f"Saved, but dashboard refresh failed ({type(exc).__name__})."
+                    )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "saved": True,
-        "file": file,
+        "file": safe_filename,
         "count": len(mappings),
         "archivedParents": len(archived_parents),
+        "warning": refresh_warning,
     }
 
 

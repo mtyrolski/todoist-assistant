@@ -2,10 +2,15 @@
 
 # pylint: disable=protected-access
 
-from unittest.mock import Mock, mock_open, patch
+import os
+from unittest.mock import Mock, patch
 
 from google.auth.exceptions import RefreshError
-from todoist.automations.gmail_tasks import GmailTasksAutomation
+from todoist.automations.gmail_tasks import (
+    GmailTasksAutomation,
+    resolve_gmail_credentials_path,
+    resolve_gmail_token_path,
+)
 from todoist.automations.gmail_tasks.automation import ExistingTaskDedupIndex
 
 
@@ -180,13 +185,13 @@ def test_get_existing_task_dedup_index_extracts_gmail_message_ids():
 
 @patch('todoist.automations.gmail_tasks.automation.build')
 @patch('todoist.automations.gmail_tasks.automation.Credentials')
-@patch('os.path.exists')
-def test_authenticate_gmail_existing_token(mock_exists, mock_credentials, mock_build):
+def test_authenticate_gmail_existing_token(mock_credentials, mock_build, tmp_path, monkeypatch):
     """Test Gmail authentication with existing valid token."""
+    monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
     automation = GmailTasksAutomation()
+    token_path = tmp_path / "gmail_token.json"
+    token_path.write_text('{"token": "cached"}', encoding="utf-8")
 
-    # Mock existing valid token
-    mock_exists.return_value = True
     mock_creds = Mock()
     mock_creds.valid = True
     mock_credentials.from_authorized_user_file.return_value = mock_creds
@@ -196,39 +201,68 @@ def test_authenticate_gmail_existing_token(mock_exists, mock_credentials, mock_b
     result = automation._authenticate_gmail()
 
     assert result == mock_service
-    mock_credentials.from_authorized_user_file.assert_called_once_with('gmail_token.json', automation.SCOPES)
+    mock_credentials.from_authorized_user_file.assert_called_once_with(str(token_path), automation.SCOPES)
     mock_build.assert_called_once_with('gmail', 'v1', credentials=mock_creds)
 
 
-@patch('os.path.exists')
-def test_authenticate_gmail_no_credentials(mock_exists):
+def test_authenticate_gmail_no_credentials(tmp_path, monkeypatch):
     """Test Gmail authentication without credentials file."""
+    monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
     automation = GmailTasksAutomation()
-
-    # Mock no existing files
-    mock_exists.return_value = False
 
     result = automation._authenticate_gmail()
 
     assert result is None
 
 
-@patch('builtins.open', new_callable=mock_open)
+def test_resolve_gmail_credentials_path_prefers_repo_root(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
+    root_credentials = tmp_path / "gmail_credentials.json"
+    root_credentials.write_text("{}", encoding="utf-8")
+    legacy_dir = tmp_path / "configs"
+    legacy_dir.mkdir()
+    (legacy_dir / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+
+    assert resolve_gmail_credentials_path() == root_credentials
+
+
+def test_resolve_gmail_credentials_path_falls_back_to_legacy_configs_dir(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
+    legacy_dir = tmp_path / "configs"
+    legacy_dir.mkdir()
+    legacy_credentials = legacy_dir / "gmail_credentials.json"
+    legacy_credentials.write_text("{}", encoding="utf-8")
+
+    assert resolve_gmail_credentials_path() == legacy_credentials
+
+
+def test_resolve_gmail_token_path_defaults_next_to_credentials(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+
+    assert resolve_gmail_token_path() == tmp_path / "gmail_token.json"
+
+
 @patch('todoist.automations.gmail_tasks.automation.build')
 @patch('todoist.automations.gmail_tasks.automation.InstalledAppFlow')
 @patch('todoist.automations.gmail_tasks.automation.Credentials')
-@patch('os.path.exists')
 def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
-    mock_exists,
     mock_credentials,
     mock_flow_cls,
     mock_build,
-    _mock_file,
+    tmp_path,
+    monkeypatch,
 ):
     """Invalid refresh token should trigger a fresh OAuth flow when allowed."""
+    monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
     automation = GmailTasksAutomation()
-
-    mock_exists.side_effect = [True, True]  # token file exists, credentials file exists
+    token_path = tmp_path / "gmail_token.json"
+    token_path.write_text('{"token": "stale"}', encoding="utf-8")
+    credentials_path = tmp_path / "gmail_credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
 
     stale_creds = Mock()
     stale_creds.valid = False
@@ -250,9 +284,49 @@ def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
     result = automation._authenticate_gmail()
 
     assert result == mock_service
-    mock_flow_cls.from_client_secrets_file.assert_called_once_with('gmail_credentials.json', automation.SCOPES)
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with(str(credentials_path), automation.SCOPES)
     flow.run_local_server.assert_called_once_with(port=0)
     mock_build.assert_called_once_with('gmail', 'v1', credentials=fresh_creds)
+
+
+@patch('todoist.automations.gmail_tasks.automation.build')
+@patch('todoist.automations.gmail_tasks.automation.InstalledAppFlow')
+@patch('todoist.automations.gmail_tasks.automation.Credentials')
+def test_authenticate_gmail_interactive_oauth_enables_insecure_transport_temporarily(
+    mock_credentials,
+    mock_flow_cls,
+    mock_build,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
+    monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
+    automation = GmailTasksAutomation()
+    credentials_path = tmp_path / "gmail_credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+    mock_credentials.from_authorized_user_file.return_value = None
+
+    fresh_creds = Mock()
+    fresh_creds.valid = True
+    fresh_creds.to_json.return_value = '{"token": "new"}'
+    flow = Mock()
+
+    def _run_local_server(*, port):
+        assert port == 0
+        assert os.environ["OAUTHLIB_INSECURE_TRANSPORT"] == "1"
+        return fresh_creds
+
+    flow.run_local_server.side_effect = _run_local_server
+    mock_flow_cls.from_client_secrets_file.return_value = flow
+
+    mock_service = Mock()
+    mock_build.return_value = mock_service
+
+    result = automation._authenticate_gmail()
+
+    assert result == mock_service
+    assert "OAUTHLIB_INSECURE_TRANSPORT" not in os.environ
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with(str(credentials_path), automation.SCOPES)
 
 
 def test_task_keywords_coverage():

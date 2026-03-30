@@ -15,7 +15,7 @@
         <p>Local-first analytics, automation, and a dashboard for Todoist data, plus optional AI summaries and read-only chat over cached activity. Sync once, analyze and automate repeatedly.</p>
         <p><strong>Quick links</strong><br/>
           <a href="docs/README.md">Docs index</a><br/>
-          <a href="docs/v0.3-release-notes.md">v0.3 release notes</a><br/>
+          <a href="docs/v0.3.1-release-notes.md">v0.3.1 release notes</a><br/>
           <a href="CHANGELOG.md">Changelog</a><br/>
           <a href="docs/INSTALLATION.md">Installation</a><br/>
           <a href="docs/USAGE.md">Usage</a><br/>
@@ -31,13 +31,13 @@
 
 <p><strong>Latest release</strong><br/>
   The latest stable release is
-  <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.0">todoist-assistant-v0.3.0</a>.<br/>
+  <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.1">todoist-assistant-v0.3.1</a>.<br/>
   For release details, notes, and checklist, see
-  <a href="docs/v0.3-release-notes.md">v0.3 release notes</a>.
+  <a href="docs/v0.3.1-release-notes.md">v0.3.1 release notes</a>.
 </p>
 
 <p><strong>Download the latest stable release</strong><br/>
-  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.0">GitHub Releases</a> and open the latest stable tag, then download the file you need:<br/>
+  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.1">GitHub Releases</a> and open the latest stable tag, then download the file you need:<br/>
   - Windows installer: <code>TodoistAssistantSetup.exe</code> or the <code>.msi</code>.<br/>
   - macOS app: <code>.dmg</code> (full app) or <code>.pkg</code> (CLI-only).<br/>
   - Linux: source distribution (see docs for setup).

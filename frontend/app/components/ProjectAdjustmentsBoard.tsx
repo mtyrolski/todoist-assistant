@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { InfoTip } from "./InfoTip";
 import { ProgressSteps } from "./ProgressSteps";
@@ -73,7 +73,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draggedProjectRef = useRef<string | null>(null);
 
-  const loadAdjustments = async (file?: string, refresh = false, resetRetries = false) => {
+  const loadAdjustments = useCallback(async (file?: string, refresh = false, resetRetries = false) => {
     let keepLoading = false;
     try {
       if (retryTimer.current) {
@@ -136,11 +136,11 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         setLoading(false);
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadAdjustments(undefined, false, true);
-  }, []);
+  }, [loadAdjustments]);
 
   useEffect(() => {
     return () => {
@@ -182,10 +182,10 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     };
   }, [loading]);
 
-  const activeRoots = adjustments?.activeRootProjects ?? [];
-  const archivedProjects = adjustments?.archivedProjects ?? [];
-  const remappableActiveRoots = adjustments?.remappableActiveRootProjects ?? [];
-  const sourceProjects = adjustments?.sourceProjects ?? [];
+  const activeRoots = useMemo(() => adjustments?.activeRootProjects ?? [], [adjustments]);
+  const archivedProjects = useMemo(() => adjustments?.archivedProjects ?? [], [adjustments]);
+  const remappableActiveRoots = useMemo(() => adjustments?.remappableActiveRootProjects ?? [], [adjustments]);
+  const sourceProjects = useMemo(() => adjustments?.sourceProjects ?? [], [adjustments]);
   const parentSet = useMemo(() => {
     const set = new Set<string>();
     for (const name of activeRoots) set.add(name);

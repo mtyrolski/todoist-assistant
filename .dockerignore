@@ -46,6 +46,8 @@ personal/
 credentials.json
 gmail_credentials.json
 gmail_token.json
+configs/gmail_credentials.json
+configs/gmail_token.json
 
 # Build artifacts
 build/
