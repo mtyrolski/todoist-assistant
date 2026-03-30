@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from tests.factories import make_project, make_project_entry, make_task
 import todoist
 import todoist.database.dataframe as dataframe_module
+from todoist.utils import MaxRetriesExceeded
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
@@ -599,7 +600,7 @@ def test_admin_save_project_adjustments_roundtrips_safe_literals(
 
     response = client.put(
         "/api/admin/project_adjustments",
-        params={"file": "adj_private.py"},
+        params={"file": "adj_private.py", "refresh": "false"},
         json={
             "mappings": {'Archived "Research"': "Academy / North Wing"},
             "archivedParents": ['Parent "One"'],
@@ -617,6 +618,36 @@ def test_admin_save_project_adjustments_roundtrips_safe_literals(
     )
     assert loaded_mapping == {'Archived "Research"': "Academy / North Wing"}
     assert archived_parents == ['Parent "One"']
+
+
+def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
+    monkeypatch, tmp_path
+) -> None:
+    personal_dir = tmp_path / "personal"
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+
+    async def _boom(*, refresh: bool) -> None:
+        _ = refresh
+        raise MaxRetriesExceeded("Failed to execute list labels after 3 retry attempts")
+
+    monkeypatch.setattr(web_api, "_ensure_state", _boom)
+
+    client = TestClient(web_api.app)
+    response = client.put(
+        "/api/admin/project_adjustments",
+        params={"file": "adj_private.py"},
+        json={"mappings": {"Archived Research": "Academy"}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["saved"] is True
+    assert payload["warning"] == "Saved, but dashboard refresh failed (MaxRetriesExceeded)."
+    loaded_mapping, archived_parents = dataframe_module.load_adjustments_file(
+        personal_dir / "adj_private.py"
+    )
+    assert loaded_mapping == {"Archived Research": "Academy"}
+    assert archived_parents == []
 
 
 def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:

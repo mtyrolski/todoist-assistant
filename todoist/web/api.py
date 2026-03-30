@@ -4240,6 +4240,7 @@ async def admin_save_project_adjustments(
 
     mappings: dict[str, str]
     archived_parents: list[str]
+    refresh_warning: str | None = None
     if isinstance(payload.get("mappings"), dict) or "archivedParents" in payload:
         mappings = cast(dict[str, str], payload.get("mappings") or {})
         archived_parents = cast(list[str], payload.get("archivedParents") or [])
@@ -4266,7 +4267,13 @@ async def admin_save_project_adjustments(
         async with _ADMIN_LOCK:
             _save_mapping_file(safe_filename, mappings, archived_parents)
             if refresh:
-                await _ensure_state(refresh=True)
+                try:
+                    await _ensure_state(refresh=True)
+                except Exception as exc:  # pragma: no cover - network safety
+                    logger.warning(f"Failed refreshing dashboard state after saving adjustments: {exc}")
+                    refresh_warning = (
+                        f"Saved, but dashboard refresh failed ({type(exc).__name__})."
+                    )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -4274,6 +4281,7 @@ async def admin_save_project_adjustments(
         "file": safe_filename,
         "count": len(mappings),
         "archivedParents": len(archived_parents),
+        "warning": refresh_warning,
     }
 
 
