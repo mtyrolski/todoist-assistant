@@ -910,6 +910,51 @@ def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
     assert payload["pendingAuth"]["active"] is True
 
 
+def test_admin_gmail_connect_accepts_repo_root_credentials_by_default(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(web_api.EnvVar.CONFIG_DIR), raising=False)
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        web_api,
+        "_start_gmail_manual_auth_session",
+        lambda: web_api._PendingGmailAuthSession(
+            state="state-2",
+            auth_url="http://127.0.0.1:9998/auth",
+            redirect_uri="http://127.0.0.1:9998/",
+            started_at="2026-03-29T12:05:00",
+        ),
+    )
+    monkeypatch.setattr(
+        web_api,
+        "_gmail_automation_status",
+        lambda: {
+            "credentialsPresent": True,
+            "tokenPresent": False,
+            "connected": False,
+            "credentialsPath": "gmail_credentials.json",
+            "tokenPath": "gmail_token.json",
+            "detail": "Pending authorization",
+            "setupDocPath": "docs/gmail_setup.md",
+            "pendingAuth": {
+                "active": True,
+                "authUrl": "http://127.0.0.1:9998/auth",
+                "redirectUri": "http://127.0.0.1:9998/",
+                "startedAt": "2026-03-29T12:05:00",
+                "error": None,
+            },
+        },
+    )
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/admin/automations/gmail/connect")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["credentialsPresent"] is True
+    assert payload["authUrl"] == "http://127.0.0.1:9998/auth"
+
+
 def test_gmail_automation_status_uses_safe_path_labels(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))

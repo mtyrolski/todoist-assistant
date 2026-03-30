@@ -68,14 +68,35 @@ def _gmail_secret_dir() -> Path:
     override = os.getenv(str(EnvVar.CONFIG_DIR))
     if override:
         return Path(override).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def _legacy_gmail_secret_dir() -> Path:
     return (Path.cwd() / "configs").resolve()
 
 
+def _existing_gmail_secret_path(filename: str) -> Path | None:
+    candidates = (_gmail_secret_dir(), _legacy_gmail_secret_dir())
+    for directory in dict.fromkeys(candidates):
+        candidate = directory / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def resolve_gmail_credentials_path() -> Path:
-    return _gmail_secret_dir() / GMAIL_CREDENTIALS_FILE
+    return _existing_gmail_secret_path(GMAIL_CREDENTIALS_FILE) or (
+        _gmail_secret_dir() / GMAIL_CREDENTIALS_FILE
+    )
 
 
 def resolve_gmail_token_path() -> Path:
+    existing_token = _existing_gmail_secret_path(GMAIL_TOKEN_FILE)
+    if existing_token is not None:
+        return existing_token
+    credentials_path = _existing_gmail_secret_path(GMAIL_CREDENTIALS_FILE)
+    if credentials_path is not None:
+        return credentials_path.with_name(GMAIL_TOKEN_FILE)
     return _gmail_secret_dir() / GMAIL_TOKEN_FILE
 
 

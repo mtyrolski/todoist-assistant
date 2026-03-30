@@ -6,7 +6,11 @@ import os
 from unittest.mock import Mock, patch
 
 from google.auth.exceptions import RefreshError
-from todoist.automations.gmail_tasks import GmailTasksAutomation
+from todoist.automations.gmail_tasks import (
+    GmailTasksAutomation,
+    resolve_gmail_credentials_path,
+    resolve_gmail_token_path,
+)
 from todoist.automations.gmail_tasks.automation import ExistingTaskDedupIndex
 
 
@@ -209,6 +213,37 @@ def test_authenticate_gmail_no_credentials(tmp_path, monkeypatch):
     result = automation._authenticate_gmail()
 
     assert result is None
+
+
+def test_resolve_gmail_credentials_path_prefers_repo_root(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
+    root_credentials = tmp_path / "gmail_credentials.json"
+    root_credentials.write_text("{}", encoding="utf-8")
+    legacy_dir = tmp_path / "configs"
+    legacy_dir.mkdir()
+    (legacy_dir / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+
+    assert resolve_gmail_credentials_path() == root_credentials
+
+
+def test_resolve_gmail_credentials_path_falls_back_to_legacy_configs_dir(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
+    legacy_dir = tmp_path / "configs"
+    legacy_dir.mkdir()
+    legacy_credentials = legacy_dir / "gmail_credentials.json"
+    legacy_credentials.write_text("{}", encoding="utf-8")
+
+    assert resolve_gmail_credentials_path() == legacy_credentials
+
+
+def test_resolve_gmail_token_path_defaults_next_to_credentials(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+
+    assert resolve_gmail_token_path() == tmp_path / "gmail_token.json"
 
 
 @patch('todoist.automations.gmail_tasks.automation.build')
