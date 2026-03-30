@@ -3,6 +3,8 @@
 This package ships the **core data layer** of Todoist Assistant: API client, database access,
 types, activity helpers, and utilities. It **excludes** the web dashboard, plots, and frontend.
 
+Latest stable release: `v0.3.1`.
+
 ## Install (editable, from repo)
 
 ```bash

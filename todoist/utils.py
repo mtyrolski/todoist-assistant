@@ -26,7 +26,7 @@ LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, Fil
                             OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
 DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
 MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
-MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.0"
+MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.1"
 RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "activity.joblib",
     "observer_state.joblib",
