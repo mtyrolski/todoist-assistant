@@ -247,18 +247,28 @@ def _dashboard_pid_dir() -> Path:
     return _dashboard_state_dir() / "pids"
 _LOCAL_MODEL_OPTIONS = [
     {"id": DEFAULT_MODEL_ID, "label": "Ministral 3 3B Instruct"},
+    {"id": "mistralai/Mistral-7B-Instruct-v0.3", "label": "Mistral 7B Instruct v0.3"},
+    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
+    {"id": "mistralai/Mistral-Small-3.1-24B-Instruct-2503", "label": "Mistral Small 3.1 24B Instruct"},
+    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
+    {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
     {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
     {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
 ]
 _OPENAI_MODEL_OPTIONS = [
+    {"id": "gpt-5-nano", "label": "GPT-5 nano"},
     {"id": "gpt-5-mini", "label": "GPT-5 mini"},
     {"id": "gpt-5", "label": "GPT-5"},
     {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
+    {"id": "gpt-4.1", "label": "GPT-4.1"},
 ]
 _TRITON_MODEL_OPTIONS = [
     {"id": DEFAULT_TRITON_MODEL_ID, "label": "Qwen 2.5 0.5B Instruct"},
     {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
     {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
+    {"id": "mistralai/Ministral-3-3B-Instruct-2512", "label": "Ministral 3 3B Instruct"},
+    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
+    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
 ]
 
 
@@ -1366,6 +1376,54 @@ def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+def _build_llm_from_settings(
+    settings: Mapping[str, Any],
+    *,
+    max_output_tokens: int,
+) -> _LlmChatModel:
+    backend = str(settings.get("backend") or _LLM_CHAT_BACKEND_DEFAULT)
+    if backend == "transformers_local":
+        config = coerce_model_config(
+            {
+                "device": settings.get("device") or _LLM_CHAT_DEVICE_DEFAULT,
+                "model_id": settings.get("localModelId") or DEFAULT_MODEL_ID,
+                "max_new_tokens": max_output_tokens,
+            }
+        )
+        return TransformersMistral3ChatModel(config)
+
+    if backend == "triton_local":
+        triton_settings = settings.get("triton")
+        if not isinstance(triton_settings, Mapping):
+            raise ValueError("Triton settings are unavailable.")
+        return TritonGenerateChatModel(
+            TritonChatConfig(
+                base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
+                model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
+                model_id=str(triton_settings.get("modelId") or DEFAULT_TRITON_MODEL_ID),
+                max_output_tokens=max_output_tokens,
+            )
+        )
+
+    if backend == "openai":
+        openai_settings = settings.get("openai")
+        if not isinstance(openai_settings, Mapping):
+            raise ValueError("OpenAI settings are unavailable.")
+        secret_key = _sanitize_text(os.getenv("OPEN_AI_SECRET_KEY"))
+        if not secret_key:
+            raise ValueError("OpenAI backend is not configured.")
+        return OpenAIResponsesChatModel(
+            OpenAIChatConfig(
+                api_key=secret_key,
+                key_name=_sanitize_text(openai_settings.get("keyName")),
+                model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
+                max_output_tokens=max_output_tokens,
+            )
+        )
+
+    raise ValueError(f"Unsupported LLM backend: {backend}")
+
+
 async def _llm_chat_model_status() -> tuple[bool, bool]:
     async with _LLM_CHAT_MODEL_LOCK:
         return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
@@ -1384,39 +1442,11 @@ async def _load_llm_chat_model_task() -> None:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
     try:
         settings = _resolve_llm_chat_settings()
-        backend = settings["backend"]
-        if backend == "transformers_local":
-            config = coerce_model_config(
-                {"device": settings["device"], "model_id": settings["localModelId"]}
-            )
-            model = await asyncio.to_thread(TransformersMistral3ChatModel, config)
-        elif backend == "triton_local":
-            triton_settings = settings["triton"]
-            model = await asyncio.to_thread(
-                TritonGenerateChatModel,
-                TritonChatConfig(
-                    base_url=str(triton_settings["baseUrl"]),
-                    model_name=str(triton_settings["modelName"]),
-                    model_id=str(triton_settings["modelId"]),
-                    max_output_tokens=256,
-                ),
-            )
-        elif backend == "openai":
-            openai_settings = settings["openai"]
-            secret_key = _sanitize_text(os.getenv("OPEN_AI_SECRET_KEY"))
-            if not secret_key:
-                raise ValueError("OpenAI backend is not configured.")
-            model = await asyncio.to_thread(
-                OpenAIResponsesChatModel,
-                OpenAIChatConfig(
-                    api_key=secret_key,
-                    key_name=_sanitize_text(openai_settings.get("keyName")),
-                    model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
-                    max_output_tokens=256,
-                ),
-            )
-        else:
-            raise ValueError(f"Unsupported LLM backend: {backend}")
+        model = await asyncio.to_thread(
+            _build_llm_from_settings,
+            settings,
+            max_output_tokens=256,
+        )
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model
         await asyncio.to_thread(_build_llm_chat_agent_sync, model)
@@ -3805,30 +3835,11 @@ def _task_ingest_rewrite_with_llm_sync(
     created_model = False
     if model is None:
         settings = _resolve_llm_chat_settings()
-        backend = settings["backend"]
-        if backend == "openai" and settings["openai"]["configured"]:
-            secret_key = _task_ingest_trim_text(os.getenv("OPEN_AI_SECRET_KEY"))
-            if secret_key:
-                model = OpenAIResponsesChatModel(
-                    OpenAIChatConfig(
-                        api_key=secret_key,
-                        key_name=_task_ingest_trim_text(settings["openai"].get("keyName")),
-                        model=str(settings["openai"].get("model") or DEFAULT_OPENAI_MODEL),
-                        max_output_tokens=768,
-                    )
-                )
-                created_model = True
-        elif backend == "triton_local":
-            triton_settings = settings["triton"]
-            model = TritonGenerateChatModel(
-                TritonChatConfig(
-                    base_url=str(triton_settings["baseUrl"]),
-                    model_name=str(triton_settings["modelName"]),
-                    model_id=str(triton_settings["modelId"]),
-                    max_output_tokens=768,
-                )
-            )
+        try:
+            model = _build_llm_from_settings(settings, max_output_tokens=768)
             created_model = True
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"Task ingest LLM unavailable: {type(exc).__name__}: {exc}")
     if model is None:
         return None
     try:
@@ -3849,7 +3860,9 @@ def _task_ingest_rewrite_with_llm_sync(
         )
         if tasks:
             source = "llm"
-            if created_model and isinstance(model, TritonGenerateChatModel):
+            if created_model and isinstance(model, TransformersMistral3ChatModel):
+                source = "transformers"
+            elif created_model and isinstance(model, TritonGenerateChatModel):
                 source = "triton"
             elif created_model and isinstance(model, OpenAIResponsesChatModel):
                 source = "openai"

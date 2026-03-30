@@ -38,6 +38,7 @@ def test_breakdown_uses_selected_device_for_transformers(monkeypatch, tmp_path) 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "transformers_local")
     monkeypatch.setenv(str(EnvVar.AGENT_DEVICE), "cuda")
+    monkeypatch.setenv(str(EnvVar.AGENT_MODEL_ID), "mistralai/Mistral-Nemo-Instruct-2407")
 
     captured: dict[str, object] = {}
 
@@ -56,6 +57,7 @@ def test_breakdown_uses_selected_device_for_transformers(monkeypatch, tmp_path) 
     assert isinstance(llm, _FakeTransformers)
     config = captured["config"]
     assert getattr(config, "device") == "cuda"
+    assert getattr(config, "model_id") == "mistralai/Mistral-Nemo-Instruct-2407"
 
 
 def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> None:
@@ -73,6 +75,11 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
         encoding="utf-8",
     )
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
+    monkeypatch.delenv(str(EnvVar.AGENT_BACKEND), raising=False)
+    monkeypatch.delenv(str(EnvVar.AGENT_TRITON_URL), raising=False)
+    monkeypatch.delenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), raising=False)
+    monkeypatch.delenv(str(EnvVar.AGENT_TRITON_MODEL_ID), raising=False)
+    monkeypatch.delenv("OPEN_AI_KEY_NAME", raising=False)
     monkeypatch.chdir(tmp_path)
 
     captured: dict[str, object] = {}

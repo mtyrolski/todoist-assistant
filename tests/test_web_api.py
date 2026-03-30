@@ -1764,6 +1764,13 @@ def test_llm_chat_settings_response_does_not_expose_secret_key(
     assert payload["openai"]["model"] == "gpt-5-mini"
     assert "secretKey" not in payload["openai"]
     assert payload["envPath"] == ".env"
+    assert "mistralai/Mistral-Nemo-Instruct-2407" in {
+        option["id"] for option in payload["localModelOptions"]
+    }
+    assert "mistralai/Mistral-Nemo-Instruct-2407" in {
+        option["id"] for option in payload["triton"]["modelOptions"]
+    }
+    assert "gpt-5-nano" in {option["id"] for option in payload["openai"]["modelOptions"]}
 
 
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
@@ -1912,6 +1919,53 @@ def test_dashboard_status_includes_triton_service(monkeypatch) -> None:
     assert res.status_code == 200
     payload = res.json()
     assert any(svc.get("name") == "Triton" for svc in payload["services"])
+
+
+def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeTransformers:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def structured_chat(self, _messages, _schema):
+            return web_api.TaskBreakdown(
+                children=[web_api.BreakdownNode(content="Draft roadmap", description="from llm")]
+            )
+
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
+    monkeypatch.setattr(
+        web_api,
+        "_resolve_llm_chat_settings",
+        lambda: {
+            "backend": "transformers_local",
+            "device": "cpu",
+            "localModelId": "mistralai/Mistral-Nemo-Instruct-2407",
+            "openai": {"configured": False, "keyName": None, "model": "gpt-5-mini"},
+            "triton": {
+                "baseUrl": "http://127.0.0.1:8003",
+                "modelName": "todoist_llm",
+                "modelId": "Qwen/Qwen2.5-0.5B-Instruct",
+            },
+        },
+    )
+    monkeypatch.setattr(web_api, "TransformersMistral3ChatModel", _FakeTransformers)
+
+    result = web_api._task_ingest_rewrite_with_llm_sync(
+        "Plan launch",
+        max_depth=2,
+        granularity="balanced",
+        preference="action-first",
+        include_descriptions=True,
+    )
+
+    assert result is not None
+    tasks, source = result
+    assert source == "transformers"
+    assert tasks[0]["content"] == "Draft roadmap"
+    config = captured["config"]
+    assert getattr(config, "model_id") == "mistralai/Mistral-Nemo-Instruct-2407"
+    assert getattr(config, "max_new_tokens") == 768
 
 
 def test_llm_chat_send_requires_message() -> None:

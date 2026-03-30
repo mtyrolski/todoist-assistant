@@ -167,7 +167,7 @@ export function LlmRuntimeSettings({
         <div>
           <h2>{compact ? "Underlying LLM" : "Underlying LLM"}</h2>
           <p className="muted tiny" style={{ margin: "6px 0 0" }}>
-            Pick the backend and actual model used under the hood. This controls the dashboard chat runtime and related AI flows.
+            Pick the backend and actual model used under the hood. This controls dashboard chat, task ingest, and the LLM task rollout automation.
           </p>
         </div>
       </header>
