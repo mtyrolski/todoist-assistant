@@ -365,6 +365,301 @@ a {
   gap: 8px;
 }
 
+.habitIntroCard {
+  display: grid;
+  gap: 18px;
+}
+
+.habitIntroGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.habitIntroNote {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+}
+
+.habitIntroLabel {
+  margin: 0 0 6px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.habitPlotsSection {
+  display: grid;
+  gap: 18px;
+}
+
+.habitPlotsHeader {
+  align-items: flex-start;
+}
+
+.habitPlotsHeaderMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.habitRateSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.habitRateStatCard {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(106, 227, 255, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(106, 227, 255, 0.14), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+}
+
+.habitRateStatCard h3 {
+  margin: 8px 0 6px;
+  font-size: 32px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.habitRateStatCard .muted {
+  margin-bottom: 0;
+}
+
+.habitTrendCard,
+.habitReliabilityCard {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+}
+
+.habitCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.habitCardHeader h3 {
+  margin: 8px 0 0;
+}
+
+.habitCardHeaderMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.habitTrendChartWrap {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.habitTrendChart {
+  display: block;
+  min-width: 720px;
+  width: 100%;
+  height: auto;
+}
+
+.habitTrendGridLine {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-dasharray: 4 6;
+}
+
+.habitTrendAxisLabel,
+.habitTrendLabel {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.habitTrendLabel {
+  font-size: 10px;
+}
+
+.habitTrendBarGood {
+  fill: rgba(97, 244, 179, 0.88);
+}
+
+.habitTrendBarWarn {
+  fill: rgba(255, 184, 108, 0.9);
+}
+
+.habitTrendBarShell {
+  fill: transparent;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1;
+}
+
+.habitTrendPoint {
+  fill: var(--accent);
+  stroke: rgba(11, 15, 22, 0.96);
+  stroke-width: 2;
+}
+
+.habitTrendLine {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 10px rgba(106, 227, 255, 0.25));
+}
+
+.habitTrendEmpty {
+  fill: var(--muted);
+  font-size: 18px;
+}
+
+.habitTrendLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.habitLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.habitLegendSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.habitLegendSwatchGood {
+  background: rgba(97, 244, 179, 0.92);
+}
+
+.habitLegendSwatchWarn {
+  background: rgba(255, 184, 108, 0.92);
+}
+
+.habitLegendSwatchLine {
+  background: var(--accent);
+}
+
+.habitWindowGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.habitWindowCard {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 12px;
+}
+
+.habitGauge {
+  width: 132px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  position: relative;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.habitGauge::after {
+  content: "";
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(12, 16, 24, 0.96), rgba(15, 19, 28, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.habitGaugeInner {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 18px;
+}
+
+.habitGaugeValue {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+}
+
+.habitGaugeLabel {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.habitWindowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.habitReliabilityList {
+  display: grid;
+  gap: 14px;
+}
+
+.habitReliabilityRow {
+  display: grid;
+  gap: 10px;
+}
+
+.habitReliabilityMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.habitReliabilityBar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.habitReliabilityFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(97, 244, 179, 0.95), rgba(106, 227, 255, 0.82));
+}
+
+.habitReliabilityMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .experimentToolbar {
   display: flex;
   justify-content: space-between;
@@ -441,6 +736,21 @@ a {
   .habitRowMain {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .habitIntroGrid,
+  .habitRateSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .habitPlotsHeader,
+  .habitCardHeader {
+    flex-direction: column;
+  }
+
+  .habitPlotsHeaderMeta,
+  .habitCardHeaderMeta {
+    justify-content: flex-start;
   }
 
   .experimentToolbar {
