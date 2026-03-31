@@ -96,12 +96,16 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
                     "backend": {
                         "label": "Triton local",
                         "selected": "triton_local",
+                        "envPath": ".env",
                         "triton": {
                             "baseUrl": "http://127.0.0.1:8003",
-                            "modelId": "Qwen/Qwen2.5-0.5B-Instruct",
+                            "modelId": "mistralai/Ministral-3-3B-Instruct-2512",
                         },
                     },
-                    "model": {"label": "Qwen 2.5 0.5B Instruct", "selected": "Qwen/Qwen2.5-0.5B-Instruct"},
+                    "model": {
+                        "label": "mistralai/Ministral-3-3B-Instruct-2512",
+                        "selected": "mistralai/Ministral-3-3B-Instruct-2512",
+                    },
                     "device": {"label": "CPU", "selected": "cpu"},
                     "queue": {"queued": 1, "running": 0, "done": 2, "failed": 0},
                 },
@@ -128,9 +132,12 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     assert exit_code == 0
     assert "Dashboard Status" in output
     assert "LLM Runtime" in output
-    assert "Triton Models" in output
+    assert "Settings source" in output
+    assert "Selected model" in output
+    assert "Triton Inventory" in output
+    assert "Configured model" in output
     assert "todoist_llm" in output
-    assert "Qwen 2.5 0.5B Instruct" in output
-    assert "id=Qwen/Qwen2.5-0.5B-Instruct" in output
+    assert "mistralai/Ministral-3-3B-Instruct-2512" in output
     assert "http://127.0.0.1:8003" in output
     assert "state=READY" in output
+    assert "model=Qwen/Qwen2.5-0.5B-Instruct" not in output

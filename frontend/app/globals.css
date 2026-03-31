@@ -432,7 +432,6 @@ a {
   margin-bottom: 0;
 }
 
-.habitTrendCard,
 .habitReliabilityCard {
   padding: 18px;
   border-radius: 22px;
@@ -459,101 +458,6 @@ a {
   justify-content: flex-end;
 }
 
-.habitTrendChartWrap {
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.habitTrendChart {
-  display: block;
-  min-width: 720px;
-  width: 100%;
-  height: auto;
-}
-
-.habitTrendGridLine {
-  stroke: rgba(255, 255, 255, 0.08);
-  stroke-dasharray: 4 6;
-}
-
-.habitTrendAxisLabel,
-.habitTrendLabel {
-  fill: var(--muted);
-  font-size: 11px;
-}
-
-.habitTrendLabel {
-  font-size: 10px;
-}
-
-.habitTrendBarGood {
-  fill: rgba(97, 244, 179, 0.88);
-}
-
-.habitTrendBarWarn {
-  fill: rgba(255, 184, 108, 0.9);
-}
-
-.habitTrendBarShell {
-  fill: transparent;
-  stroke: rgba(255, 255, 255, 0.08);
-  stroke-width: 1;
-}
-
-.habitTrendPoint {
-  fill: var(--accent);
-  stroke: rgba(11, 15, 22, 0.96);
-  stroke-width: 2;
-}
-
-.habitTrendLine {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 3.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 10px rgba(106, 227, 255, 0.25));
-}
-
-.habitTrendEmpty {
-  fill: var(--muted);
-  font-size: 18px;
-}
-
-.habitTrendLegend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.habitLegendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.habitLegendSwatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  display: inline-block;
-}
-
-.habitLegendSwatchGood {
-  background: rgba(97, 244, 179, 0.92);
-}
-
-.habitLegendSwatchWarn {
-  background: rgba(255, 184, 108, 0.92);
-}
-
-.habitLegendSwatchLine {
-  background: var(--accent);
-}
-
 .habitWindowGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -561,28 +465,34 @@ a {
 }
 
 .habitWindowCard {
-  padding: 16px;
-  border-radius: 18px;
+  padding: 18px;
+  border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.06), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
   display: grid;
-  gap: 12px;
+  gap: 14px;
+  justify-items: center;
 }
 
 .habitGauge {
-  width: 132px;
+  width: 148px;
   max-width: 100%;
   aspect-ratio: 1;
   margin: 0 auto;
   position: relative;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 24px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 16px 32px rgba(0, 0, 0, 0.24),
+    0 0 28px rgba(132, 235, 182, 0.08);
 }
 
 .habitGauge::after {
   content: "";
   position: absolute;
-  inset: 14%;
+  inset: 17%;
   border-radius: 50%;
   background: linear-gradient(180deg, rgba(12, 16, 24, 0.96), rgba(15, 19, 28, 0.96));
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -595,33 +505,46 @@ a {
   display: grid;
   place-items: center;
   text-align: center;
-  padding: 18px;
+  align-content: center;
+  gap: 4px;
+  padding: 22px;
 }
 
 .habitGaugeValue {
   display: block;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 30px;
+  font-weight: 800;
   letter-spacing: -0.05em;
+  line-height: 1;
 }
 
-.habitGaugeLabel {
+.habitGaugeCaption {
   display: block;
-  margin-top: 4px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.25;
+  font-size: 10px;
+  line-height: 1.15;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
+}
+
+.habitWindowTitle {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 .habitWindowMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
 }
 
 .habitReliabilityList {

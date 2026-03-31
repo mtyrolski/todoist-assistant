@@ -233,10 +233,18 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
     backend_raw = payload.get("backend")
     model_raw = payload.get("model")
     device_raw = payload.get("device")
+    env_path_raw = payload.get("envPath")
     queue_raw = payload.get("queue")
     backend = backend_raw if isinstance(backend_raw, dict) else {}
     model = model_raw if isinstance(model_raw, dict) else {}
     device = device_raw if isinstance(device_raw, dict) else {}
+    env_path = str(
+        env_path_raw
+        or backend.get("envPath")
+        or model.get("envPath")
+        or device.get("envPath")
+        or ""
+    ).strip()
     queue = queue_raw if isinstance(queue_raw, dict) else {}
 
     backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
@@ -245,7 +253,12 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
 
     model_active = str(model.get("active") or model.get("selected") or "unknown")
     model_selected = str(model.get("label") or model.get("selected") or model_active)
-    _print_line("Model", "neutral", f"{model_selected} (active: {model_active})")
+    model_detail = model_selected
+    if model_active != model_selected:
+        model_detail = f"{model_selected} (active: {model_active})"
+    _print_line("Selected model", "neutral", model_detail)
+    if env_path:
+        _print_line("Settings source", "neutral", env_path)
 
     device_label = str(device.get("label") or device.get("selected") or "unknown")
     _print_line("Device", "neutral", device_label)
@@ -260,26 +273,17 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
 
 
 def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
-    _section("Triton Models")
+    _section("Triton Inventory")
     llm_payload = llm_payload if isinstance(llm_payload, dict) else {}
     backend = llm_payload.get("backend")
     backend_payload = backend if isinstance(backend, dict) else {}
     triton_payload = backend_payload.get("triton")
     triton = triton_payload if isinstance(triton_payload, dict) else {}
-    model_payload = llm_payload.get("model")
-    model = model_payload if isinstance(model_payload, dict) else {}
     triton_base_url = str(triton.get("baseUrl") or "").strip()
+    configured_model_id = str(triton.get("modelId") or "").strip()
     served_models = discover_served_triton_models(triton_base_url) if triton_base_url else []
     repo_path = _triton_model_repository_path()
     models = discover_triton_models()
-
-    configured_model_id = str(
-        triton.get("modelId")
-        or model.get("selected")
-        or next((entry.get("model_id") for entry in models if entry.get("model_id")), "")
-        or ""
-    ).strip()
-    configured_model_label = str(model.get("label") or "").strip()
 
     if triton_base_url:
         detail = triton_base_url
@@ -290,10 +294,7 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
             _print_line("Endpoint", "warn", f"{detail} | served models unavailable")
 
     if configured_model_id:
-        detail = configured_model_id
-        if configured_model_label and configured_model_label != configured_model_id:
-            detail = f"{configured_model_label} | id={configured_model_id}"
-        _print_line("Configured model", "neutral", detail)
+        _print_line("Configured model", "neutral", configured_model_id)
 
     if served_models:
         for model in served_models:
@@ -315,9 +316,6 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
         version_text = _format_list([str(version) for version in model.get("versions", [])])
         backend = model.get("backend") or model.get("platform") or "unknown backend"
         detail = f"{backend} | dir={model.get('directory')} | versions={version_text}"
-        model_id = str(model.get("model_id") or "").strip()
-        if model_id:
-            detail = f"{detail} | model={model_id}"
         _print_line(str(model.get("name") or model.get("directory")), "neutral", detail, indent="  ")
 
 
