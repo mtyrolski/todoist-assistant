@@ -139,9 +139,10 @@ export function HabitTrackerPlots({
             <div className="habitGauge" style={{ background: buildRateGradient(window.rate) }} aria-hidden="true">
               <div className="habitGaugeInner">
                 <span className="habitGaugeValue">{formatPercent(window.rate)}</span>
-                <span className="habitGaugeLabel">{window.label}</span>
+                <span className="habitGaugeCaption">completion rate</span>
               </div>
             </div>
+            <div className="habitWindowTitle">{window.label}</div>
             <div className="habitWindowMeta">
               <span>{formatCount(window.completed)} completed</span>
               <span>{formatCount(window.rescheduled)} rescheduled</span>

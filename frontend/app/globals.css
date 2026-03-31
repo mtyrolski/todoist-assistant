@@ -465,28 +465,34 @@ a {
 }
 
 .habitWindowCard {
-  padding: 16px;
-  border-radius: 18px;
+  padding: 18px;
+  border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.06), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
   display: grid;
-  gap: 12px;
+  gap: 14px;
+  justify-items: center;
 }
 
 .habitGauge {
-  width: 132px;
+  width: 148px;
   max-width: 100%;
   aspect-ratio: 1;
   margin: 0 auto;
   position: relative;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 24px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 16px 32px rgba(0, 0, 0, 0.24),
+    0 0 28px rgba(132, 235, 182, 0.08);
 }
 
 .habitGauge::after {
   content: "";
   position: absolute;
-  inset: 14%;
+  inset: 17%;
   border-radius: 50%;
   background: linear-gradient(180deg, rgba(12, 16, 24, 0.96), rgba(15, 19, 28, 0.96));
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -499,33 +505,46 @@ a {
   display: grid;
   place-items: center;
   text-align: center;
-  padding: 18px;
+  align-content: center;
+  gap: 4px;
+  padding: 22px;
 }
 
 .habitGaugeValue {
   display: block;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 30px;
+  font-weight: 800;
   letter-spacing: -0.05em;
+  line-height: 1;
 }
 
-.habitGaugeLabel {
+.habitGaugeCaption {
   display: block;
-  margin-top: 4px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.25;
+  font-size: 10px;
+  line-height: 1.15;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
+}
+
+.habitWindowTitle {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 .habitWindowMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
 }
 
 .habitReliabilityList {
