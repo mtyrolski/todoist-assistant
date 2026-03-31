@@ -432,7 +432,6 @@ a {
   margin-bottom: 0;
 }
 
-.habitTrendCard,
 .habitReliabilityCard {
   padding: 18px;
   border-radius: 22px;
@@ -457,101 +456,6 @@ a {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-}
-
-.habitTrendChartWrap {
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.habitTrendChart {
-  display: block;
-  min-width: 720px;
-  width: 100%;
-  height: auto;
-}
-
-.habitTrendGridLine {
-  stroke: rgba(255, 255, 255, 0.08);
-  stroke-dasharray: 4 6;
-}
-
-.habitTrendAxisLabel,
-.habitTrendLabel {
-  fill: var(--muted);
-  font-size: 11px;
-}
-
-.habitTrendLabel {
-  font-size: 10px;
-}
-
-.habitTrendBarGood {
-  fill: rgba(97, 244, 179, 0.88);
-}
-
-.habitTrendBarWarn {
-  fill: rgba(255, 184, 108, 0.9);
-}
-
-.habitTrendBarShell {
-  fill: transparent;
-  stroke: rgba(255, 255, 255, 0.08);
-  stroke-width: 1;
-}
-
-.habitTrendPoint {
-  fill: var(--accent);
-  stroke: rgba(11, 15, 22, 0.96);
-  stroke-width: 2;
-}
-
-.habitTrendLine {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 3.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 10px rgba(106, 227, 255, 0.25));
-}
-
-.habitTrendEmpty {
-  fill: var(--muted);
-  font-size: 18px;
-}
-
-.habitTrendLegend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.habitLegendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.habitLegendSwatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  display: inline-block;
-}
-
-.habitLegendSwatchGood {
-  background: rgba(97, 244, 179, 0.92);
-}
-
-.habitLegendSwatchWarn {
-  background: rgba(255, 184, 108, 0.92);
-}
-
-.habitLegendSwatchLine {
-  background: var(--accent);
 }
 
 .habitWindowGrid {

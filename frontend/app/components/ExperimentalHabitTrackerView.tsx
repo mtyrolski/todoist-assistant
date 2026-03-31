@@ -61,8 +61,8 @@ export function ExperimentalHabitTrackerView() {
           </div>
         </header>
         <p className="muted" style={{ margin: 0 }}>
-          The overview comes first, then a single rate-focused plots section, then a roster and notes that stay readable
-          without turning the page into a chart dump.
+          The overview comes first, then a rate-focused plots section, then a roster and notes that stay readable without
+          turning the page into a chart dump.
         </p>
       </section>
 

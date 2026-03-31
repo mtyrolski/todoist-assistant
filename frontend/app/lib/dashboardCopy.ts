@@ -87,14 +87,7 @@ export const HABIT_TRACKER_LAB_HELP = `**Habit Tracker Lab**
 A focused view for the weekly habit payload.
 
 - About sits first so the page reads like an overview instead of a chart dump.
-- The plots section shows the overall completion rate and the last N weeks.
+- The plots section shows the overall completion rate and recent N-week slices.
 - The lower cards keep the roster and notes easier to scan on smaller screens.`;
-
-export const HABIT_TREND_HELP = `**Habit trend**
-Completion rate for tasks labeled \`@track_habit\`.
-
-- The gauge summarizes the full tracked history.
-- The rate line focuses on the most recent N weeks.
-- A secondary comparison plot shows completions against reschedules over that same window.`;
 
 export const SURFACE_STATUS_SUMMARY = `Stable: dashboard, control panel, and automation tooling. Beta: LLM-Agent Chat. Experimental: Habit Tracker Lab.`;

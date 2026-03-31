@@ -12,23 +12,11 @@ type WindowSummary = {
   rate: number;
 };
 
-type TrendPoint = {
-  label: string;
-  completed: number;
-  rescheduled: number;
-  total: number;
-  rate: number;
-};
-
 const WINDOW_SIZES = [4, 8, 12] as const;
-const CHART_WIDTH = 1000;
-const CHART_HEIGHT = 320;
-const CHART_MARGIN = { top: 18, right: 18, bottom: 52, left: 58 };
 
 const HELP = `**Habit rates**
 This section turns the weekly habit payload into rate-first views.
 
-- The main chart shows week-by-week completion rate with activity volume behind it.
 - The window cards compare all-time history against recent N-week slices.
 - The habit leaderboard ranks tasks by all-time reliability.`;
 
@@ -83,23 +71,13 @@ export function HabitTrackerPlots({
   }
 
   const history = habitTracker.history ?? [];
-  const trendPoints: TrendPoint[] = history.map((week) => {
-    const total = week.completed + week.rescheduled;
-    return {
-      label: week.label,
-      completed: week.completed,
-      rescheduled: week.rescheduled,
-      total,
-      rate: total > 0 ? week.completed / total : 0
-    };
-  });
-
-  const totalCompleted = trendPoints.reduce((sum, point) => sum + point.completed, 0);
-  const totalRescheduled = trendPoints.reduce((sum, point) => sum + point.rescheduled, 0);
+  const totalCompleted = history.reduce((sum, week) => sum + week.completed, 0);
+  const totalRescheduled = history.reduce((sum, week) => sum + week.rescheduled, 0);
   const totalEvents = totalCompleted + totalRescheduled;
   const totalRate = totalEvents > 0 ? totalCompleted / totalEvents : 0;
-  const latestPoint = trendPoints.at(-1) ?? null;
-  const latestRate = latestPoint?.rate ?? 0;
+  const latestWeek = history.at(-1) ?? null;
+  const latestTotal = latestWeek ? latestWeek.completed + latestWeek.rescheduled : 0;
+  const latestRate = latestTotal > 0 ? (latestWeek?.completed ?? 0) / latestTotal : 0;
   const recentWindows = WINDOW_SIZES.map((weeks) => sumWindow(history, weeks));
   const ranking = [...habitTracker.items].sort((left, right) => {
     const reliabilityDelta = (right.reliability ?? -1) - (left.reliability ?? -1);
@@ -109,21 +87,6 @@ export function HabitTrackerPlots({
     return rightVolume - leftVolume;
   });
   const topHabits = ranking.slice(0, 6);
-
-  const innerWidth = CHART_WIDTH - CHART_MARGIN.left - CHART_MARGIN.right;
-  const innerHeight = CHART_HEIGHT - CHART_MARGIN.top - CHART_MARGIN.bottom;
-  const maxVolume = Math.max(1, ...trendPoints.map((point) => point.total));
-  const barStep = trendPoints.length > 0 ? innerWidth / trendPoints.length : innerWidth;
-  const barWidth = Math.max(14, Math.min(36, barStep * 0.6));
-  const ratePath = trendPoints
-    .map((point, index) => {
-      const x = CHART_MARGIN.left + index * barStep + barStep / 2;
-      const y = CHART_MARGIN.top + innerHeight - point.rate * innerHeight;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
-  const labelStride = Math.max(1, Math.ceil(trendPoints.length / 8));
-  const gridSteps = [0, 0.25, 0.5, 0.75, 1];
 
   return (
     <section className="card habitPlotsSection">
@@ -169,117 +132,6 @@ export function HabitTrackerPlots({
           </article>
         ))}
       </div>
-
-      <article className="habitTrendCard">
-        <header className="habitCardHeader">
-          <div>
-            <p className="eyebrow">Weekly trend</p>
-            <h3>Completion rate with activity volume behind it</h3>
-          </div>
-          <div className="habitCardHeaderMeta">
-            <span className="pill pill-good">Completed</span>
-            <span className="pill pill-warn">Rescheduled</span>
-            <span className="pill pill-neutral">Rate line</span>
-          </div>
-        </header>
-        <div className="habitTrendChartWrap">
-          <svg
-            className="habitTrendChart"
-            viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-            role="img"
-            aria-label="Weekly habit completion rate and activity volume"
-          >
-            {gridSteps.map((step) => {
-              const y = CHART_MARGIN.top + innerHeight - step * innerHeight;
-              return (
-                <g key={step}>
-                  <line
-                    x1={CHART_MARGIN.left}
-                    x2={CHART_WIDTH - CHART_MARGIN.right}
-                    y1={y}
-                    y2={y}
-                    className="habitTrendGridLine"
-                  />
-                  <text x={20} y={y + 4} className="habitTrendAxisLabel">
-                    {formatPercent(step)}
-                  </text>
-                </g>
-              );
-            })}
-            {trendPoints.length ? (
-              <>
-                {trendPoints.map((point, index) => {
-                  const x = CHART_MARGIN.left + index * barStep + barStep / 2;
-                  const totalHeight = point.total > 0 ? (point.total / maxVolume) * innerHeight : 0;
-                  const rescheduledHeight = point.total > 0 ? (point.rescheduled / point.total) * totalHeight : 0;
-                  const completedHeight = Math.max(0, totalHeight - rescheduledHeight);
-                  const top = CHART_MARGIN.top + innerHeight - totalHeight;
-                  const barX = x - barWidth / 2;
-                  const rateY = CHART_MARGIN.top + innerHeight - point.rate * innerHeight;
-                  const shouldLabel = index % labelStride === 0 || index === trendPoints.length - 1;
-                  return (
-                    <g key={point.label}>
-                      <rect
-                        x={barX}
-                        y={top + rescheduledHeight}
-                        width={barWidth}
-                        height={completedHeight}
-                        rx={10}
-                        className="habitTrendBarGood"
-                      />
-                      <rect
-                        x={barX}
-                        y={top}
-                        width={barWidth}
-                        height={rescheduledHeight}
-                        rx={10}
-                        className="habitTrendBarWarn"
-                      />
-                      <rect
-                        x={barX}
-                        y={top}
-                        width={barWidth}
-                        height={Math.max(totalHeight, 1)}
-                        rx={10}
-                        className="habitTrendBarShell"
-                      />
-                      <circle cx={x} cy={rateY} r={5.5} className="habitTrendPoint" />
-                      {shouldLabel ? (
-                        <text x={x} y={CHART_HEIGHT - 16} textAnchor="middle" className="habitTrendLabel">
-                          {point.label}
-                        </text>
-                      ) : null}
-                      <title>
-                        {point.label}: {formatPercent(point.rate)} completion rate, {formatCount(point.completed)} completed,{" "}
-                        {formatCount(point.rescheduled)} rescheduled.
-                      </title>
-                    </g>
-                  );
-                })}
-                <path d={ratePath} className="habitTrendLine" />
-              </>
-            ) : (
-              <text x={CHART_WIDTH / 2} y={CHART_HEIGHT / 2} textAnchor="middle" className="habitTrendEmpty">
-                No weekly history yet.
-              </text>
-            )}
-          </svg>
-        </div>
-        <div className="habitTrendLegend">
-          <span className="habitLegendItem">
-            <span className="habitLegendSwatch habitLegendSwatchGood" />
-            Completed tasks
-          </span>
-          <span className="habitLegendItem">
-            <span className="habitLegendSwatch habitLegendSwatchWarn" />
-            Rescheduled tasks
-          </span>
-          <span className="habitLegendItem">
-            <span className="habitLegendSwatch habitLegendSwatchLine" />
-            Completion rate
-          </span>
-        </div>
-      </article>
 
       <div className="habitWindowGrid">
         {recentWindows.map((window) => (
