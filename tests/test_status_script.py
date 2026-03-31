@@ -93,6 +93,7 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
                 status_code=200,
                 payload={
                     "enabled": True,
+                    "envPath": ".env",
                     "backend": {
                         "label": "Triton local",
                         "selected": "triton_local",
@@ -128,9 +129,10 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     assert exit_code == 0
     assert "Dashboard Status" in output
     assert "LLM Runtime" in output
-    assert "Triton Models" in output
+    assert "Settings source" in output
+    assert "Selected model" in output
+    assert "Triton Inventory" in output
     assert "todoist_llm" in output
     assert "Qwen 2.5 0.5B Instruct" in output
-    assert "id=Qwen/Qwen2.5-0.5B-Instruct" in output
     assert "http://127.0.0.1:8003" in output
     assert "state=READY" in output
