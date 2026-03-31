@@ -238,7 +238,13 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
     backend = backend_raw if isinstance(backend_raw, dict) else {}
     model = model_raw if isinstance(model_raw, dict) else {}
     device = device_raw if isinstance(device_raw, dict) else {}
-    env_path = str(env_path_raw or "").strip()
+    env_path = str(
+        env_path_raw
+        or backend.get("envPath")
+        or model.get("envPath")
+        or device.get("envPath")
+        or ""
+    ).strip()
     queue = queue_raw if isinstance(queue_raw, dict) else {}
 
     backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
@@ -274,6 +280,7 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
     triton_payload = backend_payload.get("triton")
     triton = triton_payload if isinstance(triton_payload, dict) else {}
     triton_base_url = str(triton.get("baseUrl") or "").strip()
+    configured_model_id = str(triton.get("modelId") or "").strip()
     served_models = discover_served_triton_models(triton_base_url) if triton_base_url else []
     repo_path = _triton_model_repository_path()
     models = discover_triton_models()
@@ -285,6 +292,9 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
             _print_line("Endpoint", "ok", detail)
         else:
             _print_line("Endpoint", "warn", f"{detail} | served models unavailable")
+
+    if configured_model_id:
+        _print_line("Configured model", "neutral", configured_model_id)
 
     if served_models:
         for model in served_models:
@@ -306,9 +316,6 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
         version_text = _format_list([str(version) for version in model.get("versions", [])])
         backend = model.get("backend") or model.get("platform") or "unknown backend"
         detail = f"{backend} | dir={model.get('directory')} | versions={version_text}"
-        model_id = str(model.get("model_id") or "").strip()
-        if model_id:
-            detail = f"{detail} | model={model_id}"
         _print_line(str(model.get("name") or model.get("directory")), "neutral", detail, indent="  ")
 
 
