@@ -1,6 +1,5 @@
 "use client";
 
-import { HabitTrackerCard } from "./HabitTrackerCard";
 import { HabitTrackerPlots } from "./HabitTrackerPlots";
 import { InfoTip } from "./InfoTip";
 import { LoadingBar } from "./LoadingBar";
@@ -74,39 +73,35 @@ export function ExperimentalHabitTrackerView() {
 
       <HabitTrackerPlots habitTracker={habitTracker} />
 
-      <section className="grid2">
-        <HabitTrackerCard habitTracker={habitTracker} />
-
-        <section className="card">
-          <header className="cardHeader">
-            <div className="cardTitleRow">
-              <h2>Lab notes</h2>
-            </div>
-          </header>
-          <div className="experimentNoteStack">
-            <div>
-              <p className="eyebrow">What posts back to Todoist</p>
-              <p className="muted">
-                The weekly automation comments directly on each tracked task with completions, reschedules, all-time
-                totals, and a simple reliability score.
-              </p>
-            </div>
-            <div>
-              <p className="eyebrow">How to opt in</p>
-              <p className="muted">
-                Label any task with <code>@track_habit</code>. The next weekly run will include it automatically, and the
-                dashboard payload will reflect it here.
-              </p>
-            </div>
-            <div>
-              <p className="eyebrow">Why this page is separate</p>
-              <p className="muted">
-                The overview dashboard stays focused on broad activity. This lab is intentionally narrower and leaves room
-                for richer habit-specific components without crowding the home page.
-              </p>
-            </div>
+      <section className="card">
+        <header className="cardHeader">
+          <div className="cardTitleRow">
+            <h2>Lab notes</h2>
           </div>
-        </section>
+        </header>
+        <div className="experimentNoteStack">
+          <div>
+            <p className="eyebrow">What posts back to Todoist</p>
+            <p className="muted">
+              The weekly automation comments directly on each tracked task with completions, reschedules, all-time totals,
+              and a simple reliability score.
+            </p>
+          </div>
+          <div>
+            <p className="eyebrow">How to opt in</p>
+            <p className="muted">
+              Label any task with <code>@track_habit</code>. The next weekly run will include it automatically, and the
+              dashboard payload will reflect it here.
+            </p>
+          </div>
+          <div>
+            <p className="eyebrow">Why this page is separate</p>
+            <p className="muted">
+              The overview dashboard stays focused on broad activity. This lab is intentionally narrower and leaves room
+              for richer habit-specific components without crowding the home page.
+            </p>
+          </div>
+        </div>
       </section>
     </>
   );

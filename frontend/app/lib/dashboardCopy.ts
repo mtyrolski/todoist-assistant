@@ -88,6 +88,6 @@ A focused view for the weekly habit payload.
 
 - About sits first so the page reads like an overview instead of a chart dump.
 - The plots section shows the overall completion rate and recent N-week slices.
-- The lower cards keep the roster and notes easier to scan on smaller screens.`;
+- The notes section stays focused on how the tracker works instead of repeating the roster.`;
 
 export const SURFACE_STATUS_SUMMARY = `Stable: dashboard, control panel, and automation tooling. Beta: LLM-Agent Chat. Experimental: Habit Tracker Lab.`;
