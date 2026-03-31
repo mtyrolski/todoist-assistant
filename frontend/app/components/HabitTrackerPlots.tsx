@@ -119,7 +119,7 @@ export function HabitTrackerPlots({
           <p className="eyebrow">Latest week</p>
           <h3>{formatPercent(latestRate)}</h3>
           <p className="muted tiny">
-            {latestPoint ? `${formatCount(latestPoint.completed)} completed / ${formatCount(latestPoint.total)} total events` : "No weekly history yet."}
+            {latestWeek ? `${formatCount(latestWeek.completed)} completed / ${formatCount(latestTotal)} total events` : "No weekly history yet."}
           </p>
         </article>
         {recentWindows.map((window) => (
