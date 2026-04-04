@@ -73,6 +73,7 @@ llm_breakdown:
 automations:
 - ${activity}
 - ${multiply}
+- ${gmail_tasks}
 - ${habit_tracker}
 - ${stale_tasks}
 - ${template}

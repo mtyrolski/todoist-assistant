@@ -1,27 +1,29 @@
 # Documentation
 
-This folder contains the long-form docs. Start here and jump into the section you need.
+Start here if you want the practical docs instead of browsing the repository tree.
 
-## Stable docs
-- Installation: [docs/INSTALLATION.md](INSTALLATION.md)
-- Usage (CLI, dashboard, automations): [docs/USAGE.md](USAGE.md)
-- Build & CI workflows: [docs/BUILDING.md](BUILDING.md)
-- Docker workflow: [docs/DOCKER.md](DOCKER.md)
-- Code layout and module boundaries: [docs/CODE_LAYOUT.md](CODE_LAYOUT.md)
+Latest stable release: `v0.3.1`
 
-## v0.3.1 release notes
-- v0.3.1 release notes and compliance checklist: [v0.3.1 release notes](v0.3.1-release-notes.md)
-- Changelog: [CHANGELOG.md](../CHANGELOG.md)
+## Pick the path you need
 
-If you are using the latest stable release v0.3.1, start with the stable docs above. If you are working through the release notes and checklist, start with the v0.3.1 release notes page.
+- Installing the app or CLI: [INSTALLATION.md](INSTALLATION.md)
+- Running the dashboard, automations, or chat: [USAGE.md](USAGE.md)
+- Running with containers: [DOCKER.md](DOCKER.md)
+- Building installers and understanding CI: [BUILDING.md](BUILDING.md)
+- Understanding the package and module boundaries: [CODE_LAYOUT.md](CODE_LAYOUT.md)
 
-## Roadmaps
-- Status update automation plan: [docs/status_update_automation_plan.md](status_update_automation_plan.md)
+## Platform-specific details
 
-## Windows installer details
-- MSI + bootstrapper guide: [docs/windows_installer.md](windows_installer.md)
-- Uninstall behavior: [docs/windows_uninstall_behavior.md](windows_uninstall_behavior.md)
-- Prereq test matrix: [docs/windows_prereq_test_matrix.md](windows_prereq_test_matrix.md)
+- Windows installer guide: [windows_installer.md](windows_installer.md)
+- Windows uninstall behavior: [windows_uninstall_behavior.md](windows_uninstall_behavior.md)
+- Windows prerequisite matrix: [windows_prereq_test_matrix.md](windows_prereq_test_matrix.md)
 
-## Integrations
-- Gmail automation setup: [docs/gmail_setup.md](gmail_setup.md)
+## Integrations and plans
+
+- Gmail automation setup: [gmail_setup.md](gmail_setup.md)
+- Status update automation plan: [status_update_automation_plan.md](status_update_automation_plan.md)
+
+## Release history
+
+- Changelog: [../CHANGELOG.md](../CHANGELOG.md)
+- Stable release notes: [v0.3.1-release-notes.md](v0.3.1-release-notes.md)

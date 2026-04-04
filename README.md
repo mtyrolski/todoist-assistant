@@ -12,149 +12,204 @@
       </td>
       <td align="left">
         <h1>Todoist Assistant</h1>
-        <p>Local-first analytics, automation, and a dashboard for Todoist data, plus optional AI summaries and read-only chat over cached activity. Sync once, analyze and automate repeatedly.</p>
+        <p>Local-first analytics, automation, and dashboards for Todoist with optional AI summaries and read-only chat.</p>
+        <ul>
+          <li>Cache Todoist data locally and explore it in a dashboard</li>
+          <li>Run automations like sync, task multiplication, and Gmail task import</li>
+          <li>Use optional local AI summaries and read-only chat over cached activity</li>
+        </ul>
         <p><strong>Quick links</strong><br/>
           <a href="docs/README.md">Docs index</a><br/>
-          <a href="docs/v0.3.1-release-notes.md">v0.3.1 release notes</a><br/>
-          <a href="CHANGELOG.md">Changelog</a><br/>
           <a href="docs/INSTALLATION.md">Installation</a><br/>
           <a href="docs/USAGE.md">Usage</a><br/>
+          <a href="docs/DOCKER.md">Docker</a><br/>
           <a href="docs/BUILDING.md">Build and CI</a><br/>
-          <a href="docs/DOCKER.md">Docker workflow</a><br/>
-          <a href="docs/windows_installer.md">Windows installer</a><br/>
-          <a href="docs/gmail_setup.md">Gmail setup</a>
+          <a href="docs/CODE_LAYOUT.md">Code layout</a><br/>
+          <a href="https://github.com/mtyrolski/todoist-assistant/releases">Releases</a>
         </p>
       </td>
     </tr>
   </table>
 </div>
 
-<p><strong>Latest release</strong><br/>
-  The latest stable release is
-  <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.1">todoist-assistant-v0.3.1</a>.<br/>
-  For release details, notes, and checklist, see
-  <a href="docs/v0.3.1-release-notes.md">v0.3.1 release notes</a>.
-</p>
+Todoist Assistant is a local-first Todoist toolkit. It syncs your Todoist data into a local cache, gives you a dashboard to explore it, and lets you run automations on top of that data.
 
-<p><strong>Download the latest stable release</strong><br/>
-  Go to <a href="https://github.com/mtyrolski/todoist-assistant/releases/tag/todoist-assistant-v0.3.1">GitHub Releases</a> and open the latest stable tag, then download the file you need:<br/>
-  - Windows installer: <code>TodoistAssistantSetup.exe</code> or the <code>.msi</code>.<br/>
-  - macOS app: <code>.dmg</code> (full app) or <code>.pkg</code> (CLI-only).<br/>
-  - Linux: source distribution (see docs for setup).
-</p>
-
-<p><strong>Surface status</strong><br/>
-  The dashboard and control panel are the stable paths. LLM-Agent Chat is beta. Habit Tracker Lab is experimental and intentionally separate from the main dashboard flow.
-</p>
-
-### Triton-backed local LLM
-- Set `TODOIST_AGENT_BACKEND=triton_local` to route the LLM breakdown/chat stack through the local Triton server.
-- Start the stack with `make run_dashboard_cpu` for CPU or `make run_dashboard_gpu` for GPU. `make triton_shell` opens a shell inside the running Triton container.
-- Defaults: HTTP `http://127.0.0.1:8003`, model name `todoist_llm`, model id `Qwen/Qwen2.5-0.5B-Instruct`.
-- Logs: container output is tailed to `.cache/todoist-assistant/dashboard/triton.log`, and per-request inference logs go to `.cache/todoist-assistant/dashboard/triton-inference.log`.
-- The backend model lives in [`deploy/triton/model_repository/todoist_llm/1/model.py`](deploy/triton/model_repository/todoist_llm/1/model.py), with the GPU override in [`compose.triton.gpu.yaml`](compose.triton.gpu.yaml).
-
-## Highlights
-- Fast, local dashboard from your cached Todoist data (reproducible analytics, works offline after sync).
-- Guided first-run setup with token validation and project hierarchy cleanup.
-- Automations you can enable: task multiplication, local-only LLM breakdown, and an observer loop.
-- Read-only chat over cached activity for summaries and insights (no writes to Todoist).
-
-## Python library (what you can do)
-The Python package is meant for **local-first data access** and **automation**:
-- Read and cache Todoist activity via the API client and database layer.
-- Run analytics helpers (stats, activity utilities).
-- Build automations and observer loops on top of cached data.
-- (Optional) Use AI helpers and agent tools for summaries and chat.
-
-Basic import:
-```python
-import todoist
-```
-
-### Structure (where things live)
-- `todoist` - public package (core modules + helpers).
-- `todoist.api` - Todoist API client.
-- `todoist.database` - local data store and persistence helpers.
-- `todoist.automations` - automation workflows (observer, gmail, templates).
-- `todoist.llm` - AI/LLM helpers.
-- `todoist.agent` - agent tools and chat helpers.
-- `todoist.web` - FastAPI app + web API surface.
-- `todoist.dashboard` - plots + dashboard utilities.
-
-### Core package notes (from `core/README.md`)
-- Install editable core-only package:
-  - `uv pip install -e core`
-- Build wheel + sdist:
-  - `uv build core`
-- Included: `todoist.api`, `todoist.database`, `todoist.types`, `todoist.utils`, activity helpers, automation bases.
-- Excluded: dashboard + web stack, plotting, LLM/agent modules, UI-only automations.
-
-See `core/README.md` for full details.
-
-## Screenshots
+The main product is the dashboard and automation workflow. Optional AI features can summarize your local activity and power a read-only chat view, but the core value of the project is local analytics and automation. After the first sync, most day-to-day usage runs against your local cached data.
 ![Dashboard overview](img/fig1.png)
 ![Activity trends](img/fig2.png)
-![Plots](img/fig3.png)
+## What this project is
 
-## Quick start (dev)
+- A local dashboard for Todoist activity, trends, and task analysis
+- A Python package and API for working with cached Todoist data
+- A set of automations such as environment updates, task multiplication, and Gmail task import
+- An optional local AI layer for summaries and chat over your cached history
+
+## Who it is for
+
+- Todoist users who want a local dashboard instead of only Todoist's built-in views
+- People who want to automate recurring Todoist workflows
+- Developers who want a Python codebase they can extend
+
+## Latest stable release
+
+`v0.3.1`
+
+Release assets live on GitHub Releases:
+- Windows: `TodoistAssistantSetup.exe` or the `.msi`
+- macOS: `.dmg` for the app, `.pkg` for CLI-only installs
+- Linux: source checkout or Docker
+
+Releases: <https://github.com/mtyrolski/todoist-assistant/releases>
+
+## Quick start
+
+### End users
+
+#### Windows
+
+1. Download `TodoistAssistantSetup.exe` from GitHub Releases.
+2. Run the installer.
+3. Paste your Todoist API token during first-run setup.
+4. Open the dashboard and let the first sync complete.
+
+More Windows details: [docs/windows_installer.md](docs/windows_installer.md)
+
+#### macOS
+
+- App + dashboard: install the `.dmg` release asset
+- CLI-only: install the `.pkg` release asset or use Homebrew
+
+Full instructions: [docs/INSTALLATION.md](docs/INSTALLATION.md)
+
+#### Linux
+
+- Run from source
+- Or use Docker Compose
+
+Setup details: [docs/INSTALLATION.md](docs/INSTALLATION.md)
+
+### Docker
+
 ```bash
+docker compose up --build
+```
+
+Open:
+- Dashboard: http://127.0.0.1:3000
+- API: http://127.0.0.1:8000
+
+Container workflow: [docs/DOCKER.md](docs/DOCKER.md)
+
+### Developers
+
+Prerequisites:
+- Python 3.11
+- `uv`
+- Node.js 20+
+- A Todoist API token
+
+```bash
+git clone https://github.com/mtyrolski/todoist-assistant.git
+cd todoist-assistant
 cp .env.example .env
 # set API_KEY in .env
 make init_local_env
 make run_dashboard
 ```
+
 Open:
-- Frontend: http://127.0.0.1:3000
+- Dashboard: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
 
+## Everyday usage
+
+### Main commands
+
+```bash
+make run_dashboard     # start the local dashboard stack (in most cases only this one needed)
+make update_env        # refresh local cache and run short automations
+make run_observer      # keep syncing in the background
+make run_demo          # run the dashboard with demo/anonymized data
+make chat_agent        # start the local read-only chat flow
+```
+
+Command details: [docs/USAGE.md](docs/USAGE.md)
+
+### What the first run looks like
+
+1. Paste your Todoist API token.
+2. Confirm or adjust project mapping for archived or moved projects.
+3. Let the first sync build the local cache.
+4. Use the dashboard, automations, or chat against local data.
+
+## Main features
+
+### Dashboard
+
+- Runs locally against cached Todoist data
+- Shows trends, counts, priorities, and activity summaries
+- Works well for repeated analysis after the initial sync
+
+## Screenshots
+
+
+![Plots](img/fig3.png)
+![Automation controls](img/fig4.png)
+
+### Automations
+
+- `init_env` and `update_env` keep local data current
+- Multiplication automation expands tasks based on labels
+- Gmail automation can turn emails into Todoist tasks
+- Observer mode keeps refresh and short automations running continuously
+
+Automation setup lives in [`configs/automations.yaml`](configs/automations.yaml).
+
+### Optional AI features
+
+- Local summaries over cached Todoist history
+- Read-only dashboard chat
+- Triton-backed local model support for the AI stack
+
+Usage details: [docs/USAGE.md](docs/USAGE.md)
+
+## Project structure
+
+- [`todoist/`](todoist) contains the main Python package
+- [`frontend/`](frontend) contains the Next.js dashboard
+- [`configs/`](configs) contains automation and dashboard configuration
+- [`docs/`](docs) contains longer-form documentation
+- [`tests/`](tests) contains the test suite and coverage notes
+- [`core/`](core) contains the core-only package variant
+
+Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
+
+## Documentation
+
+- [docs/README.md](docs/README.md): docs index
+- [docs/INSTALLATION.md](docs/INSTALLATION.md): installation by platform
+- [docs/USAGE.md](docs/USAGE.md): commands, dashboard, and automations
+- [docs/DOCKER.md](docs/DOCKER.md): container workflow
+- [docs/BUILDING.md](docs/BUILDING.md): packaging and CI
+- [docs/gmail_setup.md](docs/gmail_setup.md): Gmail automation setup
+- [core/README.md](core/README.md): core-only package
+- [tests/README.md](tests/README.md): test layout and coverage notes
+
 ## Checks
+
+Run these before opening or closing documentation-adjacent code changes:
+
 ```bash
 make typecheck
 make lint
 make test
 make coverage
-make check
 ```
-
-- `make typecheck` now rejects explicit `: Any =` variable annotations used as checker escape hatches.
-- Keep secrets local: commit `.env.example`, never `.env`, OAuth tokens, private keys, or local credential exports.
-- Full coverage snapshots live in [`tests/COVERAGE_REPORT.md`](tests/COVERAGE_REPORT.md).
-
-## Cache and logs
-- Runtime cache files now live in `./.cache/todoist-assistant/` by default.
-- You can override cache location with `TODOIST_CACHE_DIR`.
-- Automation logs are written to `<cache-dir>/automation.log`.
-- Runtime logging defaults to `INFO`. Set `TODOIST_LOG_LEVEL=DEBUG` when you want the verbose trace again.
-- Todoist request retries now wait only after an actual `429` response, using Todoist's `Retry-After` value when available and a small RPM-based fallback otherwise.
-- On startup, legacy runtime files found in old locations are migrated to the cache dir and backed up in `.cache-migration-backup/`.
-- Migration backups are temporary and will be removed once the `v0.3` line is finalized.
-
-![Automation controls](img/fig4.png)
-
-
-## Quick start (Docker)
-```bash
-docker compose up --build
-```
-Open:
-- Dashboard: http://127.0.0.1:3000
-- API: http://127.0.0.1:8000
-
-## Installation (end users)
-- **Windows:** use `TodoistAssistantSetup.exe` from Releases (recommended). MSI details in [docs/windows_installer.md](docs/windows_installer.md).
-- **macOS:** DMG for the full app; pkg/Homebrew for CLI-only. See [docs/INSTALLATION.md](docs/INSTALLATION.md).
-- **Linux:** source setup only. See [docs/INSTALLATION.md](docs/INSTALLATION.md).
-
-## First run (what it looks like)
-- The app opens with a guided setup overlay.
-- Step 1: paste your Todoist API token. It validates immediately and shows a connection sanity check (masked token + label count).
-- Step 2: optional project adjustments (map archived projects to active roots). This can be edited later in Control Panel → Project Adjustments.
-- You can always change the token later in Control Panel → Settings.
-- After setup, the first data sync starts and a progress overlay appears while charts are generated (can take a few minutes on large accounts).
 
 ## Contributing
-Issues and PRs are welcome. See [docs/BUILDING.md](docs/BUILDING.md) for build structure and CI workflows.
+
+Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) and [SKILLS.md](SKILLS.md) for repository rules and workflow expectations.
 
 ## License
+
 MIT. See [LICENSE](LICENSE).
