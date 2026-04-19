@@ -83,6 +83,22 @@ def run_breakdown(automation: Any, db: Database) -> None:
     candidates = selection.candidates
     queued_ids = selection.queued_ids
     drop_queue_ids = selection.drop_queue_ids
+    cleanup_label_tasks = selection.cleanup_label_tasks
+
+    logger.info(
+        "LLM breakdown selection prepared {} candidate(s), {} cleanup task(s), {} dropped queue item(s)",
+        len(candidates),
+        len(cleanup_label_tasks),
+        len(drop_queue_ids),
+    )
+
+    for item in cleanup_label_tasks:
+        logger.info(
+            "Removing processed rollout label '{}' from task {} because children already exist",
+            item.label,
+            item.task.id,
+        )
+        automation.update_root_labels(db, item.task, item.label)
 
     if not candidates:
         if drop_queue_ids:
@@ -102,6 +118,12 @@ def run_breakdown(automation: Any, db: Database) -> None:
     tasks_to_process = candidates[:limit] if limit > 0 else candidates
     tasks_total = len(candidates)
     tasks_pending = tasks_total - len(tasks_to_process)
+    logger.info(
+        "LLM breakdown will process {} task(s) this tick (candidates={}, max_tasks_per_tick={})",
+        len(tasks_to_process),
+        tasks_total,
+        limit,
+    )
     run_id = automation.new_run_id()
 
     progress = build_running_progress(
@@ -208,22 +230,60 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 variant=request.variant_key,
                 enabled=automation.auto_queue_children,
             )
+            context = InsertContext(
+                max_depth=request.max_depth,
+                max_children=request.max_children,
+                max_total_tasks=request.max_total_tasks,
+                labels=automation.child_labels(task),
+                created=created,
+                queue_ctx=queue_ctx if automation.auto_queue_children else None,
+            )
             automation.insert_children(
                 db,
                 root_task=task,
                 parent_id=task.id,
                 nodes=nodes,
                 depth=1,
-                context=InsertContext(
-                    max_depth=request.max_depth,
-                    max_children=request.max_children,
-                    max_total_tasks=request.max_total_tasks,
-                    labels=automation.child_labels(task),
-                    created=created,
-                    queue_ctx=queue_ctx if automation.auto_queue_children else None,
-                ),
+                context=context,
             )
             created_count = created[0]
+            if context.errors:
+                error_message = "; ".join(context.errors[:3])
+                if len(context.errors) > 3:
+                    error_message = f"{error_message}; and {len(context.errors) - 3} more"
+                logger.error("LLM breakdown insert failed for task {}: {}", task.id, error_message)
+                failed += 1
+                processed_ids.add(task.id)
+                if created_count > 0 and source == "queue":
+                    processed_queue_ids.add(task.id)
+                if (
+                    created_count > 0
+                    and automation.remove_label_after_processing
+                    and source == "label"
+                ):
+                    automation.update_root_labels(db, task, label)
+                append_progress_result(
+                    progress,
+                    task=task,
+                    status="failed",
+                    created_count=created_count,
+                    error=error_message,
+                    depth=depth,
+                )
+                pending = tasks_total - (completed + failed)
+                set_progress_counts(
+                    progress,
+                    completed=completed,
+                    failed=failed,
+                    pending=pending,
+                    total=tasks_total,
+                    now=automation.now_iso(),
+                    processed_ids=processed_ids,
+                    track_processed=track_processed,
+                    current=None,
+                )
+                automation.progress_save(progress)
+                continue
             if automation.remove_label_after_processing and source == "label":
                 automation.update_root_labels(db, task, label)
             completed += 1

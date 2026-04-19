@@ -520,6 +520,7 @@ def test_cache_initialization_creates_expected_storages(tmp_path):
         "observer_state": "observer_state.joblib",
         "integration_launches": "integration_launches.joblib",
         "automation_launches": "automation_launches.joblib",
+        "automation_run_signals": "automation_run_signals.joblib",
         "processed_gmail_messages": "processed_gmail_messages.joblib",
         "dashboard_state": "dashboard_state.joblib",
         "llm_breakdown_progress": "llm_breakdown_progress.joblib",
@@ -629,6 +630,7 @@ def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
         ("activity", {"event1", "event2"}),
         ("integration_launches", {"integration1": 5}),
         ("automation_launches", {"automation1": 2}),
+        ("automation_run_signals", {"automation1": {"lastStatus": "completed"}}),
         ("processed_gmail_messages", {"msg1"}),
     ],
 )

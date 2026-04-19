@@ -23,6 +23,7 @@ from todoist.llm import (
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.runtime_env import resolve_runtime_env_path
 from todoist.types import Task
 from todoist.utils import Cache
 
@@ -176,13 +177,7 @@ class LLMBreakdown(Automation):
 
     @staticmethod
     def _resolve_env_path() -> Path:
-        cache_dir = os.getenv(str(EnvVar.CACHE_DIR))
-        if cache_dir:
-            return Path(cache_dir).expanduser().resolve() / ".env"
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.exists():
-            return cwd_env
-        return _REPO_ROOT / ".env"
+        return resolve_runtime_env_path(repo_root=_REPO_ROOT)
 
     @staticmethod
     def _env_values() -> dict[str, Any]:
@@ -313,6 +308,8 @@ class LLMBreakdown(Automation):
             return 1
         if self.selected_backend() != "triton_local":
             return 1
+        if self.max_tasks_per_tick <= 0:
+            return max(1, int(task_count))
         return max(1, min(int(self.max_tasks_per_tick), int(task_count)))
 
     @staticmethod
@@ -389,16 +386,30 @@ class LLMBreakdown(Automation):
                 continue
             description = _sanitize_text(node.description)
             priority = self._normalize_priority(node.priority)
-            result = db.insert_task(
-                content=content,
-                description=description,
-                project_id=root_task.task_entry.project_id,
-                parent_id=parent_id,
-                priority=priority,
-                labels=context.labels,
-            )
+            try:
+                result = db.insert_task(
+                    content=content,
+                    description=description,
+                    project_id=root_task.task_entry.project_id if parent_id is None else None,
+                    parent_id=parent_id,
+                    priority=priority,
+                    labels=context.labels,
+                )
+            except Exception as exc:  # pragma: no cover - network safety
+                message = (
+                    f"Failed inserting subtask '{content}' for root task {root_task.id} "
+                    f"under parent {parent_id}: {type(exc).__name__}: {exc}"
+                )
+                context.errors.append(message)
+                logger.error(message)
+                continue
             if "id" not in result:
-                logger.error("Failed to insert subtask '{}'", content)
+                message = (
+                    f"Todoist did not return an id for subtask '{content}' "
+                    f"(root task {root_task.id}, parent {parent_id})"
+                )
+                context.errors.append(message)
+                logger.error(message)
                 continue
             context.created[0] += 1
             child_id = str(result["id"])

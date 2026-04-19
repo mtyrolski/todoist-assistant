@@ -6,9 +6,11 @@ from typing import Any
 
 import numpy as np
 import torch
+from huggingface_hub import snapshot_download
 from loguru import logger
 import triton_python_backend_utils as pb_utils
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerFast
+from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 
 
 def _env(name: str, default: str) -> str:
@@ -47,7 +49,7 @@ def _resolve_device(name: str) -> torch.device:
 def _resolve_torch_dtype(dtype: str, *, device: torch.device) -> torch.dtype | None:
     normalized = dtype.strip().lower()
     if normalized == "auto":
-        return torch.float16 if device.type == "cuda" else torch.float32
+        return torch.float16 if device.type == "cuda" else None
     if normalized == "float16":
         return torch.float16
     if normalized == "bfloat16":
@@ -55,6 +57,92 @@ def _resolve_torch_dtype(dtype: str, *, device: torch.device) -> torch.dtype | N
     if normalized == "float32":
         return torch.float32
     return None
+
+
+def _load_tokenizer(model_id: str, *, trust_remote_code: bool) -> Any:
+    try:
+        return AutoTokenizer.from_pretrained(
+            model_id,
+            trust_remote_code=trust_remote_code,
+            use_fast=True,
+        )
+    except ValueError as exc:
+        if "TokenizersBackend" not in str(exc):
+            raise
+
+    logger.warning(
+        "Falling back to tokenizer.json loading for model {} after AutoTokenizer failed with TokenizersBackend",
+        model_id,
+    )
+    repo_path = Path(
+        snapshot_download(
+            repo_id=model_id,
+            allow_patterns=[
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "special_tokens_map.json",
+            ],
+        )
+    )
+    tokenizer_json = repo_path / "tokenizer.json"
+    tokenizer_config_path = repo_path / "tokenizer_config.json"
+
+    init_kwargs: dict[str, Any] = {}
+    if tokenizer_config_path.exists():
+        tokenizer_cfg = json.loads(tokenizer_config_path.read_text(encoding="utf-8"))
+        for key in ("bos_token", "eos_token", "unk_token", "pad_token"):
+            value = tokenizer_cfg.get(key)
+            if isinstance(value, str) and value:
+                init_kwargs[key] = value
+        additional = tokenizer_cfg.get("additional_special_tokens") or tokenizer_cfg.get(
+            "extra_special_tokens"
+        )
+        if isinstance(additional, list):
+            init_kwargs["additional_special_tokens"] = [
+                item for item in additional if isinstance(item, str) and item
+            ]
+
+    return PreTrainedTokenizerFast(tokenizer_file=str(tokenizer_json), **init_kwargs)
+
+
+def _load_config(model_id: str) -> Any:
+    try:
+        return AutoConfig.from_pretrained(model_id)
+    except KeyError as exc:
+        if "ministral3" not in str(exc):
+            raise
+
+    logger.warning(
+        "Falling back to config.json normalization for model {} after AutoConfig failed with ministral3",
+        model_id,
+    )
+    repo_path = Path(snapshot_download(repo_id=model_id, allow_patterns=["config.json"]))
+    cfg_dict = json.loads((repo_path / "config.json").read_text(encoding="utf-8"))
+    text_cfg = cfg_dict.get("text_config")
+    if isinstance(text_cfg, dict) and text_cfg.get("model_type") == "ministral3":
+        text_cfg["model_type"] = "mistral"
+
+    model_type = cfg_dict.get("model_type")
+    if not isinstance(model_type, str) or not model_type:
+        raise ValueError("Invalid config.json: missing model_type")
+    model_kwargs = {key: value for key, value in cfg_dict.items() if key != "model_type"}
+    return AutoConfig.for_model(model_type, **model_kwargs)
+
+
+def _strip_quantization_config(cfg: object) -> None:
+    if hasattr(cfg, "quantization_config"):
+        delattr(cfg, "quantization_config")
+
+
+def _move_model_to_runtime(
+    model: Any,
+    *,
+    device: torch.device,
+    dtype: torch.dtype | None,
+) -> Any:
+    if dtype is None:
+        return model.to(device)
+    return model.to(device=device, dtype=dtype)
 
 
 def _decode_scalar(value: Any) -> str:
@@ -186,26 +274,47 @@ class TritonPythonModel:
         self._temperature = _env_float("TODOIST_TRITON_TEMPERATURE", 0.2)
         self._top_p = _env_float("TODOIST_TRITON_TOP_P", 0.95)
         self._trust_remote_code = _env_bool("TODOIST_TRITON_TRUST_REMOTE_CODE", False)
+        self._max_batch_size = max(1, _env_int("TODOIST_TRITON_MAX_BATCH_SIZE", 8))
+        self._max_batch_input_tokens = max(
+            1,
+            _env_int("TODOIST_TRITON_MAX_BATCH_INPUT_TOKENS", 2048),
+        )
         self._torch_dtype = _resolve_torch_dtype(self._dtype, device=self._device)
 
-        tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer = _load_tokenizer(
             self._model_id,
             trust_remote_code=self._trust_remote_code,
-            use_fast=True,
         )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token or tokenizer.pad_token
         tokenizer.padding_side = "left"
         self._tokenizer = tokenizer
 
+        hf_config = _load_config(self._model_id)
+        _strip_quantization_config(hf_config)
+
         model_kwargs: dict[str, Any] = {
+            "config": hf_config,
             "trust_remote_code": self._trust_remote_code,
             "low_cpu_mem_usage": True,
         }
         if self._torch_dtype is not None:
-            model_kwargs["dtype"] = self._torch_dtype
-        self._model = AutoModelForCausalLM.from_pretrained(self._model_id, **model_kwargs)
-        self._model.to(self._device)
+            model_kwargs["torch_dtype"] = self._torch_dtype
+        if getattr(hf_config, "model_type", None) == "mistral3":
+            self._model = Mistral3ForConditionalGeneration.from_pretrained(
+                self._model_id,
+                **model_kwargs,
+            )
+        else:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self._model_id,
+                **model_kwargs,
+            )
+        self._model = _move_model_to_runtime(
+            self._model,
+            device=self._device,
+            dtype=self._torch_dtype,
+        )
         self._model.eval()
         self._pad_token_id = self._tokenizer.pad_token_id
         if self._pad_token_id is None and self._tokenizer.eos_token_id is not None:
@@ -213,7 +322,9 @@ class TritonPythonModel:
         logger.info(
             "todoist_llm initialized "
             f"(model_id={self._model_id}, device={self._device.type}, dtype={self._dtype}, "
-            f"default_max_tokens={self._max_tokens}, temperature={self._temperature}, top_p={self._top_p})"
+            f"default_max_tokens={self._max_tokens}, temperature={self._temperature}, top_p={self._top_p}, "
+            f"max_batch_size={self._max_batch_size}, "
+            f"max_batch_input_tokens={self._max_batch_input_tokens})"
         )
 
     def execute(self, requests: Sequence[Any]) -> list[Any]:
@@ -267,21 +378,31 @@ class TritonPythonModel:
                 f"grouped into {len(grouped_requests)} execution batch(es)"
             )
             for (do_sample, max_tokens, temperature, top_p), items in grouped_requests.items():
-                prompt_lengths = [len(prompt) for _, _, prompt in items]
-                logger.info(
-                    "todoist_llm dispatching batch "
-                    f"(batch_size={len(items)}, do_sample={do_sample}, max_tokens={max_tokens}, "
-                    f"temperature={temperature}, top_p={top_p}, prompt_chars={prompt_lengths})"
-                )
-                texts = self._generate_batch(
-                    [prompt for _, _, prompt in items],
-                    do_sample=do_sample,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                )
-                for (request_index, item_index, _prompt), text in zip(items, texts, strict=True):
-                    response_rows[request_index][item_index] = text
+                for batch_index, execution_items in enumerate(
+                    self._split_execution_items(items),
+                    start=1,
+                ):
+                    prompt_lengths = [len(prompt) for _, _, prompt in execution_items]
+                    logger.info(
+                        "todoist_llm dispatching batch "
+                        f"(group_size={len(items)}, execution_batch={batch_index}, "
+                        f"execution_batch_size={len(execution_items)}, do_sample={do_sample}, "
+                        f"max_tokens={max_tokens}, temperature={temperature}, top_p={top_p}, "
+                        f"prompt_chars={prompt_lengths})"
+                    )
+                    texts = self._generate_batch(
+                        [prompt for _, _, prompt in execution_items],
+                        do_sample=do_sample,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                    )
+                    for (request_index, item_index, _prompt), text in zip(
+                        execution_items,
+                        texts,
+                        strict=True,
+                    ):
+                        response_rows[request_index][item_index] = text
         except Exception as exc:
             logger.exception("todoist_llm failed while generating Triton responses")
             return [
@@ -302,6 +423,58 @@ class TritonPythonModel:
         # Triton handles lifecycle; the transformers model is released with the process.
         logger.info("todoist_llm finalize called")
         return None
+
+    def _prompt_token_lengths(self, prompts: list[str]) -> list[int]:
+        if not prompts:
+            return []
+        encoded = self._tokenizer(
+            prompts,
+            add_special_tokens=True,
+            padding=False,
+            truncation=False,
+        )
+        input_ids = encoded.get("input_ids")
+        if not isinstance(input_ids, list):
+            return [1 for _ in prompts]
+        lengths: list[int] = []
+        for item in input_ids:
+            if isinstance(item, list):
+                lengths.append(max(1, len(item)))
+            else:
+                lengths.append(1)
+        if len(lengths) < len(prompts):
+            lengths.extend([1] * (len(prompts) - len(lengths)))
+        return lengths[: len(prompts)]
+
+    def _split_execution_items(
+        self,
+        items: list[tuple[int, int, str]],
+    ) -> list[list[tuple[int, int, str]]]:
+        if not items:
+            return []
+        prompts = [prompt for _, _, prompt in items]
+        token_lengths = self._prompt_token_lengths(prompts)
+        batches: list[list[tuple[int, int, str]]] = []
+        current_items: list[tuple[int, int, str]] = []
+        current_tokens = 0
+
+        for item, token_length in zip(items, token_lengths, strict=True):
+            capped_length = max(1, int(token_length))
+            exceeds_size = len(current_items) >= self._max_batch_size
+            exceeds_tokens = (
+                bool(current_items)
+                and current_tokens + capped_length > self._max_batch_input_tokens
+            )
+            if exceeds_size or exceeds_tokens:
+                batches.append(current_items)
+                current_items = []
+                current_tokens = 0
+            current_items.append(item)
+            current_tokens += capped_length
+
+        if current_items:
+            batches.append(current_items)
+        return batches
 
     def _generate_batch(
         self,

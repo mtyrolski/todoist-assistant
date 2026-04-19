@@ -160,3 +160,47 @@ def test_habit_tracker_posts_comment_once_per_task_and_week(
             ),
         )
     ]
+
+
+def test_habit_tracker_posts_comment_with_raw_activity_dataframe(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    tracked_task = make_task("habit-1", content="Morning walk", labels=["track_habit"])
+    project = make_project(
+        project_id="project-1",
+        project_entry=make_project_entry(project_id="project-1", name="Health"),
+        tasks=[tracked_task],
+    )
+
+    comments: list[tuple[str, str]] = []
+
+    class _FakeDb:
+        def fetch_projects(self, include_tasks: bool = True):
+            assert include_tasks is True
+            return [project]
+
+        def create_comment(self, *, task_id: str, content: str):
+            comments.append((task_id, content))
+            return {"task_id": task_id, "content": content}
+
+    monkeypatch.setattr(
+        "todoist.automations.habit_tracker.automation.load_activity_data",
+        lambda db: _habit_df().reset_index(),
+    )
+    monkeypatch.setattr(
+        "todoist.automations.habit_tracker.automation.datetime",
+        type(
+            "_FixedDateTime",
+            (),
+            {"now": staticmethod(lambda: datetime(2025, 1, 15, 12, 0, 0))},
+        ),
+    )
+
+    automation = HabitTracker(history_weeks=4, frequency_in_minutes=0)
+    result = automation.tick(cast(Database, _FakeDb()))
+
+    assert len(result) == 1
+    assert comments[0][0] == "habit-1"
+    assert "Habit tracker update for 2025-01-06 to 2025-01-12" in comments[0][1]

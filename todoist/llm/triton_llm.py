@@ -256,7 +256,7 @@ class TritonGenerateChatModel:
         if name == "PlannerDecision":
             return min(self.config.max_output_tokens, 256)
         if name == "TaskBreakdown":
-            return max(self.config.max_output_tokens, 384)
+            return min(self.config.max_output_tokens, 256)
         return self.config.max_output_tokens
 
     def _repair_structured_output(self, raw: str, schema: type[BaseModel]) -> str:

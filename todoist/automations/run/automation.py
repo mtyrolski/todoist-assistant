@@ -2,7 +2,7 @@ import hydra
 from loguru import logger
 from tqdm import tqdm
 from omegaconf import DictConfig
-from todoist.automations.base import Automation
+from todoist.automations.base import Automation, run_automations_resiliently
 from todoist.database.base import Database
 from todoist.utils import automation_log_path, configure_runtime_logging
 
@@ -15,14 +15,11 @@ def main(config: DictConfig) -> None:
     automations: list[Automation] = hydra.utils.instantiate(config.automations)
     logger.info("Loaded automations: {}", list(map(str, automations)))
     logger.info("Starting automations...")
-    for automation in tqdm(automations, desc="Processing automations"):
-        logger.info("Running automation: {}", automation)
-        if automation.is_long:
-            logger.warning("Long automation detected, skipping...")
-            continue
-        automation.tick(dbio)
-        logger.info("Automation completed: {}", automation)
-    logger.success("All automations completed.")
+    run_automations_resiliently(
+        tqdm(automations, desc="Processing automations"),
+        db=dbio,
+        skip_long=True,
+    )
 
 
 if __name__ == '__main__':

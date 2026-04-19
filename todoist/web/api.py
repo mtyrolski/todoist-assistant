@@ -85,6 +85,7 @@ from todoist.llm import (
 )
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
+from todoist.runtime_env import resolve_runtime_env_path
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -274,13 +275,7 @@ _TRITON_MODEL_OPTIONS = [
 
 
 def _resolve_env_path() -> Path:
-    cache_dir = os.getenv(str(EnvVar.CACHE_DIR))
-    if cache_dir:
-        return Path(cache_dir).expanduser().resolve() / ".env"
-    cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        return cwd_env
-    return _REPO_ROOT / ".env"
+    return resolve_runtime_env_path(repo_root=_REPO_ROOT)
 
 
 def _normalize_api_key(raw: str | None) -> str:
@@ -2594,6 +2589,26 @@ def _restart_dashboard_observer_if_managed() -> bool:
     return True
 
 
+def _automation_run_signal_metadata(automation_name: str) -> dict[str, Any]:
+    payload = Cache().automation_run_signals.load()
+    signals = payload if isinstance(payload, dict) else {}
+    signal_payload = signals.get(automation_name)
+    if not isinstance(signal_payload, Mapping):
+        return {}
+    return {
+        "attemptCount": signal_payload.get("attemptCount"),
+        "successCount": signal_payload.get("successCount"),
+        "failureCount": signal_payload.get("failureCount"),
+        "skipCount": signal_payload.get("skipCount"),
+        "lastStatus": signal_payload.get("lastStatus"),
+        "lastStartedAt": signal_payload.get("lastStartedAt"),
+        "lastFinishedAt": signal_payload.get("lastFinishedAt"),
+        "lastDurationSeconds": signal_payload.get("lastDurationSeconds"),
+        "lastError": signal_payload.get("lastError"),
+        "lastSuccessAt": signal_payload.get("lastSuccessAt"),
+    }
+
+
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
     launches = Cache().automation_launches.load().get(automation.name, [])
     last_launch = launches[-1] if launches else None
@@ -2604,6 +2619,7 @@ def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
         "isLong": getattr(automation, "is_long", False),
         "launchCount": len(launches),
         "lastLaunch": last_launch_iso,
+        **_automation_run_signal_metadata(automation.name),
     }
 
 
@@ -2774,9 +2790,16 @@ async def admin_clear_timezone() -> dict[str, Any]:
     return _resolve_timezone_status()
 
 
-def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:
+def _run_automation_sync(
+    automation: Automation,
+    *,
+    dbio: Database,
+    continue_on_error: bool = False,
+) -> dict[str, Any]:
     output_stream = io.StringIO()
     started_at = datetime.now()
+    task_delegations = None
+    error: str | None = None
     with (
         contextlib.redirect_stdout(output_stream),
         contextlib.redirect_stderr(output_stream),
@@ -2784,6 +2807,15 @@ def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str,
         loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
         try:
             task_delegations = automation.tick(dbio)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Automation {} failed during manual run: {}",
+                automation.name,
+                error,
+            )
+            if not continue_on_error:
+                raise
         finally:
             logger.remove(loguru_handler_id)
     finished_at = datetime.now()
@@ -2794,6 +2826,36 @@ def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str,
         "durationSeconds": round((finished_at - started_at).total_seconds(), 3),
         "output": output_stream.getvalue(),
         "taskDelegations": task_delegations,
+        "status": "failed" if error else "completed",
+        "error": error,
+    }
+
+
+def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    completed = 0
+    failed = 0
+
+    for automation in _load_automations():
+        result = _run_automation_sync(
+            automation,
+            dbio=dbio,
+            continue_on_error=True,
+        )
+        results.append(result)
+        if result["status"] == "failed":
+            failed += 1
+        else:
+            completed += 1
+        dbio.reset()
+
+    return {
+        "results": results,
+        "summary": {
+            "completed": completed,
+            "failed": failed,
+            "skipped": 0,
+        },
     }
 
 
@@ -2830,16 +2892,11 @@ async def admin_run_all_automations(refresh: bool = False) -> dict[str, Any]:
     async with _ADMIN_LOCK:
         dbio = Database(".env")
         dbio.pull()
-        results: list[dict[str, Any]] = []
-        for automation in _load_automations():
-            results.append(
-                await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio)
-            )
-            dbio.reset()
+        result = await asyncio.to_thread(_run_all_automations_sync, dbio=dbio)
 
         if refresh:
             await _ensure_state(refresh=True)
-        return {"results": results}
+        return result
 
 
 def _now_iso() -> str:
@@ -2916,15 +2973,10 @@ async def _run_all_automations_job(*, job_id: str) -> None:
         async with _ADMIN_LOCK:
             dbio = Database(".env")
             dbio.pull()
-            results: list[dict[str, Any]] = []
-            for automation in _load_automations():
-                results.append(
-                    await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio)
-                )
-                dbio.reset()
+            result = await asyncio.to_thread(_run_all_automations_sync, dbio=dbio)
 
         await _update_job(
-            job_id, status="done", finished_at=_now_iso(), result={"results": results}
+            job_id, status="done", finished_at=_now_iso(), result=result
         )
     except Exception as exc:  # pragma: no cover - defensive
         await _update_job(

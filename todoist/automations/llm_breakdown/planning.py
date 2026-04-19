@@ -31,6 +31,7 @@ class CandidateSelection:
     candidates: list[BreakdownCandidate]
     queued_ids: set[str]
     drop_queue_ids: set[str]
+    cleanup_label_tasks: list[BreakdownCandidate]
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ def collect_candidates(
     queued_ids = {item["task_id"] for item in queue_items}
     drop_queue_ids: set[str] = set()
     candidates: list[BreakdownCandidate] = []
+    cleanup_label_tasks: list[BreakdownCandidate] = []
 
     for item in queue_items:
         task_id = item["task_id"]
@@ -149,6 +151,17 @@ def collect_candidates(
             continue
         if not automation.allow_existing_children and children_by_parent.get(task.id):
             logger.info("Skipping task {} (already has children)", task.id)
+            if automation.remove_label_after_processing:
+                variant_key, _ = automation.resolve_variant(llm_label)
+                cleanup_label_tasks.append(
+                    BreakdownCandidate(
+                        task=task,
+                        label=llm_label,
+                        variant=variant_key,
+                        depth=1,
+                        source="label",
+                    )
+                )
             continue
         if task.id in processed_ids:
             continue
@@ -167,6 +180,7 @@ def collect_candidates(
         candidates=candidates,
         queued_ids=queued_ids,
         drop_queue_ids=drop_queue_ids,
+        cleanup_label_tasks=cleanup_label_tasks,
     )
 
 

@@ -3,8 +3,9 @@
 # pylint: disable=too-many-lines
 
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock
 
 import pandas as pd
@@ -764,6 +765,81 @@ def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
     assert payload["automations"][0]["enabled"] is False
     assert payload["automations"][0]["authRequired"] is True
     assert payload["automations"][0]["connection"]["connected"] is False
+
+
+class _ApiStubAutomation(web_api.Automation):
+    def __init__(self, name: str):
+        super().__init__(name, frequency=15)
+
+    def _tick(self, db):
+        _ = db
+        return []
+
+
+class _ApiFailingAutomation(_ApiStubAutomation):
+    def _tick(self, db):
+        _ = db
+        raise RuntimeError("boom")
+
+
+def test_automation_launch_metadata_includes_run_signal(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    cache = web_api.Cache()
+    cache.automation_launches.save({"Signal Auto": [datetime(2026, 4, 18, 15, 0, 0)]})
+    cache.automation_run_signals.save(
+        {
+            "Signal Auto": {
+                "attemptCount": 3,
+                "successCount": 2,
+                "failureCount": 1,
+                "skipCount": 0,
+                "lastStatus": "failed",
+                "lastStartedAt": "2026-04-18T15:01:00",
+                "lastFinishedAt": "2026-04-18T15:01:02",
+                "lastDurationSeconds": 2.0,
+                "lastError": "RuntimeError: boom",
+                "lastSuccessAt": "2026-04-18T14:59:59",
+            }
+        }
+    )
+
+    payload = web_api._automation_launch_metadata(_ApiStubAutomation("Signal Auto"))
+
+    assert payload["launchCount"] == 1
+    assert payload["lastLaunch"] == "2026-04-18T15:00:00"
+    assert payload["lastStatus"] == "failed"
+    assert payload["attemptCount"] == 3
+    assert payload["successCount"] == 2
+    assert payload["failureCount"] == 1
+    assert payload["lastError"] == "RuntimeError: boom"
+
+
+def test_run_all_automations_sync_continues_after_failure(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+
+    class _DbStub:
+        def __init__(self) -> None:
+            self.reset_calls = 0
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+    db = _DbStub()
+    monkeypatch.setattr(
+        web_api,
+        "_load_automations",
+        lambda: [_ApiFailingAutomation("broken"), _ApiStubAutomation("healthy")],
+    )
+
+    result = web_api._run_all_automations_sync(dbio=cast(web_api.Database, db))
+
+    assert result["summary"] == {"completed": 1, "failed": 1, "skipped": 0}
+    assert [item["name"] for item in result["results"]] == ["broken", "healthy"]
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["error"] == "RuntimeError: boom"
+    assert result["results"][1]["status"] == "completed"
+    assert result["results"][1]["error"] is None
+    assert db.reset_calls == 2
 
 
 def test_enabled_automation_keys_defaults_non_auth_sections() -> None:

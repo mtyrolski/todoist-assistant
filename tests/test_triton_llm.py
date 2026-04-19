@@ -180,7 +180,7 @@ def test_triton_structured_chat_parses_json(monkeypatch) -> None:
     assert payload.children[0].content == "Step 1"
     inputs = cast(list[dict[str, Any]], captured_payload["inputs"])
     assert inputs[1]["data"] == [[False]]
-    assert inputs[2]["data"] == [[384]]
+    assert inputs[2]["data"] == [[128]]
 
 
 def test_triton_structured_chat_falls_back_to_numbered_breakdown(monkeypatch) -> None:
@@ -270,6 +270,51 @@ def test_triton_structured_chat_repairs_plaintext_to_json(monkeypatch) -> None:
 
     assert calls["count"] == 2
     assert [child.content for child in payload.children] == ["Book travel", "Reserve hotel"]
+
+
+def test_triton_structured_chat_falls_back_to_prefixed_breakdown_lines(monkeypatch) -> None:
+    monkeypatch.setattr("todoist.llm.triton_llm._load_tokenizer", lambda _model_id: _FakeTokenizer())
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model_name": DEFAULT_TRITON_MODEL_NAME,
+                "model_version": "1",
+                "outputs": [
+                    {
+                        "name": "text_output",
+                        "datatype": "BYTES",
+                        "shape": [1, 1],
+                        "data": [[
+                            "I need you to break this down.\n"
+                            "[INST] Subtask 1: Draft the metric list\n"
+                            "Subtask 2: Define the data sources\n"
+                            "[CLS] [END] Task 1: Draft the metric list\n"
+                            "```python\nprint('ignore code blocks')\n```"
+                        ]],
+                    }
+                ],
+            },
+            request=request,
+        )
+
+    model = TritonGenerateChatModel(TritonChatConfig())
+    setattr(
+        model,
+        "_client",
+        httpx.Client(
+            transport=httpx.MockTransport(_handler),
+            timeout=model.config.timeout_seconds,
+        ),
+    )
+
+    payload = model.structured_chat([{"role": "user", "content": "Break this down"}], TaskBreakdown)
+
+    assert [child.content for child in payload.children] == [
+        "Draft the metric list",
+        "Define the data sources",
+    ]
 
 
 def test_triton_post_raises_api_message_for_http_errors(monkeypatch) -> None:

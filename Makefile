@@ -4,9 +4,9 @@ FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
-TRITON_MODEL_ID := Qwen/Qwen2.5-0.5B-Instruct
-TRITON_MODEL_NAME := todoist_llm
-TRITON_URL := http://127.0.0.1:8003
+TRITON_MODEL_ID ?=
+TRITON_MODEL_NAME ?=
+TRITON_URL ?=
 
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations

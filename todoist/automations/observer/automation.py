@@ -95,7 +95,15 @@ class AutomationObserver:
             )
         for automation in automations_to_run:
             logger.info(f"Observer triggering automation {automation}")
-            automation.tick(self._db)
+            try:
+                automation.tick(self._db)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Observer automation {} failed: {}: {}",
+                    automation.name,
+                    type(exc).__name__,
+                    exc,
+                )
         return ObserverRunResult(
             new_events=len(new_events),
             automations_ran=len(automations_to_run),

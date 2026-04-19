@@ -15,6 +15,16 @@ type AutomationInfo = {
   isLong: boolean;
   launchCount: number;
   lastLaunch: string | null;
+  attemptCount?: number;
+  successCount?: number;
+  failureCount?: number;
+  skipCount?: number;
+  lastStatus?: string | null;
+  lastStartedAt?: string | null;
+  lastFinishedAt?: string | null;
+  lastDurationSeconds?: number | null;
+  lastError?: string | null;
+  lastSuccessAt?: string | null;
   enabled: boolean;
   authRequired: boolean;
   defaultEnabled: boolean;
@@ -47,7 +57,14 @@ type RunResult = {
   taskDelegations: unknown;
 };
 
-type RunAllResult = { results: RunResult[] };
+type RunAllResult = {
+  results: RunResult[];
+  summary?: {
+    completed: number;
+    failed: number;
+    skipped: number;
+  };
+};
 
 type AdminJob = {
   id: string;
@@ -92,18 +109,37 @@ function formatLaunchMeta(a: AutomationInfo): string {
   return `${last} • ${freq} • ${count}`;
 }
 
+function formatSignalMeta(a: AutomationInfo): string {
+  if (!a.lastStatus) return "signal: waiting for first tracked run";
+  const when = a.lastFinishedAt ?? a.lastStartedAt ?? a.lastSuccessAt;
+  const parts = [`signal: ${a.lastStatus}`];
+  if (when) parts.push(`at: ${when}`);
+  if (typeof a.lastDurationSeconds === "number") {
+    parts.push(`duration: ${a.lastDurationSeconds.toFixed(3)}s`);
+  }
+  if (typeof a.attemptCount === "number") {
+    parts.push(`attempts: ${a.attemptCount}`);
+  }
+  return parts.join(" • ");
+}
+
 function automationLogSource(a: AutomationInfo): string {
   return a.enabled ? "observer" : "automation";
 }
 
 function automationStatusTone(a: AutomationInfo): "good" | "warn" | "neutral" {
   if (a.authRequired && !a.connection?.connected) return "warn";
+  if (a.lastStatus === "failed") return "warn";
+  if (a.lastStatus === "completed") return "good";
   if (a.enabled) return "good";
   return "neutral";
 }
 
 function automationStatusLabel(a: AutomationInfo): string {
   if (a.authRequired && !a.connection?.connected) return "Needs authorization";
+  if (a.lastStatus === "failed") return "Last run failed";
+  if (a.lastStatus === "completed") return "Last run completed";
+  if (a.lastStatus === "skipped") return "Skipped in batch";
   if (a.enabled) return "Live in observer";
   return "Ready to enable";
 }
@@ -285,7 +321,12 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       for (const r of result.results) byName[r.name] = r;
       setRunOutput((prev) => ({ ...prev, ...byName }));
       onAfterMutation();
-      setAdminNotice("All automations finished. Open live logs for the observer and automation runner traces.");
+      const summary = result.summary;
+      setAdminNotice(
+        summary
+          ? `All automations finished: ${summary.completed} completed, ${summary.failed} failed, ${summary.skipped} skipped.`
+          : "All automations finished. Open live logs for the observer and automation runner traces."
+      );
       const metaRes = await fetch("/api/admin/automations");
       if (metaRes.ok) {
         const list = (await metaRes.json()) as AutomationListResponse;
@@ -545,6 +586,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                   <div className="rowMain">
                     <p className="rowTitle">{a.name}</p>
                     <p className="muted tiny">{formatLaunchMeta(a)}</p>
+                    <p className="muted tiny">{formatSignalMeta(a)}</p>
                     <div className="automationStatusLine">
                       <span className={`pill ${automationStatusTone(a) === "good" ? "pill-good" : automationStatusTone(a) === "warn" ? "pill-warn" : "pill-neutral"}`}>
                         {automationStatusLabel(a)}
@@ -556,6 +598,11 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                     {a.connection ? (
                       <p className={`muted tiny automationDetailNote${a.connection.connected ? " automationDetailNoteGood" : ""}`}>
                         Gmail: {a.connection.connected ? "connected" : a.connection.detail}
+                      </p>
+                    ) : null}
+                    {a.lastError ? (
+                      <p className="muted tiny automationDetailNote">
+                        Last error: {a.lastError}
                       </p>
                     ) : null}
                     {a.key === "gmail_tasks" && (gmailAuthUrl || a.connection?.pendingAuth?.authUrl) ? (
