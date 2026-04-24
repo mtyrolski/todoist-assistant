@@ -98,7 +98,7 @@ def test_triton_chat_posts_infer_request(monkeypatch, tmp_path) -> None:
         True,
         0.2,
         0.95,
-        256,
+        384,
     )
     mock_logger.debug.assert_any_call("Received Triton infer response (text_chars={})", len("completion"))
     assert inputs[0]["name"] == "text_input"
@@ -115,7 +115,7 @@ def test_triton_chat_posts_infer_request(monkeypatch, tmp_path) -> None:
         "name": "max_output_tokens",
         "datatype": "INT32",
         "shape": [1, 1],
-        "data": [[256]],
+        "data": [[384]],
     }
     assert inputs[3] == {
         "name": "temperature",
@@ -269,6 +269,92 @@ def test_triton_structured_chat_repairs_plaintext_to_json(monkeypatch) -> None:
     payload = model.structured_chat([{"role": "user", "content": "Break this down"}], TaskBreakdown)
 
     assert calls["count"] == 2
+    assert [child.content for child in payload.children] == ["Book travel", "Reserve hotel"]
+
+
+def test_triton_structured_chat_repairs_empty_breakdown(monkeypatch) -> None:
+    monkeypatch.setattr("todoist.llm.triton_llm._load_tokenizer", lambda _model_id: _FakeTokenizer())
+    calls = {"count": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            text = '{"children":[]}'
+        else:
+            text = '{"children":[{"content":"Identify documents"},{"content":"Plan extraction"}]}'
+        return httpx.Response(
+            200,
+            json={
+                "model_name": DEFAULT_TRITON_MODEL_NAME,
+                "model_version": "1",
+                "outputs": [
+                    {
+                        "name": "text_output",
+                        "datatype": "BYTES",
+                        "shape": [1, 1],
+                        "data": [[text]],
+                    }
+                ],
+            },
+            request=request,
+        )
+
+    model = TritonGenerateChatModel(TritonChatConfig())
+    setattr(
+        model,
+        "_client",
+        httpx.Client(
+            transport=httpx.MockTransport(_handler),
+            timeout=model.config.timeout_seconds,
+        ),
+    )
+
+    payload = model.structured_chat([{"role": "user", "content": "Break this down"}], TaskBreakdown)
+
+    assert calls["count"] == 2
+    assert [child.content for child in payload.children] == ["Identify documents", "Plan extraction"]
+
+
+def test_triton_structured_chat_accepts_top_level_json_array(monkeypatch) -> None:
+    monkeypatch.setattr("todoist.llm.triton_llm._load_tokenizer", lambda _model_id: _FakeTokenizer())
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model_name": DEFAULT_TRITON_MODEL_NAME,
+                "model_version": "1",
+                "outputs": [
+                    {
+                        "name": "text_output",
+                        "datatype": "BYTES",
+                        "shape": [1, 1],
+                        "data": [[
+                            "```json\n"
+                            "[\n"
+                            '  {"content":"Book travel","description":"Pick flights","priority":1,"expand":false,"children":[]},\n'
+                            '  {"content":"Reserve hotel","description":"Choose lodging","priority":2,"expand":false,"children":[]}\n'
+                            "]\n"
+                            "```"
+                        ]],
+                    }
+                ],
+            },
+            request=request,
+        )
+
+    model = TritonGenerateChatModel(TritonChatConfig())
+    setattr(
+        model,
+        "_client",
+        httpx.Client(
+            transport=httpx.MockTransport(_handler),
+            timeout=model.config.timeout_seconds,
+        ),
+    )
+
+    payload = model.structured_chat([{"role": "user", "content": "Break this down"}], TaskBreakdown)
+
     assert [child.content for child in payload.children] == ["Book travel", "Reserve hotel"]
 
 

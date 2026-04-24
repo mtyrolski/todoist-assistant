@@ -4,8 +4,6 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
-from loguru import logger
-
 from todoist.llm.llm_utils import (
     TaskFetcher,
     _build_ancestor_context,
@@ -109,7 +107,6 @@ def collect_candidates(
     automation: Any,
     all_tasks: list[Task],
     tasks_by_id: dict[str, Task],
-    children_by_parent: dict[str, list[Task]],
     queue_items: list[dict[str, Any]],
     processed_ids: set[str],
     fetch_task: TaskFetcher,
@@ -123,10 +120,6 @@ def collect_candidates(
         task_id = item["task_id"]
         task = tasks_by_id.get(task_id) or fetch_task(task_id, False)
         if task is None:
-            drop_queue_ids.add(task_id)
-            continue
-        if not automation.allow_existing_children and children_by_parent.get(task.id):
-            logger.info("Skipping queued task {} (already has children)", task.id)
             drop_queue_ids.add(task_id)
             continue
         if task.id in processed_ids:
@@ -148,20 +141,6 @@ def collect_candidates(
             continue
         llm_label = find_llm_label(task.task_entry.labels, automation.label_prefix_lower)
         if llm_label is None:
-            continue
-        if not automation.allow_existing_children and children_by_parent.get(task.id):
-            logger.info("Skipping task {} (already has children)", task.id)
-            if automation.remove_label_after_processing:
-                variant_key, _ = automation.resolve_variant(llm_label)
-                cleanup_label_tasks.append(
-                    BreakdownCandidate(
-                        task=task,
-                        label=llm_label,
-                        variant=variant_key,
-                        depth=1,
-                        source="label",
-                    )
-                )
             continue
         if task.id in processed_ids:
             continue

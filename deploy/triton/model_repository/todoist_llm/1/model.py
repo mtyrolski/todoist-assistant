@@ -266,11 +266,11 @@ class TritonPythonModel:
         self._model_config = json.loads(args["model_config"])
         self._model_id = _env(
             "TODOIST_AGENT_TRITON_MODEL_ID",
-            "Qwen/Qwen2.5-0.5B-Instruct",
+            "mistralai/Ministral-3-3B-Instruct-2512",
         )
         self._device = _resolve_device("TODOIST_TRITON_DEVICE")
         self._dtype = _env("TODOIST_TRITON_MODEL_DTYPE", "auto")
-        self._max_tokens = _env_int("TODOIST_TRITON_MAX_TOKENS", 256)
+        self._max_tokens = _env_int("TODOIST_TRITON_MAX_TOKENS", 384)
         self._temperature = _env_float("TODOIST_TRITON_TEMPERATURE", 0.2)
         self._top_p = _env_float("TODOIST_TRITON_TOP_P", 0.95)
         self._trust_remote_code = _env_bool("TODOIST_TRITON_TRUST_REMOTE_CODE", False)

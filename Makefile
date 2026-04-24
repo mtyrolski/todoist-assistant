@@ -115,23 +115,7 @@ run_observer:
 	uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
 
 clear_local_env:
-	@cache_dir="$${TODOIST_CACHE_DIR:-.cache/todoist-assistant}"; \
-	data_dir="$${TODOIST_DATA_DIR:-.}"; \
-	echo "Clearing cache dir: $$cache_dir"; \
-	rm -rf "$$cache_dir"; \
-	rm -rf .cache-migration-backup; \
-	rm -rf "$$data_dir/cache" "$$data_dir/.cache-migration-backup"; \
-	rm -f automation.log \
-		activity.joblib \
-		observer_state.joblib \
-		integration_launches.joblib \
-		automation_launches.joblib \
-		processed_gmail_messages.joblib \
-		dashboard_state.joblib \
-		llm_breakdown_progress.joblib \
-		llm_breakdown_queue.joblib \
-		llm_chat_queue.joblib \
-		llm_chat_conversations.joblib
+	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \

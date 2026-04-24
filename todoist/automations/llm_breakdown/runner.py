@@ -17,7 +17,6 @@ from .models import (
     QueueItem,
 )
 from .planning import (
-    build_children_by_parent,
     build_task_lookup,
     collect_candidates,
     prepare_breakdown_request,
@@ -32,13 +31,99 @@ from .progress import (
 )
 
 
+def _post_task_comment(db: Database, task_id: str, content: str) -> None:
+    try:
+        db.create_comment(task_id=task_id, content=content)
+    except Exception as exc:  # pragma: no cover - comment audit must not block rollout
+        logger.warning("Failed to create LLM breakdown comment for task {}: {}", task_id, exc)
+
+
+def _llm_descriptor(automation: Any, llm: Any) -> str:
+    backend = getattr(automation, "_llm_backend", None) or "unknown"
+    config = getattr(llm, "config", None)
+    model = (
+        getattr(config, "model_id", None)
+        or getattr(config, "model", None)
+        or getattr(llm, "model_id", None)
+        or "unknown"
+    )
+    return f"{backend} / {model}"
+
+
+def _comment_header() -> str:
+    return "Todoist Assistant LLM Breakdown"
+
+
+def _start_comment(*, run_id: str, request: Any, llm_descriptor: str) -> str:
+    return "\n".join(
+        [
+            _comment_header(),
+            "Status: started",
+            f"Run: {run_id}",
+            f"Model: {llm_descriptor}",
+            f"Variant: {request.variant_key}",
+            f"Depth: {request.depth}",
+            f"Source: {request.source}",
+        ]
+    )
+
+
+def _failure_comment(*, run_id: str, error_message: str) -> str:
+    return "\n".join(
+        [
+            _comment_header(),
+            "Status: failed",
+            f"Run: {run_id}",
+            f"Error: {error_message}",
+            "Label kept for retry.",
+        ]
+    )
+
+
+def _fallback_comment(*, run_id: str, reason: str) -> str:
+    return "\n".join(
+        [
+            _comment_header(),
+            "Status: fallback",
+            f"Run: {run_id}",
+            f"Reason: {reason}",
+        ]
+    )
+
+
+def _node_content(node: Any) -> str:
+    return str(getattr(node, "content", "") or "").strip()
+
+
+def _completion_comment(
+    *,
+    run_id: str,
+    created_count: int,
+    nodes: list[Any],
+    fallback_reason: str | None,
+) -> str:
+    lines = [
+        _comment_header(),
+        "Status: completed",
+        f"Run: {run_id}",
+        f"Created subtasks: {created_count}",
+    ]
+    if fallback_reason:
+        lines.append(f"Fallback reason: {fallback_reason}")
+    titles = [_node_content(node) for node in nodes]
+    titles = [title for title in titles if title]
+    if titles:
+        lines.append("Planned children:")
+        lines.extend(f"- {title}" for title in titles[:10])
+    return "\n".join(lines)
+
+
 def run_breakdown(automation: Any, db: Database) -> None:
     logger.info("Running LLM Breakdown automation")
     projects = db.fetch_projects(include_tasks=True)
     all_tasks: list[Task] = [task for project in projects for task in project.tasks]
     logger.debug(f"Found {len(all_tasks)} tasks in total")
 
-    children_by_parent = build_children_by_parent(all_tasks)
     tasks_by_id = build_task_lookup(all_tasks)
     fetched_tasks: dict[str, Task] = {}
     now = automation.now_iso()
@@ -75,7 +160,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
         automation=automation,
         all_tasks=all_tasks,
         tasks_by_id=tasks_by_id,
-        children_by_parent=children_by_parent,
         queue_items=queue_items,
         processed_ids=processed_ids,
         fetch_task=fetch_task,
@@ -160,6 +244,13 @@ def run_breakdown(automation: Any, db: Database) -> None:
         )
         for item in tasks_to_process
     ]
+    llm_descriptor = _llm_descriptor(automation, llm)
+    for request in prepared_requests:
+        _post_task_comment(
+            db,
+            request.task.id,
+            _start_comment(run_id=run_id, request=request, llm_descriptor=llm_descriptor),
+        )
     generation_results = generate_breakdowns(
         automation=automation,
         llm=llm,
@@ -186,15 +277,22 @@ def run_breakdown(automation: Any, db: Database) -> None:
         progress[ProgressKey.UPDATED_AT.value] = automation.now_iso()
         automation.progress_save(progress)
 
+        fallback_reason: str | None = None
         if result.error is not None or result.breakdown is None:
-            logger.error("LLM breakdown failed for task {}: {}", task.id, result.error)
+            error_message = result.error or "unknown error"
+            logger.error("LLM breakdown failed for task {}: {}", task.id, error_message)
+            _post_task_comment(
+                db,
+                task.id,
+                _failure_comment(run_id=run_id, error_message=error_message),
+            )
             failed += 1
-            processed_ids.add(task.id)
             append_progress_result(
                 progress,
                 task=task,
                 status="failed",
-                error=result.error or "unknown error",
+                created_count=0,
+                error=error_message,
                 depth=depth,
             )
             pending = tasks_total - (completed + failed)
@@ -211,82 +309,133 @@ def run_breakdown(automation: Any, db: Database) -> None:
             )
             automation.progress_save(progress)
             continue
-
         nodes = result.breakdown.children
-        created_count = 0
         if not nodes:
+            fallback_reason = "empty breakdown"
             logger.info(f"LLM returned no subtasks for task {task.id}")
-            if automation.remove_label_after_processing and source == "label":
-                automation.update_root_labels(db, task, label)
-            completed += 1
-        else:
+            nodes = automation.fallback_nodes(task, reason=fallback_reason)
+            logger.warning(
+                "Using fallback breakdown for task {} after empty result",
+                task.id,
+            )
+            _post_task_comment(
+                db,
+                task.id,
+                _fallback_comment(run_id=run_id, reason=fallback_reason),
+            )
+
+        created_count = 0
+
+        def _insert_nodes(
+            candidate_nodes: list[Any],
+            *,
+            current_depth: int = depth,
+            current_label: str = label,
+            current_request: Any = request,
+            current_task: Task = task,
+        ) -> tuple[InsertContext, int]:
             created = [0]
             queue_ctx = QueueContext(
                 items=queue_additions,
                 ids=queued_ids,
-                next_depth=depth + 1,
-                limit=request.queue_depth_limit,
-                label=label,
-                variant=request.variant_key,
+                next_depth=current_depth + 1,
+                limit=current_request.queue_depth_limit,
+                label=current_label,
+                variant=current_request.variant_key,
                 enabled=automation.auto_queue_children,
             )
             context = InsertContext(
-                max_depth=request.max_depth,
-                max_children=request.max_children,
-                max_total_tasks=request.max_total_tasks,
-                labels=automation.child_labels(task),
+                max_depth=current_request.max_depth,
+                max_children=current_request.max_children,
+                max_total_tasks=current_request.max_total_tasks,
+                labels=automation.child_labels(current_task),
                 created=created,
                 queue_ctx=queue_ctx if automation.auto_queue_children else None,
             )
             automation.insert_children(
                 db,
-                root_task=task,
-                parent_id=task.id,
-                nodes=nodes,
+                root_task=current_task,
+                parent_id=current_task.id,
+                nodes=candidate_nodes,
                 depth=1,
                 context=context,
             )
-            created_count = created[0]
-            if context.errors:
-                error_message = "; ".join(context.errors[:3])
-                if len(context.errors) > 3:
-                    error_message = f"{error_message}; and {len(context.errors) - 3} more"
-                logger.error("LLM breakdown insert failed for task {}: {}", task.id, error_message)
-                failed += 1
-                processed_ids.add(task.id)
-                if created_count > 0 and source == "queue":
-                    processed_queue_ids.add(task.id)
-                if (
-                    created_count > 0
-                    and automation.remove_label_after_processing
-                    and source == "label"
-                ):
-                    automation.update_root_labels(db, task, label)
-                append_progress_result(
-                    progress,
-                    task=task,
-                    status="failed",
-                    created_count=created_count,
-                    error=error_message,
-                    depth=depth,
-                )
-                pending = tasks_total - (completed + failed)
-                set_progress_counts(
-                    progress,
-                    completed=completed,
-                    failed=failed,
-                    pending=pending,
-                    total=tasks_total,
-                    now=automation.now_iso(),
-                    processed_ids=processed_ids,
-                    track_processed=track_processed,
-                    current=None,
-                )
-                automation.progress_save(progress)
-                continue
-            if automation.remove_label_after_processing and source == "label":
+            return context, created[0]
+
+        context, created_count = _insert_nodes(nodes)
+        if context.errors and created_count == 0 and fallback_reason is None:
+            error_message = "; ".join(context.errors[:3])
+            if len(context.errors) > 3:
+                error_message = f"{error_message}; and {len(context.errors) - 3} more"
+            fallback_reason = error_message
+            logger.warning(
+                "Retrying task {} with fallback breakdown after insert errors",
+                task.id,
+            )
+            _post_task_comment(
+                db,
+                task.id,
+                _fallback_comment(run_id=run_id, reason=error_message),
+            )
+            context, created_count = _insert_nodes(
+                automation.fallback_nodes(task, reason=error_message)
+            )
+
+        if context.errors:
+            error_message = "; ".join(context.errors[:3])
+            if len(context.errors) > 3:
+                error_message = f"{error_message}; and {len(context.errors) - 3} more"
+            logger.error("LLM breakdown insert failed for task {}: {}", task.id, error_message)
+            _post_task_comment(
+                db,
+                task.id,
+                _failure_comment(run_id=run_id, error_message=error_message),
+            )
+            failed += 1
+            processed_ids.add(task.id)
+            if created_count > 0 and source == "queue":
+                processed_queue_ids.add(task.id)
+            if (
+                created_count > 0
+                and automation.remove_label_after_processing
+                and source == "label"
+            ):
                 automation.update_root_labels(db, task, label)
-            completed += 1
+            append_progress_result(
+                progress,
+                task=task,
+                status="failed",
+                created_count=created_count,
+                error=error_message,
+                depth=depth,
+            )
+            pending = tasks_total - (completed + failed)
+            set_progress_counts(
+                progress,
+                completed=completed,
+                failed=failed,
+                pending=pending,
+                total=tasks_total,
+                now=automation.now_iso(),
+                processed_ids=processed_ids,
+                track_processed=track_processed,
+                current=None,
+            )
+            automation.progress_save(progress)
+            continue
+        if automation.remove_label_after_processing and source == "label":
+            automation.update_root_labels(db, task, label)
+        completed += 1
+        _post_task_comment(
+            db,
+            task.id,
+            _completion_comment(
+                run_id=run_id,
+                created_count=created_count,
+                nodes=nodes,
+                fallback_reason=fallback_reason,
+            ),
+        )
 
         append_progress_result(
             progress,

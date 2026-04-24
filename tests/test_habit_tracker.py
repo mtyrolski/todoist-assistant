@@ -100,6 +100,31 @@ def test_summarize_tracked_habits_builds_weekly_and_all_time_counts() -> None:
     assert abs(second_item["reliability"] - 66.67) < 0.01
 
 
+def test_summarize_tracked_habits_accepts_frames_with_date_index_and_column() -> None:
+    tracked_tasks = [
+        TrackedHabitTask(
+            task_id="habit-1",
+            content="Morning walk",
+            project_id="project-1",
+            project_name="Health",
+            project_color="green",
+        )
+    ]
+    activity = _habit_df().copy()
+    activity["date"] = activity.index
+
+    summary = summarize_tracked_habits(
+        activity,
+        tracked_tasks,
+        anchor=datetime(2025, 1, 15, 12, 0, 0),
+        history_weeks=2,
+    )
+
+    assert summary["trackedCount"] == 1
+    assert summary["totals"]["weeklyCompleted"] == 1
+    assert summary["totals"]["weeklyRescheduled"] == 1
+
+
 def test_habit_tracker_posts_comment_once_per_task_and_week(
     monkeypatch, tmp_path
 ) -> None:

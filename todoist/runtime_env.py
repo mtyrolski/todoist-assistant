@@ -10,7 +10,7 @@ from todoist.env import EnvVar
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_TRITON_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
 
 
 def _sanitize_env_text(value: object) -> str | None:
