@@ -76,7 +76,7 @@ export type AdminJob = {
 };
 
 export type AdminJobStartResponse = {
-  jobId?: string;
+  jobId: string;
   status?: string;
   detail?: string | null;
 };
