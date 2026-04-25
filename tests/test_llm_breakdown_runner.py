@@ -42,6 +42,9 @@ class _FakeDb:
         self.comments.append({"task_id": task_id, "content": content})
         return {"id": f"comment-{len(self.comments)}"}
 
+    def fetch_task_comments(self, task_id: str):
+        return [comment for comment in self.comments if comment["task_id"] == task_id]
+
 
 class _RefreshableFakeDb(_FakeDb):
     def __init__(self, initial_tasks, refreshed_tasks):
@@ -271,13 +274,72 @@ def test_run_breakdown_keeps_task_labeled_when_llm_generation_fails(
     assert db.updated == []
     assert len(db.comments) == 2
     assert "Status: failed" in db.comments[1]["content"]
-    assert "Label kept for retry." in db.comments[1]["content"]
+    assert "Label kept for retry (1/3)." in db.comments[1]["content"]
     assert any(
         item.get("task_id") == "task-1"
         and item.get("status") == "failed"
         and item.get("created_count") == 0
         for item in results
     )
+
+
+def test_run_breakdown_marks_task_failed_after_three_generation_failures(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    task = make_task("task-1", content="Task 1", labels=["llm-breakdown"], project_id="project-1")
+    db = _FakeDb([task])
+    db.comments.extend(
+        [
+            {
+                "task_id": "task-1",
+                "content": "Todoist Assistant LLM Breakdown\nStatus: failed\nRun: first",
+            },
+            {
+                "task_id": "task-1",
+                "content": "Todoist Assistant LLM Breakdown\nStatus: failed\nRun: second",
+            },
+        ]
+    )
+    automation = LLMBreakdown()
+
+    class _FakeLlm:
+        def structured_chat(self, messages, schema):
+            assert schema is TaskBreakdown
+            assert messages
+            raise RuntimeError("timed out")
+
+    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+
+    run_breakdown(automation, cast(Database, db))
+
+    assert db.insert_calls == []
+    assert db.updated == [("task-1", ["llm-breakdown-failed"])]
+    assert "Status: failed" in db.comments[-1]["content"]
+    assert "Failure limit reached (3/3); replaced label with llm-breakdown-failed." in db.comments[-1]["content"]
+
+
+def test_run_breakdown_ignores_failed_breakdown_label(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    task = make_task("task-1", content="Task 1", labels=["llm-breakdown-failed"], project_id="project-1")
+    db = _FakeDb([task])
+    automation = LLMBreakdown()
+
+    class _FakeLlm:
+        def structured_chat(self, messages, schema):  # pragma: no cover - should not be called
+            raise AssertionError("failed label should not be processed")
+
+    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+
+    run_breakdown(automation, cast(Database, db))
+
+    assert db.insert_calls == []
+    assert db.updated == []
+    assert db.comments == []
 
 
 def test_run_breakdown_processes_tasks_even_when_children_already_exist(

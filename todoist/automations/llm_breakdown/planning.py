@@ -142,6 +142,9 @@ def collect_candidates(
         llm_label = find_llm_label(task.task_entry.labels, automation.label_prefix_lower)
         if llm_label is None:
             continue
+        failed_label_lower = getattr(automation, "failed_label_lower", "")
+        if failed_label_lower and llm_label.lower() == failed_label_lower:
+            continue
         if task.id in processed_ids:
             continue
         variant_key, _ = automation.resolve_variant(llm_label)

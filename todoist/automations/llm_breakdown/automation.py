@@ -51,6 +51,8 @@ class BreakdownSettings:
     max_queue_depth: int = 1
     auto_queue_children: bool = True
     track_progress: bool = True
+    failed_label: str = "llm-breakdown-failed"
+    max_failures_per_task: int = 3
 
 
 def _coerce_settings(
@@ -104,6 +106,9 @@ class LLMBreakdown(Automation):
         self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
         self.auto_queue_children = settings_obj.auto_queue_children
         self.track_progress = settings_obj.track_progress
+        self.failed_label = _sanitize_text(settings_obj.failed_label) or "llm-breakdown-failed"
+        self.failed_label_lower = self.failed_label.lower()
+        self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
         self._llm: (
@@ -382,6 +387,16 @@ class LLMBreakdown(Automation):
             return
         db.update_task(task.id, labels=updated)
 
+    def _mark_root_failed(self, db: Database, task: Task, label_to_replace: str) -> None:
+        labels = task.task_entry.labels
+        target = label_to_replace.lower()
+        updated = [label for label in labels if label.lower() != target]
+        if not any(label.lower() == self.failed_label_lower for label in updated):
+            updated.append(self.failed_label)
+        if updated == labels:
+            return
+        db.update_task(task.id, labels=updated)
+
     def _insert_children(
         self,
         db: Database,
@@ -449,6 +464,9 @@ class LLMBreakdown(Automation):
 
     def update_root_labels(self, db: Database, task: Task, label_to_remove: str) -> None:
         self._update_root_labels(db, task, label_to_remove)
+
+    def mark_root_failed(self, db: Database, task: Task, label_to_replace: str) -> None:
+        self._mark_root_failed(db, task, label_to_replace)
 
     def insert_children(
         self,

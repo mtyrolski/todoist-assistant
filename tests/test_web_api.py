@@ -1124,6 +1124,26 @@ def test_admin_task_ingest_projects_returns_sorted_projects(monkeypatch) -> None
     assert payload["projects"][1]["label"] == "Inbox"
 
 
+def test_task_ingest_project_payload_includes_only_active_projects() -> None:
+    active_root = make_project(project_id="root", name="Root")
+    active_child = make_project(project_id="child", name="Child", parent_id="root")
+    archived = make_project(
+        project_id="archived",
+        project_entry=make_project_entry(
+            project_id="archived", name="Archived", is_archived=True
+        ),
+        is_archived=True,
+    )
+    deleted = make_project(project_id="deleted", name="Deleted", is_deleted=True)
+
+    payload = web_api._task_ingest_project_payload(
+        [archived, deleted, active_child, active_root]
+    )
+
+    assert [project["id"] for project in payload] == ["root", "child"]
+    assert [project["label"] for project in payload] == ["Root", "Root / Child"]
+
+
 def test_admin_task_ingest_preview_builds_nested_outline(monkeypatch) -> None:
     monkeypatch.setattr(
         web_api,

@@ -69,13 +69,21 @@ def _start_comment(*, run_id: str, request: Any, llm_descriptor: str) -> str:
 
 
 def _failure_comment(*, run_id: str, error_message: str) -> str:
+    return _failure_comment_with_action(
+        run_id=run_id,
+        error_message=error_message,
+        action="Label kept for retry.",
+    )
+
+
+def _failure_comment_with_action(*, run_id: str, error_message: str, action: str) -> str:
     return "\n".join(
         [
             _comment_header(),
             "Status: failed",
             f"Run: {run_id}",
             f"Error: {error_message}",
-            "Label kept for retry.",
+            action,
         ]
     )
 
@@ -116,6 +124,38 @@ def _completion_comment(
         lines.append("Planned children:")
         lines.extend(f"- {title}" for title in titles[:10])
     return "\n".join(lines)
+
+
+def _task_failure_comment_count(db: Database, task_id: str) -> int:
+    try:
+        comments = db.fetch_task_comments(task_id)
+    except Exception as exc:  # pragma: no cover - defensive retry policy
+        logger.warning("Failed to fetch LLM breakdown comments for task {}: {}", task_id, exc)
+        return 0
+    return sum(
+        1
+        for comment in comments
+        if isinstance(comment, dict)
+        and _comment_header() in str(comment.get("content") or "")
+        and "Status: failed" in str(comment.get("content") or "")
+    )
+
+
+def _failure_action_for_task(
+    automation: Any,
+    db: Database,
+    *,
+    task: Task,
+    label: str,
+    source: str,
+) -> str:
+    failure_count = _task_failure_comment_count(db, task.id) + 1
+    max_failures = int(getattr(automation, "max_failures_per_task", 3))
+    failed_label = str(getattr(automation, "failed_label", "llm-breakdown-failed"))
+    if source == "label" and failure_count >= max_failures:
+        automation.mark_root_failed(db, task, label)
+        return f"Failure limit reached ({failure_count}/{max_failures}); replaced label with {failed_label}."
+    return f"Label kept for retry ({failure_count}/{max_failures})."
 
 
 def run_breakdown(automation: Any, db: Database) -> None:
@@ -281,10 +321,21 @@ def run_breakdown(automation: Any, db: Database) -> None:
         if result.error is not None or result.breakdown is None:
             error_message = result.error or "unknown error"
             logger.error("LLM breakdown failed for task {}: {}", task.id, error_message)
+            action = _failure_action_for_task(
+                automation,
+                db,
+                task=task,
+                label=label,
+                source=source,
+            )
             _post_task_comment(
                 db,
                 task.id,
-                _failure_comment(run_id=run_id, error_message=error_message),
+                _failure_comment_with_action(
+                    run_id=run_id,
+                    error_message=error_message,
+                    action=action,
+                ),
             )
             failed += 1
             append_progress_result(

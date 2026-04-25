@@ -3290,7 +3290,14 @@ def _task_ingest_db() -> Database:
 
 
 def _task_ingest_project_payload(projects: Sequence[Project]) -> list[dict[str, Any]]:
-    by_id = {project.id: project for project in projects}
+    active_projects = [
+        project
+        for project in projects
+        if not project.is_archived
+        and not project.project_entry.is_archived
+        and not project.project_entry.is_deleted
+    ]
+    by_id = {project.id: project for project in active_projects}
 
     def project_path(project: Project) -> list[str]:
         names: list[str] = []
@@ -3304,7 +3311,7 @@ def _task_ingest_project_payload(projects: Sequence[Project]) -> list[dict[str, 
         return list(reversed(names))
 
     payload = []
-    for project in projects:
+    for project in active_projects:
         path = project_path(project)
         payload.append(
             {
