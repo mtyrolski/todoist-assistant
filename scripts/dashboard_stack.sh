@@ -19,11 +19,38 @@ FRONTEND_PORT="${DASHBOARD_FRONTEND_PORT:-3000}"
 API_PORT="${DASHBOARD_API_PORT:-8000}"
 TRITON_HTTP_PORT="${TODOIST_TRITON_HTTP_PORT:-8003}"
 
-TRITON_MODEL_ID="${TRITON_MODEL_ID:-Qwen/Qwen2.5-0.5B-Instruct}"
-TRITON_MODEL_NAME="${TRITON_MODEL_NAME:-todoist_llm}"
-TRITON_URL="${TRITON_URL:-http://127.0.0.1:${TRITON_HTTP_PORT}}"
+TRITON_MODEL_ID="${TRITON_MODEL_ID:-}"
+TRITON_MODEL_NAME="${TRITON_MODEL_NAME:-}"
+TRITON_URL="${TRITON_URL:-}"
 
 mkdir -p "${PID_DIR}" "${STATE_DIR}"
+
+resolve_triton_runtime_settings() {
+    local repo_root="${1}"
+    local settings=()
+    mapfile -t settings < <(python3 - "${repo_root}" <<'PY'
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repo_root))
+
+from todoist.runtime_env import resolve_triton_launch_settings
+
+payload = resolve_triton_launch_settings(repo_root=repo_root, cwd=repo_root)
+print(payload["model_id"])
+print(payload["model_name"])
+print(payload["url"])
+PY
+)
+    if [[ "${#settings[@]}" -ge 3 ]]; then
+        TRITON_MODEL_ID="${settings[0]}"
+        TRITON_MODEL_NAME="${settings[1]}"
+        TRITON_URL="${settings[2]}"
+    fi
+}
+
+resolve_triton_runtime_settings "${REPO_ROOT}"
 
 timestamp() {
     date +"%H:%M:%S"
@@ -165,6 +192,39 @@ wait_for_frontend() {
     wait_for_http "http://127.0.0.1:${FRONTEND_PORT}" "frontend" 120 0.5
 }
 
+triton_service_running() {
+    local mode="${1}"
+    docker_compose "${mode}" ps --status running --services 2>/dev/null | grep -qx 'triton'
+}
+
+wait_for_triton_ready() {
+    local mode="${1}"
+    local url="http://127.0.0.1:${TRITON_HTTP_PORT}/v2/health/ready"
+    local tries=0
+    log_note "Waiting for Triton to be ready..."
+    if ! command -v curl >/dev/null 2>&1; then
+        sleep 5
+        return 0
+    fi
+
+    until curl -fsS "${url}" >/dev/null 2>&1; do
+        tries=$((tries + 1))
+        if ! triton_service_running "${mode}"; then
+            echo "Triton failed before becoming ready."
+            return 1
+        fi
+        if [[ ${tries} -ge 900 ]]; then
+            echo "Triton readiness check timed out."
+            return 1
+        fi
+        if (( tries % 10 == 0 )); then
+            log_note "Triton still not ready after ${tries} checks..."
+        fi
+        sleep 1
+    done
+    log_note "Triton is ready."
+}
+
 port_listener_details() {
     local port="${1}"
     ss -ltnp "( sport = :${port} )" 2>/dev/null | tail -n +2 | sed '/^[[:space:]]*$/d'
@@ -227,6 +287,7 @@ start_triton() {
         export TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}"
         export TODOIST_TRITON_DEVICE="${TODOIST_TRITON_DEVICE:-${triton_device}}"
         export TODOIST_TRITON_MODEL_DTYPE="${TODOIST_TRITON_MODEL_DTYPE:-${triton_dtype}}"
+        export TODOIST_TRITON_STUB_TIMEOUT_SECONDS="${TODOIST_TRITON_STUB_TIMEOUT_SECONDS:-300}"
         export TODOIST_TRITON_TORCH_INSTALL_FLAVOR="${mode}"
         export TODOIST_TRITON_PYTHON_SHM_PREFIX="todoist_$(date +%s)"
         export TODOIST_DASHBOARD_LOG_DIR="${STATE_DIR}"
@@ -235,7 +296,7 @@ start_triton() {
     nohup bash -lc "cd '${REPO_ROOT}' && COMPOSE_PROFILES=dashboard docker compose ${COMPOSE_FILES[*]} logs -f --no-color triton" > "${TRITON_LOG_FILE}" 2>&1 &
     echo "$!" > "${TRITON_LOG_PID_FILE}"
     echo "${mode}" > "${TRITON_MODE_FILE}"
-    wait_for_http "http://127.0.0.1:${TRITON_HTTP_PORT}/v2/health/ready" "Triton" 900 1
+    wait_for_triton_ready "${mode}"
     print_recent_log "Triton" "${TRITON_LOG_FILE}" 10
     print_recent_log "Triton inference" "${TRITON_INFERENCE_LOG_FILE}" 10
 }

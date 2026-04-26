@@ -51,7 +51,7 @@ class LocalChatConfig:
     dtype: DType = "auto"
     temperature: float = 0.2
     top_p: float = 0.95
-    max_new_tokens: int = 256
+    max_new_tokens: int = 384
     suppress_hf_warnings: bool = True
 
 
@@ -157,6 +157,8 @@ class TransformersMistral3ChatModel:
             return min(self.config.max_new_tokens, 64)
         if name == "PlannerDecision":
             return min(self.config.max_new_tokens, 256)
+        if name == "TaskBreakdown":
+            return min(self.config.max_new_tokens, 512)
         return self.config.max_new_tokens
 
     def _generate_text(
@@ -217,6 +219,12 @@ def _schema_instructions(schema: type[BaseModel]) -> str:
             "If action=final -> final_answer required, tool_code null.\n"
             "plan can be empty."
         )
+    if name == "TaskBreakdown":
+        return (
+            "JSON only with a top-level `children` array. "
+            "Each child object must include: `content`, `description`, `priority`, `expand`, and `children`.\n"
+            "Use short imperative phrases. No markdown, no numbering, no extra keys."
+        )
 
     field_names = list(schema.model_fields)
     if len(field_names) == 1:
@@ -270,22 +278,40 @@ def _extract_json_payload(text: str) -> str | None:
     return None
 
 
+def _try_parse_top_level_json_collection(raw: str, schema: type[T]) -> T | None:
+    if schema.__name__ != "TaskBreakdown":
+        return None
+    with suppress(ValueError, TypeError, ValidationError):
+        payload = json.loads(raw)
+        if isinstance(payload, list):
+            return schema.model_validate({"children": payload})
+    return None
+
+
 def _try_parse_structured_output(raw: str, schema: type[T]) -> T | None:
+    parsed: T | None = None
     with suppress(ValidationError):
-        return schema.model_validate_json(raw)
+        parsed = schema.model_validate_json(raw)
+    if parsed is None:
+        parsed = _try_parse_top_level_json_collection(raw, schema)
 
     cleaned = _strip_markdown_code_fence(raw)
-    if cleaned != raw:
+    if parsed is None and cleaned != raw:
         with suppress(ValidationError):
-            return schema.model_validate_json(cleaned)
+            parsed = schema.model_validate_json(cleaned)
+        if parsed is None:
+            parsed = _try_parse_top_level_json_collection(cleaned, schema)
 
     extracted = _extract_json_payload(cleaned)
-    if extracted is None:
-        return _try_parse_schema_fallback(cleaned, schema)
+    if parsed is None and extracted is not None:
+        with suppress(ValidationError):
+            parsed = schema.model_validate_json(extracted)
+        if parsed is None:
+            parsed = _try_parse_top_level_json_collection(extracted, schema)
 
-    with suppress(ValidationError):
-        return schema.model_validate_json(extracted)
-    return _try_parse_schema_fallback(cleaned, schema)
+    if parsed is None:
+        parsed = _try_parse_schema_fallback(cleaned, schema)
+    return parsed
 
 
 def _try_parse_schema_fallback(raw: str, schema: type[T]) -> T | None:
@@ -297,6 +323,11 @@ def _try_parse_schema_fallback(raw: str, schema: type[T]) -> T | None:
         with suppress(ValidationError):
             return schema.model_validate({"children": [{"content": line} for line in content_lines]})
 
+    prefixed_lines = _extract_prefixed_breakdown_lines(raw)
+    if prefixed_lines:
+        with suppress(ValidationError):
+            return schema.model_validate({"children": [{"content": line} for line in prefixed_lines]})
+
     numbered_lines = _extract_numbered_breakdown_lines(raw)
     if numbered_lines:
         with suppress(ValidationError):
@@ -306,10 +337,7 @@ def _try_parse_schema_fallback(raw: str, schema: type[T]) -> T | None:
 
 def _extract_breakdown_content_lines(raw: str) -> list[str]:
     items: list[str] = []
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
+    for stripped in _iter_breakdown_candidate_lines(raw):
         match = re.match(r"^(?:[-*]\s*)?content\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
         if match is None:
             continue
@@ -322,10 +350,7 @@ def _extract_breakdown_content_lines(raw: str) -> list[str]:
 def _extract_numbered_breakdown_lines(raw: str) -> list[str]:
     ignored_prefixes = ("task:", "ancestors:", "children:", "expand:", "break down tasks:")
     items: list[str] = []
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
+    for stripped in _iter_breakdown_candidate_lines(raw):
         lowered = stripped.lower()
         if lowered.startswith(ignored_prefixes):
             continue
@@ -336,6 +361,43 @@ def _extract_numbered_breakdown_lines(raw: str) -> list[str]:
         if candidate and candidate not in items:
             items.append(candidate)
     return items
+
+
+def _extract_prefixed_breakdown_lines(raw: str) -> list[str]:
+    items: list[str] = []
+    for stripped in _iter_breakdown_candidate_lines(raw):
+        match = re.match(
+            r"^(?:sub\s*task|task|step)\s*#?\s*\d+\s*[:.)-]\s+(.+)$",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        candidate = _normalize_breakdown_line(match.group(1))
+        if candidate and candidate not in items:
+            items.append(candidate)
+    return items
+
+
+def _iter_breakdown_candidate_lines(raw: str) -> list[str]:
+    lines: list[str] = []
+    in_code_block = False
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        normalized = re.sub(
+            r"(?:\[(?:/?INST|CLS|END)\]\s*)+",
+            "",
+            stripped,
+            flags=re.IGNORECASE,
+        ).strip()
+        if normalized:
+            lines.append(normalized)
+    return lines
 
 
 def _normalize_breakdown_line(value: str) -> str | None:
@@ -412,7 +474,7 @@ def _load_config(model_id: str):
     try:
         return AutoConfig.from_pretrained(model_id)
     except KeyError as exc:
-        if str(exc) != "'ministral3'":
+        if "ministral3" not in str(exc):
             raise
 
     repo_path = Path(snapshot_download(repo_id=model_id, allow_patterns=["config.json"]))

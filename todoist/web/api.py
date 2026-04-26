@@ -85,11 +85,11 @@ from todoist.llm import (
 )
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
+from todoist.runtime_env import resolve_runtime_env_path
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
     resolve_dashboard_config_path,
-    update_observer_settings,
 )
 from todoist.web.dashboard_payload import (
     DEFAULT_URGENCY_SETTINGS,
@@ -106,6 +106,7 @@ from todoist.web.dashboard_payload import (
     period_bounds as _period_bounds,
     safe_activity_anchor as _safe_activity_anchor,
 )
+from todoist.web.routes.admin_automations import router as _admin_automations_router
 from todoist.habit_tracker import extract_tracked_habit_tasks
 from todoist.utils import (
     Cache,
@@ -137,6 +138,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(_admin_automations_router)
 
 
 @app.get("/api/health", tags=["health"])
@@ -199,6 +201,10 @@ _TQDM_STEP_MAP = {
     "Building project hierarchy": 2,
     "Querying activity data": 1,
 }
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -264,23 +270,17 @@ _OPENAI_MODEL_OPTIONS = [
     {"id": "gpt-4.1", "label": "GPT-4.1"},
 ]
 _TRITON_MODEL_OPTIONS = [
-    {"id": DEFAULT_TRITON_MODEL_ID, "label": "Qwen 2.5 0.5B Instruct"},
-    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
+    {"id": DEFAULT_TRITON_MODEL_ID, "label": "Ministral 3 3B Instruct"},
     {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
-    {"id": "mistralai/Ministral-3-3B-Instruct-2512", "label": "Ministral 3 3B Instruct"},
+    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
+    {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
     {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
     {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
 ]
 
 
 def _resolve_env_path() -> Path:
-    cache_dir = os.getenv(str(EnvVar.CACHE_DIR))
-    if cache_dir:
-        return Path(cache_dir).expanduser().resolve() / ".env"
-    cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        return cwd_env
-    return _REPO_ROOT / ".env"
+    return resolve_runtime_env_path(repo_root=_REPO_ROOT)
 
 
 def _normalize_api_key(raw: str | None) -> str:
@@ -2232,6 +2232,75 @@ def _serialize_dt(value: Any) -> str | None:
     return None
 
 
+def _run_automation_sync(
+    automation: Automation,
+    *,
+    dbio: Database,
+    continue_on_error: bool = False,
+) -> dict[str, Any]:
+    output_stream = io.StringIO()
+    started_at = datetime.now()
+    task_delegations = None
+    error: str | None = None
+    with (
+        contextlib.redirect_stdout(output_stream),
+        contextlib.redirect_stderr(output_stream),
+    ):
+        loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
+        try:
+            task_delegations = automation.tick(dbio)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Automation {} failed during manual run: {}",
+                automation.name,
+                error,
+            )
+            if not continue_on_error:
+                raise
+        finally:
+            logger.remove(loguru_handler_id)
+    finished_at = datetime.now()
+    return {
+        "name": automation.name,
+        "startedAt": started_at.isoformat(timespec="seconds"),
+        "finishedAt": finished_at.isoformat(timespec="seconds"),
+        "durationSeconds": round((finished_at - started_at).total_seconds(), 3),
+        "output": output_stream.getvalue(),
+        "taskDelegations": task_delegations,
+        "status": "failed" if error else "completed",
+        "error": error,
+    }
+
+
+def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    completed = 0
+    failed = 0
+
+    for automation in _load_automations():
+        result = _run_automation_sync(
+            automation,
+            dbio=dbio,
+            continue_on_error=True,
+        )
+        results.append(result)
+        if result["status"] == "failed":
+            failed += 1
+        else:
+            completed += 1
+        dbio.reset()
+
+    return {
+        "results": results,
+        "summary": {
+            "completed": completed,
+            "failed": failed,
+            "skipped": 0,
+        },
+    }
+
+
 def _load_automations() -> list[Automation]:
     config = load_config("automations", str(_CONFIG_DIR.resolve()))
     automations: list[Automation] = hydra.utils.instantiate(
@@ -2594,6 +2663,26 @@ def _restart_dashboard_observer_if_managed() -> bool:
     return True
 
 
+def _automation_run_signal_metadata(automation_name: str) -> dict[str, Any]:
+    payload = Cache().automation_run_signals.load()
+    signals = payload if isinstance(payload, dict) else {}
+    signal_payload = signals.get(automation_name)
+    if not isinstance(signal_payload, Mapping):
+        return {}
+    return {
+        "attemptCount": signal_payload.get("attemptCount"),
+        "successCount": signal_payload.get("successCount"),
+        "failureCount": signal_payload.get("failureCount"),
+        "skipCount": signal_payload.get("skipCount"),
+        "lastStatus": signal_payload.get("lastStatus"),
+        "lastStartedAt": signal_payload.get("lastStartedAt"),
+        "lastFinishedAt": signal_payload.get("lastFinishedAt"),
+        "lastDurationSeconds": signal_payload.get("lastDurationSeconds"),
+        "lastError": signal_payload.get("lastError"),
+        "lastSuccessAt": signal_payload.get("lastSuccessAt"),
+    }
+
+
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
     launches = Cache().automation_launches.load().get(automation.name, [])
     last_launch = launches[-1] if launches else None
@@ -2604,71 +2693,8 @@ def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
         "isLong": getattr(automation, "is_long", False),
         "launchCount": len(launches),
         "lastLaunch": last_launch_iso,
+        **_automation_run_signal_metadata(automation.name),
     }
-
-
-@app.get("/api/admin/automations", tags=["admin"])
-async def admin_automations() -> dict[str, Any]:
-    """List configured automations plus cached launch metadata."""
-
-    try:
-        automations = _load_automation_inventory()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to load automations: {exc}")
-        return {"automations": [], "error": f"{type(exc).__name__}: {exc}"}
-    return {"automations": automations, "configPath": str(_AUTOMATIONS_PATH)}
-
-
-@app.post("/api/admin/automations/{key}/enabled", tags=["admin"])
-async def admin_set_automation_enabled(
-    key: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    enabled = bool(payload.get("enabled"))
-    async with _ADMIN_LOCK:
-        config = _read_yaml_config(_AUTOMATIONS_PATH)
-        available_keys = _available_automation_keys(config)
-        if key not in available_keys:
-            raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
-        _set_automation_enabled(key, enabled=enabled)
-        _restart_dashboard_observer_if_managed()
-    return await admin_automations()
-
-
-@app.get("/api/admin/automations/gmail/status", tags=["admin"])
-async def admin_gmail_automation_status() -> dict[str, Any]:
-    return _gmail_automation_status()
-
-
-@app.post("/api/admin/automations/gmail/connect", tags=["admin"])
-async def admin_gmail_automation_connect() -> dict[str, Any]:
-    status = _gmail_automation_status()
-    if not status["credentialsPresent"]:
-        raise HTTPException(
-            status_code=400,
-            detail="gmail_credentials.json is required before connecting Gmail.",
-        )
-    if status["connected"]:
-        return status
-    pending_auth = status.get("pendingAuth")
-    if isinstance(pending_auth, Mapping) and pending_auth.get("active"):
-        status["authUrl"] = pending_auth.get("authUrl")
-        status["redirectUri"] = pending_auth.get("redirectUri")
-        return status
-    session = await asyncio.to_thread(_start_gmail_manual_auth_session)
-    next_status = _gmail_automation_status()
-    next_status["authUrl"] = session.auth_url
-    next_status["redirectUri"] = session.redirect_uri
-    return next_status
-
-
-@app.delete("/api/admin/automations/gmail/connect", tags=["admin"])
-async def admin_gmail_automation_disconnect() -> dict[str, Any]:
-    token_path = resolve_gmail_token_path()
-    if token_path.exists():
-        token_path.unlink()
-    _clear_gmail_auth_session()
-    return _gmail_automation_status()
 
 
 @app.get("/api/admin/api_token", tags=["admin"])
@@ -2774,197 +2800,6 @@ async def admin_clear_timezone() -> dict[str, Any]:
     return _resolve_timezone_status()
 
 
-def _run_automation_sync(automation: Automation, *, dbio: Database) -> dict[str, Any]:
-    output_stream = io.StringIO()
-    started_at = datetime.now()
-    with (
-        contextlib.redirect_stdout(output_stream),
-        contextlib.redirect_stderr(output_stream),
-    ):
-        loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
-        try:
-            task_delegations = automation.tick(dbio)
-        finally:
-            logger.remove(loguru_handler_id)
-    finished_at = datetime.now()
-    return {
-        "name": automation.name,
-        "startedAt": started_at.isoformat(timespec="seconds"),
-        "finishedAt": finished_at.isoformat(timespec="seconds"),
-        "durationSeconds": round((finished_at - started_at).total_seconds(), 3),
-        "output": output_stream.getvalue(),
-        "taskDelegations": task_delegations,
-    }
-
-
-@app.post("/api/admin/automations/run", tags=["admin"])
-async def admin_run_automation(name: str, refresh: bool = False) -> dict[str, Any]:
-    """
-    Run a single automation by name (from configs/automations.yaml).
-
-    Notes:
-    - Uses the same frequency gating as the CLI/observer runner.
-    - `refresh=true` forces the dashboard state to reload after the run.
-    """
-    async with _ADMIN_LOCK:
-        automations = {a.name: a for a in _load_automations()}
-        if name not in automations:
-            raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
-
-        dbio = Database(".env")
-        dbio.pull()
-        result = await asyncio.to_thread(
-            _run_automation_sync, automations[name], dbio=dbio
-        )
-        dbio.reset()
-
-        if refresh:
-            await _ensure_state(refresh=True)
-        return result
-
-
-@app.post("/api/admin/automations/run_all", tags=["admin"])
-async def admin_run_all_automations(refresh: bool = False) -> dict[str, Any]:
-    """Run all configured automations sequentially."""
-
-    async with _ADMIN_LOCK:
-        dbio = Database(".env")
-        dbio.pull()
-        results: list[dict[str, Any]] = []
-        for automation in _load_automations():
-            results.append(
-                await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio)
-            )
-            dbio.reset()
-
-        if refresh:
-            await _ensure_state(refresh=True)
-        return {"results": results}
-
-
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-async def _save_job(job: _AdminJob) -> None:
-    async with _JOBS_LOCK:
-        _JOBS[job.id] = job
-
-
-async def _get_job(job_id: str) -> _AdminJob:
-    async with _JOBS_LOCK:
-        job = _JOBS.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Unknown job id")
-        return job
-
-
-async def _update_job(job_id: str, **fields: Any) -> None:
-    async with _JOBS_LOCK:
-        job = _JOBS.get(job_id)
-        if job is None:
-            return
-        for key, value in fields.items():
-            setattr(job, key, value)
-
-
-@app.get("/api/admin/jobs/{job_id}", tags=["admin"])
-async def admin_job(job_id: str) -> dict[str, Any]:
-    job = await _get_job(job_id)
-    return {
-        "id": job.id,
-        "kind": job.kind,
-        "status": job.status,
-        "createdAt": job.created_at,
-        "startedAt": job.started_at,
-        "finishedAt": job.finished_at,
-        "result": job.result,
-        "error": job.error,
-    }
-
-
-async def _run_automation_job(*, job_id: str, name: str) -> None:
-    await _update_job(job_id, status="running", started_at=_now_iso())
-    try:
-        async with _ADMIN_LOCK:
-            automations = {a.name: a for a in _load_automations()}
-            if name not in automations:
-                raise HTTPException(
-                    status_code=404, detail=f"Unknown automation: {name}"
-                )
-
-            dbio = Database(".env")
-            dbio.pull()
-            result = await asyncio.to_thread(
-                _run_automation_sync, automations[name], dbio=dbio
-            )
-            dbio.reset()
-
-        await _update_job(job_id, status="done", finished_at=_now_iso(), result=result)
-    except Exception as exc:  # pragma: no cover - defensive
-        await _update_job(
-            job_id,
-            status="failed",
-            finished_at=_now_iso(),
-            error=f"{type(exc).__name__}: {exc}",
-        )
-
-
-async def _run_all_automations_job(*, job_id: str) -> None:
-    await _update_job(job_id, status="running", started_at=_now_iso())
-    try:
-        async with _ADMIN_LOCK:
-            dbio = Database(".env")
-            dbio.pull()
-            results: list[dict[str, Any]] = []
-            for automation in _load_automations():
-                results.append(
-                    await asyncio.to_thread(_run_automation_sync, automation, dbio=dbio)
-                )
-                dbio.reset()
-
-        await _update_job(
-            job_id, status="done", finished_at=_now_iso(), result={"results": results}
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        await _update_job(
-            job_id,
-            status="failed",
-            finished_at=_now_iso(),
-            error=f"{type(exc).__name__}: {exc}",
-        )
-
-
-@app.post("/api/admin/automations/run_async", tags=["admin"])
-async def admin_run_automation_async(name: str) -> dict[str, Any]:
-    """Start an automation run in the background and return a job id."""
-
-    job = _AdminJob(
-        id=str(uuid4()),
-        kind="automation",
-        status="queued",
-        created_at=_now_iso(),
-    )
-    await _save_job(job)
-    asyncio.create_task(_run_automation_job(job_id=job.id, name=name))
-    return {"jobId": job.id, "status": job.status}
-
-
-@app.post("/api/admin/automations/run_all_async", tags=["admin"])
-async def admin_run_all_automations_async() -> dict[str, Any]:
-    """Start a run of all configured automations in the background and return a job id."""
-
-    job = _AdminJob(
-        id=str(uuid4()),
-        kind="automations",
-        status="queued",
-        created_at=_now_iso(),
-    )
-    await _save_job(job)
-    asyncio.create_task(_run_all_automations_job(job_id=job.id))
-    return {"jobId": job.id, "status": job.status}
-
-
 def _load_observer_state() -> dict[str, Any]:
     try:
         payload = Cache().observer_state.load()
@@ -3003,121 +2838,6 @@ def _build_observer(db: Database) -> AutomationObserver:
     return AutomationObserver(
         db=db, automations=short_automations, activity=activity_automation
     )
-
-
-@app.get("/api/admin/observer", tags=["admin"])
-async def admin_observer_state() -> dict[str, Any]:
-    config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
-    state = _load_observer_state()
-    observer_settings = observer_settings_payload(config, path=_DASHBOARD_CONFIG_PATH)
-    state["enabled"] = bool(observer_settings["enabled"])
-    state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-    state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
-    return {
-        "state": _serialize_observer_state(state),
-        "settings": observer_settings,
-        "editTargets": [
-            {
-                "key": "observer",
-                "label": "Dashboard observer",
-                "icon": "wrench",
-                "configPath": observer_settings["configPath"],
-                "anchor": "observer-control",
-            }
-        ],
-    }
-
-
-@app.post("/api/admin/observer", tags=["admin"])
-async def admin_set_observer(payload: Any = Body(...)) -> dict[str, Any]:
-    if isinstance(payload, bool):
-        update_payload: dict[str, Any] = {"enabled": payload}
-    elif isinstance(payload, dict):
-        update_payload = payload
-    else:
-        raise HTTPException(status_code=400, detail="Body must be a JSON object or boolean")
-
-    async with _ADMIN_LOCK:
-        config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
-        try:
-            observer_settings = update_observer_settings(config, update_payload)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        cache_state = _load_observer_state()
-        cache_state["enabled"] = bool(observer_settings["enabled"])
-        cache_state["refreshIntervalMinutes"] = observer_settings["refreshIntervalMinutes"]
-        cache_state["refreshIntervalSeconds"] = float(
-            observer_settings["refreshIntervalMinutes"]
-        ) * 60.0
-        cache_state["updatedAt"] = _now_iso()
-        Cache().observer_state.save(cache_state)
-        _save_yaml_config(_DASHBOARD_CONFIG_PATH, config)
-    return {
-        "state": _serialize_observer_state(cache_state),
-        "settings": observer_settings,
-        "editTargets": [
-            {
-                "key": "observer",
-                "label": "Dashboard observer",
-                "icon": "wrench",
-                "configPath": observer_settings["configPath"],
-                "anchor": "observer-control",
-            }
-        ],
-    }
-
-
-@app.post("/api/admin/observer/run", tags=["admin"])
-async def admin_run_observer(force: bool = False) -> dict[str, Any]:
-    async with _ADMIN_LOCK:
-        state = _load_observer_state()
-        observer_settings = observer_settings_payload(
-            load_dashboard_config(_DASHBOARD_CONFIG_PATH),
-            path=_DASHBOARD_CONFIG_PATH,
-        )
-        enabled = bool(observer_settings["enabled"])
-        state["enabled"] = enabled
-        state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-        state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
-        if not enabled and not force:
-            raise HTTPException(status_code=409, detail="Observer is disabled")
-
-        started_at = datetime.now()
-        dbio = Database(".env")
-        try:
-            dbio.pull()
-            observer = _build_observer(dbio)
-            result = await asyncio.to_thread(observer.run_once)
-            status = "ran" if result.automations_ran > 0 else "idle"
-            state.update(
-                {
-                    "lastStatus": status,
-                    "lastEvents": int(result.new_events),
-                    "lastAutomationsRan": int(result.automations_ran),
-                    "lastError": None,
-                }
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            state.update(
-                {
-                    "lastStatus": "failed",
-                    "lastEvents": None,
-                    "lastAutomationsRan": None,
-                    "lastError": f"{type(exc).__name__}: {exc}",
-                }
-            )
-            raise HTTPException(status_code=500, detail=state["lastError"]) from exc
-        finally:
-            dbio.reset()
-            finished_at = datetime.now()
-            state["lastRunAt"] = finished_at.isoformat(timespec="seconds")
-            state["lastDurationSeconds"] = round(
-                (finished_at - started_at).total_seconds(), 3
-            )
-            state["updatedAt"] = _now_iso()
-            Cache().observer_state.save(state)
-
-    return {"state": _serialize_observer_state(state)}
 
 
 def _log_files() -> list[dict[str, Any]]:
@@ -3570,7 +3290,14 @@ def _task_ingest_db() -> Database:
 
 
 def _task_ingest_project_payload(projects: Sequence[Project]) -> list[dict[str, Any]]:
-    by_id = {project.id: project for project in projects}
+    active_projects = [
+        project
+        for project in projects
+        if not project.is_archived
+        and not project.project_entry.is_archived
+        and not project.project_entry.is_deleted
+    ]
+    by_id = {project.id: project for project in active_projects}
 
     def project_path(project: Project) -> list[str]:
         names: list[str] = []
@@ -3584,7 +3311,7 @@ def _task_ingest_project_payload(projects: Sequence[Project]) -> list[dict[str, 
         return list(reversed(names))
 
     payload = []
-    for project in projects:
+    for project in active_projects:
         path = project_path(project)
         payload.append(
             {

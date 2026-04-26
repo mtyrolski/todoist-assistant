@@ -1,43 +1,10 @@
 import hydra
-from loguru import logger
-from tqdm import tqdm
 from omegaconf import DictConfig
-from todoist.automations.base import Automation
-from todoist.database.base import Database
-from todoist.utils import automation_log_path, configure_runtime_logging
-from todoist.automations.activity import Activity
+from todoist.automations.entrypoint import run_configured_automations, select_update_env_automations
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
-    configure_runtime_logging(log_path=automation_log_path())
-
-    dbio = Database('.env')
-    automations: list[Automation] = hydra.utils.instantiate(config.automations)
-    logger.info("Loaded automations: {}", list(map(str, automations)))
-
-    # Filtering only for short ones
-    automations = list(filter(lambda x: not x.is_long, automations))
-
-    # if Activity among automations, we need to run the longest (still left) one.
-    activity_automations: list[Activity] = [a for a in automations if isinstance(a, Activity)]
-    rest_automations: list[Automation] = [a for a in automations if not isinstance(a, Activity)]
-    if activity_automations:
-        longest_automation = max(activity_automations, key=lambda x: x.nweeks)
-        logger.info(f"Activity automations found, running the longest one - last {int(longest_automation.nweeks)} weeks of activity collection.")
-        automations = [longest_automation] + rest_automations
-    else:
-        logger.info("No activity automations found, running all remaining automations.")
-
-    if not automations:
-        logger.warning("No automations to run. Exiting.")
-        return
-
-    logger.info("Starting automations...")
-    for automation in tqdm(automations, desc="Processing automations"):
-        logger.info("Running automation: {}", automation)
-        automation.tick(dbio)
-        logger.info("Automation completed: {}", automation)
-    logger.success("All automations completed.")
+    run_configured_automations(config, select_automations=select_update_env_automations)
 
 
 if __name__ == '__main__':

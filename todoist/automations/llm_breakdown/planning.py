@@ -4,8 +4,6 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
-from loguru import logger
-
 from todoist.llm.llm_utils import (
     TaskFetcher,
     _build_ancestor_context,
@@ -31,6 +29,7 @@ class CandidateSelection:
     candidates: list[BreakdownCandidate]
     queued_ids: set[str]
     drop_queue_ids: set[str]
+    cleanup_label_tasks: list[BreakdownCandidate]
 
 
 @dataclass(frozen=True)
@@ -108,7 +107,6 @@ def collect_candidates(
     automation: Any,
     all_tasks: list[Task],
     tasks_by_id: dict[str, Task],
-    children_by_parent: dict[str, list[Task]],
     queue_items: list[dict[str, Any]],
     processed_ids: set[str],
     fetch_task: TaskFetcher,
@@ -116,15 +114,12 @@ def collect_candidates(
     queued_ids = {item["task_id"] for item in queue_items}
     drop_queue_ids: set[str] = set()
     candidates: list[BreakdownCandidate] = []
+    cleanup_label_tasks: list[BreakdownCandidate] = []
 
     for item in queue_items:
         task_id = item["task_id"]
         task = tasks_by_id.get(task_id) or fetch_task(task_id, False)
         if task is None:
-            drop_queue_ids.add(task_id)
-            continue
-        if not automation.allow_existing_children and children_by_parent.get(task.id):
-            logger.info("Skipping queued task {} (already has children)", task.id)
             drop_queue_ids.add(task_id)
             continue
         if task.id in processed_ids:
@@ -147,8 +142,8 @@ def collect_candidates(
         llm_label = find_llm_label(task.task_entry.labels, automation.label_prefix_lower)
         if llm_label is None:
             continue
-        if not automation.allow_existing_children and children_by_parent.get(task.id):
-            logger.info("Skipping task {} (already has children)", task.id)
+        failed_label_lower = getattr(automation, "failed_label_lower", "")
+        if failed_label_lower and llm_label.lower() == failed_label_lower:
             continue
         if task.id in processed_ids:
             continue
@@ -167,6 +162,7 @@ def collect_candidates(
         candidates=candidates,
         queued_ids=queued_ids,
         drop_queue_ids=drop_queue_ids,
+        cleanup_label_tasks=cleanup_label_tasks,
     )
 
 

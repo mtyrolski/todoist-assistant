@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeAlias, Union, cast
 
@@ -46,6 +46,7 @@ class InsertContext:
     labels: list[str] | None
     created: list[int]
     queue_ctx: QueueContext | None
+    errors: list[str] = field(default_factory=list)
 
 
 def _normalize_text(value: object) -> str | None:

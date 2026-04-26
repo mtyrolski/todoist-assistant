@@ -23,6 +23,7 @@ from todoist.llm import (
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.runtime_env import resolve_runtime_env_path
 from todoist.types import Task
 from todoist.utils import Cache
 
@@ -50,6 +51,8 @@ class BreakdownSettings:
     max_queue_depth: int = 1
     auto_queue_children: bool = True
     track_progress: bool = True
+    failed_label: str = "llm-breakdown-failed"
+    max_failures_per_task: int = 3
 
 
 def _coerce_settings(
@@ -103,6 +106,9 @@ class LLMBreakdown(Automation):
         self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
         self.auto_queue_children = settings_obj.auto_queue_children
         self.track_progress = settings_obj.track_progress
+        self.failed_label = _sanitize_text(settings_obj.failed_label) or "llm-breakdown-failed"
+        self.failed_label_lower = self.failed_label.lower()
+        self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
         self._llm: (
@@ -176,13 +182,7 @@ class LLMBreakdown(Automation):
 
     @staticmethod
     def _resolve_env_path() -> Path:
-        cache_dir = os.getenv(str(EnvVar.CACHE_DIR))
-        if cache_dir:
-            return Path(cache_dir).expanduser().resolve() / ".env"
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.exists():
-            return cwd_env
-        return _REPO_ROOT / ".env"
+        return resolve_runtime_env_path(repo_root=_REPO_ROOT)
 
     @staticmethod
     def _env_values() -> dict[str, Any]:
@@ -313,6 +313,8 @@ class LLMBreakdown(Automation):
             return 1
         if self.selected_backend() != "triton_local":
             return 1
+        if self.max_tasks_per_tick <= 0:
+            return max(1, int(task_count))
         return max(1, min(int(self.max_tasks_per_tick), int(task_count)))
 
     @staticmethod
@@ -358,12 +360,39 @@ class LLMBreakdown(Automation):
         return labels or None
 
     @staticmethod
+    def _fallback_nodes(task: Task, *, reason: str | None = None) -> list[BreakdownNode]:
+        description_parts = [f"Fallback rollout for task: {task.task_entry.content.strip()}"]
+        task_description = _sanitize_text(task.task_entry.description)
+        if task_description:
+            description_parts.append(f"Context: {task_description}")
+        if reason:
+            description_parts.append(f"Reason: {reason}")
+        return [
+            BreakdownNode(
+                content="Define first concrete step",
+                description="\n".join(description_parts),
+                expand=False,
+                children=[],
+            )
+        ]
+
+    @staticmethod
     def _update_root_labels(db: Database, task: Task, label_to_remove: str) -> None:
         labels = task.task_entry.labels
         if not labels:
             return
         target = label_to_remove.lower()
         updated = [label for label in labels if label.lower() != target]
+        if updated == labels:
+            return
+        db.update_task(task.id, labels=updated)
+
+    def _mark_root_failed(self, db: Database, task: Task, label_to_replace: str) -> None:
+        labels = task.task_entry.labels
+        target = label_to_replace.lower()
+        updated = [label for label in labels if label.lower() != target]
+        if not any(label.lower() == self.failed_label_lower for label in updated):
+            updated.append(self.failed_label)
         if updated == labels:
             return
         db.update_task(task.id, labels=updated)
@@ -389,16 +418,30 @@ class LLMBreakdown(Automation):
                 continue
             description = _sanitize_text(node.description)
             priority = self._normalize_priority(node.priority)
-            result = db.insert_task(
-                content=content,
-                description=description,
-                project_id=root_task.task_entry.project_id,
-                parent_id=parent_id,
-                priority=priority,
-                labels=context.labels,
-            )
+            try:
+                result = db.insert_task(
+                    content=content,
+                    description=description,
+                    project_id=root_task.task_entry.project_id if parent_id is None else None,
+                    parent_id=parent_id,
+                    priority=priority,
+                    labels=context.labels,
+                )
+            except Exception as exc:  # pragma: no cover - network safety
+                message = (
+                    f"Failed inserting subtask '{content}' for root task {root_task.id} "
+                    f"under parent {parent_id}: {type(exc).__name__}: {exc}"
+                )
+                context.errors.append(message)
+                logger.error(message)
+                continue
             if "id" not in result:
-                logger.error("Failed to insert subtask '{}'", content)
+                message = (
+                    f"Todoist did not return an id for subtask '{content}' "
+                    f"(root task {root_task.id}, parent {parent_id})"
+                )
+                context.errors.append(message)
+                logger.error(message)
                 continue
             context.created[0] += 1
             child_id = str(result["id"])
@@ -416,8 +459,14 @@ class LLMBreakdown(Automation):
     def child_labels(self, task: Task) -> list[str] | None:
         return self._child_labels(task)
 
+    def fallback_nodes(self, task: Task, *, reason: str | None = None) -> list[BreakdownNode]:
+        return self._fallback_nodes(task, reason=reason)
+
     def update_root_labels(self, db: Database, task: Task, label_to_remove: str) -> None:
         self._update_root_labels(db, task, label_to_remove)
+
+    def mark_root_failed(self, db: Database, task: Task, label_to_replace: str) -> None:
+        self._mark_root_failed(db, task, label_to_replace)
 
     def insert_children(
         self,
@@ -439,4 +488,14 @@ class LLMBreakdown(Automation):
         )
 
     def _tick(self, db: Database) -> None:
+        refresh = getattr(db, "reset", None)
+        if callable(refresh):
+            try:
+                logger.debug("Refreshing active Todoist tasks before LLM breakdown selection")
+                refresh()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to refresh active Todoist tasks before LLM breakdown selection: {}",
+                    exc,
+                )
         run_breakdown(self, db)

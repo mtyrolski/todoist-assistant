@@ -21,7 +21,7 @@ from .usage import record_llm_usage
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_TRITON_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -32,8 +32,8 @@ class TritonChatConfig:
     base_url: str = DEFAULT_TRITON_URL
     temperature: float = 0.2
     top_p: float = 0.95
-    max_output_tokens: int = 256
-    timeout_seconds: float = 60.0
+    max_output_tokens: int = 384
+    timeout_seconds: float = 240.0
 
 
 class TritonGenerateChatModel:
@@ -98,13 +98,16 @@ class TritonGenerateChatModel:
             operation="structured_chat",
         )
         parsed = _try_parse_structured_output(raw, schema)
-        if parsed is not None:
+        if parsed is not None and not _is_empty_structured_result(parsed):
             logger.debug("Triton structured_chat parsed schema={} without repair", schema.__name__)
             return parsed
-        logger.warning("Triton structured_chat repairing malformed output for schema={}", schema.__name__)
+        if parsed is not None:
+            logger.warning("Triton structured_chat repairing empty output for schema={}", schema.__name__)
+        else:
+            logger.warning("Triton structured_chat repairing malformed output for schema={}", schema.__name__)
         repaired = self._repair_structured_output(raw, schema)
         parsed = _try_parse_structured_output(repaired, schema)
-        if parsed is not None:
+        if parsed is not None and not _is_empty_structured_result(parsed):
             logger.debug("Triton structured_chat repair succeeded for schema={}", schema.__name__)
             return parsed
         logger.error("Triton structured_chat failed for schema={}", schema.__name__)
@@ -256,7 +259,7 @@ class TritonGenerateChatModel:
         if name == "PlannerDecision":
             return min(self.config.max_output_tokens, 256)
         if name == "TaskBreakdown":
-            return max(self.config.max_output_tokens, 384)
+            return min(self.config.max_output_tokens, 512)
         return self.config.max_output_tokens
 
     def _repair_structured_output(self, raw: str, schema: type[BaseModel]) -> str:
@@ -266,6 +269,7 @@ class TritonGenerateChatModel:
                 "content": (
                     "Convert the provided draft into strict JSON only. "
                     "Do not add commentary, markdown, or code fences."
+                    "\nFor TaskBreakdown, children must contain at least one concrete actionable task."
                 ),
             },
             {
@@ -340,6 +344,13 @@ def _normalize_generated_text(text: str) -> str:
     if closing < 0:
         return stripped
     return stripped[closing + len("</think>") :].strip()
+
+
+def _is_empty_structured_result(value: BaseModel) -> bool:
+    if value.__class__.__name__ != "TaskBreakdown":
+        return False
+    children = getattr(value, "children", None)
+    return isinstance(children, list) and len(children) == 0
 
 
 def _estimate_token_count(tokenizer: Any, text: str) -> int:

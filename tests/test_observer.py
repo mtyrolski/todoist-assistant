@@ -52,6 +52,12 @@ class _StubAutomation(Automation):
         self.tick_calls.append(db)
 
 
+class _FailingAutomation(_StubAutomation):
+    def _tick(self, db: Database):
+        super()._tick(db)
+        raise RuntimeError("boom")
+
+
 class _StubActivity(Activity):
     def __init__(self, events, stats):
         super().__init__("Activity Fetching Automation", 1, 1)
@@ -142,3 +148,25 @@ def test_observer_runs_polling_automation_without_new_events(tmp_path: Path, mon
     assert len(automation.tick_calls) == 1
     assert result.new_events == 0
     assert result.automations_ran == 1
+
+
+def test_observer_continues_after_automation_failure(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    events = [_event("1", "added")]
+    db = _StubDb()
+    activity = _StubActivity(events, {"total": 1, "added": 1})
+    failing = _FailingAutomation("Broken")
+    healthy = _StubAutomation("Healthy")
+
+    observer = AutomationObserver(
+        db=cast(Database, db),
+        automations=[failing, healthy],
+        activity=activity,
+    )
+    result = observer.run_once()
+
+    assert db.reset_calls == 1
+    assert len(failing.tick_calls) == 1
+    assert len(healthy.tick_calls) == 1
+    assert result.new_events == 1
+    assert result.automations_ran == 2

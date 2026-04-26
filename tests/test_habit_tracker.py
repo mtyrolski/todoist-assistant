@@ -100,6 +100,31 @@ def test_summarize_tracked_habits_builds_weekly_and_all_time_counts() -> None:
     assert abs(second_item["reliability"] - 66.67) < 0.01
 
 
+def test_summarize_tracked_habits_accepts_frames_with_date_index_and_column() -> None:
+    tracked_tasks = [
+        TrackedHabitTask(
+            task_id="habit-1",
+            content="Morning walk",
+            project_id="project-1",
+            project_name="Health",
+            project_color="green",
+        )
+    ]
+    activity = _habit_df().copy()
+    activity["date"] = activity.index
+
+    summary = summarize_tracked_habits(
+        activity,
+        tracked_tasks,
+        anchor=datetime(2025, 1, 15, 12, 0, 0),
+        history_weeks=2,
+    )
+
+    assert summary["trackedCount"] == 1
+    assert summary["totals"]["weeklyCompleted"] == 1
+    assert summary["totals"]["weeklyRescheduled"] == 1
+
+
 def test_habit_tracker_posts_comment_once_per_task_and_week(
     monkeypatch, tmp_path
 ) -> None:
@@ -160,3 +185,47 @@ def test_habit_tracker_posts_comment_once_per_task_and_week(
             ),
         )
     ]
+
+
+def test_habit_tracker_posts_comment_with_raw_activity_dataframe(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    tracked_task = make_task("habit-1", content="Morning walk", labels=["track_habit"])
+    project = make_project(
+        project_id="project-1",
+        project_entry=make_project_entry(project_id="project-1", name="Health"),
+        tasks=[tracked_task],
+    )
+
+    comments: list[tuple[str, str]] = []
+
+    class _FakeDb:
+        def fetch_projects(self, include_tasks: bool = True):
+            assert include_tasks is True
+            return [project]
+
+        def create_comment(self, *, task_id: str, content: str):
+            comments.append((task_id, content))
+            return {"task_id": task_id, "content": content}
+
+    monkeypatch.setattr(
+        "todoist.automations.habit_tracker.automation.load_activity_data",
+        lambda db: _habit_df().reset_index(),
+    )
+    monkeypatch.setattr(
+        "todoist.automations.habit_tracker.automation.datetime",
+        type(
+            "_FixedDateTime",
+            (),
+            {"now": staticmethod(lambda: datetime(2025, 1, 15, 12, 0, 0))},
+        ),
+    )
+
+    automation = HabitTracker(history_weeks=4, frequency_in_minutes=0)
+    result = automation.tick(cast(Database, _FakeDb()))
+
+    assert len(result) == 1
+    assert comments[0][0] == "habit-1"
+    assert "Habit tracker update for 2025-01-06 to 2025-01-12" in comments[0][1]

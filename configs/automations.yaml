@@ -56,6 +56,8 @@ llm_breakdown:
   max_tasks_per_tick: 0
   max_queue_depth: 1
   auto_queue_children: true
+  model_config:
+    max_new_tokens: 384
   variants:
     breakdown:
       instruction: Balanced breakdown with 4-6 top-level tasks.

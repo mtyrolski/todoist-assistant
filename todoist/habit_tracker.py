@@ -87,10 +87,26 @@ def summarize_tracked_habits(
         filtered = pd.DataFrame(columns=["task_id", "type"])
         filtered.index = pd.to_datetime(pd.Index([], name="date"))
     else:
-        task_id_series = cast(pd.Series, df_activity["task_id"]).astype(str)
+        filtered = cast(pd.DataFrame, df_activity.copy())
+        if "date" in filtered.columns:
+            # Normalize through a private timestamp column so frames that already carry a
+            # `date` column and/or a `date` index level cannot confuse pandas lookups.
+            filtered = filtered.reset_index(drop=True)
+            filtered["_habit_date"] = pd.to_datetime(filtered["date"], errors="coerce")
+            filtered = filtered.dropna(subset=["_habit_date"])
+            filtered.sort_values("_habit_date", inplace=True)
+            filtered.drop(columns=["date"], inplace=True, errors="ignore")
+            filtered.set_index("_habit_date", inplace=True)
+            filtered.index.name = "date"
+        elif not isinstance(filtered.index, pd.DatetimeIndex):
+            raise ValueError(
+                "df_activity must include a 'date' column or a DatetimeIndex"
+            )
+
+        task_id_series = cast(pd.Series, filtered["task_id"]).astype(str)
         filtered = cast(
             pd.DataFrame,
-            df_activity[task_id_series.isin(list(tracked_ids))].copy(),
+            filtered[task_id_series.isin(list(tracked_ids))].copy(),
         )
 
     for offset in reversed(range(history_weeks)):

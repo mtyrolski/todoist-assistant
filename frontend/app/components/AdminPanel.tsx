@@ -5,62 +5,33 @@ import Link from "next/link";
 import { InfoTip } from "./InfoTip";
 import { LlmRuntimeSettings } from "./LlmRuntimeSettings";
 import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
+import {
+  clearAdminApiToken,
+  clearAdminTimezone,
+  connectAdminGmailAutomation,
+  disconnectAdminGmailAutomation,
+  getAdminApiTokenStatus,
+  getAdminAutomations,
+  getAdminJob,
+  getAdminTimezoneStatus,
+  saveAdminApiToken,
+  saveAdminTimezone,
+  setAdminAutomationEnabled,
+  startAdminAutomation,
+  startAllAdminAutomations,
+  type AdminApiTokenStatus,
+  type AdminAutomationInfo,
+  type AdminJob,
+  type AdminRunAllResult,
+  type AdminRunResult,
+  type AdminTimezoneStatus
+} from "../lib/adminApi";
 
 type Tab = "automations" | "adjustments" | "settings";
+type AutomationInfo = AdminAutomationInfo;
+type ApiTokenStatus = AdminApiTokenStatus;
+type TimezoneStatus = AdminTimezoneStatus;
 
-type AutomationInfo = {
-  key: string;
-  name: string;
-  frequencyMinutes: number;
-  isLong: boolean;
-  launchCount: number;
-  lastLaunch: string | null;
-  enabled: boolean;
-  authRequired: boolean;
-  defaultEnabled: boolean;
-  connection?: {
-    credentialsPresent: boolean;
-    tokenPresent: boolean;
-    connected: boolean;
-    credentialsPath: string;
-    tokenPath: string;
-    detail: string;
-    setupDocPath: string;
-    pendingAuth?: {
-      active: boolean;
-      authUrl: string;
-      redirectUri: string;
-      startedAt: string;
-      error?: string | null;
-    };
-  };
-};
-
-type AutomationListResponse = { automations: AutomationInfo[]; configPath?: string };
-
-type RunResult = {
-  name: string;
-  startedAt: string;
-  finishedAt: string;
-  durationSeconds: number;
-  output: string;
-  taskDelegations: unknown;
-};
-
-type RunAllResult = { results: RunResult[] };
-
-type AdminJob = {
-  id: string;
-  kind: string;
-  status: "queued" | "running" | "done" | "failed";
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  result: unknown;
-  error: string | null;
-};
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const ADMIN_HELP = `**Dashboard Admin**
 Manage automations, project mappings, and local dashboard settings.
 
@@ -68,22 +39,7 @@ Manage automations, project mappings, and local dashboard settings.
 - Adjustments map archived projects to active roots.
 - Settings updates your local Todoist API token.`;
 
-type ApiTokenStatus = {
-  configured: boolean;
-  masked: string;
-  envPath: string;
-};
-
-type TimezoneStatus = {
-  configured: boolean;
-  timezone: string;
-  source: "system" | "env";
-  override: string | null;
-  overrideValid: boolean;
-  system: string;
-  envPath: string;
-  invalidOverride?: string;
-};
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function formatLaunchMeta(a: AutomationInfo): string {
   const last = a.lastLaunch ? `last: ${a.lastLaunch}` : "never run";
@@ -92,18 +48,37 @@ function formatLaunchMeta(a: AutomationInfo): string {
   return `${last} • ${freq} • ${count}`;
 }
 
+function formatSignalMeta(a: AutomationInfo): string {
+  if (!a.lastStatus) return "signal: waiting for first tracked run";
+  const when = a.lastFinishedAt ?? a.lastStartedAt ?? a.lastSuccessAt;
+  const parts = [`signal: ${a.lastStatus}`];
+  if (when) parts.push(`at: ${when}`);
+  if (typeof a.lastDurationSeconds === "number") {
+    parts.push(`duration: ${a.lastDurationSeconds.toFixed(3)}s`);
+  }
+  if (typeof a.attemptCount === "number") {
+    parts.push(`attempts: ${a.attemptCount}`);
+  }
+  return parts.join(" • ");
+}
+
 function automationLogSource(a: AutomationInfo): string {
   return a.enabled ? "observer" : "automation";
 }
 
 function automationStatusTone(a: AutomationInfo): "good" | "warn" | "neutral" {
   if (a.authRequired && !a.connection?.connected) return "warn";
+  if (a.lastStatus === "failed") return "warn";
+  if (a.lastStatus === "completed") return "good";
   if (a.enabled) return "good";
   return "neutral";
 }
 
 function automationStatusLabel(a: AutomationInfo): string {
   if (a.authRequired && !a.connection?.connected) return "Needs authorization";
+  if (a.lastStatus === "failed") return "Last run failed";
+  if (a.lastStatus === "completed") return "Last run completed";
+  if (a.lastStatus === "skipped") return "Skipped in batch";
   if (a.enabled) return "Live in observer";
   return "Ready to enable";
 }
@@ -120,7 +95,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
 
   const [automations, setAutomations] = useState<AutomationInfo[] | null>(null);
   const [running, setRunning] = useState<string | null>(null);
-  const [runOutput, setRunOutput] = useState<Record<string, RunResult>>({});
+  const [runOutput, setRunOutput] = useState<Record<string, AdminRunResult>>({});
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [automationMutationKey, setAutomationMutationKey] = useState<string | null>(null);
@@ -150,9 +125,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   useEffect(() => {
     const loadAutomations = async () => {
       try {
-        const res = await fetch("/api/admin/automations");
-        const payload = (await res.json()) as AutomationListResponse & { error?: string };
-        if (!res.ok) throw new Error("automations");
+        const payload = await getAdminAutomations();
         if (payload.error) {
           setAutomations(payload.automations ?? []);
           setGmailAuthUrl(payload.automations?.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
@@ -173,9 +146,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     if (!gmailAuthUrl) return undefined;
     const timer = window.setInterval(async () => {
       try {
-        const refreshed = await fetch("/api/admin/automations");
-        if (!refreshed.ok) return;
-        const list = (await refreshed.json()) as AutomationListResponse;
+        const list = await getAdminAutomations();
         setAutomations(list.automations);
         const gmail = list.automations.find((automation) => automation.key === "gmail_tasks");
         const pendingUrl = gmail?.connection?.pendingAuth?.authUrl ?? null;
@@ -192,10 +163,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
 
   const loadApiToken = async () => {
     try {
-      const res = await fetch("/api/admin/api_token");
-      const payload = (await res.json()) as ApiTokenStatus;
-      if (!res.ok) throw new Error("api_token");
-      setTokenStatus(payload);
+      setTokenStatus(await getAdminApiTokenStatus());
     } catch {
       setTokenStatus(null);
     }
@@ -203,9 +171,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
 
   const loadTimezone = async () => {
     try {
-      const res = await fetch("/api/admin/timezone");
-      const payload = (await res.json()) as TimezoneStatus;
-      if (!res.ok) throw new Error("timezone");
+      const payload = await getAdminTimezoneStatus();
       setTimezoneStatus(payload);
       setTimezoneDraft(payload.override ?? "");
     } catch {
@@ -223,12 +189,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
 
   const waitForJob = async (jobId: string): Promise<AdminJob> => {
     for (;;) {
-      const res = await fetch(`/api/admin/jobs/${encodeURIComponent(jobId)}`);
-      const payload = (await res.json()) as AdminJob;
-      if (!res.ok) {
-        const detail = (payload as unknown as { detail?: unknown })?.detail;
-        throw new Error(String(detail ?? "Job lookup failed"));
-      }
+      const payload = await getAdminJob(jobId);
       if (payload.status === "done" || payload.status === "failed") return payload;
       await sleep(800);
     }
@@ -239,24 +200,19 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAdminError(null);
       setAdminNotice(null);
       setRunning(name);
-      const start = await fetch(`/api/admin/automations/run_async?name=${encodeURIComponent(name)}`, { method: "POST" });
-      const startPayload = (await start.json()) as { jobId?: string; detail?: unknown };
-      if (!start.ok || !startPayload.jobId) {
-        throw new Error(String(startPayload.detail ?? "Failed to start automation job"));
-      }
+      const startPayload = await startAdminAutomation(name);
       setAdminNotice(`Automation job started: ${startPayload.jobId}`);
       const job = await waitForJob(startPayload.jobId);
       if (job.status === "failed") {
         throw new Error(job.error ?? "Automation job failed");
       }
-      const run = job.result as RunResult;
+      const run = job.result as AdminRunResult;
       setRunOutput((prev) => ({ ...prev, [name]: run }));
       onAfterMutation();
       setAdminNotice(`Automation finished: ${name}. Open live logs to inspect the run details.`);
-      const metaRes = await fetch("/api/admin/automations");
-      if (metaRes.ok) {
-        const list = (await metaRes.json()) as AutomationListResponse;
-        setAutomations(list.automations);
+      const refreshed = await getAdminAutomations().catch(() => null);
+      if (refreshed) {
+        setAutomations(refreshed.automations);
       }
     } catch (e) {
       setAdminError(e instanceof Error ? e.message : "Failed to run automation");
@@ -270,26 +226,26 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAdminError(null);
       setAdminNotice(null);
       setRunning("__all__");
-      const start = await fetch("/api/admin/automations/run_all_async", { method: "POST" });
-      const startPayload = (await start.json()) as { jobId?: string; detail?: unknown };
-      if (!start.ok || !startPayload.jobId) {
-        throw new Error(String(startPayload.detail ?? "Failed to start automation job"));
-      }
+      const startPayload = await startAllAdminAutomations();
       setAdminNotice(`Automation job started: ${startPayload.jobId}`);
       const job = await waitForJob(startPayload.jobId);
       if (job.status === "failed") {
         throw new Error(job.error ?? "Automation job failed");
       }
-      const result = job.result as RunAllResult;
-      const byName: Record<string, RunResult> = {};
+      const result = job.result as AdminRunAllResult;
+      const byName: Record<string, AdminRunResult> = {};
       for (const r of result.results) byName[r.name] = r;
       setRunOutput((prev) => ({ ...prev, ...byName }));
       onAfterMutation();
-      setAdminNotice("All automations finished. Open live logs for the observer and automation runner traces.");
-      const metaRes = await fetch("/api/admin/automations");
-      if (metaRes.ok) {
-        const list = (await metaRes.json()) as AutomationListResponse;
-        setAutomations(list.automations);
+      const summary = result.summary;
+      setAdminNotice(
+        summary
+        ? `All automations finished: ${summary.completed} completed, ${summary.failed} failed, ${summary.skipped} skipped.`
+          : "All automations finished. Open live logs for the observer and automation runner traces."
+      );
+      const refreshed = await getAdminAutomations().catch(() => null);
+      if (refreshed) {
+        setAutomations(refreshed.automations);
       }
     } catch (e) {
       setAdminError(e instanceof Error ? e.message : "Failed to run automations");
@@ -303,15 +259,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAdminError(null);
       setAdminNotice(null);
       setAutomationMutationKey(`${automation.key}:${enabled ? "enable" : "disable"}`);
-      const res = await fetch(`/api/admin/automations/${encodeURIComponent(automation.key)}/enabled`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled })
-      });
-      const payload = (await res.json()) as AutomationListResponse & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to update automation");
-      }
+      const payload = await setAdminAutomationEnabled(automation.key, enabled);
       setAutomations(payload.automations);
       setAdminNotice(
         enabled
@@ -331,18 +279,13 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAdminError(null);
       setAdminNotice(null);
       setAutomationMutationKey("gmail:connect");
-      const res = await fetch("/api/admin/automations/gmail/connect", { method: "POST" });
-      const payload = (await res.json()) as { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to connect Gmail");
-      }
-      const refreshed = await fetch("/api/admin/automations");
-      if (refreshed.ok) {
-        const list = (await refreshed.json()) as AutomationListResponse;
+      const payload = await connectAdminGmailAutomation();
+      const list = await getAdminAutomations().catch(() => null);
+      if (list) {
         setAutomations(list.automations);
         setGmailAuthUrl(list.automations.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
       }
-      const authUrl = (payload as { authUrl?: string }).authUrl;
+      const authUrl = payload.authUrl;
       if (authUrl) {
         setGmailAuthUrl(authUrl);
         setAdminNotice("Gmail authorization link is ready. Open it in your preferred browser, then come back here.");
@@ -362,15 +305,10 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAdminError(null);
       setAdminNotice(null);
       setAutomationMutationKey("gmail:disconnect");
-      const res = await fetch("/api/admin/automations/gmail/connect", { method: "DELETE" });
-      const payload = (await res.json()) as { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to disconnect Gmail");
-      }
-      const refreshed = await fetch("/api/admin/automations");
-      if (refreshed.ok) {
-        const list = (await refreshed.json()) as AutomationListResponse;
-        setAutomations(list.automations);
+      await disconnectAdminGmailAutomation();
+      const refreshed = await getAdminAutomations().catch(() => null);
+      if (refreshed) {
+        setAutomations(refreshed.automations);
       }
       setGmailAuthUrl(null);
       setAdminNotice("Gmail disconnected. Reconnect later to resume Gmail automation.");
@@ -391,15 +329,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setTokenSaving(true);
       setTokenError(null);
       setTokenNotice(null);
-      const res = await fetch("/api/admin/api_token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: tokenDraft.trim(), validate: true })
-      });
-      const payload = (await res.json()) as ApiTokenStatus & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to save token");
-      }
+      const payload = await saveAdminApiToken(tokenDraft.trim());
       setTokenStatus(payload);
       setTokenDraft("");
       setTokenNotice("API token saved and validated.");
@@ -416,9 +346,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setTokenSaving(true);
       setTokenError(null);
       setTokenNotice(null);
-      const res = await fetch("/api/admin/api_token", { method: "DELETE" });
-      const payload = (await res.json()) as ApiTokenStatus;
-      if (!res.ok) throw new Error("clear_token");
+      const payload = await clearAdminApiToken();
       setTokenStatus(payload);
       setTokenNotice("API token removed.");
       onAfterMutation();
@@ -438,15 +366,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setTimezoneSaving(true);
       setTimezoneError(null);
       setTimezoneNotice(null);
-      const res = await fetch("/api/admin/timezone", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timezone: timezoneDraft.trim() })
-      });
-      const payload = (await res.json()) as TimezoneStatus & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to save timezone");
-      }
+      const payload = await saveAdminTimezone(timezoneDraft.trim());
       setTimezoneStatus(payload);
       setTimezoneDraft(payload.override ?? "");
       setTimezoneNotice("Timezone override saved.");
@@ -463,9 +383,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setTimezoneSaving(true);
       setTimezoneError(null);
       setTimezoneNotice(null);
-      const res = await fetch("/api/admin/timezone", { method: "DELETE" });
-      const payload = (await res.json()) as TimezoneStatus;
-      if (!res.ok) throw new Error("clear_timezone");
+      const payload = await clearAdminTimezone();
       setTimezoneStatus(payload);
       setTimezoneDraft("");
       setTimezoneNotice("Timezone override removed (using system timezone).");
@@ -545,6 +463,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                   <div className="rowMain">
                     <p className="rowTitle">{a.name}</p>
                     <p className="muted tiny">{formatLaunchMeta(a)}</p>
+                    <p className="muted tiny">{formatSignalMeta(a)}</p>
                     <div className="automationStatusLine">
                       <span className={`pill ${automationStatusTone(a) === "good" ? "pill-good" : automationStatusTone(a) === "warn" ? "pill-warn" : "pill-neutral"}`}>
                         {automationStatusLabel(a)}
@@ -556,6 +475,11 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                     {a.connection ? (
                       <p className={`muted tiny automationDetailNote${a.connection.connected ? " automationDetailNoteGood" : ""}`}>
                         Gmail: {a.connection.connected ? "connected" : a.connection.detail}
+                      </p>
+                    ) : null}
+                    {a.lastError ? (
+                      <p className="muted tiny automationDetailNote">
+                        Last error: {a.lastError}
                       </p>
                     ) : null}
                     {a.key === "gmail_tasks" && (gmailAuthUrl || a.connection?.pendingAuth?.authUrl) ? (

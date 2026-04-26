@@ -53,9 +53,13 @@ def _generate_breakdown_result(*, llm: Any, request: PreparedBreakdownRequest) -
         request.source,
     )
     try:
+        breakdown = llm.structured_chat(request.messages, TaskBreakdown)
+        if breakdown.children:
+            return BreakdownGenerationResult(request=request, breakdown=breakdown)
+        logger.warning("Breakdown request for task {} returned no children; retrying", request.task.id)
         return BreakdownGenerationResult(
             request=request,
-            breakdown=llm.structured_chat(request.messages, TaskBreakdown),
+            breakdown=llm.structured_chat(_non_empty_retry_messages(request), TaskBreakdown),
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Breakdown request failed for task {}", request.task.id)
@@ -64,3 +68,17 @@ def _generate_breakdown_result(*, llm: Any, request: PreparedBreakdownRequest) -
             breakdown=None,
             error=str(exc),
         )
+
+
+def _non_empty_retry_messages(request: PreparedBreakdownRequest) -> list[dict[str, str]]:
+    messages = [dict(message) for message in request.messages]
+    retry_instruction = (
+        "The previous rollout had no children. Return strict JSON with a non-empty "
+        "`children` array containing 3-6 concrete, actionable subtasks for this task. "
+        "Do not return an empty list."
+    )
+    for message in messages:
+        if str(message.get("role") or "").strip().lower() == "system":
+            message["content"] = f"{message.get('content', '').strip()} {retry_instruction}".strip()
+            return messages
+    return [{"role": "system", "content": retry_instruction}, *messages]

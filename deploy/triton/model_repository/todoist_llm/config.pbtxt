@@ -1,10 +1,10 @@
 name: "todoist_llm"
 backend: "python"
-max_batch_size: 4
+max_batch_size: 8
 
 dynamic_batching {
-  preferred_batch_size: [ 1, 2, 4 ]
-  max_queue_delay_microseconds: 2000
+  preferred_batch_size: [ 1, 2, 4, 8]
+  max_queue_delay_microseconds: 50000
 }
 
 input [
