@@ -1,13 +1,18 @@
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
+import plotly.graph_objects as go
 
 from tests.factories import make_project, make_task
 from todoist.web.dashboard_payload import (
+    add_plot_event_markers,
+    apply_date_axis_viewport,
+    compute_plot_history_beg,
     FIRE_TASK_LABEL,
     count_labeled_tasks,
     evaluate_urgency_status,
     extract_metrics_dict,
+    normalize_plot_events,
 )
 
 
@@ -49,6 +54,53 @@ def test_extract_metrics_dict_keeps_period_metrics_only() -> None:
         "Added Tasks",
         "Rescheduled Tasks",
     ]
+
+
+def test_scrollable_date_axis_keeps_history_with_viewport() -> None:
+    df = pd.DataFrame(
+        [
+            {"date": "2024-01-01", "type": "completed"},
+            {"date": "2025-01-01", "type": "completed"},
+        ]
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+    history_beg = compute_plot_history_beg(
+        df,
+        end=datetime(2025, 1, 15),
+    )
+    fig = apply_date_axis_viewport(
+        go.Figure(),
+        beg=datetime(2024, 12, 15),
+        end=datetime(2025, 1, 15),
+    )
+
+    assert history_beg == pd.Timestamp("2024-01-01").to_pydatetime()
+    assert fig.layout.xaxis.range[0] == pd.Timestamp("2024-12-15").to_pydatetime()
+    assert fig.layout.xaxis.rangeslider.visible is True
+
+
+def test_plot_events_are_normalized_and_added_as_vertical_markers() -> None:
+    events = normalize_plot_events(
+        {
+            "plot_events": [
+                {"date": "2025-01-05", "label": "Launch", "color": "#00ffaa"},
+                {"date": "invalid", "label": "Skip"},
+            ]
+        }
+    )
+    fig = add_plot_event_markers(
+        go.Figure(),
+        events,
+        beg=datetime(2025, 1, 1),
+        end=datetime(2025, 1, 31),
+    )
+
+    assert events == [{"date": "2025-01-05", "label": "Launch", "color": "#00ffaa"}]
+    assert len(fig.layout.shapes) == 1
+    assert fig.layout.shapes[0].line.width == 4
+    assert len(fig.layout.annotations) == 1
+    assert fig.layout.annotations[0].text == "Launch"
 
 
 def test_evaluate_urgency_status_returns_good_when_clear() -> None:

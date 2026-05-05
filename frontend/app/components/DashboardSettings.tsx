@@ -15,7 +15,14 @@ type DashboardSettingsResponse = {
     warnDeadlineWithinDays: number;
     warnDeadlineMinCount: number;
     configPath?: string;
+    plotEvents?: PlotEventSetting[];
   };
+};
+
+type PlotEventSetting = {
+  date: string;
+  label: string;
+  color: string;
 };
 
 type DashboardLabelsResponse = {
@@ -59,6 +66,7 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
   const [warnDueMinCount, setWarnDueMinCount] = useState("1");
   const [warnDeadlineWithinDays, setWarnDeadlineWithinDays] = useState("0");
   const [warnDeadlineMinCount, setWarnDeadlineMinCount] = useState("1");
+  const [plotEvents, setPlotEvents] = useState<PlotEventSetting[]>([]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -80,6 +88,7 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
       setWarnDueMinCount(String(payload.settings.warnDueMinCount));
       setWarnDeadlineWithinDays(String(payload.settings.warnDeadlineWithinDays));
       setWarnDeadlineMinCount(String(payload.settings.warnDeadlineMinCount));
+      setPlotEvents(payload.settings.plotEvents ?? []);
       setConfigPath(payload.settings.configPath ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard settings");
@@ -126,7 +135,14 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
           warnDueWithinDays: Number(warnDueWithinDays),
           warnDueMinCount: Number(warnDueMinCount),
           warnDeadlineWithinDays: Number(warnDeadlineWithinDays),
-          warnDeadlineMinCount: Number(warnDeadlineMinCount)
+          warnDeadlineMinCount: Number(warnDeadlineMinCount),
+          plotEvents: plotEvents
+            .map((item) => ({
+              date: item.date.trim(),
+              label: item.label.trim(),
+              color: item.color.trim() || "#ff6b7a"
+            }))
+            .filter((item) => item.date || item.label)
         })
       });
       const payload = await readJson<DashboardSettingsResponse>(res);
@@ -141,6 +157,7 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
       setWarnDueMinCount(String(payload.settings.warnDueMinCount));
       setWarnDeadlineWithinDays(String(payload.settings.warnDeadlineWithinDays));
       setWarnDeadlineMinCount(String(payload.settings.warnDeadlineMinCount));
+      setPlotEvents(payload.settings.plotEvents ?? []);
       setConfigPath(payload.settings.configPath ?? "");
       setNotice("Dashboard urgency settings updated.");
       onAfterMutation();
@@ -149,6 +166,18 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
     } finally {
       setSaving(false);
     }
+  };
+
+  const updatePlotEvent = (index: number, patch: Partial<PlotEventSetting>) => {
+    setPlotEvents((items) => items.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
+  };
+
+  const addPlotEvent = () => {
+    setPlotEvents((items) => [...items, { date: "", label: "", color: "#ff6b7a" }]);
+  };
+
+  const removePlotEvent = (index: number) => {
+    setPlotEvents((items) => items.filter((_, idx) => idx !== index));
   };
 
   return (
@@ -268,6 +297,58 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
                 onChange={(event) => setWarnDeadlineMinCount(event.target.value)}
               />
             </label>
+          </div>
+          <div className="plotEventEditor">
+            <div className="adminRow">
+              <div>
+                <p className="fieldLabel" style={{ margin: 0 }}>Plot event markers</p>
+                <p className="muted tiny" style={{ margin: "4px 0 0" }}>
+                  Completion plots show these as annotated vertical bars.
+                </p>
+              </div>
+              <button className="button buttonSmall buttonGhost" type="button" onClick={addPlotEvent}>
+                Add event
+              </button>
+            </div>
+            {plotEvents.length ? (
+              <div className="plotEventList">
+                {plotEvents.map((item, index) => (
+                  <div className="plotEventRow" key={index}>
+                    <label className="field">
+                      <span className="fieldLabel">Date</span>
+                      <input
+                        className="textInput"
+                        type="date"
+                        value={item.date}
+                        onChange={(event) => updatePlotEvent(index, { date: event.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="fieldLabel">Label</span>
+                      <input
+                        className="textInput"
+                        value={item.label}
+                        onChange={(event) => updatePlotEvent(index, { label: event.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="fieldLabel">Color</span>
+                      <input
+                        className="textInput colorInput"
+                        type="color"
+                        value={item.color || "#ff6b7a"}
+                        onChange={(event) => updatePlotEvent(index, { color: event.target.value })}
+                      />
+                    </label>
+                    <button className="button buttonSmall buttonGhost" type="button" onClick={() => removePlotEvent(index)}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted tiny" style={{ margin: 0 }}>No plot event markers configured.</p>
+            )}
           </div>
           <div className="adminRowRight">
             <button className="button buttonSmall" type="button" onClick={saveSettings} disabled={saving}>

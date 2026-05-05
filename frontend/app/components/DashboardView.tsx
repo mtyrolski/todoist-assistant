@@ -378,12 +378,14 @@ export function DashboardView({
       title: "Periodically Completed Tasks Per Project",
       figure: figures.completedTasksPeriodically,
       height: 520,
+      interactive: true,
       help: PLOT_HELP.completedTasksPeriodically
     },
     {
       title: "Cumulative Periodically Completed Tasks Per Project",
       figure: figures.cumsumCompletedTasksPeriodically,
       height: 520,
+      interactive: true,
       help: PLOT_HELP.cumsumCompletedTasksPeriodically
     }
   ];
@@ -398,6 +400,7 @@ export function DashboardView({
       title: "Events Over Time",
       figure: figures.eventsOverTime,
       height: 520,
+      interactive: true,
       help: PLOT_HELP.eventsOverTime
     }
   ];

@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import argparse
 from pathlib import Path
+from collections.abc import Sequence
 
 from todoist.env import EnvVar
 from todoist.utils import RUNTIME_MIGRATABLE_FILENAMES, resolve_cache_dir
@@ -58,8 +60,22 @@ def clear_local_env() -> list[Path]:
     return removed
 
 
-def main() -> int:
-    clear_local_env()
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Remove local Todoist Assistant runtime state.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print every removed cache or runtime path.",
+    )
+    args = parser.parse_args(argv)
+    removed = clear_local_env()
+    if args.verbose:
+        if removed:
+            for path in removed:
+                print(f"Removed: {path}")
+        else:
+            print("Nothing to remove.")
     return 0
 
 

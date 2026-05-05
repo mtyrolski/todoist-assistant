@@ -90,6 +90,29 @@ function automationAvailabilityLabel(a: AutomationInfo): string {
   return a.enabled ? "Already active" : "One click to enable";
 }
 
+function automationTimelineItems(a: AutomationInfo, latestManualRun?: AdminRunResult) {
+  const items: { label: string; time: string | null; tone: "good" | "warn" | "neutral" }[] = [
+    {
+      label: "Launch",
+      time: a.lastLaunch,
+      tone: a.lastLaunch ? "neutral" : "neutral"
+    },
+    {
+      label: a.lastStatus ? `Signal ${a.lastStatus}` : "Signal",
+      time: a.lastFinishedAt ?? a.lastStartedAt ?? a.lastSuccessAt ?? null,
+      tone: a.lastStatus === "failed" ? "warn" : a.lastStatus === "completed" ? "good" : "neutral"
+    }
+  ];
+  if (latestManualRun) {
+    items.push({
+      label: latestManualRun.status === "failed" ? "Manual failed" : "Manual run",
+      time: latestManualRun.finishedAt ?? latestManualRun.startedAt,
+      tone: latestManualRun.status === "failed" ? "warn" : "good"
+    });
+  }
+  return items;
+}
+
 export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void }) {
   const [tab, setTab] = useState<Tab>("automations");
 
@@ -464,6 +487,15 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                     <p className="rowTitle">{a.name}</p>
                     <p className="muted tiny">{formatLaunchMeta(a)}</p>
                     <p className="muted tiny">{formatSignalMeta(a)}</p>
+                    <div className="automationTimeline" aria-label={`${a.name} run timeline`}>
+                      {automationTimelineItems(a, runOutput[a.name]).map((item, index) => (
+                        <div className={`automationTimelineItem automationTimelineItem-${item.tone}`} key={`${a.name}-${item.label}-${index}`}>
+                          <span className="automationTimelineDot" />
+                          <span className="automationTimelineLabel">{item.label}</span>
+                          <span className="automationTimelineTime">{item.time ?? "waiting"}</span>
+                        </div>
+                      ))}
+                    </div>
                     <div className="automationStatusLine">
                       <span className={`pill ${automationStatusTone(a) === "good" ? "pill-good" : automationStatusTone(a) === "warn" ? "pill-warn" : "pill-neutral"}`}>
                         {automationStatusLabel(a)}

@@ -987,6 +987,59 @@ h1 {
   align-items: center;
 }
 
+.automationTimeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.automationTimelineItem {
+  display: inline-grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #d8e2f0;
+  font-size: 11px;
+}
+
+.automationTimelineDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(216, 226, 240, 0.7);
+}
+
+.automationTimelineItem-good {
+  border-color: rgba(97, 244, 179, 0.34);
+}
+
+.automationTimelineItem-good .automationTimelineDot {
+  background: #61f4b3;
+}
+
+.automationTimelineItem-warn {
+  border-color: rgba(255, 123, 123, 0.4);
+}
+
+.automationTimelineItem-warn .automationTimelineDot {
+  background: #ff7b7b;
+}
+
+.automationTimelineLabel {
+  font-weight: 650;
+}
+
+.automationTimelineTime {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .automationDetailNote {
   margin: 0;
   color: #c7d0dd;
@@ -1148,6 +1201,32 @@ h1 {
 
 .customRangeMetaWarn {
   color: #ffc7c7;
+}
+
+.plotEventEditor {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.plotEventList {
+  display: grid;
+  gap: 10px;
+}
+
+.plotEventRow {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(160px, 1.4fr) 72px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.colorInput {
+  min-width: 56px;
+  padding: 6px;
 }
 
 .textInput {
@@ -3575,6 +3654,10 @@ textarea.textInput {
 
   .customRangeDivider {
     display: none;
+  }
+
+  .plotEventRow {
+    grid-template-columns: 1fr;
   }
 
   .chatLayout {

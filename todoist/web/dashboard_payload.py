@@ -1,6 +1,6 @@
 import json
 from datetime import date, datetime, timedelta
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from fastapi import HTTPException
@@ -36,6 +36,8 @@ DEFAULT_URGENCY_SETTINGS = {
         "danger": "Urgent",
     },
 }
+DEFAULT_PLOT_EVENT_COLOR = "#ff6b7a"
+MAX_PLOT_HISTORY_WEEKS = 260
 
 
 def _normalize_label_name(value: str) -> str:
@@ -454,6 +456,144 @@ def extract_metrics_dict(
 def fig_to_dict(fig) -> dict[str, Any]:
     payload = pio.to_json(fig, validate=False, pretty=False)
     return json.loads(payload or "{}")
+
+
+def compute_plot_history_beg(
+    df_activity,
+    *,
+    end: datetime,
+    max_weeks: int = MAX_PLOT_HISTORY_WEEKS,
+) -> datetime:
+    """Return the bounded history start used for scrollable time-series figures."""
+
+    df_activity = normalize_activity_df(df_activity)
+    fallback = end - timedelta(weeks=max_weeks)
+    if df_activity.empty:
+        return fallback
+    try:
+        first_value = pd.to_datetime(df_activity.index).min()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(f"Failed to resolve activity history start; using fallback: {exc}")
+        return fallback
+    if first_value is None or bool(pd.isna(cast(Any, first_value))):
+        return fallback
+    if isinstance(first_value, pd.Timestamp):
+        first_dt = first_value.to_pydatetime(warn=False)
+    elif isinstance(first_value, datetime):
+        first_dt = first_value
+    else:
+        try:
+            first_dt = datetime.fromisoformat(str(first_value))
+        except ValueError:
+            return fallback
+    return max(first_dt, fallback)
+
+
+def apply_date_axis_viewport(
+    fig: go.Figure,
+    *,
+    beg: datetime,
+    end: datetime,
+    rangeslider: bool = True,
+) -> go.Figure:
+    """Keep the plotted history available while opening on the selected viewport."""
+
+    slider = (
+        {
+            "visible": True,
+            "thickness": 0.08,
+            "bgcolor": "rgba(255,255,255,0.05)",
+            "bordercolor": "rgba(255,255,255,0.14)",
+            "borderwidth": 1,
+        }
+        if rangeslider
+        else {"visible": False}
+    )
+    fig.update_xaxes(
+        range=[beg, end],
+        rangeslider=slider,
+        type="date",
+        fixedrange=False,
+    )
+    fig.update_layout(
+        uirevision=f"{beg.isoformat()}:{end.isoformat()}",
+    )
+    return fig
+
+
+def normalize_plot_events(config: Mapping[str, Any] | None) -> list[dict[str, str]]:
+    if not isinstance(config, Mapping):
+        return []
+    raw_events = config.get("plot_events", [])
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, str):
+        return []
+
+    events: list[dict[str, str]] = []
+    for item in raw_events:
+        if not isinstance(item, Mapping):
+            continue
+        raw_date = str(item.get("date") or "").strip()
+        raw_label = str(item.get("label") or "").strip()
+        if not raw_date or not raw_label:
+            continue
+        try:
+            event_date = parse_yyyy_mm_dd(raw_date).strftime("%Y-%m-%d")
+        except HTTPException:
+            logger.warning("Skipping invalid dashboard plot event date: {}", raw_date)
+            continue
+        color = str(item.get("color") or DEFAULT_PLOT_EVENT_COLOR).strip()
+        events.append({"date": event_date, "label": raw_label, "color": color})
+    return events
+
+
+def add_plot_event_markers(
+    fig: go.Figure,
+    events: Sequence[Mapping[str, str]],
+    *,
+    beg: datetime,
+    end: datetime,
+) -> go.Figure:
+    """Add annotated vertical event lines to date-axis completion plots."""
+
+    for event in events[:100]:
+        raw_date = str(event.get("date") or "").strip()
+        label = str(event.get("label") or "").strip()
+        if not raw_date or not label:
+            continue
+        try:
+            event_dt = parse_yyyy_mm_dd(raw_date)
+        except HTTPException:
+            continue
+        if event_dt < beg or event_dt > end:
+            continue
+        color = str(event.get("color") or DEFAULT_PLOT_EVENT_COLOR).strip()
+        x_value = event_dt.isoformat()
+        fig.add_shape(
+            type="line",
+            xref="x",
+            yref="paper",
+            x0=x_value,
+            x1=x_value,
+            y0=0,
+            y1=1,
+            line=dict(color=color, width=4),
+            opacity=0.92,
+        )
+        fig.add_annotation(
+            x=x_value,
+            y=1,
+            xref="x",
+            yref="paper",
+            text=label,
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(size=12, color=color),
+            bgcolor="rgba(17,19,24,0.78)",
+            bordercolor=color,
+            borderwidth=1,
+            borderpad=3,
+        )
+    return fig
 
 
 def parse_yyyy_mm_dd(value: str) -> datetime:

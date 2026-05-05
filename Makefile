@@ -115,7 +115,7 @@ run_observer:
 	uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
 
 clear_local_env:
-	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env
+	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env $(CLEAR_LOCAL_ENV_ARGS)
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
