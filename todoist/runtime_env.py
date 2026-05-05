@@ -10,7 +10,7 @@ from todoist.env import EnvVar
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
+DEFAULT_TRITON_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 
 
 def _sanitize_env_text(value: object) -> str | None:
@@ -26,7 +26,7 @@ def resolve_runtime_env_path(
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     data_dir = _sanitize_env_text(env.get(str(EnvVar.DATA_DIR)))
     if data_dir:
         return Path(data_dir).expanduser().resolve() / ".env"
@@ -78,7 +78,7 @@ def resolve_triton_launch_settings(
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     env_path = resolve_runtime_env_path(repo_root=repo_root, cwd=cwd, environ=env)
     file_values = load_runtime_env_values(env_path)
     default_url = f"http://127.0.0.1:{_sanitize_env_text(env.get('TODOIST_TRITON_HTTP_PORT')) or '8003'}"

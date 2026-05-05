@@ -2,9 +2,9 @@
 
 
 from dataclasses import dataclass
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 import json
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 import httpx
 from loguru import logger
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .local_llm import (
     _load_tokenizer,
-    _render_mistral_instruct_prompt,
+    _render_chat_prompt,
     _schema_instructions,
     _try_parse_structured_output,
 )
@@ -21,7 +21,7 @@ from .usage import record_llm_usage
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
+DEFAULT_TRITON_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -121,38 +121,7 @@ class TritonGenerateChatModel:
         return True
 
     def _render_prompt(self, messages: Sequence[dict[str, str]]) -> str:
-        apply_chat_template = getattr(self._tokenizer, "apply_chat_template", None)
-        if callable(apply_chat_template):
-            template_fn = cast(Callable[..., object], apply_chat_template)
-            payload = [
-                {
-                    "role": str(message.get("role") or "").strip().lower(),
-                    "content": str(message.get("content") or "").strip(),
-                }
-                for message in messages
-                if str(message.get("content") or "").strip()
-            ]
-            try:
-                rendered = template_fn(  # pylint: disable=not-callable
-                    payload,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=False,
-                )
-                if isinstance(rendered, str) and rendered.strip():
-                    return rendered.strip()
-            except (TypeError, ValueError, NotImplementedError):
-                try:
-                    rendered = template_fn(  # pylint: disable=not-callable
-                        payload,
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
-                    if isinstance(rendered, str) and rendered.strip():
-                        return rendered.strip()
-                except (TypeError, ValueError, NotImplementedError):
-                    pass
-        return _render_mistral_instruct_prompt(messages, self._tokenizer)
+        return _render_chat_prompt(messages, self._tokenizer)
 
     def _generate_text(
         self,

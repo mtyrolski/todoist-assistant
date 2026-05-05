@@ -62,10 +62,10 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["backend"]["triton"]["modelId"] in {
         option["id"] for option in payload["backend"]["triton"]["modelOptions"]
     }
-    assert payload["model"]["selected"] == "mistralai/Ministral-3-3B-Instruct-2512"
+    assert payload["model"]["selected"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["device"]["selected"] == "cpu"
     assert payload["usage"]["totals"]["inferenceCount"] == 0
-    assert payload["usage"]["current"]["modelId"] == "mistralai/Ministral-3-3B-Instruct-2512"
+    assert payload["usage"]["current"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
 

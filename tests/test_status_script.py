@@ -99,12 +99,12 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
                         "envPath": ".env",
                         "triton": {
                             "baseUrl": "http://127.0.0.1:8003",
-                            "modelId": "mistralai/Ministral-3-3B-Instruct-2512",
+                            "modelId": "Qwen/Qwen2.5-3B-Instruct",
                         },
                     },
                     "model": {
-                        "label": "mistralai/Ministral-3-3B-Instruct-2512",
-                        "selected": "mistralai/Ministral-3-3B-Instruct-2512",
+                        "label": "Qwen/Qwen2.5-3B-Instruct",
+                        "selected": "Qwen/Qwen2.5-3B-Instruct",
                     },
                     "device": {"label": "CPU", "selected": "cpu"},
                     "queue": {"queued": 1, "running": 0, "done": 2, "failed": 0},
@@ -137,7 +137,7 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     assert "Triton Inventory" in output
     assert "Configured model" in output
     assert "todoist_llm" in output
-    assert "mistralai/Ministral-3-3B-Instruct-2512" in output
+    assert "Qwen/Qwen2.5-3B-Instruct" in output
     assert "http://127.0.0.1:8003" in output
     assert "state=READY" in output
     assert "model=Qwen/Qwen2.5-0.5B-Instruct" not in output
