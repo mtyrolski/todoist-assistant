@@ -52,7 +52,7 @@ The main product is the dashboard and automation workflow. Optional AI features 
 
 ## Latest stable release
 
-`v0.3.1`
+`v0.3.2`
 
 Release assets live on GitHub Releases:
 - Windows: `TodoistAssistantSetup.exe` or the `.msi`
