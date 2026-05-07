@@ -1,3 +1,5 @@
+# pyright: reportPrivateImportUsage=false
+
 from typing import cast
 from unittest.mock import patch
 
