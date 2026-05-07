@@ -25,5 +25,8 @@
     "eslint": "^9.0.0",
     "eslint-config-next": "15.0.0",
     "typescript": "5.6.3"
+  },
+  "overrides": {
+    "stream-parser": "0.3.1"
   }
 }
