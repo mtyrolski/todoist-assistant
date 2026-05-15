@@ -35,8 +35,6 @@ import {
   useSyncLabel
 } from "../lib/dashboardHooks";
 
-const FIRST_SYNC_KEY = "todoist-assistant.firstSyncComplete";
-
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
 type UrgencyChipKey = "fireTasks" | "p1Tasks" | "p2Tasks" | "p3Tasks" | "p4Tasks" | "dueTasks" | "deadlineTasks";
@@ -161,9 +159,6 @@ export function DashboardView({
   const { status, loadingStatus, refreshStatus } = useDashboardStatus();
   const { progress: llmProgress, loading: loadingLlmProgress, refresh: refreshLlmProgress } = useLlmBreakdownProgress();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
-  const [firstSyncPending, setFirstSyncPending] = useState(false);
-  const [firstSyncTriggered, setFirstSyncTriggered] = useState(false);
-  const [activityRecoveryAttempted, setActivityRecoveryAttempted] = useState(false);
   const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
   const focusMetricsRef = useRef<HTMLDivElement | null>(null);
   const activityReady = Boolean(status?.activityCache);
@@ -189,12 +184,6 @@ export function DashboardView({
   }, [tokenReady, activityReady, mappingReady]);
   const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
   const setupChecklistActive = setupSteps.some((step) => !step.done);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const done = window.localStorage.getItem(FIRST_SYNC_KEY) === "1";
-    setFirstSyncPending(!done);
-  }, []);
 
   const periodLabel = useMemo(() => {
     if (!dashboard) return null;
@@ -226,37 +215,6 @@ export function DashboardView({
     setCustomBeg("");
     setCustomEnd("");
   };
-
-  useEffect(() => {
-    if (!status || activityRecoveryAttempted) return;
-    if (!activityReady) {
-      setActivityRecoveryAttempted(true);
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem(FIRST_SYNC_KEY);
-      }
-      if (!firstSyncPending) {
-        setFirstSyncPending(true);
-        setFirstSyncTriggered(false);
-      }
-    }
-  }, [status, activityRecoveryAttempted, activityReady, firstSyncPending]);
-
-  useEffect(() => {
-    if (!firstSyncPending || firstSyncTriggered) return;
-    setFirstSyncTriggered(true);
-    refresh();
-  }, [firstSyncPending, firstSyncTriggered, refresh]);
-
-  useEffect(() => {
-    if (!firstSyncPending) return;
-    if (!activityReady) return;
-    if (loadingDashboard || progressDisplay?.active) return;
-    if (!dashboard && !dashboardError) return;
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(FIRST_SYNC_KEY, "1");
-    }
-    setFirstSyncPending(false);
-  }, [firstSyncPending, activityReady, loadingDashboard, progressDisplay, dashboard, dashboardError]);
 
   const noData = Boolean(dashboard?.noData);
   const dashboardWithUrgency = dashboard as DashboardHomeWithUrgency | null;
@@ -415,23 +373,22 @@ export function DashboardView({
     { key: "p4", label: "P4", className: "badge badge-p4", value: dashboard?.badges.p4 }
   ];
 
-  const showFirstSyncOverlay =
+  const showSyncOverlay =
     !setupActive &&
-    (firstSyncPending ||
-      retrying ||
+    (retrying ||
       (!dashboard && (setupChecklistActive || loadingDashboard || progressDisplay?.active)));
 
   return (
     <div>
       <LoadingBar active={loadingDashboard || loadingStatus} />
-      {showFirstSyncOverlay ? (
+      {showSyncOverlay ? (
         <div className="firstSyncOverlay" role="status" aria-live="polite">
           <div className="firstSyncPanel">
-            <p className="eyebrow">First-time sync</p>
-            <h2>Preparing your dashboard</h2>
+            <p className="eyebrow">Sync check</p>
+            <h2>Checking Todoist data</h2>
             <p className="muted">
-              We are fetching your Todoist data and building the first set of charts. This can take a few minutes on
-              large accounts.
+              We are checking local caches, fetching Todoist updates when needed, and rebuilding the dashboard charts.
+              Large accounts can take a few minutes.
             </p>
             {setupSteps.length ? (
               <div className="setupChecklist">
@@ -589,7 +546,7 @@ export function DashboardView({
         </div>
       </header>
 
-      {showFirstSyncOverlay ? null : <ProgressSteps progress={progressDisplay} />}
+      {showSyncOverlay ? null : <ProgressSteps progress={progressDisplay} />}
 
       {!noData ? (
         <nav className="jumpNav" aria-label="Jump to sections">

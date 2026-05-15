@@ -65,6 +65,10 @@ If a refactor improves internals, prefer moving logic behind the existing facade
 
 Before closing work, run:
 
+- `make test_all`
+
+Use `make test_all` as the first full verification command because it runs typecheck, lint, and tests in parallel while reporting each substage result. If it is unavailable, or if you need to isolate a failing stage, run:
+
 - `make typecheck`
 - `make lint`
 - `make test`

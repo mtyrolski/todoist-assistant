@@ -114,9 +114,6 @@ export function TokenGate({
       setValidation({ configured: true, valid: true, labelsCount: payload.labelsCount ?? null });
       setTokenDraft("");
       setTokenNotice("API token saved and validated.");
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("todoist-assistant.firstSyncComplete");
-      }
     } catch (e) {
       setTokenError(e instanceof Error ? e.message : "Failed to save token");
     } finally {

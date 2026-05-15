@@ -55,7 +55,7 @@ API_KEY_PLACEHOLDERS = frozenset(
     }
 )
 
-TqdmProgressCallback = Callable[[str, int, int, str | None], None]
+TqdmProgressCallback = Callable[..., None]
 
 
 @dataclass
@@ -77,12 +77,24 @@ def get_tqdm_progress_callback() -> TqdmProgressCallback | None:
     return _STATE.tqdm_progress_callback
 
 
-def report_tqdm_progress(desc: str, current: int, total: int, unit: str | None = None) -> None:
+def report_tqdm_progress(
+    desc: str,
+    current: int,
+    total: int,
+    unit: str | None = None,
+    detail: str | None = None,
+) -> None:
     callback = _STATE.tqdm_progress_callback
     if callback is None:
         return
     try:
-        callback(desc, current, total, unit)
+        if detail is None:
+            callback(desc, current, total, unit)
+        else:
+            try:
+                callback(desc, current, total, unit, detail)
+            except TypeError:
+                callback(desc, current, total, unit)
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug(f"Progress callback failed: {exc}")
 

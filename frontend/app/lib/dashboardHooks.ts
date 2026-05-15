@@ -274,10 +274,10 @@ export function useSyncLabel(status: DashboardStatus | null) {
 
   const label = useMemo(() => {
     if (!status) return "Sync status unavailable";
-    const activityCache = status.activityCache;
-    if (!activityCache) return "Activity cache missing";
-    const lastRefresh = activityCache.mtime;
-    if (!lastRefresh) return "Sync time unknown";
+    const lastRefresh = status.apiCache.lastRefresh ?? status.activityCache?.mtime ?? null;
+    if (!lastRefresh) {
+      return status.activityCache ? "Sync time unknown" : "Local cache missing";
+    }
     const lastMs = Date.parse(lastRefresh);
     if (Number.isNaN(lastMs)) return "Sync unknown";
     const diffMs = Math.max(0, syncClock - lastMs);
@@ -292,6 +292,7 @@ export function useSyncLabel(status: DashboardStatus | null) {
 
   const title = useMemo(() => {
     if (!status) return undefined;
+    if (status.apiCache.lastRefresh) return status.apiCache.lastRefresh;
     if (!status.activityCache) return "activity.joblib missing";
     return status.activityCache.mtime ?? "sync time unavailable";
   }, [status]);

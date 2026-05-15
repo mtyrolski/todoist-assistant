@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
@@ -221,11 +221,18 @@ _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
-_DASHBOARD_STATE_SCHEMA_VERSION = 1
+_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
+    "Checking Todoist updates": 1,
     "Querying project data": 1,
+    "Checking activity cache": 1,
+    "Backfilling activity history": 1,
+    "Fetching activity history": 1,
+    "Fetching recent activity": 1,
+    "Fetching archived project activity": 1,
+    "Resolving project hierarchy": 2,
     "Building project hierarchy": 2,
     "Querying activity data": 1,
 }

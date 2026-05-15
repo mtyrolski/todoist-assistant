@@ -20,11 +20,11 @@ export type DashboardProgress = {
 
 const STEPS: ProgressStep[] = [
   {
-    label: "Querying project data",
-    hint: "Fetching projects and tasks"
+    label: "Checking Todoist updates",
+    hint: "Refreshing projects, tasks, and activity when needed"
   },
   {
-    label: "Building project hierarchy",
+    label: "Resolving project hierarchy",
     hint: "Resolving roots across active and archived projects"
   },
   {
@@ -44,6 +44,17 @@ function resolveStepIndex(progress: DashboardProgress): number {
     const normalized = progress.stage.toLowerCase();
     const idx = STEPS.findIndex((step) => step.label.toLowerCase() === normalized);
     if (idx >= 0) return idx;
+    if (
+      normalized.includes("todoist") ||
+      normalized.includes("activity") ||
+      normalized.includes("project data") ||
+      normalized.includes("fetching")
+    ) {
+      return 0;
+    }
+    if (normalized.includes("hierarchy") || normalized.includes("root")) {
+      return 1;
+    }
   }
 
   return 0;

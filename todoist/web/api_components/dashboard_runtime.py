@@ -93,19 +93,32 @@ async def _finish_progress(error: str | None = None) -> None:
 def _build_tqdm_progress_callback():
     last_update = 0.0
     last_value = -1
+    adaptive_activity_stages = {
+        "Backfilling activity history",
+        "Fetching activity history",
+    }
 
-    def _callback(desc: str, current: int, total: int, unit: str | None) -> None:
+    def _callback(
+        desc: str,
+        current: int,
+        total: int,
+        unit: str | None,
+        detail_override: str | None = None,
+    ) -> None:
         nonlocal last_update, last_value
+        if desc in adaptive_activity_stages and unit == "page":
+            return
         now = time.time()
-        if current == last_value and (now - last_update) < 0.4:
+        progress_value = (desc, unit, current, total)
+        if progress_value == last_value and (now - last_update) < 0.4:
             return
         if current != total and (now - last_update) < 0.35:
             return
-        last_value = current
+        last_value = progress_value
         last_update = now
         step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
         unit_suffix = f" {unit}" if unit else ""
-        detail = f"{desc}: {current}/{total}{unit_suffix}"
+        detail = detail_override or f"{desc}: {current}/{total}{unit_suffix}"
         _run_async_in_main_loop(
             _set_progress(
                 desc or "Working",
@@ -131,6 +144,124 @@ def _activity_cache_signature() -> dict[str, int] | None:
     return {"mtime_ns": int(stat.st_mtime_ns), "size": int(stat.st_size)}
 
 
+def _adjustments_cache_signature() -> list[dict[str, int | str]]:
+    personal_dir = resolve_personal_dir()
+    if not personal_dir.exists():
+        return []
+
+    signatures: list[dict[str, int | str]] = []
+    for path in sorted(personal_dir.iterdir()):
+        if not path.is_file() or path.suffix != ".py":
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        signatures.append(
+            {
+                "name": path.name,
+                "mtime_ns": int(stat.st_mtime_ns),
+                "size": int(stat.st_size),
+            }
+        )
+    return signatures
+
+
+def _coerce_activity_datetime_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _project_parent_id(project: Project) -> str | None:
+    return project.project_entry.parent_id or project.project_entry.v2_parent_id
+
+
+def _project_has_candidate_ancestor(
+    project: Project,
+    *,
+    projects_by_id: dict[str, Project],
+    candidate_names: set[str],
+) -> bool:
+    visited: set[str] = set()
+    parent_id = _project_parent_id(project)
+    while parent_id and parent_id not in visited:
+        visited.add(parent_id)
+        parent = projects_by_id.get(parent_id)
+        if parent is None:
+            return False
+        if parent.project_entry.name in candidate_names:
+            return True
+        parent_id = _project_parent_id(parent)
+    return False
+
+
+def _configured_archived_parent_project_ids(dbio: Database) -> set[str]:
+    from todoist.database.dataframe import (
+        get_adjusting_archived_parent_projects,
+        get_adjusting_mapping,
+    )
+
+    archived_parent_names = set(get_adjusting_archived_parent_projects())
+    if not archived_parent_names:
+        return set()
+
+    link_mapping = get_adjusting_mapping()
+    candidate_names = set(archived_parent_names)
+    candidate_names.update(
+        source_name
+        for source_name, target_name in link_mapping.items()
+        if source_name in archived_parent_names or target_name in archived_parent_names
+    )
+
+    projects = dbio.fetch_projects(include_tasks=False) + dbio.fetch_archived_projects()
+    projects_by_id = {project.id: project for project in projects}
+    target_ids: set[str] = set()
+    for project in projects:
+        if not project.is_archived:
+            continue
+        if (
+            project.project_entry.name in candidate_names
+            or _project_has_candidate_ancestor(
+                project,
+                projects_by_id=projects_by_id,
+                candidate_names=candidate_names,
+            )
+        ):
+            target_ids.add(project.id)
+    return target_ids
+
+
+def _fetch_configured_archived_parent_activity(
+    dbio: Database,
+    cached_events: set[Event],
+) -> set[Event]:
+    parent_project_ids = _configured_archived_parent_project_ids(dbio)
+    if not parent_project_ids:
+        return set()
+
+    now_utc = datetime.now(timezone.utc)
+    date_from = now_utc - timedelta(weeks=520)
+    date_to = now_utc
+    logger.info(
+        "Fetching scoped activity for {} configured archived parent project id(s).",
+        len(parent_project_ids),
+    )
+    fetched_events = dbio.fetch_activity_for_parent_projects(
+        parent_project_ids,
+        date_from=date_from,
+        date_to=date_to,
+        window_weeks=52,
+        events_already_fetched=set(cached_events),
+        progress_desc="Fetching archived project activity",
+    )
+    return {
+        event
+        for event in fetched_events
+        if _coerce_activity_datetime_utc(event.date) >= date_from
+    }
+
+
 def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
     df_activity = _state.df_activity
     active_projects = _state.active_projects
@@ -151,6 +282,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
             _DEMO_DASHBOARD_STATE_SCHEMA_VERSION if demo_mode else None
         ),
         "activity_cache_signature": _activity_cache_signature(),
+        "adjustments_cache_signature": _adjustments_cache_signature(),
         "df_activity": df_activity,
         "active_projects": active_projects,
         "project_colors": project_colors,
@@ -175,7 +307,14 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
                     return False
                 payload_signature = payload.get("activity_cache_signature")
                 current_signature = _activity_cache_signature()
-                if payload_signature == current_signature:
+                payload_adjustments_signature = payload.get(
+                    "adjustments_cache_signature"
+                )
+                current_adjustments_signature = _adjustments_cache_signature()
+                if (
+                    payload_signature == current_signature
+                    and payload_adjustments_signature == current_adjustments_signature
+                ):
                     df_activity = payload.get("df_activity")
                     active_projects = payload.get("active_projects")
                     project_colors = payload.get("project_colors")
@@ -217,10 +356,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
     try:
         _run_async_in_main_loop(
             _set_progress(
-                "Querying project data",
+                "Checking Todoist updates",
                 step=1,
                 total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Fetching projects and tasks",
+                detail="Refreshing project and task data from Todoist",
             )
         )
         dbio = Database(".env")
@@ -230,6 +369,14 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             cached_events = Cache().activity.load()
         except LocalStorageError:
             cached_events = set()
+        _run_async_in_main_loop(
+            _set_progress(
+                "Checking activity cache",
+                step=1,
+                total_steps=_PROGRESS_TOTAL_STEPS,
+                detail=f"Loaded {len(cached_events)} cached activity event(s)",
+            )
+        )
 
         def _should_backfill(events: set[Event]) -> bool:
             if not events:
@@ -258,16 +405,40 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                         f"Activity cache looks short; backfilling history "
                         f"(window={nweeks}w, stop={early_stop})."
                     )
+                    _run_async_in_main_loop(
+                        _set_progress(
+                            "Backfilling activity history",
+                            step=1,
+                            total_steps=_PROGRESS_TOTAL_STEPS,
+                            detail=(
+                                f"Cache has {len(cached_events)} event(s); "
+                                f"fetching older {nweeks}-week windows"
+                            ),
+                        )
+                    )
                     events = dbio.fetch_activity_adaptively(
                         nweeks_window_size=nweeks,
                         early_stop_after_n_windows=early_stop,
                         events_already_fetched=set(cached_events),
+                        progress_desc="Backfilling activity history",
                     )
                     Cache().activity.save(set(events))
                 except Exception as exc:  # pragma: no cover - network-dependent
                     logger.warning(f"Failed to backfill activity cache: {exc}")
                 finally:
                     _activity_backfill_attempted = True
+            else:
+                _run_async_in_main_loop(
+                    _set_progress(
+                        "Checking activity cache",
+                        step=1,
+                        total_steps=_PROGRESS_TOTAL_STEPS,
+                        detail=(
+                            f"Cache has {len(cached_events)} event(s); "
+                            "no history backfill needed"
+                        ),
+                    )
+                )
 
         if not cached_events and _resolve_api_key():
             try:
@@ -285,14 +456,34 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 logger.info(
                     f"Activity cache empty; fetching full history (window={nweeks}w, stop={early_stop})."
                 )
+                _run_async_in_main_loop(
+                    _set_progress(
+                        "Fetching activity history",
+                        step=1,
+                        total_steps=_PROGRESS_TOTAL_STEPS,
+                        detail=(
+                            "Activity cache is empty; fetching Todoist "
+                            f"activity in {nweeks}-week windows"
+                        ),
+                    )
+                )
                 events = dbio.fetch_activity_adaptively(
                     nweeks_window_size=nweeks,
                     early_stop_after_n_windows=early_stop,
                     events_already_fetched=set(),
+                    progress_desc="Fetching activity history",
                 )
                 if not events:
                     logger.info(
                         "Adaptive fetch returned no events; attempting recent activity pages."
+                    )
+                    _run_async_in_main_loop(
+                        _set_progress(
+                            "Fetching recent activity",
+                            step=1,
+                            total_steps=_PROGRESS_TOTAL_STEPS,
+                            detail="No history events found yet; checking recent activity pages",
+                        )
                     )
                     events = dbio.fetch_activity(max_pages=2)
                 Cache().activity.save(set(events))
@@ -301,9 +492,32 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             finally:
                 _activity_backfill_attempted = True
 
+        if _resolve_api_key():
+            try:
+                try:
+                    cached_events = Cache().activity.load()
+                except LocalStorageError:
+                    cached_events = set()
+                archived_parent_events = _fetch_configured_archived_parent_activity(
+                    dbio,
+                    set(cached_events),
+                )
+                if archived_parent_events:
+                    merged_events = set(cached_events) | archived_parent_events
+                    Cache().activity.save(merged_events)
+                    logger.info(
+                        "Merged {} scoped archived-parent event(s) into activity cache; total={}.",
+                        len(archived_parent_events),
+                        len(merged_events),
+                    )
+            except Exception as exc:  # pragma: no cover - network-dependent
+                logger.warning(
+                    f"Failed to fetch scoped archived-parent activity: {exc}"
+                )
+
         _run_async_in_main_loop(
             _set_progress(
-                "Building project hierarchy",
+                "Resolving project hierarchy",
                 step=2,
                 total_steps=_PROGRESS_TOTAL_STEPS,
                 detail="Resolving roots across active and archived projects",
@@ -343,6 +557,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             df_activity = anonymize_activity_dates(df_activity)
 
         project_colors = dbio.fetch_mapping_project_name_to_color()
+        from todoist.database.dataframe import get_adjusting_mapping
+
+        for source_name, target_name in get_adjusting_mapping().items():
+            if target_name not in project_colors and source_name in project_colors:
+                project_colors[target_name] = project_colors[source_name]
 
         _state.db = dbio
         _state.df_activity = df_activity

@@ -1,4 +1,4 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -137,9 +137,56 @@ typecheck: check_explicit_any ## Run pyright type checks
 lint: ## Run pylint
 	PYTHONPATH=. uv run pylint -j 0 todoist tests
 
-validate: typecheck lint ## Run typecheck + lint
-
-check: validate test ## Run validate + tests
+test_all: ## Run typecheck, lint, and tests in parallel, then print logs in order
+	+@bash -c '\
+		set -u; \
+		log_dir="$(DASHBOARD_STATE_DIR)/checks/$$(date +%Y%m%d-%H%M%S)"; \
+		mkdir -p "$$log_dir"; \
+		reported_file="$$log_dir/.reported"; \
+		: > "$$reported_file"; \
+		targets="typecheck lint test check_explicit_any"; \
+		total="$$(printf "%s\n" $$targets | wc -w | tr -d " ")"; \
+		echo "Running checks in parallel: $$targets"; \
+		echo "Logs: $$log_dir"; \
+		for target in $$targets; do \
+			( \
+				$(MAKE) --no-print-directory "$$target" >"$$log_dir/$$target.log" 2>&1; \
+				printf "%s\n" "$$?" >"$$log_dir/$$target.status"; \
+			) & \
+		done; \
+		completed=0; \
+		while [ "$$completed" -lt "$$total" ]; do \
+			for target in $$targets; do \
+				if [ -f "$$log_dir/$$target.status" ] && ! grep -qx "$$target" "$$reported_file"; then \
+					code="$$(cat "$$log_dir/$$target.status")"; \
+					printf "%s\n" "$$target" >> "$$reported_file"; \
+					completed="$$((completed + 1))"; \
+					printf "Completed [%s/%s] make %s: %s (exit %s)\n" "$$completed" "$$total" "$$target" "$$([ "$$code" -eq 0 ] && printf passed || printf failed)" "$$code"; \
+				fi; \
+			done; \
+			if [ "$$completed" -lt "$$total" ]; then \
+				sleep 1; \
+			fi; \
+		done; \
+		wait || true; \
+		status=0; \
+		for target in $$targets; do \
+			code="$$(cat "$$log_dir/$$target.status" 2>/dev/null || printf "1")"; \
+			printf "\n===== make %s (%s) =====\n" "$$target" "$$([ "$$code" -eq 0 ] && printf passed || printf failed)"; \
+			cat "$$log_dir/$$target.log"; \
+			printf "===== make %s exit %s =====\n" "$$target" "$$code"; \
+			if [ "$$code" -ne 0 ]; then \
+				status="$$code"; \
+			fi; \
+		done; \
+		printf "\nLogs kept in %s\n" "$$log_dir"; \
+		if [ "$$status" -eq 0 ]; then \
+			echo "test_all passed."; \
+		else \
+			echo "test_all failed."; \
+		fi; \
+		exit "$$status"; \
+	'
 
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
 	uv run python3 -m scripts.build_windows

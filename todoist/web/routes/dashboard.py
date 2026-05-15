@@ -18,6 +18,7 @@ from todoist.dashboard.plots import (
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
+from todoist.database.dataframe import get_adjusting_archived_parent_projects
 from todoist.habit_tracker import extract_tracked_habit_tasks
 from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.web.dashboard_payload import (
@@ -136,6 +137,7 @@ async def dashboard_home(
         settings=dashboard_settings_cfg.get("urgency") if hasattr(dashboard_settings_cfg, "get") else None,
     )
     plot_events = _normalize_plot_events(dashboard_settings_cfg)
+    always_visible_projects = get_adjusting_archived_parent_projects()
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
@@ -149,6 +151,7 @@ async def dashboard_home(
         f"end={end_label}",
         f"no_data={int(no_data)}",
         f"today={today.isoformat()}",
+        f"always_visible_projects={','.join(sorted(always_visible_projects))}",
         f"plot_events={len(plot_events)}:{','.join(item['date'] + '=' + item['label'] + '=' + item['color'] for item in plot_events)}",
     )
     cached = _state.home_payload_cache.get(cache_key)
@@ -181,6 +184,9 @@ async def dashboard_home(
                     end_range,
                     granularity,
                     project_colors,
+                    visibility_beg_date=beg_range,
+                    visibility_end_date=end_range,
+                    always_visible_projects=always_visible_projects,
                 ),
                 plot_events,
                 beg=history_beg_range,
@@ -197,6 +203,9 @@ async def dashboard_home(
                     end_range,
                     granularity,
                     project_colors,
+                    visibility_beg_date=beg_range,
+                    visibility_end_date=end_range,
+                    always_visible_projects=always_visible_projects,
                 ),
                 plot_events,
                 beg=history_beg_range,

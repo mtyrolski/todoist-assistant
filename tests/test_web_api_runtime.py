@@ -355,6 +355,64 @@ def test_dashboard_progress_without_error() -> None:
     assert payload["error"] is None
     assert payload["stage"] == "Processing"
 
+def test_dashboard_progress_ignores_adaptive_activity_page_counts() -> None:
+    web_api._progress_state.active = False
+    web_api._progress_state.stage = None
+    web_api._progress_state.step = 0
+    web_api._progress_state.total_steps = 0
+    web_api._progress_state.started_at = None
+    web_api._progress_state.updated_at = None
+    web_api._progress_state.detail = None
+    web_api._progress_state.sub_current = None
+    web_api._progress_state.sub_total = None
+    web_api._progress_state.error = None
+
+    callback = web_api._build_tqdm_progress_callback()
+    callback("Fetching activity history", 1, 2, "page")
+
+    client = TestClient(web_api.app)
+    payload = client.get("/api/dashboard/progress").json()
+    assert payload["active"] is False
+    assert payload["subCurrent"] is None
+    assert payload["subTotal"] is None
+
+    callback("Fetching activity history", 1, 3, "window")
+
+    payload = client.get("/api/dashboard/progress").json()
+    assert payload["active"] is True
+    assert payload["detail"] == "Fetching activity history: 1/3 window"
+    assert payload["subCurrent"] == 1
+    assert payload["subTotal"] == 3
+
+def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
+    web_api._progress_state.active = False
+    web_api._progress_state.stage = None
+    web_api._progress_state.step = 0
+    web_api._progress_state.total_steps = 0
+    web_api._progress_state.started_at = None
+    web_api._progress_state.updated_at = None
+    web_api._progress_state.detail = None
+    web_api._progress_state.sub_current = None
+    web_api._progress_state.sub_total = None
+    web_api._progress_state.error = None
+
+    callback = web_api._build_tqdm_progress_callback()
+    callback(
+        "Fetching activity history",
+        1,
+        3,
+        "window",
+        "Fetching activity history: window 1 scanning 2026-03-05 to 2026-05-14 UTC; workers=1",
+    )
+
+    client = TestClient(web_api.app)
+    payload = client.get("/api/dashboard/progress").json()
+    assert payload["detail"] == (
+        "Fetching activity history: window 1 scanning 2026-03-05 to 2026-05-14 UTC; workers=1"
+    )
+    assert payload["subCurrent"] == 1
+    assert payload["subTotal"] == 3
+
 def test_dashboard_status_includes_triton_service(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
 

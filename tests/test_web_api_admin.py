@@ -50,6 +50,7 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) 
     ]
     assert payload["unmappedSourceProjects"] == ["Archived Root", "Inbox"]
 
+
 def test_admin_project_adjustments_rejects_path_traversal(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(tmp_path / "personal"))
     client = TestClient(web_api.app)
@@ -71,6 +72,16 @@ def test_admin_save_project_adjustments_roundtrips_safe_literals(
 ) -> None:
     personal_dir = tmp_path / "personal"
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+    monkeypatch.setattr(
+        web_api,
+        "_load_projects_for_adjustments_sync",
+        lambda refresh: (
+            ["Academy / North Wing"],
+            ["Archived Root"],
+            ['Archived "Research"', 'Parent "One"'],
+            ["Inbox"],
+        ),
+    )
     client = TestClient(web_api.app)
 
     response = client.put(
@@ -99,6 +110,16 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
 ) -> None:
     personal_dir = tmp_path / "personal"
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+    monkeypatch.setattr(
+        web_api,
+        "_load_projects_for_adjustments_sync",
+        lambda refresh: (
+            ["Academy"],
+            ["Archived Root"],
+            ["Archived Research"],
+            ["Inbox"],
+        ),
+    )
 
     async def _boom(*, refresh: bool) -> None:
         _ = refresh
@@ -122,6 +143,61 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
     )
     assert loaded_mapping == {"Archived Research": "Academy"}
     assert archived_parents == []
+
+
+def test_admin_save_project_adjustments_rejects_active_child_source(
+    monkeypatch, tmp_path
+) -> None:
+    personal_dir = tmp_path / "personal"
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+    monkeypatch.setattr(
+        web_api,
+        "_load_projects_for_adjustments_sync",
+        lambda refresh: (
+            ["Academy"],
+            ["deepflare"],
+            ["deepflare"],
+            ["Inbox"],
+        ),
+    )
+    client = TestClient(web_api.app)
+
+    response = client.put(
+        "/api/admin/project_adjustments",
+        params={"file": "adj_private.py", "refresh": "false"},
+        json={"mappings": {"DeepMhcFlare": "deepflare"}},
+    )
+
+    assert response.status_code == 400
+    assert "Mapping sources must be archived projects" in response.json()["detail"]
+
+
+def test_admin_save_project_adjustments_rejects_active_archived_parent(
+    monkeypatch, tmp_path
+) -> None:
+    personal_dir = tmp_path / "personal"
+    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
+    monkeypatch.setattr(
+        web_api,
+        "_load_projects_for_adjustments_sync",
+        lambda refresh: (
+            ["Academy"],
+            ["deepflare"],
+            ["deepflare"],
+            ["Inbox"],
+        ),
+    )
+    client = TestClient(web_api.app)
+
+    response = client.put(
+        "/api/admin/project_adjustments",
+        params={"file": "adj_private.py", "refresh": "false"},
+        json={"mappings": {}, "archivedParents": ["DeepMhcFlare"]},
+    )
+
+    assert response.status_code == 400
+    assert "archivedParents must contain archived projects only" in response.json()["detail"]
+
 
 def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "configs"

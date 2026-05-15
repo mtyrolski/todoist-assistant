@@ -31,6 +31,7 @@ def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> N
             "last_refresh_s": 123.0,
             "demo_mode": False,
             "activity_cache_signature": web_api._activity_cache_signature(),
+            "adjustments_cache_signature": [],
             "df_activity": df,
             "active_projects": [],
             "project_colors": {"A": "#123456"},
@@ -61,6 +62,7 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
             "last_refresh_s": 123.0,
             "demo_mode": False,
             "activity_cache_signature": original_signature,
+            "adjustments_cache_signature": [],
             "df_activity": _single_event_df(),
             "active_projects": [],
             "project_colors": {},
@@ -73,6 +75,41 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     _clear_dashboard_state()
     loaded = web_api._load_state_from_disk_cache(demo_mode=False)
     assert loaded is False
+
+
+def test_load_state_from_disk_cache_rejects_stale_adjustment_signature(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    cache.dashboard_state.save(
+        {
+            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+            "created_at": "2025-01-01T00:00:00",
+            "last_refresh_s": 123.0,
+            "demo_mode": False,
+            "activity_cache_signature": web_api._activity_cache_signature(),
+            "adjustments_cache_signature": [],
+            "df_activity": _single_event_df(),
+            "active_projects": [],
+            "project_colors": {},
+        }
+    )
+
+    personal_dir = tmp_path / "personal"
+    personal_dir.mkdir()
+    (personal_dir / "adj_private.py").write_text(
+        "link_adjustements = {}\narchived_parent_projects = ['MSFT']\n",
+        encoding="utf-8",
+    )
+
+    _clear_dashboard_state()
+    loaded = web_api._load_state_from_disk_cache(demo_mode=False)
+    assert loaded is False
+
 
 def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
     monkeypatch, tmp_path
@@ -90,6 +127,7 @@ def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
             "demo_mode": True,
             "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION - 1,
             "activity_cache_signature": web_api._activity_cache_signature(),
+            "adjustments_cache_signature": [],
             "df_activity": _single_event_df(),
             "active_projects": [],
             "project_colors": {"A": "#123456"},
@@ -117,6 +155,7 @@ def test_load_state_from_disk_cache_restores_current_demo_snapshot(
             "demo_mode": True,
             "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION,
             "activity_cache_signature": web_api._activity_cache_signature(),
+            "adjustments_cache_signature": [],
             "df_activity": df,
             "active_projects": [],
             "project_colors": {"A": "#123456"},

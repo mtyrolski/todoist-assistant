@@ -11,6 +11,7 @@ from todoist.database.demo import (
     anonymize_label_names,
     anonymize_project_names,
 )
+from todoist.web.dashboard_payload import normalize_activity_df
 
 
 def _duration(index: pd.Index) -> pd.Timedelta:
@@ -51,6 +52,27 @@ def test_anonymize_activity_dates_preserves_task_durations():
         original = df[df["task_id"] == task_id].sort_index()
         anonymized = result[result["task_id"] == task_id].sort_index()
         assert _duration(original.index) == _duration(anonymized.index)
+
+
+def test_anonymize_activity_dates_keeps_date_column_in_sync_after_normalization():
+    base = datetime(2024, 1, 1, 9, 0, 0)
+    df = pd.DataFrame(
+        {
+            "task_id": ["task1", "task1"],
+            "type": ["added", "completed"],
+            "id": ["e1", "e2"],
+            "date": [base, base + timedelta(hours=1)],
+            "parent_item_id": ["task1", "task1"],
+        },
+        index=pd.DatetimeIndex([base, base + timedelta(hours=1)]),
+    )
+    df.index.name = "date"
+
+    shifted = anonymize_activity_dates(df)
+    renormalized = normalize_activity_df(shifted)
+
+    assert list(shifted.index) == list(pd.DatetimeIndex(shifted["date"]))
+    assert list(renormalized.index) == list(shifted.index)
 
 
 def test_anonymize_project_names_uses_stable_hierarchy_themes():

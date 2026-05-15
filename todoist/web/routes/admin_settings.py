@@ -103,6 +103,45 @@ async def admin_save_project_adjustments(
 
     try:
         safe_filename = normalize_adjustment_filename(file)
+        project_lists = cast(
+            tuple[list[str], list[str], list[str], list[str]],
+            await asyncio.to_thread(
+                _load_projects_for_adjustments_sync,
+                False,
+            ),
+        )
+        active_root = project_lists[0]
+        archived_names = project_lists[2]
+        remappable_active_root = project_lists[3]
+        allowed_sources = set(archived_names) | set(remappable_active_root)
+        allowed_targets = set(active_root) | set(archived_names)
+        invalid_sources = sorted(set(mappings) - allowed_sources)
+        invalid_targets = sorted(set(mappings.values()) - allowed_targets)
+        invalid_archived_parents = sorted(set(archived_parents) - set(archived_names))
+        if invalid_sources:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Mapping sources must be archived projects or explicitly "
+                    f"remappable active roots: {', '.join(invalid_sources[:10])}"
+                ),
+            )
+        if invalid_targets:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Mapping targets must be active roots or archived projects: "
+                    f"{', '.join(invalid_targets[:10])}"
+                ),
+            )
+        if invalid_archived_parents:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "archivedParents must contain archived projects only: "
+                    f"{', '.join(invalid_archived_parents[:10])}"
+                ),
+            )
         async with _ADMIN_LOCK:
             _save_mapping_file(safe_filename, mappings, archived_parents)
             if refresh:

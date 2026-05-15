@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -6,9 +7,16 @@ from todoist.stats import extract_task_due_date
 from todoist.types import Event, EventEntry
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.utils import safe_instantiate_entry
+from todoist.utils import report_tqdm_progress, safe_instantiate_entry
 
 ACTIVITY_PAGE_LIMIT = 100
+
+
+def _format_progress_date_range(date_from: datetime, date_to: datetime) -> str:
+    return (
+        f"{date_from.astimezone(timezone.utc).date().isoformat()} "
+        f"to {date_to.astimezone(timezone.utc).date().isoformat()} UTC"
+    )
 
 
 class DatabaseActivity:
@@ -34,6 +42,7 @@ class DatabaseActivity:
         early_stop_after_n_windows: int = 5,
         max_pages_per_window: int | None = None,
         events_already_fetched: set[Event] | None = None,
+        progress_desc: str = "Querying activity data",
     ) -> list[Event]:
         """
         Fetch activity events from Todoist API in a moving-window pattern.
@@ -55,14 +64,37 @@ class DatabaseActivity:
             early_stop_after_n_windows,
             max_pages_per_window,
         )
+        window_number = 0
+        report_tqdm_progress(
+            progress_desc,
+            0,
+            max(early_stop_after_n_windows, 1),
+            "window",
+        )
         while n_empty_weeks < early_stop_after_n_windows:
+            window_number += 1
+            remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
             window_end = now_utc - timedelta(weeks=iterated_weeks)
             window_start = window_end - timedelta(weeks=nweeks_window_size)
+            window_range = _format_progress_date_range(window_start, window_end)
+            report_tqdm_progress(
+                progress_desc,
+                window_number - 1,
+                max(window_number - 1 + remaining_empty_windows, 1),
+                "window",
+                detail=(
+                    f"{progress_desc}: window {window_number} scanning {window_range}; "
+                    "workers=1; "
+                    f"empty windows={n_empty_weeks}/{early_stop_after_n_windows}; "
+                    f"cached events={len(events_already_fetched)}"
+                ),
+            )
             window_events = self._fetch_activity_range(
                 date_from=window_start,
                 date_to=window_end,
                 max_pages=max_pages_per_window,
                 events_already_fetched=events_already_fetched,
+                progress_desc=progress_desc,
             )
             iterated_weeks += nweeks_window_size
             events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
@@ -73,6 +105,20 @@ class DatabaseActivity:
             new_events = [e for e in window_events if e not in events_already_fetched]
             total_events.extend(new_events)
             events_already_fetched.update(new_events)
+            remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
+            report_tqdm_progress(
+                progress_desc,
+                window_number,
+                max(window_number + remaining_empty_windows, window_number),
+                "window",
+                detail=(
+                    f"{progress_desc}: completed window {window_number} "
+                    f"({window_range}); workers=1; "
+                    f"new events={len(new_events)}; "
+                    f"empty windows={n_empty_weeks}/{early_stop_after_n_windows}; "
+                    f"total cached events={len(events_already_fetched)}"
+                ),
+            )
         logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
 
         # Extend with already fetched events to avoid losing them.
@@ -125,12 +171,24 @@ class DatabaseActivity:
         collected_pages = 0
         while collected_pages < max_pages:
             page_index = starting_page + collected_pages
+            report_tqdm_progress(
+                "Fetching recent activity",
+                collected_pages,
+                max_pages,
+                "page",
+            )
             page_entries, next_cursor = self._fetch_activity_page(
                 page_index=page_index,
                 cursor=cursor,
             )
             result.extend(self._events_from_entries(page_entries))
             collected_pages += 1
+            report_tqdm_progress(
+                "Fetching recent activity",
+                collected_pages,
+                max_pages,
+                "page",
+            )
             if not next_cursor:
                 logger.debug(f"No further activity cursor available at page {page_index}")
                 break
@@ -146,6 +204,8 @@ class DatabaseActivity:
         date_to: datetime,
         max_pages: int | None = None,
         events_already_fetched: set[Event] | None = None,
+        progress_desc: str = "Querying activity data",
+        parent_project_id: str | None = None,
     ) -> list[Event]:
         if max_pages is not None and max_pages <= 0:
             return []
@@ -177,16 +237,35 @@ class DatabaseActivity:
                 "date_from": date_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "date_to": date_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
+            if parent_project_id:
+                params["parent_project_id"] = parent_project_id
             if cursor:
                 params["cursor"] = cursor
 
+            next_page_number = fetched_pages + 1
+            estimated_total_pages = max_pages if max_pages is not None else next_page_number + 1
+            report_tqdm_progress(
+                progress_desc,
+                next_page_number,
+                max(estimated_total_pages, 1),
+                "page",
+            )
             spec = RequestSpec(
                 endpoint=TodoistEndpoints.LIST_ACTIVITY,
                 params=params,
                 rate_limited=True,
             )
+            project_suffix = (
+                f" parent_project_id={parent_project_id}"
+                if parent_project_id
+                else ""
+            )
             decoded_result = self._api_client.request_json(
-                spec, operation_name=f"fetch activity range {date_from.isoformat()} {date_to.isoformat()}"
+                spec,
+                operation_name=(
+                    f"fetch activity range {date_from.isoformat()} "
+                    f"{date_to.isoformat()}{project_suffix}"
+                ),
             )
             if not isinstance(decoded_result, dict):
                 raise RuntimeError("Unexpected response payload when fetching activity range")
@@ -199,6 +278,12 @@ class DatabaseActivity:
             page_entries = [safe_instantiate_entry(EventEntry, **event) for event in raw_events]
             page_events = self._events_from_entries(page_entries)
             fetched_pages += 1
+            report_tqdm_progress(
+                progress_desc,
+                fetched_pages,
+                max(estimated_total_pages, fetched_pages),
+                "page",
+            )
             if events_already_fetched:
                 page_new_events = [event for event in page_events if event not in events_already_fetched]
                 skipped_events = len(page_events) - len(page_new_events)
@@ -217,11 +302,95 @@ class DatabaseActivity:
 
             next_cursor = decoded_result.get("next_cursor")
             if not isinstance(next_cursor, str):
+                report_tqdm_progress(
+                    progress_desc,
+                    fetched_pages,
+                    max(fetched_pages, 1),
+                    "page",
+                )
                 break
             cursor = next_cursor
 
         logger.info(f"Finished activity range fetch. Total events collected: {len(events)}")
         return events
+
+    def fetch_activity_for_parent_projects(
+        self,
+        parent_project_ids: Iterable[str],
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        window_weeks: int = 52,
+        events_already_fetched: set[Event] | None = None,
+        progress_desc: str = "Fetching archived project activity",
+    ) -> list[Event]:
+        """Fetch activity scoped to specific Todoist parent project ids."""
+
+        project_ids = sorted({project_id for project_id in parent_project_ids if project_id})
+        if not project_ids:
+            return []
+        if date_from >= date_to:
+            return []
+        if window_weeks <= 0:
+            raise ValueError("window_weeks must be positive")
+
+        seen_events = set(events_already_fetched or set())
+        fetched_events: list[Event] = []
+        window_delta = timedelta(weeks=window_weeks)
+        estimated_windows_per_project = max(
+            1,
+            int(((date_to - date_from).total_seconds() + window_delta.total_seconds() - 1) // window_delta.total_seconds()),
+        )
+        total_windows = len(project_ids) * estimated_windows_per_project
+        completed_windows = 0
+
+        report_tqdm_progress(progress_desc, 0, total_windows, "window")
+        for project_index, parent_project_id in enumerate(project_ids, start=1):
+            window_end = date_to
+            while window_end > date_from:
+                window_start = max(date_from, window_end - window_delta)
+                completed_windows += 1
+                window_range = _format_progress_date_range(window_start, window_end)
+                report_tqdm_progress(
+                    progress_desc,
+                    completed_windows - 1,
+                    total_windows,
+                    "window",
+                    detail=(
+                        f"{progress_desc}: project {project_index}/{len(project_ids)} "
+                        f"scanning {window_range}; cached events={len(seen_events)}"
+                    ),
+                )
+                window_events = self._fetch_activity_range(
+                    date_from=window_start,
+                    date_to=window_end,
+                    events_already_fetched=seen_events,
+                    progress_desc=progress_desc,
+                    parent_project_id=parent_project_id,
+                )
+                new_events = [event for event in window_events if event not in seen_events]
+                fetched_events.extend(new_events)
+                seen_events.update(new_events)
+                report_tqdm_progress(
+                    progress_desc,
+                    completed_windows,
+                    total_windows,
+                    "window",
+                    detail=(
+                        f"{progress_desc}: project {project_index}/{len(project_ids)} "
+                        f"completed {window_range}; new events={len(new_events)}"
+                    ),
+                )
+                window_end = window_start
+
+        fetched_events = list(set(fetched_events))
+        fetched_events.sort(key=lambda event: event.event_entry.event_date, reverse=True)
+        logger.info(
+            "Finished scoped parent-project activity fetch. Projects={}, new_events={}",
+            len(project_ids),
+            len(fetched_events),
+        )
+        return fetched_events
 
     @staticmethod
     def _events_from_entries(entries: list[EventEntry]) -> list[Event]:
