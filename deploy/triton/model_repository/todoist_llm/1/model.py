@@ -264,10 +264,7 @@ class TritonPythonModel:
     def initialize(self, args: dict[str, Any]) -> None:
         _configure_logging()
         self._model_config = json.loads(args["model_config"])
-        self._model_id = _env(
-            "TODOIST_AGENT_TRITON_MODEL_ID",
-            "mistralai/Ministral-3-3B-Instruct-2512",
-        )
+        self._model_id = _env("TODOIST_AGENT_MODEL_ID", "Qwen/Qwen2.5-3B-Instruct")
         self._device = _resolve_device("TODOIST_TRITON_DEVICE")
         self._dtype = _env("TODOIST_TRITON_MODEL_DTYPE", "auto")
         self._max_tokens = _env_int("TODOIST_TRITON_MAX_TOKENS", 384)

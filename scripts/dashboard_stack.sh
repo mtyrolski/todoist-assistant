@@ -19,7 +19,7 @@ FRONTEND_PORT="${DASHBOARD_FRONTEND_PORT:-3000}"
 API_PORT="${DASHBOARD_API_PORT:-8000}"
 TRITON_HTTP_PORT="${TODOIST_TRITON_HTTP_PORT:-8003}"
 
-TRITON_MODEL_ID="${TRITON_MODEL_ID:-}"
+MODEL_ID="${MODEL_ID:-}"
 TRITON_MODEL_NAME="${TRITON_MODEL_NAME:-}"
 TRITON_URL="${TRITON_URL:-}"
 
@@ -44,7 +44,7 @@ print(payload["url"])
 PY
 )
     if [[ "${#settings[@]}" -ge 3 ]]; then
-        TRITON_MODEL_ID="${settings[0]}"
+        MODEL_ID="${settings[0]}"
         TRITON_MODEL_NAME="${settings[1]}"
         TRITON_URL="${settings[2]}"
     fi
@@ -260,7 +260,7 @@ require_gpu_runtime() {
 
 start_triton() {
     local mode="${1}"
-    log_note "Starting Triton (${mode}) for model ${TRITON_MODEL_NAME} <- ${TRITON_MODEL_ID}..."
+    log_note "Starting Triton (${mode}) for model ${TRITON_MODEL_NAME} <- ${MODEL_ID}..."
     require_docker
     if [[ "${mode}" == "gpu" ]]; then
         require_gpu_runtime
@@ -283,7 +283,7 @@ start_triton() {
     fi
 
     (
-        export TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}"
+        export TODOIST_AGENT_MODEL_ID="${MODEL_ID}"
         export TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}"
         export TODOIST_TRITON_DEVICE="${TODOIST_TRITON_DEVICE:-${triton_device}}"
         export TODOIST_TRITON_MODEL_DTYPE="${TODOIST_TRITON_MODEL_DTYPE:-${triton_dtype}}"
@@ -357,13 +357,13 @@ start_dashboard() {
     start_triton "${mode}"
 
     log_note "Starting API on 127.0.0.1:${API_PORT}..."
-    nohup env TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
+    nohup env TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
     local api_pid="$!"
     echo "${api_pid}" > "${PID_DIR}/api.pid"
     wait_for_process "${api_pid}" "API"
 
     log_note "Starting observer..."
-    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_TRITON_MODEL_ID="${TRITON_MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
+    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
     local observer_pid="$!"
     echo "${observer_pid}" > "${PID_DIR}/observer.pid"
     wait_for_process "${observer_pid}" "Observer"

@@ -2,7 +2,7 @@
 
 Start here if you want the practical docs instead of browsing the repository tree.
 
-Latest stable release: `v0.3.1`
+Latest stable release: `v0.3.2`
 
 ## Pick the path you need
 
@@ -26,4 +26,4 @@ Latest stable release: `v0.3.1`
 ## Release history
 
 - Changelog: [../CHANGELOG.md](../CHANGELOG.md)
-- Stable release notes: [v0.3.1-release-notes.md](v0.3.1-release-notes.md)
+- Stable release notes: [v0.3.2-release-notes.md](v0.3.2-release-notes.md)

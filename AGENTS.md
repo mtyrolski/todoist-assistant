@@ -9,7 +9,8 @@
 
 ## Checks
 
-- Run `make typecheck`, `make lint`, and `make test` before closing work.
+- Prefer `make test_all` as the first full verification command; it runs typecheck, lint, and tests in parallel and prints each substage result as it finishes.
+- If `make test_all` is unavailable or you need isolated failures, run `make typecheck`, `make lint`, and `make test` before closing work.
 - Run `make coverage` when touching multiple modules or changing test coverage expectations.
 - Do not silence type problems with explicit variable annotations like `my_value: Any = ...`.
 - Prefer fixing the type or narrowing the value instead of suppressing the checker.

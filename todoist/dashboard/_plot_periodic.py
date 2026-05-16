@@ -19,14 +19,7 @@ def _current_period_label(
 ) -> datetime | None:
     """Return the resample label that contains ``end_date``."""
 
-    fallback: datetime | None = None
-    try:
-        period = cast(Any, pd.Period(end_date, freq=granularity))
-        period_end = period.end_time
-        if not pd.isna(period_end):
-            fallback = cast(datetime, cast(Any, period_end).to_pydatetime(warn=False))
-    except Exception:  # pragma: no cover - defensive fallback for unusual freqs
-        fallback = None
+    fallback = _period_label_for_granularity(end_date, granularity)
 
     if index is None or index.empty:
         return fallback
@@ -52,6 +45,59 @@ def _drop_projects_without_period_activity(df_periodic: pd.DataFrame) -> pd.Data
     return cast(pd.DataFrame, df_periodic.loc[:, active_columns])
 
 
+def _columns_with_completed_activity(
+    df_completed: pd.DataFrame,
+    *,
+    beg_date: datetime,
+    end_date: datetime,
+    always_visible_projects: set[str] | None = None,
+) -> list[str]:
+    if df_completed.empty:
+        return []
+
+    always_visible_projects = always_visible_projects or set()
+    df_visible = df_completed[
+        (df_completed.index >= beg_date)
+        & (df_completed.index <= end_date)
+    ]
+    visible_names: set[str] = set()
+    if not df_visible.empty:
+        project_names = cast(pd.Series, df_visible["root_project_name"])
+        visible_names.update(str(name) for name in project_names.dropna().astype(str).unique())
+
+    if always_visible_projects:
+        all_project_names = cast(pd.Series, df_completed["root_project_name"])
+        visible_names.update(
+            str(name)
+            for name in all_project_names.dropna().astype(str).unique()
+            if str(name) in always_visible_projects
+        )
+
+    return sorted(visible_names)
+
+
+def _period_freq_for_granularity(granularity: str) -> str:
+    """Convert resampling aliases into Period-compatible frequencies."""
+
+    if granularity == "ME":
+        return "M"
+    if granularity == "3ME":
+        return "Q-DEC"
+    return granularity
+
+
+def _period_label_for_granularity(end_date: datetime, granularity: str) -> datetime | None:
+    try:
+        period = cast(Any, pd.Period(end_date, freq=_period_freq_for_granularity(granularity)))
+        period_end = period.end_time
+        if pd.isna(period_end):
+            return None
+        period_end_ts = cast(pd.Timestamp, pd.Timestamp(period_end))
+        return cast(datetime, period_end_ts.normalize().to_pydatetime(warn=False))
+    except Exception:  # pragma: no cover - defensive fallback for unusual freqs
+        return None
+
+
 @dataclass(frozen=True)
 class _PeriodicForecastContext:
     current_label: datetime | None
@@ -67,9 +113,21 @@ def _prepare_completed_periodic_frame(
     beg_date: datetime,
     end_date: datetime,
     granularity: str,
+    visibility_beg_date: datetime | None = None,
+    visibility_end_date: datetime | None = None,
+    always_visible_projects: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    df_completed = df[df["type"] == "completed"].loc[:end_date].copy()
+    df_completed = cast(pd.DataFrame, df[df["type"] == "completed"].copy())
     df_completed.index = pd.to_datetime(df_completed.index)
+    df_completed = cast(pd.DataFrame, df_completed[df_completed.index <= end_date])
+    visibility_beg = visibility_beg_date or beg_date
+    visibility_end = visibility_end_date or end_date
+    active_columns = _columns_with_completed_activity(
+        df_completed,
+        beg_date=visibility_beg,
+        end_date=visibility_end,
+        always_visible_projects=always_visible_projects,
+    )
     df_periodic = cast(
         pd.DataFrame,
         df_completed.groupby([period_grouper(granularity), "root_project_name"])
@@ -78,6 +136,10 @@ def _prepare_completed_periodic_frame(
         .sort_index(),
     )
     df_periodic = cast(pd.DataFrame, df_periodic[df_periodic.index >= beg_date])
+    df_periodic = cast(
+        pd.DataFrame,
+        df_periodic.loc[:, [column for column in active_columns if column in df_periodic.columns]],
+    )
     return df_completed, _drop_projects_without_period_activity(df_periodic)
 
 
@@ -85,7 +147,7 @@ def _period_bounds_for_granularity(
     end_date: datetime, granularity: str
 ) -> tuple[datetime | None, datetime | None]:
     try:
-        period = cast(Any, pd.Period(end_date, freq=granularity))
+        period = cast(Any, pd.Period(end_date, freq=_period_freq_for_granularity(granularity)))
         start = period.start_time
         end = period.end_time
         if pd.isna(start) or pd.isna(end):
@@ -105,17 +167,26 @@ def _build_periodic_forecast_context(
     period_index: pd.Index,
 ) -> _PeriodicForecastContext:
     normalized_index = cast(pd.DatetimeIndex, pd.DatetimeIndex(period_index))
-    current_label = _current_period_label(end_date, granularity, normalized_index)
+    as_of = min(end_date, datetime.now())
+    current_label = _current_period_label(as_of, granularity, normalized_index)
     current_start: datetime | None = None
     current_end: datetime | None = None
     if current_label is not None:
         current_start, current_end = _period_bounds_for_granularity(
-            end_date, granularity
+            as_of, granularity
         )
 
-    as_of = min(end_date, datetime.now())
+    has_current_period_activity = bool(
+        current_start is not None
+        and not normalized_index.empty
+        and cast(pd.Timestamp, normalized_index.max()) >= pd.Timestamp(current_start)
+    )
     show_forecast = bool(
-        current_label and current_start and current_end and current_label > as_of
+        current_label
+        and current_start
+        and current_end
+        and current_label > as_of
+        and has_current_period_activity
     )
     return _PeriodicForecastContext(
         current_label=current_label,
@@ -137,10 +208,13 @@ def _current_period_project_counts(
     ):
         return {}
 
-    df_current = df_completed[
-        (df_completed.index >= context.current_start)
-        & (df_completed.index <= context.as_of)
-    ]
+    df_current = cast(
+        pd.DataFrame,
+        df_completed[
+            (df_completed.index >= context.current_start)
+            & (df_completed.index <= context.as_of)
+        ],
+    )
     if df_current.empty:
         return {}
     return df_current.groupby("root_project_name").size().astype(int).to_dict()
@@ -154,6 +228,40 @@ def _total_tasks_series(df_periodic: pd.DataFrame) -> pd.Series:
     if float(totals.fillna(0).sum()) <= 0:
         return pd.Series(dtype=float)
     return totals
+
+
+def _activity_span(series: pd.Series) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    active = cast(pd.Series, series.fillna(0).astype(float) > 0)
+    if not bool(active.any()):
+        return None
+    active_index = cast(pd.Index, series.index[active])
+    return cast(pd.Timestamp, active_index.min()), cast(pd.Timestamp, active_index.max())
+
+
+def _trim_to_activity_span(series: pd.Series, activity_series: pd.Series) -> pd.Series:
+    span = _activity_span(activity_series)
+    if span is None:
+        return pd.Series(dtype=float)
+    start, end = span
+    return cast(
+        pd.Series,
+        series[(series.index >= start) & (series.index <= end)],
+    )
+
+
+def _positive_activity_periods(series: pd.Series) -> pd.Series:
+    active = cast(pd.Series, series.fillna(0).astype(float) > 0)
+    return cast(pd.Series, series[active])
+
+
+def _series_at_positive_activity_periods(
+    series: pd.Series,
+    activity_series: pd.Series,
+) -> pd.Series:
+    active_periods = _positive_activity_periods(activity_series)
+    if active_periods.empty:
+        return pd.Series(dtype=float)
+    return cast(pd.Series, series.loc[active_periods.index])
 
 
 def _add_total_overlay_periodic_traces(
@@ -378,12 +486,18 @@ def plot_completed_tasks_periodically(
     granularity: str,
     project_colors: dict[str, str],
     include_total_overlay: bool = True,
+    visibility_beg_date: datetime | None = None,
+    visibility_end_date: datetime | None = None,
+    always_visible_projects: set[str] | None = None,
 ) -> go.Figure:
     df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
         df,
         beg_date=beg_date,
         end_date=end_date,
         granularity=granularity,
+        visibility_beg_date=visibility_beg_date,
+        visibility_end_date=visibility_end_date,
+        always_visible_projects=always_visible_projects,
     )
     forecast_context = _build_periodic_forecast_context(
         end_date=end_date,
@@ -394,13 +508,28 @@ def plot_completed_tasks_periodically(
         df_completed, context=forecast_context
     )
     fig = go.Figure()
+    archived_project_names = always_visible_projects or set()
 
     for root_project in df_weekly_per_project.columns:
         root_project_name = str(root_project)
-        project_series = cast(pd.Series, df_weekly_per_project[root_project]).fillna(0)
+        project_counts = cast(pd.Series, df_weekly_per_project[root_project])
+        is_archived_project = root_project_name in archived_project_names
+        if is_archived_project:
+            project_series = _positive_activity_periods(project_counts)
+        else:
+            project_series = _trim_to_activity_span(
+                project_counts.fillna(0),
+                project_counts,
+            )
+        if project_series.empty:
+            continue
         color = project_colors.get(root_project_name, "#808080")
 
-        if forecast_context.show_forecast and forecast_context.current_label is not None:
+        if (
+            not is_archived_project
+            and forecast_context.show_forecast
+            and forecast_context.current_label is not None
+        ):
             historical = cast(
                 pd.Series,
                 project_series[
@@ -424,7 +553,8 @@ def plot_completed_tasks_periodically(
             )
 
         if (
-            forecast_context.show_forecast
+            not is_archived_project
+            and forecast_context.show_forecast
             and forecast_context.current_label is not None
             and forecast_context.current_start
             and forecast_context.current_end
@@ -535,14 +665,24 @@ def cumsum_completed_tasks_periodically(
     granularity: str,
     project_colors: dict[str, str],
     include_total_overlay: bool = True,
+    visibility_beg_date: datetime | None = None,
+    visibility_end_date: datetime | None = None,
+    always_visible_projects: set[str] | None = None,
 ) -> go.Figure:
     df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
         df,
         beg_date=beg_date,
         end_date=end_date,
         granularity=granularity,
+        visibility_beg_date=visibility_beg_date,
+        visibility_end_date=visibility_end_date,
+        always_visible_projects=always_visible_projects,
     )
-    df_weekly_per_project = df_weekly_per_project.cumsum()
+    df_periodic_counts = df_weekly_per_project.copy()
+    df_weekly_per_project = cast(
+        pd.DataFrame,
+        df_weekly_per_project.cumsum().ffill().fillna(0),
+    )
     if not df_weekly_per_project.empty and len(df_weekly_per_project.columns):
         min_date = cast(pd.Timestamp, df_weekly_per_project.index.min()) - pd.Timedelta(
             days=7 if "W" in granularity else 14
@@ -559,15 +699,35 @@ def cumsum_completed_tasks_periodically(
         df_completed, context=forecast_context
     )
     fig = go.Figure()
+    archived_project_names = always_visible_projects or set()
 
     for root_project in df_weekly_per_project.columns:
         root_project_name = str(root_project)
-        project_series = (
-            cast(pd.Series, df_weekly_per_project[root_project]).ffill().fillna(0)
-        )
+        project_counts = cast(pd.Series, df_periodic_counts[root_project])
+        is_archived_project = root_project_name in archived_project_names
+        project_cumulative = cast(
+            pd.Series,
+            df_weekly_per_project[root_project],
+        ).ffill().fillna(0)
+        if is_archived_project:
+            project_series = _series_at_positive_activity_periods(
+                project_cumulative,
+                project_counts,
+            )
+        else:
+            project_series = _trim_to_activity_span(
+                project_cumulative,
+                project_counts,
+            )
+        if project_series.empty:
+            continue
         color = project_colors.get(root_project_name, "#808080")
 
-        if forecast_context.show_forecast and forecast_context.current_label is not None:
+        if (
+            not is_archived_project
+            and forecast_context.show_forecast
+            and forecast_context.current_label is not None
+        ):
             historical = cast(
                 pd.Series,
                 project_series[
@@ -584,14 +744,15 @@ def cumsum_completed_tasks_periodically(
                     y=historical,
                     name=root_project_name,
                     legendgroup=root_project_name,
-                    line_shape="spline",
+                    line_shape="linear",
                     mode="lines+markers",
                     line=dict(color=color),
                 )
             )
 
         if (
-            forecast_context.show_forecast
+            not is_archived_project
+            and forecast_context.show_forecast
             and forecast_context.current_label is not None
             and forecast_context.current_start
             and forecast_context.current_end

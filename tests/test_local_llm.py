@@ -1,10 +1,15 @@
+# pyright: reportPrivateImportUsage=false
+
+from typing import cast
 from unittest.mock import patch
 
 import torch
 from pydantic import BaseModel
+from transformers import PreTrainedTokenizerBase
 
 from todoist.env import EnvVar
 from todoist.llm import LocalChatConfig, MessageRole, PromptToken, TransformersMistral3ChatModel
+from todoist.llm.local_llm import _render_chat_prompt
 from todoist.llm.usage import load_llm_usage_summary
 
 
@@ -36,6 +41,17 @@ class FakeTokenizer:
 
 class FakeConfig:
     model_type = "mistral3"
+
+
+class FakeChatTemplateTokenizer:
+    bos_token = PromptToken.BOS_FALLBACK
+    eos_token = PromptToken.EOS_FALLBACK
+
+    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt, enable_thinking):
+        assert tokenize is False
+        assert add_generation_prompt is True
+        assert enable_thinking is False
+        return "PROMPT:" + " | ".join(f"{item['role']}={item['content']}" for item in messages)
 
 
 class FakeModel:
@@ -83,3 +99,12 @@ def test_local_llm_initializes_and_generates(monkeypatch, tmp_path):
     assert usage["totals"]["structuredCount"] == 1
     assert usage["totals"]["inputTokens"] == 6
     assert usage["totals"]["outputTokens"] == 2
+
+
+def test_local_chat_prompt_uses_tokenizer_template_when_available():
+    prompt = _render_chat_prompt(
+        [{"role": MessageRole.USER, "content": "Break this down"}],
+        cast(PreTrainedTokenizerBase, FakeChatTemplateTokenizer()),
+    )
+
+    assert prompt == "PROMPT:user=Break this down"

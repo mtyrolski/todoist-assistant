@@ -86,7 +86,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       setLoading(true);
       setError(null);
       setWarning(null);
-      setLoadingHint("Fetching archived and active projects from Todoist. This can take a few minutes on first sync.");
+      setLoadingHint("Checking archived and active projects from Todoist. Large accounts can take a few minutes.");
       const qs = new URLSearchParams();
       if (file) qs.set("file", file);
       if (refresh) qs.set("refresh", "true");
@@ -113,7 +113,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         keepLoading = true;
         setError(null);
         setLoadingHint(
-          "Preparing project adjustments. The Todoist API can be rate-limited during first sync — retrying shortly…"
+          "Preparing project adjustments. Todoist API rate limits can slow this refresh; retrying shortly..."
         );
         if (retryTimer.current) {
           clearTimeout(retryTimer.current);
@@ -273,13 +273,13 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       updatedAt: null,
       detail:
         loadingHint ??
-        "Fetching archived and active projects from Todoist. This can take a few minutes on first sync.",
+        "Checking archived and active Todoist projects. Large accounts can take a few minutes.",
       error: null
     } satisfies DashboardProgress;
   }, [progress, loading, loadingHint]);
 
   const addParent = (name: string) => {
-    if (!name || activeRoots.includes(name)) return;
+    if (!name || !archivedProjects.includes(name)) return;
     setArchivedParentsDraft((prev) => {
       if (prev.includes(name)) return prev;
       const next = [...prev, name];
@@ -395,7 +395,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
           </div>
           <p className="muted tiny" style={{ margin: 0 }}>
             Map archived projects or configurable active roots like Inbox to a root project so history and charts stay
-            together the way you want. First load may take a few minutes while Todoist data syncs.
+            together the way you want. Refreshes may take a few minutes while Todoist data syncs.
           </p>
         </div>
         <div className="adjustmentsHeaderActions">
@@ -436,7 +436,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
           <ProgressSteps progress={progressDisplay} />
           <p className="muted tiny" style={{ margin: 0 }}>
             {loadingHint ??
-              "Fetching archived and active projects. If this is your first sync, the Todoist API may be rate-limited; progress will appear above."}
+              "Checking archived and active projects. Todoist API rate limits can slow large refreshes; progress will appear above."}
           </p>
           <div className="skeleton" style={{ minHeight: 180 }} />
         </div>

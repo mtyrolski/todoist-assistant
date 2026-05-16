@@ -490,6 +490,101 @@ def test_fetch_activity_adaptively_passes_cached_events_to_range(_mock_logger, d
     assert first_call_kwargs["events_already_fetched"] == {cached_event}
 
 
+@patch('todoist.database.db_activity.logger')
+def test_fetch_activity_adaptively_reports_window_progress(_mock_logger, db_activity):
+    from todoist.utils import set_tqdm_progress_callback
+
+    progress_calls: list[tuple[str, int, int, str | None]] = []
+    set_tqdm_progress_callback(
+        lambda desc, current, total, unit: progress_calls.append(
+            (desc, current, total, unit)
+        )
+    )
+    try:
+        with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+            mock_fetch_window.side_effect = [[], []]
+
+            db_activity.fetch_activity_adaptively(
+                nweeks_window_size=4,
+                early_stop_after_n_windows=2,
+                progress_desc="Backfilling activity history",
+            )
+    finally:
+        set_tqdm_progress_callback(None)
+
+    assert any(
+        call == ("Backfilling activity history", 0, 2, "window")
+        for call in progress_calls
+    )
+    assert any(
+        desc == "Backfilling activity history"
+        and current >= 1
+        and unit == "window"
+        for desc, current, _total, unit in progress_calls
+    )
+
+
+@patch('todoist.database.db_activity.logger')
+def test_fetch_activity_adaptively_reports_verbose_window_detail(_mock_logger, db_activity):
+    from todoist.utils import set_tqdm_progress_callback
+
+    progress_calls: list[tuple[str, int, int, str | None, str | None]] = []
+
+    def _capture(
+        desc: str,
+        current: int,
+        total: int,
+        unit: str | None,
+        detail: str | None = None,
+    ) -> None:
+        progress_calls.append((desc, current, total, unit, detail))
+
+    set_tqdm_progress_callback(_capture)
+    try:
+        with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+            mock_fetch_window.side_effect = [[], []]
+
+            db_activity.fetch_activity_adaptively(
+                nweeks_window_size=4,
+                early_stop_after_n_windows=2,
+                progress_desc="Backfilling activity history",
+            )
+    finally:
+        set_tqdm_progress_callback(None)
+
+    details = [detail or "" for *_rest, detail in progress_calls]
+    assert any("scanning" in detail and "to" in detail for detail in details)
+    assert any("workers=1" in detail for detail in details)
+    assert any("empty windows=" in detail for detail in details)
+
+
+@patch('todoist.database.db_activity.TodoistAPIClient.request_json')
+def test_fetch_activity_range_reports_page_progress(mock_request_json, db_activity):
+    from datetime import datetime, timezone
+    from todoist.utils import set_tqdm_progress_callback
+
+    mock_request_json.return_value = {"results": [], "next_cursor": None}
+    progress_calls: list[tuple[str, int, int, str | None]] = []
+    set_tqdm_progress_callback(
+        lambda desc, current, total, unit: progress_calls.append(
+            (desc, current, total, unit)
+        )
+    )
+    try:
+        getattr(db_activity, "_fetch_activity_range")(
+            date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            date_to=datetime(2024, 1, 8, tzinfo=timezone.utc),
+            progress_desc="Fetching activity history",
+        )
+    finally:
+        set_tqdm_progress_callback(None)
+
+    assert any(
+        desc == "Fetching activity history" and unit == "page" and current >= 1
+        for desc, current, _total, unit in progress_calls
+    )
+
+
 @patch('todoist.database.db_activity.TodoistAPIClient.request_json')
 def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_request_json, db_activity):
     from datetime import datetime, timezone
@@ -561,6 +656,66 @@ def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_r
 
     assert [event.id for event in events] == ["event-new", "event-older-missing"]
     assert mock_request_json.call_count == 3
+
+
+@patch('todoist.database.db_activity.TodoistAPIClient.request_json')
+def test_fetch_activity_range_filters_by_parent_project_id(mock_request_json, db_activity):
+    from datetime import datetime, timezone
+
+    mock_request_json.return_value = {"results": [], "next_cursor": None}
+
+    getattr(db_activity, "_fetch_activity_range")(
+        date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        date_to=datetime(2024, 1, 31, tzinfo=timezone.utc),
+        parent_project_id="archived-parent",
+    )
+
+    spec_arg = mock_request_json.call_args.args[0]
+    assert spec_arg.params["parent_project_id"] == "archived-parent"
+
+
+def test_fetch_activity_for_parent_projects_scans_each_parent_window(db_activity):
+    from datetime import datetime, timezone
+    from todoist.types import Event, EventEntry
+    import datetime as dt
+
+    entry = EventEntry(
+        id="event-parent",
+        object_type="item",
+        object_id="task-parent",
+        event_type="completed",
+        event_date="2024-01-03T12:00:00Z",
+        parent_project_id="parent-a",
+        parent_item_id=None,
+        initiator_id="user1",
+        extra_data={"content": "Task parent"},
+        extra_data_id="extra-parent",
+        v2_object_id="v2_task_parent",
+        v2_parent_item_id=None,
+        v2_parent_project_id="v2_parent_a",
+    )
+    event = Event(
+        event_entry=entry,
+        id="event-parent",
+        date=dt.datetime(2024, 1, 3, 12, 0, 0),
+    )
+
+    with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_range:
+        mock_fetch_range.side_effect = [[event], []]
+
+        events = db_activity.fetch_activity_for_parent_projects(
+            ["parent-a", "parent-b"],
+            date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            date_to=datetime(2024, 1, 8, tzinfo=timezone.utc),
+            window_weeks=1,
+            events_already_fetched=set(),
+        )
+
+    assert events == [event]
+    assert mock_fetch_range.call_count == 2
+    assert {
+        call.kwargs["parent_project_id"] for call in mock_fetch_range.call_args_list
+    } == {"parent-a", "parent-b"}
 
 
 def test_fetch_activity_signature(db_activity):

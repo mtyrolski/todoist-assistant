@@ -25,7 +25,7 @@ def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(tmp_path: Path
     (data_dir / ".env").write_text(
         "\n".join(
             [
-                "TODOIST_AGENT_TRITON_MODEL_ID='from-data'",
+                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
                 "TODOIST_AGENT_TRITON_MODEL_NAME='todoist_llm'",
                 "TODOIST_AGENT_TRITON_URL='http://127.0.0.1:8123'",
             ]
@@ -35,7 +35,7 @@ def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(tmp_path: Path
     (cache_dir / ".env").write_text(
         "\n".join(
             [
-                "TODOIST_AGENT_TRITON_MODEL_ID='from-cache'",
+                "TODOIST_AGENT_MODEL_ID='from-cache'",
                 "TODOIST_AGENT_TRITON_MODEL_NAME='todoist_llm'",
                 "TODOIST_AGENT_TRITON_URL='http://127.0.0.1:9000'",
             ]
@@ -61,7 +61,7 @@ def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(tmp_path: Path
     )
 
     assert env_path == data_dir / ".env"
-    assert payload["model_id"] == "from-data"
+    assert payload["model_id"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["url"] == "http://127.0.0.1:8123"
 
 
@@ -70,7 +70,7 @@ def test_resolve_triton_launch_settings_reads_saved_env(tmp_path: Path) -> None:
     env_path.write_text(
         "\n".join(
             [
-                "TODOIST_AGENT_TRITON_MODEL_ID='mistralai/Ministral-3-3B-Instruct-2512'",
+                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
                 "TODOIST_AGENT_TRITON_MODEL_NAME='todoist_llm'",
                 "TODOIST_AGENT_TRITON_URL='http://127.0.0.1:8123'",
             ]
@@ -80,6 +80,20 @@ def test_resolve_triton_launch_settings_reads_saved_env(tmp_path: Path) -> None:
 
     payload = resolve_triton_launch_settings(repo_root=tmp_path, cwd=tmp_path, environ={})
 
-    assert payload["model_id"] == "mistralai/Ministral-3-3B-Instruct-2512"
+    assert payload["model_id"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["model_name"] == "todoist_llm"
     assert payload["url"] == "http://127.0.0.1:8123"
+
+
+def test_resolve_triton_launch_settings_falls_back_from_unsupported_model(
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "TODOIST_AGENT_MODEL_ID='openai/gpt-oss-20b'",
+        encoding="utf-8",
+    )
+
+    payload = resolve_triton_launch_settings(repo_root=tmp_path, cwd=tmp_path, environ={})
+
+    assert payload["model_id"] == "Qwen/Qwen2.5-3B-Instruct"

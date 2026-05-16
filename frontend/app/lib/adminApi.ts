@@ -53,6 +53,8 @@ export type AdminRunResult = {
   durationSeconds: number;
   output: string;
   taskDelegations: unknown;
+  status?: string;
+  error?: string | null;
 };
 
 export type AdminRunAllResult = {

@@ -326,5 +326,7 @@ def anonymize_activity_dates(df_activity: pd.DataFrame, *, seed: str = "todoist-
 
     offset_series = task_key.map(lambda value: offsets.get(str(value), zero_delta)).fillna(zero_delta)
     df.index = df.index + pd.to_timedelta(offset_series.to_numpy())
+    if "date" in df.columns:
+        df["date"] = df.index
     df.sort_index(inplace=True)
     return df

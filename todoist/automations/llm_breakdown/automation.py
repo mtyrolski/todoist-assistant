@@ -14,6 +14,7 @@ from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.env import EnvVar
 from todoist.llm import (
+    DEFAULT_MODEL_ID,
     DEFAULT_OPENAI_MODEL,
     LocalChatConfig,
     OpenAIChatConfig,
@@ -23,6 +24,7 @@ from todoist.llm import (
     TransformersMistral3ChatModel,
 )
 from todoist.llm.llm_utils import _sanitize_text
+from todoist.llm.model_catalog import coerce_model_id_for_backend
 from todoist.runtime_env import resolve_runtime_env_path
 from todoist.types import Task
 from todoist.utils import Cache
@@ -209,7 +211,7 @@ class LLMBreakdown(Automation):
             os.getenv(str(EnvVar.AGENT_MODEL_ID)) or values.get(str(EnvVar.AGENT_MODEL_ID))
         )
         if model_id:
-            updates["model_id"] = model_id
+            updates["model_id"] = coerce_model_id_for_backend(model_id, "local")
         config = replace(self.model_config, **updates) if updates else self.model_config
         return TransformersMistral3ChatModel(config)
 
@@ -239,14 +241,15 @@ class LLMBreakdown(Automation):
             or values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
         )
         model_id = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID))
-            or values.get(str(EnvVar.AGENT_TRITON_MODEL_ID))
+            os.getenv(str(EnvVar.AGENT_MODEL_ID))
+            or values.get(str(EnvVar.AGENT_MODEL_ID))
         )
+        coerced_model_id = coerce_model_id_for_backend(model_id, "triton")
         return TritonGenerateChatModel(
             TritonChatConfig(
                 base_url=base_url or TritonChatConfig().base_url,
                 model_name=model_name or TritonChatConfig().model_name,
-                model_id=model_id or TritonChatConfig().model_id,
+                model_id=coerced_model_id or DEFAULT_MODEL_ID,
                 temperature=float(self.model_config.temperature),
                 top_p=float(self.model_config.top_p),
                 max_output_tokens=int(self.model_config.max_new_tokens),

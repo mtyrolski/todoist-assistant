@@ -48,7 +48,7 @@ def chat(
     model_id: str = typer.Option(
         ...,
         envvar=EnvVar.AGENT_MODEL_ID,
-        help="Transformers model id or local path (e.g. mistralai/Ministral-3-3B-Instruct-2512)",
+        help="Transformers model id or local path (e.g. Qwen/Qwen2.5-3B-Instruct)",
     ),
     cache_path: Path = typer.Option(
         Path(resolve_cache_dir()),

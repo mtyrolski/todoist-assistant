@@ -1,11 +1,12 @@
-# pylint: disable=global-statement,too-many-lines
+# pyright: reportFunctionMemberAccess=false, reportPossiblyUnboundVariable=false
+# pylint: disable=global-statement,too-many-lines,protected-access,unused-import
 
 import asyncio
 from collections.abc import Mapping, Sequence
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
@@ -18,7 +19,6 @@ from pathlib import Path
 import signal
 import subprocess
 import threading
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import time
 
@@ -30,10 +30,6 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-from pydantic import BaseModel, Field
-
-from todoist.api.client import RequestSpec, TodoistAPIClient, TimeoutSettings
-from todoist.api.endpoints import TodoistEndpoints
 from todoist.database.base import Database
 from todoist.database.dataframe import (
     DEFAULT_ADJUSTMENTS_FILENAME,
@@ -54,7 +50,6 @@ from todoist.dashboard.plots import (
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
-from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.gmail_tasks import (
@@ -69,11 +64,9 @@ from todoist.automations.llm_breakdown.config import (
 )
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
-from todoist.automations.multiplicate.automation import MultiplyConfig
 from todoist.llm import (
     DEFAULT_MODEL_ID,
     DEFAULT_OPENAI_MODEL,
-    DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     MessageRole,
@@ -85,7 +78,7 @@ from todoist.llm import (
 )
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
-from todoist.runtime_env import resolve_runtime_env_path
+from todoist.llm.model_catalog import LOCAL_MODEL_OPTIONS, OPENAI_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -93,21 +86,60 @@ from todoist.dashboard_settings import (
 )
 from todoist.web.dashboard_payload import (
     DEFAULT_URGENCY_SETTINGS,
-    build_habit_tracker_payload as _build_habit_tracker_payload,
-    completed_share_leaderboard as _completed_share_leaderboard,
-    compute_insights as _compute_insights,
     compute_plot_range as _compute_plot_range,
     empty_activity_df as _empty_activity_df,
     evaluate_urgency_status as _evaluate_urgency_status,
-    extract_metrics_dict as _extract_metrics_dict,
-    fig_to_dict as _fig_to_dict,
-    last_completed_week_bounds as _last_completed_week_bounds,
     normalize_activity_df as _normalize_activity_df,
-    period_bounds as _period_bounds,
-    safe_activity_anchor as _safe_activity_anchor,
+    normalize_plot_events as _normalize_plot_events,
 )
 from todoist.web.routes.admin_automations import router as _admin_automations_router
-from todoist.habit_tracker import extract_tracked_habit_tasks
+from todoist.web.routes.api_routes import router as _api_routes_router
+from todoist.web.api_components.logs import (
+    RuntimeLogSpec as _RuntimeLogSpec,
+    display_log_path as _component_display_log_path,
+    read_log_file as _read_log_file,
+    resolve_runtime_log_request as _component_resolve_runtime_log_request,
+    resolve_runtime_log_source as _component_resolve_runtime_log_source,
+    runtime_log_path as _component_runtime_log_path,
+    runtime_log_sources as _component_runtime_log_sources,
+)
+from todoist.web.api_components.runtime import (
+    REPO_ROOT as _REPO_ROOT,
+    dashboard_pid_dir as _dashboard_pid_dir,
+    dashboard_state_dir as _dashboard_state_dir,
+    detect_system_timezone as _detect_system_timezone,
+    is_valid_timezone_name as _is_valid_timezone_name,
+    looks_like_api_key as _looks_like_api_key,
+    mask_api_key as _mask_api_key,
+    normalize_api_key as _normalize_api_key,
+    normalize_timezone as _normalize_timezone,
+    resolve_api_key as _resolve_api_key,
+    resolve_config_dir as _resolve_config_dir,
+    resolve_data_dir as _resolve_data_dir,
+    resolve_env_path as _resolve_env_path,
+    safe_display_path as _safe_display_path,
+    validate_api_token as _validate_api_token,
+)
+from todoist.web.api_components.settings import (
+    dashboard_settings_payload as _component_dashboard_settings_payload,
+    llm_breakdown_settings_payload as _llm_breakdown_settings_payload,
+    multiplication_settings_payload as _multiplication_settings_payload,
+)
+from todoist.web.api_components.templates import (
+    ensure_identifier as _ensure_identifier,
+    load_defaults_list as _load_defaults_list,
+    normalize_template_node as _normalize_template_node,
+    read_yaml_config as _read_yaml_config,
+    save_yaml_config as _save_yaml_config,
+    template_defaults_key as _template_defaults_key,
+    template_path as _component_template_path,
+    template_summary as _component_template_summary,
+    template_to_camel as _template_to_camel,
+)
+from todoist.web.api_components import llm_chat as _llm_chat_component
+from todoist.web.api_components import task_ingest as _task_ingest_component
+from todoist.web.api_components import dashboard_runtime as _dashboard_runtime_component
+from todoist.web.api_components import automation_runtime as _automation_runtime_component
 from todoist.utils import (
     Cache,
     LocalStorageError,
@@ -139,7 +171,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(_admin_automations_router)
-
+app.include_router(_api_routes_router)
 
 @app.get("/api/health", tags=["health"])
 async def healthcheck() -> dict[str, str]:
@@ -147,9 +179,7 @@ async def healthcheck() -> dict[str, str]:
 
     return {"status": "ok", "version": get_version()}
 
-
 Granularity = Literal["W", "ME", "3ME"]
-
 
 class _DashboardState:
     def __init__(self) -> None:
@@ -169,7 +199,6 @@ class _DashboardState:
             and self.demo_mode == demo_mode
         )
 
-
 @dataclass
 class _ProgressState:
     active: bool = False
@@ -183,7 +212,6 @@ class _ProgressState:
     sub_total: int | None = None
     error: str | None = None
 
-
 _state = _DashboardState()
 _progress_state = _ProgressState()
 _activity_backfill_attempted = False
@@ -193,35 +221,24 @@ _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
-_DASHBOARD_STATE_SCHEMA_VERSION = 1
+_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
+    "Checking Todoist updates": 1,
     "Querying project data": 1,
+    "Checking activity cache": 1,
+    "Backfilling activity history": 1,
+    "Fetching activity history": 1,
+    "Fetching recent activity": 1,
+    "Fetching archived project activity": 1,
+    "Resolving project hierarchy": 2,
     "Building project hierarchy": 2,
     "Querying activity data": 1,
 }
 
-
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _resolve_data_dir() -> Path:
-    override = os.getenv(str(EnvVar.DATA_DIR)) or os.getenv(str(EnvVar.CACHE_DIR))
-    if override:
-        return Path(override).expanduser().resolve()
-    return _REPO_ROOT
-
-
-def _resolve_config_dir() -> Path:
-    override = os.getenv(str(EnvVar.CONFIG_DIR))
-    if override:
-        return Path(override).expanduser().resolve()
-    return _REPO_ROOT / "configs"
-
 
 _DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
@@ -229,128 +246,9 @@ _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
-_IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
-_API_KEY_PLACEHOLDERS = {
-    "put your api here",
-    "put your api key here",
-    "your todoist api key",
-}
-_API_KEY_MIN_LENGTH = 20
-_API_KEY_HEX_RE = re.compile(r"^[a-fA-F0-9]{32,64}$")
-_API_KEY_FALLBACK_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
-
-
-def _dashboard_state_dir() -> Path:
-    override = os.getenv("DASHBOARD_STATE_DIR")
-    if override:
-        return Path(override).expanduser().resolve()
-    return _REPO_ROOT / ".cache" / "todoist-assistant" / "dashboard"
-
-
-def _dashboard_pid_dir() -> Path:
-    override = os.getenv("DASHBOARD_PID_DIR")
-    if override:
-        return Path(override).expanduser().resolve()
-    return _dashboard_state_dir() / "pids"
-_LOCAL_MODEL_OPTIONS = [
-    {"id": DEFAULT_MODEL_ID, "label": "Ministral 3 3B Instruct"},
-    {"id": "mistralai/Mistral-7B-Instruct-v0.3", "label": "Mistral 7B Instruct v0.3"},
-    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
-    {"id": "mistralai/Mistral-Small-3.1-24B-Instruct-2503", "label": "Mistral Small 3.1 24B Instruct"},
-    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
-    {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
-    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
-    {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
-]
-_OPENAI_MODEL_OPTIONS = [
-    {"id": "gpt-5-nano", "label": "GPT-5 nano"},
-    {"id": "gpt-5-mini", "label": "GPT-5 mini"},
-    {"id": "gpt-5", "label": "GPT-5"},
-    {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
-    {"id": "gpt-4.1", "label": "GPT-4.1"},
-]
-_TRITON_MODEL_OPTIONS = [
-    {"id": DEFAULT_TRITON_MODEL_ID, "label": "Ministral 3 3B Instruct"},
-    {"id": "Qwen/Qwen2.5-3B-Instruct", "label": "Qwen 2.5 3B Instruct"},
-    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
-    {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
-    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
-    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
-]
-
-
-def _resolve_env_path() -> Path:
-    return resolve_runtime_env_path(repo_root=_REPO_ROOT)
-
-
-def _normalize_api_key(raw: str | None) -> str:
-    if not raw:
-        return ""
-    value = str(raw).strip().strip("'\"")
-    if not value:
-        return ""
-    if value.strip().lower() in _API_KEY_PLACEHOLDERS:
-        return ""
-    return value
-
-
-def _looks_like_api_key(value: str) -> bool:
-    if len(value) < _API_KEY_MIN_LENGTH:
-        return False
-    if any(char.isspace() for char in value):
-        return False
-    if _API_KEY_HEX_RE.fullmatch(value):
-        return True
-    return _API_KEY_FALLBACK_RE.fullmatch(value) is not None
-
-
-def _resolve_api_key() -> str:
-    env_value = _normalize_api_key(os.getenv("API_KEY"))
-    if env_value:
-        return env_value
-    env_path = _resolve_env_path()
-    if env_path.exists():
-        data = dotenv_values(env_path)
-        file_value = _normalize_api_key(data.get("API_KEY"))
-        if file_value:
-            os.environ["API_KEY"] = file_value
-            return file_value
-    return ""
-
-
-def _normalize_timezone(raw: Any) -> str:
-    if raw is None:
-        return ""
-    return str(raw).strip().strip("'\"")
-
-
-def _is_valid_timezone_name(value: str) -> bool:
-    if not value:
-        return False
-    try:
-        ZoneInfo(value)
-    except ZoneInfoNotFoundError:
-        return False
-    except Exception:
-        return False
-    return True
-
-
-def _detect_system_timezone() -> str:
-    local_timezone = datetime.now().astimezone().tzinfo
-    if local_timezone is None:
-        return "UTC"
-
-    key = getattr(local_timezone, "key", None)
-    if isinstance(key, str) and key.strip():
-        return key
-
-    timezone_name = local_timezone.tzname(None)
-    if isinstance(timezone_name, str) and timezone_name.strip():
-        return timezone_name
-
-    return "UTC"
-
+_LOCAL_MODEL_OPTIONS = LOCAL_MODEL_OPTIONS
+_OPENAI_MODEL_OPTIONS = OPENAI_MODEL_OPTIONS
+_TRITON_MODEL_OPTIONS = TRITON_MODEL_OPTIONS
 
 def _resolve_timezone_status() -> dict[str, Any]:
     env_path = _resolve_env_path()
@@ -387,46 +285,6 @@ def _resolve_timezone_status() -> dict[str, Any]:
     payload["invalidOverride"] = override
     return payload
 
-
-def _mask_api_key(value: str) -> str:
-    if not value:
-        return ""
-    if len(value) <= 4:
-        return "••••"
-    return f"••••{value[-4:]}"
-
-
-def _safe_display_path(path: Path, *, root: Path | None = None) -> str:
-    if root is not None:
-        try:
-            return str(path.relative_to(root))
-        except ValueError:
-            pass
-    name = path.name.strip()
-    return name or str(path)
-
-
-def _validate_api_token(token: str) -> tuple[bool, str | None, int | None]:
-    client = TodoistAPIClient(max_attempts=1)
-    spec = RequestSpec(
-        endpoint=TodoistEndpoints.LIST_LABELS,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=TimeoutSettings(connect=5.0, read=10.0),
-        max_attempts=1,
-    )
-    try:
-        payload = client.request_json(spec, operation_name="validate_api_token")
-    except Exception as exc:  # pragma: no cover - network dependent
-        return False, f"{type(exc).__name__}: {exc}", None
-
-    if not isinstance(payload, dict):
-        return False, f"Unexpected payload type: {type(payload).__name__}", None
-    results = payload.get("results")
-    if not isinstance(results, list):
-        return False, "Unexpected labels response payload", None
-    return True, None, len(results)
-
-
 @dataclass
 class _AdminJob:
     id: str
@@ -437,7 +295,6 @@ class _AdminJob:
     finished_at: str | None = None
     result: Any | None = None
     error: str | None = None
-
 
 _JOBS: dict[str, _AdminJob] = {}
 
@@ -478,899 +335,113 @@ _LLM_CHAT_WORKER_RUNNING = False
 _LLM_CHAT_AGENT = None
 _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
+def _call_dashboard_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
+    _dashboard_runtime_component._sync_api_globals()
+    return getattr(_dashboard_runtime_component, name)(*args, **kwargs)
 
 def _env_demo_mode() -> bool:
-    value = os.getenv(str(EnvVar.DASHBOARD_DEMO), "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
-
+    return bool(_call_dashboard_runtime("_env_demo_mode"))
 
 def _run_async_in_main_loop(coro: Any) -> Any:
-    """Run an async coroutine in the main event loop from a worker thread."""
-    if _main_loop is not None:
-        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
-        return future.result()
-    else:
-        # Fallback to creating a new event loop if main loop is not set
-        return asyncio.run(coro)
-
+    return _call_dashboard_runtime("_run_async_in_main_loop", coro)
 
 async def _progress_snapshot() -> dict[str, Any]:
-    async with _PROGRESS_LOCK:
-        return {
-            "active": _progress_state.active,
-            "stage": _progress_state.stage,
-            "step": _progress_state.step,
-            "totalSteps": _progress_state.total_steps,
-            "startedAt": _progress_state.started_at,
-            "updatedAt": _progress_state.updated_at,
-            "detail": _progress_state.detail,
-            "subCurrent": _progress_state.sub_current,
-            "subTotal": _progress_state.sub_total,
-            "error": _progress_state.error,
-        }
+    return await _call_dashboard_runtime("_progress_snapshot")
 
-
-async def _set_progress(
-    stage: str,
-    *,
-    step: int,
-    total_steps: int,
-    detail: str | None = None,
-    sub_current: int | None = None,
-    sub_total: int | None = None,
-) -> None:
-    now = _now_iso()
-    async with _PROGRESS_LOCK:
-        if not _progress_state.active:
-            _progress_state.started_at = now
-            _progress_state.error = None
-        _progress_state.active = True
-        _progress_state.stage = stage
-        _progress_state.step = step
-        _progress_state.total_steps = total_steps
-        _progress_state.detail = detail
-        _progress_state.sub_current = sub_current
-        _progress_state.sub_total = sub_total
-        _progress_state.updated_at = now
-
+async def _set_progress(stage: str, step: int, total_steps: int = _PROGRESS_TOTAL_STEPS) -> None:
+    await _call_dashboard_runtime("_set_progress", stage, step, total_steps)
 
 async def _finish_progress(error: str | None = None) -> None:
-    now = _now_iso()
-    async with _PROGRESS_LOCK:
-        _progress_state.active = False
-        _progress_state.stage = None
-        _progress_state.step = 0
-        _progress_state.total_steps = 0
-        _progress_state.detail = None
-        _progress_state.started_at = None
-        _progress_state.sub_current = None
-        _progress_state.sub_total = None
-        _progress_state.updated_at = now
-        _progress_state.error = error
-
+    await _call_dashboard_runtime("_finish_progress", error)
 
 def _build_tqdm_progress_callback():
-    last_update = 0.0
-    last_value = -1
-
-    def _callback(desc: str, current: int, total: int, unit: str | None) -> None:
-        nonlocal last_update, last_value
-        now = time.time()
-        if current == last_value and (now - last_update) < 0.4:
-            return
-        if current != total and (now - last_update) < 0.35:
-            return
-        last_value = current
-        last_update = now
-        step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
-        unit_suffix = f" {unit}" if unit else ""
-        detail = f"{desc}: {current}/{total}{unit_suffix}"
-        _run_async_in_main_loop(
-            _set_progress(
-                desc or "Working",
-                step=step,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail=detail,
-                sub_current=current,
-                sub_total=total,
-            )
-        )
-
-    return _callback
-
+    return _call_dashboard_runtime("_build_tqdm_progress_callback")
 
 def _activity_cache_signature() -> dict[str, int] | None:
-    activity_path = Path(Cache().activity.path)
-    if not activity_path.exists():
-        return None
-    try:
-        stat = activity_path.stat()
-    except OSError:
-        return None
-    return {"mtime_ns": int(stat.st_mtime_ns), "size": int(stat.st_size)}
+    return _call_dashboard_runtime("_activity_cache_signature")
 
 
 def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
-    df_activity = _state.df_activity
-    active_projects = _state.active_projects
-    project_colors = _state.project_colors
-    if (
-        df_activity is None
-        or active_projects is None
-        or project_colors is None
-    ):
-        return
-
-    payload: dict[str, Any] = {
-        "version": _DASHBOARD_STATE_SCHEMA_VERSION,
-        "created_at": _now_iso(),
-        "last_refresh_s": float(_state.last_refresh_s),
-        "demo_mode": bool(demo_mode),
-        "demo_state_version": (
-            _DEMO_DASHBOARD_STATE_SCHEMA_VERSION if demo_mode else None
-        ),
-        "activity_cache_signature": _activity_cache_signature(),
-        "df_activity": df_activity,
-        "active_projects": active_projects,
-        "project_colors": project_colors,
-    }
-    try:
-        Cache().dashboard_state.save(payload)
-    except (LocalStorageError, OSError, TypeError) as exc:
-        logger.warning(f"Failed to persist dashboard state cache: {exc}")
+    _call_dashboard_runtime("_persist_state_to_disk_cache", demo_mode=demo_mode)
 
 
 def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
-    loaded = False
-    try:
-        payload = Cache().dashboard_state.load()
-    except LocalStorageError:
-        payload = None
-
-    if isinstance(payload, dict):
-        if payload.get("version") == _DASHBOARD_STATE_SCHEMA_VERSION:
-            if bool(payload.get("demo_mode", False)) == demo_mode:
-                if demo_mode and payload.get("demo_state_version") != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION:
-                    return False
-                payload_signature = payload.get("activity_cache_signature")
-                current_signature = _activity_cache_signature()
-                if payload_signature == current_signature:
-                    df_activity = payload.get("df_activity")
-                    active_projects = payload.get("active_projects")
-                    project_colors = payload.get("project_colors")
-                    if isinstance(df_activity, pd.DataFrame):
-                        if isinstance(active_projects, list):
-                            if isinstance(project_colors, dict):
-                                _state.db = None
-                                _state.df_activity = _normalize_activity_df(
-                                    df_activity
-                                )
-                                _state.active_projects = active_projects
-                                _state.project_colors = {
-                                    str(k): str(v) for k, v in project_colors.items()
-                                }
-                                _state.last_refresh_s = float(
-                                    payload.get("last_refresh_s") or time.time()
-                                )
-                                _state.home_payload_cache = {}
-                                _state.demo_mode = demo_mode
-                                logger.info(
-                                    "Loaded dashboard state cache from disk "
-                                    f"(events={len(df_activity)}, "
-                                    f"projects={len(active_projects)})"
-                                )
-                                loaded = True
-
-    return loaded
+    return bool(_call_dashboard_runtime("_load_state_from_disk_cache", demo_mode=demo_mode))
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
-    global _activity_backfill_attempted
-    # Reset progress state to clear any stale information from previous failed refreshes
-    _run_async_in_main_loop(_finish_progress(error=None))
-
-    previous_callback = get_tqdm_progress_callback()
-    set_tqdm_progress_callback(_build_tqdm_progress_callback())
-
-    error: str | None = None
-    try:
-        _run_async_in_main_loop(
-            _set_progress(
-                "Querying project data",
-                step=1,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Fetching projects and tasks",
-            )
-        )
-        dbio = Database(".env")
-        dbio.pull()
-
-        try:
-            cached_events = Cache().activity.load()
-        except LocalStorageError:
-            cached_events = set()
-
-        def _should_backfill(events: set[Event]) -> bool:
-            if not events:
-                return True
-            dates = [e.date for e in events if isinstance(e.date, datetime)]
-            if not dates:
-                return True
-            span = max(dates) - min(dates)
-            return span < timedelta(weeks=12)
-
-        if cached_events and _resolve_api_key() and not _activity_backfill_attempted:
-            if _should_backfill(cached_events):
-                try:
-                    cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-                    activity_cfg = (
-                        cfg.get("activity") if isinstance(cfg, DictConfig) else None
-                    )
-                    nweeks = 10
-                    early_stop = 2
-                    if isinstance(activity_cfg, Mapping):
-                        nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
-                        early_stop = int(
-                            activity_cfg.get("early_stop_after_n_windows", early_stop)
-                        )
-                    logger.info(
-                        f"Activity cache looks short; backfilling history "
-                        f"(window={nweeks}w, stop={early_stop})."
-                    )
-                    events = dbio.fetch_activity_adaptively(
-                        nweeks_window_size=nweeks,
-                        early_stop_after_n_windows=early_stop,
-                        events_already_fetched=set(cached_events),
-                    )
-                    Cache().activity.save(set(events))
-                except Exception as exc:  # pragma: no cover - network-dependent
-                    logger.warning(f"Failed to backfill activity cache: {exc}")
-                finally:
-                    _activity_backfill_attempted = True
-
-        if not cached_events and _resolve_api_key():
-            try:
-                cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-                activity_cfg = (
-                    cfg.get("activity") if isinstance(cfg, DictConfig) else None
-                )
-                nweeks = 10
-                early_stop = 2
-                if isinstance(activity_cfg, Mapping):
-                    nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
-                    early_stop = int(
-                        activity_cfg.get("early_stop_after_n_windows", early_stop)
-                    )
-                logger.info(
-                    f"Activity cache empty; fetching full history (window={nweeks}w, stop={early_stop})."
-                )
-                events = dbio.fetch_activity_adaptively(
-                    nweeks_window_size=nweeks,
-                    early_stop_after_n_windows=early_stop,
-                    events_already_fetched=set(),
-                )
-                if not events:
-                    logger.info(
-                        "Adaptive fetch returned no events; attempting recent activity pages."
-                    )
-                    events = dbio.fetch_activity(max_pages=2)
-                Cache().activity.save(set(events))
-            except Exception as exc:  # pragma: no cover - network-dependent
-                logger.warning(f"Failed to seed activity cache: {exc}")
-            finally:
-                _activity_backfill_attempted = True
-
-        _run_async_in_main_loop(
-            _set_progress(
-                "Building project hierarchy",
-                step=2,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Resolving roots across active and archived projects",
-            )
-        )
-        try:
-            df_activity = _normalize_activity_df(load_activity_data(dbio))
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(f"Failed to load activity data; using empty dataset: {exc}")
-            df_activity = _empty_activity_df()
-
-        _run_async_in_main_loop(
-            _set_progress(
-                "Preparing dashboard data",
-                step=3,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Loading metadata and caches",
-            )
-        )
-        active_projects = dbio.fetch_projects(include_tasks=True)
-
-        if demo_mode and not dbio.is_anonymized:
-            from todoist.database.demo import (
-                anonymize_label_names,
-                anonymize_project_names,
-            )
-
-            project_ori2anonym = anonymize_project_names(df_activity, active_projects)
-            label_ori2anonym = anonymize_label_names(active_projects)
-            dbio.anonymize(
-                project_mapping=project_ori2anonym, label_mapping=label_ori2anonym
-            )
-
-        if demo_mode:
-            from todoist.database.demo import anonymize_activity_dates
-
-            df_activity = anonymize_activity_dates(df_activity)
-
-        project_colors = dbio.fetch_mapping_project_name_to_color()
-
-        _state.db = dbio
-        _state.df_activity = df_activity
-        _state.active_projects = active_projects
-        _state.project_colors = project_colors
-        _state.last_refresh_s = time.time()
-        _state.home_payload_cache = {}
-        _state.demo_mode = demo_mode
-        _persist_state_to_disk_cache(demo_mode=demo_mode)
-    except Exception as exc:  # pragma: no cover - defensive
-        error = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        set_tqdm_progress_callback(previous_callback)
-        _run_async_in_main_loop(_finish_progress(error))
+    _call_dashboard_runtime("_refresh_state_sync", demo_mode=demo_mode)
 
 
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
-    global _main_loop
-    desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-    if not refresh and _state.is_ready_for(demo_mode=desired_demo):
-        return
-
-    async with _STATE_LOCK:
-        desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-        if not refresh and _state.is_ready_for(demo_mode=desired_demo):
-            return
-        if not refresh and _load_state_from_disk_cache(demo_mode=desired_demo):
-            return
-        # Store the main event loop for worker threads to use
-        _main_loop = asyncio.get_running_loop()
-        await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
+    await _call_dashboard_runtime("_ensure_state", refresh, demo_mode=demo_mode)
 
 
 def _cache_runtime_path(filename: str) -> Path:
-    return Path(Cache().path) / filename
+    return _call_dashboard_runtime("_cache_runtime_path", filename)
 
 
 def _stat_file(path: str | Path) -> dict[str, Any] | None:
-    path_obj = Path(path).expanduser().resolve()
-    if not path_obj.exists():
-        return None
-    try:
-        stat = path_obj.stat()
-        return {
-            "path": str(path_obj),
-            "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-            "size": stat.st_size,
-        }
-    except OSError:
-        return {"path": str(path_obj), "mtime": None, "size": None}
+    return _call_dashboard_runtime("_stat_file", path)
 
 
 def _service_statuses() -> list[dict[str, Any]]:
-    api_key_set = bool(_resolve_api_key())
-    cache_activity = _stat_file(_cache_runtime_path("activity.joblib"))
-    automation_log = _stat_file(automation_log_path())
-    env_path = _resolve_env_path()
-    file_values = dotenv_values(env_path) if env_path.exists() else {}
-    triton_settings = _resolve_triton_settings(file_values)
-    triton_ready = _triton_ready(triton_settings)
-    observer_settings = observer_settings_payload(
-        load_dashboard_config(_DASHBOARD_CONFIG_PATH),
-        path=_DASHBOARD_CONFIG_PATH,
-    )
-    observer_enabled = bool(observer_settings["enabled"])
-
-    observer_recent = False
-    if automation_log and automation_log.get("mtime"):
-        try:
-            log_dt = datetime.fromisoformat(automation_log["mtime"])
-            observer_recent = (datetime.now() - log_dt) < timedelta(minutes=2)
-        except ValueError:
-            observer_recent = False
-
-    if not observer_enabled:
-        observer_status = "warn"
-        observer_detail = "disabled"
-    elif observer_recent:
-        observer_status = "ok"
-        observer_detail = "recent activity"
-    else:
-        observer_status = "neutral"
-        observer_detail = "enabled, waiting for first tick"
-
-    return [
-        {
-            "name": "Todoist token",
-            "status": "ok" if api_key_set else "warn",
-            "detail": "API_KEY set" if api_key_set else "API_KEY missing",
-        },
-        {
-            "name": "Activity cache",
-            "status": "ok" if cache_activity else "warn",
-            "detail": cache_activity or "activity.joblib missing",
-        },
-        {
-            "name": "Automation log",
-            "status": "ok" if automation_log else "warn",
-            "detail": automation_log or "automation.log missing",
-        },
-        {
-            "name": "Triton",
-            "status": "ok" if triton_ready else "warn",
-            "detail": (
-                f"{triton_settings['modelName']} ready at {triton_settings['baseUrl']}"
-                if triton_ready
-                else f"not ready at {triton_settings['baseUrl']}"
-            ),
-        },
-        {"name": "Observer", "status": observer_status, "detail": observer_detail},
-    ]
-
-
-@app.get("/api/dashboard/status", tags=["dashboard"])
-async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
-    """
-    Lightweight status endpoint for UI badges (does not generate plots).
-    """
-    # Intentionally ignore refresh: this endpoint must stay non-blocking and avoid Todoist API calls.
-    _ = refresh
-    dashboard_config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
-    observer_settings = observer_settings_payload(dashboard_config, path=_DASHBOARD_CONFIG_PATH)
-    return {
-        "services": _service_statuses(),
-        "configurableItems": [
-            {
-                "key": "observer",
-                "label": "Dashboard observer",
-                "icon": "wrench",
-                "configPath": observer_settings["configPath"],
-                "anchor": "observer-control",
-            }
-        ],
-        "apiCache": {
-            "lastRefresh": datetime.fromtimestamp(_state.last_refresh_s).isoformat(
-                timespec="seconds"
-            )
-            if _state.last_refresh_s
-            else None
-        },
-        "activityCache": _stat_file(_cache_runtime_path("activity.joblib")),
-        "now": datetime.now().isoformat(timespec="seconds"),
-    }
-
-
-@app.get("/api/dashboard/progress", tags=["dashboard"])
-async def dashboard_progress() -> dict[str, Any]:
-    """Return current data refresh progress for the dashboard."""
-
-    return await _progress_snapshot()
+    return _call_dashboard_runtime("_service_statuses")
 
 
 def _llm_breakdown_snapshot() -> dict[str, Any]:
-    payload = Cache().llm_breakdown_progress.load()
-    if not isinstance(payload, dict):
-        payload = {}
-
-    results = payload.get(ProgressKey.RESULTS.value)
-    results = results if isinstance(results, list) else []
-    recent = results[-3:] if results else []
-
-    return {
-        "active": bool(payload.get("active")),
-        "status": payload.get("status") or "idle",
-        "runId": payload.get("run_id"),
-        "startedAt": payload.get("started_at"),
-        "updatedAt": payload.get("updated_at"),
-        "tasksTotal": int(payload.get("tasks_total") or 0),
-        "tasksCompleted": int(payload.get("tasks_completed") or 0),
-        "tasksFailed": int(payload.get("tasks_failed") or 0),
-        "tasksPending": int(payload.get("tasks_pending") or 0),
-        "current": payload.get("current"),
-        "error": payload.get("error"),
-        "recent": recent,
-    }
+    return _call_dashboard_runtime("_llm_breakdown_snapshot")
 
 
-@app.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
-async def dashboard_llm_breakdown() -> dict[str, Any]:
-    """Return LLM breakdown queue progress."""
-
-    return _llm_breakdown_snapshot()
+for _component_wrapper_name in _dashboard_runtime_component._COMPONENT_EXPORTS:
+    globals()[_component_wrapper_name]._component_wrapper_for = _component_wrapper_name
+del _component_wrapper_name
 
 
 def _normalize_chat_message(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
-    role = str(raw.get("role") or "").strip().lower()
-    if role not in _CHAT_ROLES:
-        return None
-    content = _sanitize_text(raw.get("content"))
-    if not content:
-        return None
-    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
-    return {"role": role, "content": content, "created_at": created_at}
-
-
+    return _llm_chat_component._normalize_chat_message(raw)
 def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
-    conv_id = str(raw.get("id") or "").strip()
-    if not conv_id:
-        return None
-    title = _sanitize_text(raw.get("title")) or "Untitled chat"
-    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
-    updated_at = str(raw.get("updated_at") or raw.get("updatedAt") or created_at or "")
-    messages_raw = raw.get("messages")
-    messages: list[dict[str, Any]] = []
-    if isinstance(messages_raw, list):
-        for msg in messages_raw:
-            normalized = _normalize_chat_message(msg)
-            if normalized:
-                messages.append(normalized)
-    return {
-        "id": conv_id,
-        "title": title,
-        "created_at": created_at,
-        "updated_at": updated_at,
-        "messages": messages,
-    }
-
-
+    return _llm_chat_component._normalize_chat_conversation(raw)
 def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
-    item_id = str(raw.get("id") or "").strip()
-    conversation_id = str(
-        raw.get("conversation_id") or raw.get("conversationId") or ""
-    ).strip()
-    content = _sanitize_text(raw.get("content"))
-    if not item_id or not conversation_id or not content:
-        return None
-    status = str(raw.get("status") or "queued").strip().lower()
-    if status not in _CHAT_QUEUE_STATUSES:
-        status = "queued"
-    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
-    return {
-        "id": item_id,
-        "conversation_id": conversation_id,
-        "content": content,
-        "status": status,
-        "created_at": created_at,
-        "started_at": raw.get("started_at") or raw.get("startedAt"),
-        "finished_at": raw.get("finished_at") or raw.get("finishedAt"),
-        "error": raw.get("error"),
-    }
-
-
+    return _llm_chat_component._normalize_chat_queue_item(raw)
 def _load_llm_chat_conversations() -> list[dict[str, Any]]:
-    try:
-        payload = Cache().llm_chat_conversations.load()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to load LLM chat conversations: {exc}")
-        return []
-    if not isinstance(payload, list):
-        return []
-    conversations: list[dict[str, Any]] = []
-    for raw in payload:
-        normalized = _normalize_chat_conversation(raw)
-        if normalized:
-            conversations.append(normalized)
-    return conversations
-
-
+    return _llm_chat_component._load_llm_chat_conversations()
 def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
-    try:
-        Cache().llm_chat_conversations.save(conversations)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to save LLM chat conversations: {exc}")
-
-
+    return _llm_chat_component._save_llm_chat_conversations(conversations)
 def _load_llm_chat_queue() -> list[dict[str, Any]]:
-    try:
-        payload = Cache().llm_chat_queue.load()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to load LLM chat queue: {exc}")
-        return []
-    if not isinstance(payload, list):
-        return []
-    queue_items: list[dict[str, Any]] = []
-    for raw in payload:
-        normalized = _normalize_chat_queue_item(raw)
-        if normalized:
-            queue_items.append(normalized)
-    return queue_items
-
-
+    return _llm_chat_component._load_llm_chat_queue()
 def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
-    try:
-        Cache().llm_chat_queue.save(items)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to save LLM chat queue: {exc}")
-
-
+    return _llm_chat_component._save_llm_chat_queue(items)
 def _truncate_text(value: str, limit: int = 120) -> str:
-    if len(value) <= limit:
-        return value
-    return value[: max(0, limit - 3)].rstrip() + "..."
-
-
+    return _llm_chat_component._truncate_text(value, limit)
 def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
-    messages = conv.get("messages") or []
-    last_message = None
-    if messages:
-        last_message = messages[-1].get("content")
-        if isinstance(last_message, str):
-            last_message = _truncate_text(last_message, 140)
-        else:
-            last_message = None
-    return {
-        "id": conv.get("id"),
-        "title": conv.get("title"),
-        "createdAt": conv.get("created_at"),
-        "updatedAt": conv.get("updated_at"),
-        "messageCount": len(messages),
-        "lastMessage": last_message,
-    }
-
-
+    return _llm_chat_component._conversation_summary(conv)
 def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": item.get("id"),
-        "conversationId": item.get("conversation_id"),
-        "content": _truncate_text(item.get("content") or "", 160),
-        "status": item.get("status"),
-        "createdAt": item.get("created_at"),
-        "startedAt": item.get("started_at"),
-        "finishedAt": item.get("finished_at"),
-        "error": item.get("error"),
-    }
-
-
+    return _llm_chat_component._queue_item_payload(item)
 def _parse_iso_timestamp(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value))
-    except ValueError:
-        return None
-
-
+    return _llm_chat_component._parse_iso_timestamp(value)
 def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> bool:
-    changed = False
-    cutoff = now_dt - timedelta(seconds=_LLM_CHAT_TIMEOUT_S)
-    now_iso = now_dt.isoformat(timespec="seconds")
-    for item in queue:
-        if item.get("status") != "running":
-            continue
-        started_at = item.get("started_at") or item.get("created_at")
-        started_dt = _parse_iso_timestamp(started_at)
-        if started_dt is None:
-            continue
-        if started_dt <= cutoff:
-            item["status"] = "failed"
-            item["finished_at"] = now_iso
-            item["error"] = "Timed out after 1h"
-            changed = True
-    return changed
-
-
+    return _llm_chat_component._expire_llm_chat_queue(queue, now_dt)
 def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if len(queue) <= _CHAT_QUEUE_LIMIT:
-        return queue
-    to_drop = len(queue) - _CHAT_QUEUE_LIMIT
-    if to_drop <= 0:
-        return queue
-    trimmed: list[dict[str, Any]] = []
-    for item in queue:
-        if to_drop and item.get("status") in {"done", "failed"}:
-            to_drop -= 1
-            continue
-        trimmed.append(item)
-    return trimmed
-
-
+    return _llm_chat_component._prune_queue(queue)
 def _available_llm_chat_devices() -> list[str]:
-    devices = ["cpu"]
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            devices.append("cuda")
-    except Exception:  # pragma: no cover - defensive
-        pass
-    return devices
-
-
+    return _llm_chat_component._available_llm_chat_devices()
 def _llm_model_options_payload(
     options: Sequence[Mapping[str, str]], selected: str
 ) -> list[dict[str, Any]]:
-    seen: set[str] = set()
-    payload: list[dict[str, Any]] = []
-    for option in options:
-        option_id = _sanitize_text(option.get("id"))
-        if not option_id or option_id in seen:
-            continue
-        seen.add(option_id)
-        payload.append(
-            {
-                "id": option_id,
-                "label": _sanitize_text(option.get("label")) or option_id,
-                "selected": option_id == selected,
-            }
-        )
-    if selected and selected not in seen:
-        payload.insert(0, {"id": selected, "label": selected, "selected": True})
-    return payload
-
-
+    return _llm_chat_component._llm_model_options_payload(options, selected)
 def _normalize_llm_chat_backend(raw: Any) -> str:
-    value = str(raw or "").strip().lower()
-    if value in _LLM_CHAT_BACKEND_LABELS:
-        return value
-    return _LLM_CHAT_BACKEND_DEFAULT
-
-
+    return _llm_chat_component._normalize_llm_chat_backend(raw)
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
-    value = str(raw or "").strip().lower()
-    if value == "gpu":
-        value = "cuda"
-    if value in available_devices:
-        return value
-    return _LLM_CHAT_DEVICE_DEFAULT
-
-
+    return _llm_chat_component._normalize_llm_chat_device(raw, available_devices=available_devices)
 def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    secret_key = _sanitize_text(
-        os.getenv("OPEN_AI_SECRET_KEY") or file_values.get("OPEN_AI_SECRET_KEY")
-    )
-    key_name = _sanitize_text(
-        os.getenv("OPEN_AI_KEY_NAME") or file_values.get("OPEN_AI_KEY_NAME")
-    )
-    model = _sanitize_text(
-        os.getenv("OPEN_AI_MODEL") or file_values.get("OPEN_AI_MODEL")
-    ) or DEFAULT_OPENAI_MODEL
-    if secret_key:
-        os.environ["OPEN_AI_SECRET_KEY"] = secret_key
-    if key_name:
-        os.environ["OPEN_AI_KEY_NAME"] = key_name
-    os.environ["OPEN_AI_MODEL"] = model
-    return {
-        "configured": bool(secret_key),
-        "keyName": key_name,
-        "model": model,
-        "modelOptions": _llm_model_options_payload(_OPENAI_MODEL_OPTIONS, model),
-    }
-
-
+    return _llm_chat_component._resolve_openai_settings(file_values)
 def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    base_url = _sanitize_text(
-        os.getenv(str(EnvVar.AGENT_TRITON_URL)) or file_values.get(str(EnvVar.AGENT_TRITON_URL))
-    ) or DEFAULT_TRITON_URL
-    model_name = _sanitize_text(
-        os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-        or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-    ) or DEFAULT_TRITON_MODEL_NAME
-    model_id = _sanitize_text(
-        os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID))
-        or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_ID))
-    ) or DEFAULT_TRITON_MODEL_ID
-    os.environ[str(EnvVar.AGENT_TRITON_URL)] = base_url
-    os.environ[str(EnvVar.AGENT_TRITON_MODEL_NAME)] = model_name
-    os.environ[str(EnvVar.AGENT_TRITON_MODEL_ID)] = model_id
-    return {
-        "baseUrl": base_url,
-        "modelName": model_name,
-        "modelId": model_id,
-        "modelOptions": _llm_model_options_payload(_TRITON_MODEL_OPTIONS, model_id),
-    }
-
-
+    return _llm_chat_component._resolve_triton_settings(file_values)
 def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
-    base_url = _sanitize_text(triton_settings.get("baseUrl"))
-    if not base_url:
-        return False
-    try:
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/v2/health/ready",
-            timeout=0.5,
-        )
-        response.raise_for_status()
-    except (httpx.HTTPError, ValueError):
-        return False
-    return True
-
-
+    return _llm_chat_component._triton_ready(triton_settings)
 def _resolve_llm_chat_settings() -> dict[str, Any]:
-    env_path = _resolve_env_path()
-    backend_key = str(EnvVar.AGENT_BACKEND)
-    device_key = str(EnvVar.AGENT_DEVICE)
-    local_model_key = str(EnvVar.AGENT_MODEL_ID)
-    file_values = dotenv_values(env_path) if env_path.exists() else {}
-    available_devices = _available_llm_chat_devices()
-    openai_settings = _resolve_openai_settings(file_values)
-    triton_settings = _resolve_triton_settings(file_values)
-    local_model_id = _sanitize_text(
-        os.getenv(local_model_key) or file_values.get(local_model_key)
-    ) or DEFAULT_MODEL_ID
-
-    backend = _normalize_llm_chat_backend(
-        os.getenv(backend_key) or file_values.get(backend_key)
-    )
-    device = _normalize_llm_chat_device(
-        os.getenv(device_key) or file_values.get(device_key),
-        available_devices=available_devices,
-    )
-    if backend == "openai" and not openai_settings["configured"]:
-        backend = _LLM_CHAT_BACKEND_DEFAULT
-    os.environ[backend_key] = backend
-    os.environ[device_key] = device
-    os.environ[local_model_key] = local_model_id
-    selected_model_id = (
-        openai_settings["model"]
-        if backend == "openai"
-        else triton_settings["modelId"]
-        if backend == "triton_local"
-        else local_model_id
-    )
-
-    return {
-        "backend": backend,
-        "backendLabel": _LLM_CHAT_BACKEND_LABELS[backend],
-        "device": device,
-        "deviceLabel": _LLM_CHAT_DEVICE_LABELS[device],
-        "localModelId": local_model_id,
-        "localModelOptions": _llm_model_options_payload(_LOCAL_MODEL_OPTIONS, local_model_id),
-        "availableBackends": [
-            {
-                "id": backend_id,
-                "label": label,
-                "available": (
-                    backend_id == "transformers_local"
-                    or backend_id == "triton_local"
-                    or (backend_id == "openai" and openai_settings["configured"])
-                ),
-            }
-            for backend_id, label in _LLM_CHAT_BACKEND_LABELS.items()
-        ],
-        "availableDevices": [
-            {
-                "id": device_id,
-                "label": label,
-                "available": device_id in available_devices,
-            }
-            for device_id, label in _LLM_CHAT_DEVICE_LABELS.items()
-        ],
-        "openai": {
-            "configured": openai_settings["configured"],
-            "keyName": openai_settings["keyName"],
-            "model": openai_settings["model"],
-            "modelOptions": openai_settings["modelOptions"],
-        },
-        "triton": {
-            "configured": True,
-            "healthy": _triton_ready(triton_settings),
-            "baseUrl": triton_settings["baseUrl"],
-            "modelName": triton_settings["modelName"],
-            "modelId": triton_settings["modelId"],
-            "modelOptions": triton_settings["modelOptions"],
-        },
-        "usage": load_llm_usage_summary(
-            selected_backend=backend,
-            selected_model_id=str(selected_model_id or ""),
-        ),
-        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
-    }
-
-
+    return _llm_chat_component._resolve_llm_chat_settings()
 async def _reset_llm_chat_runtime() -> None:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING, _LLM_CHAT_AGENT
     async with _LLM_CHAT_MODEL_LOCK:
@@ -1381,61 +452,13 @@ async def _reset_llm_chat_runtime() -> None:
 
 
 def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    public = dict(settings)
-    openai_settings = dict(public.get("openai") or {})
-    openai_settings.pop("secretKey", None)
-    public["openai"] = openai_settings
-    return public
-
-
+    return _llm_chat_component._public_llm_chat_settings(settings)
 def _build_llm_from_settings(
     settings: Mapping[str, Any],
     *,
     max_output_tokens: int,
 ) -> _LlmChatModel:
-    backend = str(settings.get("backend") or _LLM_CHAT_BACKEND_DEFAULT)
-    if backend == "transformers_local":
-        config = coerce_model_config(
-            {
-                "device": settings.get("device") or _LLM_CHAT_DEVICE_DEFAULT,
-                "model_id": settings.get("localModelId") or DEFAULT_MODEL_ID,
-                "max_new_tokens": max_output_tokens,
-            }
-        )
-        return TransformersMistral3ChatModel(config)
-
-    if backend == "triton_local":
-        triton_settings = settings.get("triton")
-        if not isinstance(triton_settings, Mapping):
-            raise ValueError("Triton settings are unavailable.")
-        return TritonGenerateChatModel(
-            TritonChatConfig(
-                base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
-                model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
-                model_id=str(triton_settings.get("modelId") or DEFAULT_TRITON_MODEL_ID),
-                max_output_tokens=max_output_tokens,
-            )
-        )
-
-    if backend == "openai":
-        openai_settings = settings.get("openai")
-        if not isinstance(openai_settings, Mapping):
-            raise ValueError("OpenAI settings are unavailable.")
-        secret_key = _sanitize_text(os.getenv("OPEN_AI_SECRET_KEY"))
-        if not secret_key:
-            raise ValueError("OpenAI backend is not configured.")
-        return OpenAIResponsesChatModel(
-            OpenAIChatConfig(
-                api_key=secret_key,
-                key_name=_sanitize_text(openai_settings.get("keyName")),
-                model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
-                max_output_tokens=max_output_tokens,
-            )
-        )
-
-    raise ValueError(f"Unsupported LLM backend: {backend}")
-
-
+    return _llm_chat_component._build_llm_from_settings(settings, max_output_tokens=max_output_tokens)
 async def _llm_chat_model_status() -> tuple[bool, bool]:
     async with _LLM_CHAT_MODEL_LOCK:
         return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
@@ -1473,21 +496,7 @@ async def _load_llm_chat_model_task() -> None:
 def _build_chat_messages(
     conversation: dict[str, Any], user_content: str
 ) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = []
-    if _CHAT_SYSTEM_PROMPT:
-        messages.append(
-            {"role": MessageRole.SYSTEM.value, "content": _CHAT_SYSTEM_PROMPT}
-        )
-    for msg in conversation.get("messages") or []:
-        role = msg.get("role")
-        content = msg.get("content")
-        # Skip system messages from history to avoid conflicts with the prepended system prompt
-        if role in _CHAT_ROLES and content and role != MessageRole.SYSTEM.value:
-            messages.append({"role": role, "content": str(content)})
-    messages.append({"role": MessageRole.USER.value, "content": user_content})
-    return messages
-
-
+    return _llm_chat_component._build_chat_messages(conversation, user_content)
 def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
     global _LLM_CHAT_AGENT
     try:
@@ -1735,1109 +744,60 @@ async def _run_llm_chat_queue() -> None:
 
 
 async def _llm_chat_snapshot() -> dict[str, Any]:
-    enabled, loading = await _llm_chat_model_status()
-    settings = _resolve_llm_chat_settings()
-    async with _LLM_CHAT_STORAGE_LOCK:
-        queue = _load_llm_chat_queue()
-        if _expire_llm_chat_queue(queue, datetime.now()):
-            _save_llm_chat_queue(queue)
-        conversations = _load_llm_chat_conversations()
-
-    counts = {status: 0 for status in _CHAT_QUEUE_STATUSES}
-    for item in queue:
-        status = item.get("status")
-        if status in counts:
-            counts[status] += 1
-
-    items = list(reversed(queue))[:12]
-    summaries = [_conversation_summary(conv) for conv in conversations]
-    summaries.sort(key=lambda item: item.get("updatedAt") or "", reverse=True)
-    current = next((item for item in queue if item.get("status") == "running"), None)
-    return {
-        "enabled": enabled,
-        "loading": loading,
-        "backend": {
-            "selected": settings["backend"],
-            "label": settings["backendLabel"],
-            "active": settings["backend"] if enabled or loading else None,
-            "options": settings["availableBackends"],
-            "openai": {
-                "configured": settings["openai"]["configured"],
-                "keyName": settings["openai"]["keyName"],
-                "model": settings["openai"]["model"],
-                "modelOptions": settings["openai"]["modelOptions"],
-            },
-            "triton": {
-                "configured": settings["triton"]["configured"],
-                "healthy": settings["triton"]["healthy"],
-                "baseUrl": settings["triton"]["baseUrl"],
-                "modelName": settings["triton"]["modelName"],
-                "modelId": settings["triton"]["modelId"],
-                "modelOptions": settings["triton"]["modelOptions"],
-            },
-            "envPath": settings["envPath"],
-        },
-        "model": {
-            "selected": (
-                settings["openai"]["model"]
-                if settings["backend"] == "openai"
-                else settings["triton"]["modelId"]
-                if settings["backend"] == "triton_local"
-                else settings["localModelId"]
-            ),
-            "label": (
-                settings["openai"]["model"]
-                if settings["backend"] == "openai"
-                else settings["triton"]["modelId"]
-                if settings["backend"] == "triton_local"
-                else settings["localModelId"]
-            ),
-            "active": (
-                settings["openai"]["model"]
-                if (enabled or loading) and settings["backend"] == "openai"
-                else settings["triton"]["modelId"]
-                if (enabled or loading) and settings["backend"] == "triton_local"
-                else settings["localModelId"]
-                if (enabled or loading) and settings["backend"] == "transformers_local"
-                else None
-            ),
-            "local": {
-                "selected": settings["localModelId"],
-                "options": settings["localModelOptions"],
-            },
-            "openai": {
-                "selected": settings["openai"]["model"],
-                "options": settings["openai"]["modelOptions"],
-            },
-            "triton": {
-                "selected": settings["triton"]["modelId"],
-                "options": settings["triton"]["modelOptions"],
-            },
-            "envPath": settings["envPath"],
-        },
-        "device": {
-            "selected": settings["device"],
-            "label": settings["deviceLabel"],
-            "active": (
-                settings["device"]
-                if (enabled or loading) and settings["backend"] == "transformers_local"
-                else None
-            ),
-            "options": settings["availableDevices"],
-            "envPath": settings["envPath"],
-        },
-        "queue": {
-            "total": len(queue),
-            "queued": counts["queued"],
-            "running": counts["running"],
-            "done": counts["done"],
-            "failed": counts["failed"],
-            "items": [_queue_item_payload(item) for item in items],
-            "current": _queue_item_payload(current) if current else None,
-        },
-        "usage": settings["usage"],
-        "conversations": summaries,
-    }
-
-
-@app.get("/api/dashboard/llm_chat", tags=["dashboard"])
-async def dashboard_llm_chat() -> dict[str, Any]:
-    """Return LLM chat queue status and conversation summaries."""
-
-    return await _llm_chat_snapshot()
-
-
-@app.get("/api/llm_chat/settings", tags=["llm"])
-async def llm_chat_settings() -> dict[str, Any]:
-    return _public_llm_chat_settings(_resolve_llm_chat_settings())
-
-
-@app.put("/api/llm_chat/settings", tags=["llm"])
-async def llm_chat_update_settings(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    settings = _resolve_llm_chat_settings()
-    requested_backend = str(payload.get("backend") or "").strip().lower()
-    if requested_backend not in {item["id"] for item in settings["availableBackends"]}:
-        raise HTTPException(status_code=400, detail="Unsupported LLM backend.")
-    backend = _normalize_llm_chat_backend(requested_backend)
-    if backend == "openai" and not settings["openai"]["configured"]:
-        raise HTTPException(
-            status_code=400,
-            detail="OpenAI backend is not configured.",
-        )
-
-    available_devices = [
-        str(item["id"])
-        for item in settings["availableDevices"]
-        if bool(item["available"])
-    ]
-    requested_device = str(payload.get("device") or "").strip().lower()
-    if requested_device == "gpu":
-        requested_device = "cuda"
-    if requested_device not in _LLM_CHAT_DEVICE_LABELS:
-        raise HTTPException(status_code=400, detail="Unsupported LLM device.")
-    if requested_device not in available_devices:
-        raise HTTPException(
-            status_code=400,
-            detail="Requested device is not available on this machine.",
-        )
-    device = _normalize_llm_chat_device(requested_device, available_devices=available_devices)
-    local_model_id = _sanitize_text(payload.get("localModelId")) or settings["localModelId"]
-    openai_model = _sanitize_text(payload.get("openaiModel")) or settings["openai"]["model"]
-    triton_model_id = _sanitize_text(payload.get("tritonModelId")) or settings["triton"]["modelId"]
-
-    enabled, loading = await _llm_chat_model_status()
-    if loading:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot change LLM settings while the model is loading.",
-        )
-
-    env_path = _resolve_env_path()
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
-    set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
-    set_key(str(env_path), str(EnvVar.AGENT_MODEL_ID), local_model_id)
-    set_key(str(env_path), "OPEN_AI_MODEL", openai_model)
-    set_key(str(env_path), str(EnvVar.AGENT_TRITON_MODEL_ID), triton_model_id)
-    os.environ[str(EnvVar.AGENT_BACKEND)] = backend
-    os.environ[str(EnvVar.AGENT_DEVICE)] = device
-    os.environ[str(EnvVar.AGENT_MODEL_ID)] = local_model_id
-    os.environ["OPEN_AI_MODEL"] = openai_model
-    os.environ[str(EnvVar.AGENT_TRITON_MODEL_ID)] = triton_model_id
-
-    if enabled:
-        await _reset_llm_chat_runtime()
-
-    updated = _resolve_llm_chat_settings()
-    updated["enabled"] = False if enabled else enabled
-    updated["loading"] = False
-    updated["reloadedRequired"] = enabled
-    return _public_llm_chat_settings(updated)
-
-
-@app.post("/api/llm_chat/enable", tags=["llm"])
-async def llm_chat_enable() -> dict[str, Any]:
-    """Start loading the local LLM model used for chat."""
-
-    await _start_llm_chat_model_load()
-    enabled, loading = await _llm_chat_model_status()
-    settings = _resolve_llm_chat_settings()
-    return {
-        "enabled": enabled,
-        "loading": loading,
-        "backend": settings["backend"],
-        "device": settings["device"],
-    }
-
-
-@app.post("/api/llm_chat/send", tags=["llm"])
-async def llm_chat_send(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    """Queue a chat prompt for the local LLM."""
-
-    message = _sanitize_text(payload.get("message"))
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
-
-    enabled, loading = await _llm_chat_model_status()
-    if not (enabled or loading):
-        raise HTTPException(
-            status_code=409,
-            detail="Model not loaded. Click Enable in the dashboard first.",
-        )
-
-    conversation_id = _sanitize_text(
-        payload.get("conversationId") or payload.get("conversation_id")
-    )
-    now = _now_iso()
-
-    async with _LLM_CHAT_STORAGE_LOCK:
-        conversations = _load_llm_chat_conversations()
-        conversation = None
-        if conversation_id:
-            conversation = next(
-                (item for item in conversations if item.get("id") == conversation_id),
-                None,
-            )
-            if conversation is None:
-                raise HTTPException(status_code=404, detail="Conversation not found")
-        else:
-            conversation_id = str(uuid4())
-            title = _truncate_text(message, 80)
-            conversation = {
-                "id": conversation_id,
-                "title": title,
-                "created_at": now,
-                "updated_at": now,
-                "messages": [],
-            }
-            conversations.append(conversation)
-
-        conversation["updated_at"] = now
-
-        queue = _load_llm_chat_queue()
-        item = {
-            "id": str(uuid4()),
-            "conversation_id": conversation_id,
-            "content": message,
-            "status": "queued",
-            "created_at": now,
-            "started_at": None,
-            "finished_at": None,
-            "error": None,
-        }
-        queue.append(item)
-        queue = _prune_queue(queue)
-        _save_llm_chat_queue(queue)
-        _save_llm_chat_conversations(conversations)
-
-    if enabled or loading:
-        await _maybe_start_llm_chat_worker()
-    return {
-        "queued": True,
-        "item": _queue_item_payload(item),
-        "conversationId": conversation_id,
-    }
-
-
-@app.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
-async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
-    """Fetch a conversation transcript."""
-
-    # Validate conversation_id format (should be a valid UUID)
-    try:
-        UUID(conversation_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail="Invalid conversation ID format"
-        ) from exc
-
-    async with _LLM_CHAT_STORAGE_LOCK:
-        conversations = _load_llm_chat_conversations()
-    conversation = next(
-        (item for item in conversations if item.get("id") == conversation_id), None
-    )
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return {
-        "id": conversation.get("id"),
-        "title": conversation.get("title"),
-        "createdAt": conversation.get("created_at"),
-        "updatedAt": conversation.get("updated_at"),
-        "messages": [
-            {
-                "role": msg.get("role"),
-                "content": msg.get("content"),
-                "createdAt": msg.get("created_at"),
-            }
-            for msg in conversation.get("messages") or []
-        ],
-    }
-
-@app.get("/api/dashboard/home", tags=["dashboard"])
-async def dashboard_home(
-    granularity: Granularity = "W",
-    weeks: int = 12,
-    beg: str | None = None,
-    end: str | None = None,
-    refresh: bool = False,
-) -> dict[str, Any]:
-    """
-    Home dashboard payload: metrics, badges, and Plotly figures.
-
-    Notes:
-    - `weeks` controls the date range used for time-series plots (default ~12 weeks).
-    - `beg`/`end` (YYYY-MM-DD) override `weeks` when provided.
-    - `granularity` controls periodic aggregation where applicable.
-    - `refresh=true` forces a Todoist API pull + activity reload (otherwise cached state is reused).
-    """
-    await _ensure_state(refresh=refresh)
-
-    df_activity = _state.df_activity
-    active_projects = _state.active_projects
-    project_colors = _state.project_colors
-
-    if df_activity is None or active_projects is None or project_colors is None:
-        return {
-            "error": "Dashboard data unavailable. Please ensure the database is configured and accessible."
-        }
-
-    df_activity = _normalize_activity_df(df_activity)
-    dashboard_settings_cfg = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
-    dashboard_settings = _dashboard_settings_payload(dashboard_settings_cfg)
-
-    no_data = df_activity.empty
-    beg_range, end_range = _compute_plot_range(
-        df_activity, weeks=weeks, beg=beg, end=end
-    )
-    beg_label = beg if beg is not None else beg_range.strftime("%Y-%m-%d")
-    end_label = end if end is not None else end_range.strftime("%Y-%m-%d")
-
-    periods = _period_bounds(df_activity, granularity)
-    metrics = _extract_metrics_dict(df_activity, periods)
-    today = datetime.now().date()
-    urgency_status = _evaluate_urgency_status(
-        active_projects,
-        today=today,
-        settings=dashboard_settings_cfg.get("urgency") if hasattr(dashboard_settings_cfg, "get") else None,
-    )
-
-    p1 = sum(map(p1_tasks, active_projects))
-    p2 = sum(map(p2_tasks, active_projects))
-    p3 = sum(map(p3_tasks, active_projects))
-    p4 = sum(map(p4_tasks, active_projects))
-
-    cache_key = (
-        "home",
-        f"g={granularity}",
-        f"beg={beg_label}",
-        f"end={end_label}",
-        f"no_data={int(no_data)}",
-        f"today={today.isoformat()}",
-    )
-    cached = _state.home_payload_cache.get(cache_key)
-    if cached and not refresh:
-        return cached
-
-    anchor_dt = _safe_activity_anchor(df_activity)
-    last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(
-        anchor_dt
-    )
-    tracked_habit_tasks = extract_tracked_habit_tasks(active_projects)
-    habit_tracker = _build_habit_tracker_payload(
-        df_activity,
-        tracked_habit_tasks,
-        anchor=anchor_dt,
-        project_colors=project_colors,
-    )
-
-    if no_data:
-        figures = {}
-        parent_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
-        root_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
-    else:
-        figures = {
-            "weeklyCompletionTrend": _fig_to_dict(
-                plot_weekly_completion_trend(df_activity, end_range)
-            ),
-            "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
-            "completedTasksPeriodically": _fig_to_dict(
-                plot_completed_tasks_periodically(
-                    df_activity, beg_range, end_range, granularity, project_colors
-                )
-            ),
-            "cumsumCompletedTasksPeriodically": _fig_to_dict(
-                cumsum_completed_tasks_periodically(
-                    df_activity, beg_range, end_range, granularity, project_colors
-                )
-            ),
-            "heatmapEventsByDayHour": _fig_to_dict(
-                plot_heatmap_of_events_by_day_and_hour(
-                    df_activity, beg_range, end_range
-                )
-            ),
-            "eventsOverTime": _fig_to_dict(
-                plot_events_over_time(df_activity, beg_range, end_range, granularity)
-            ),
-            "activeProjectHierarchy": _fig_to_dict(
-                plot_active_project_hierarchy(
-                    df_activity,
-                    beg_range,
-                    end_range,
-                    active_projects,
-                    project_colors,
-                )
-            ),
-        }
-        parent_completed_share = _completed_share_leaderboard(
-            df_activity,
-            beg=last_week_beg,
-            end=last_week_end,
-            column="parent_project_name",
-            project_colors=project_colors,
-        )
-        root_completed_share = _completed_share_leaderboard(
-            df_activity,
-            beg=last_week_beg,
-            end=last_week_end,
-            column="root_project_name",
-            project_colors=project_colors,
-        )
-
-    payload = {
-        "noData": no_data,
-        "range": {
-            "beg": beg_label,
-            "end": end_label,
-            "granularity": granularity,
-            "weeks": weeks,
-        },
-        "metrics": {
-            "items": metrics,
-            "currentPeriod": periods["currentLabel"],
-            "previousPeriod": periods["previousLabel"],
-        },
-        "urgencyStatus": urgency_status,
-        "configurableItems": [
-            {
-                "key": "urgency",
-                "label": "Urgency watch badge",
-                "icon": "wrench",
-                "configPath": dashboard_settings["configPath"],
-                "anchor": "dashboard-settings",
-                "summary": (
-                    f"Priority thresholds {dashboard_settings['warnPriorityThresholds']}; "
-                    f"due within {dashboard_settings['warnDueWithinDays']} days; "
-                    f"deadline within {dashboard_settings['warnDeadlineWithinDays']} days."
-                ),
-            }
-        ],
-        "badges": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
-        "habitTracker": habit_tracker,
-        "insights": {
-            "label": last_week_label,
-            "items": []
-            if no_data
-            else _compute_insights(
-                df_activity,
-                beg=last_week_beg,
-                end=last_week_end,
-                project_colors=project_colors,
-            ),
-        },
-        "leaderboards": {
-            "lastCompletedWeek": {
-                "label": last_week_label,
-                "beg": last_week_beg.strftime("%Y-%m-%d"),
-                "end": (last_week_end - timedelta(days=1)).strftime("%Y-%m-%d"),
-                "parentProjects": parent_completed_share,
-                "rootProjects": root_completed_share,
-            }
-        },
-        "figures": figures,
-        "refreshedAt": datetime.now().isoformat(timespec="seconds"),
-    }
-    _state.home_payload_cache[cache_key] = payload
-    return payload
-
-
-def _serialize_dt(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
-    return None
-
-
-def _run_automation_sync(
-    automation: Automation,
-    *,
-    dbio: Database,
-    continue_on_error: bool = False,
-) -> dict[str, Any]:
-    output_stream = io.StringIO()
-    started_at = datetime.now()
-    task_delegations = None
-    error: str | None = None
-    with (
-        contextlib.redirect_stdout(output_stream),
-        contextlib.redirect_stderr(output_stream),
-    ):
-        loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
-        try:
-            task_delegations = automation.tick(dbio)
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            logger.exception(
-                "Automation {} failed during manual run: {}",
-                automation.name,
-                error,
-            )
-            if not continue_on_error:
-                raise
-        finally:
-            logger.remove(loguru_handler_id)
-    finished_at = datetime.now()
-    return {
-        "name": automation.name,
-        "startedAt": started_at.isoformat(timespec="seconds"),
-        "finishedAt": finished_at.isoformat(timespec="seconds"),
-        "durationSeconds": round((finished_at - started_at).total_seconds(), 3),
-        "output": output_stream.getvalue(),
-        "taskDelegations": task_delegations,
-        "status": "failed" if error else "completed",
-        "error": error,
-    }
-
-
-def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
-    results: list[dict[str, Any]] = []
-    completed = 0
-    failed = 0
-
-    for automation in _load_automations():
-        result = _run_automation_sync(
-            automation,
-            dbio=dbio,
-            continue_on_error=True,
-        )
-        results.append(result)
-        if result["status"] == "failed":
-            failed += 1
-        else:
-            completed += 1
-        dbio.reset()
-
-    return {
-        "results": results,
-        "summary": {
-            "completed": completed,
-            "failed": failed,
-            "skipped": 0,
-        },
-    }
-
-
-def _load_automations() -> list[Automation]:
-    config = load_config("automations", str(_CONFIG_DIR.resolve()))
-    automations: list[Automation] = hydra.utils.instantiate(
-        cast(DictConfig, config).automations
-    )
-    return automations
-
-
-def _available_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    reserved = {"defaults", "automations", "hydra"}
-    keys: list[str] = []
-    for key, value in config.items():
-        if key in reserved or not isinstance(key, str):
-            continue
-        if isinstance(value, Mapping) and value.get("_target_"):
-            keys.append(key)
-    return keys
-
-
-def _automation_ref(key: str) -> str:
-    return f"${{{key}}}"
-
-
-def _automation_requires_auth(key: str) -> bool:
-    return key in {"gmail_tasks"}
-
-
-def _default_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    return [key for key in _available_automation_keys(config) if not _automation_requires_auth(key)]
-
-
-def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    raw = config.get("automations")
-    if not isinstance(raw, Sequence):
-        return []
-    target_to_keys: dict[str, list[str]] = {}
-    for key in _available_automation_keys(config):
-        section = config.get(key)
-        if isinstance(section, Mapping):
-            target = section.get("_target_")
-            if isinstance(target, str) and target:
-                target_to_keys.setdefault(target, []).append(key)
-    keys: list[str] = []
-    for item in raw:
-        if isinstance(item, Mapping):
-            target = item.get("_target_")
-            if isinstance(target, str):
-                matched_keys = target_to_keys.get(target, [])
-                if len(matched_keys) == 1:
-                    keys.append(matched_keys[0])
-                    continue
-            continue
-        item_str = str(item).strip()
-        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item_str)
-        if match:
-            keys.append(match.group(1))
-    return keys
-
-
-def _enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    configured = _configured_enabled_automation_keys(config)
-    if configured:
-        return configured
-    return _default_enabled_automation_keys(config)
-
-
-@dataclass
-class _PendingGmailAuthSession:
-    state: str
-    auth_url: str
-    redirect_uri: str
-    started_at: str
-    completed: bool = False
-    error: str | None = None
-
-
-_GMAIL_AUTH_LOCK = threading.Lock()
-_GMAIL_AUTH_SESSION: _PendingGmailAuthSession | None = None
-_OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
-
-
-def _clear_gmail_auth_session() -> None:
-    global _GMAIL_AUTH_SESSION
-    with _GMAIL_AUTH_LOCK:
-        _GMAIL_AUTH_SESSION = None
-
-
-def _current_gmail_auth_session() -> _PendingGmailAuthSession | None:
-    with _GMAIL_AUTH_LOCK:
-        return _GMAIL_AUTH_SESSION
-
-
-def _write_gmail_token(credentials: Credentials) -> None:
-    token_path = resolve_gmail_token_path()
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(credentials.to_json(), encoding="utf-8")
-
-
-@contextlib.contextmanager
-def _allow_insecure_oauth_transport() -> Any:
-    previous = os.environ.get(_OAUTHLIB_INSECURE_TRANSPORT)
-    os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = "1"
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(_OAUTHLIB_INSECURE_TRANSPORT, None)
-        else:
-            os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = previous
-
-
-def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
-    global _GMAIL_AUTH_SESSION
-
-    credentials_path = resolve_gmail_credentials_path()
-    if not credentials_path.exists():
-        raise FileNotFoundError("gmail_credentials.json is required before connecting Gmail.")
-
-    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), GmailTasksAutomation.SCOPES)
-
-    class _OAuthCallbackHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            nonlocal flow
-            server = cast(ThreadingHTTPServer, self.server)
-            current_url = f"http://127.0.0.1:{server.server_address[1]}{self.path}"
-            try:
-                with _allow_insecure_oauth_transport():
-                    flow.fetch_token(authorization_response=current_url)
-                credentials = cast(Credentials, flow.credentials)
-                _write_gmail_token(credentials)
-                _set_automation_enabled("gmail_tasks", enabled=True)
-                _restart_dashboard_observer_if_managed()
-                with _GMAIL_AUTH_LOCK:
-                    if _GMAIL_AUTH_SESSION is not None:
-                        _GMAIL_AUTH_SESSION.completed = True
-                        _GMAIL_AUTH_SESSION.error = None
-                body = (
-                    "<html><body style='font-family:system-ui,sans-serif;padding:24px'>"
-                    "<h1>Gmail connected</h1>"
-                    "<p>You can return to the control panel and refresh the automation state.</p>"
-                    "</body></html>"
-                )
-                self.send_response(200)
-            except Exception as exc:  # pragma: no cover - callback failures are browser driven
-                with _GMAIL_AUTH_LOCK:
-                    if _GMAIL_AUTH_SESSION is not None:
-                        _GMAIL_AUTH_SESSION.error = f"{type(exc).__name__}: {exc}"
-                body = (
-                    "<html><body style='font-family:system-ui,sans-serif;padding:24px'>"
-                    "<h1>Gmail authorization failed</h1>"
-                    f"<p>{type(exc).__name__}: {exc}</p>"
-                    "</body></html>"
-                )
-                self.send_response(500)
-
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(body.encode("utf-8"))
-
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003  # pylint: disable=redefined-builtin
-            message = format % args if args else format
-            logger.info("Gmail OAuth callback: {}", message)
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _OAuthCallbackHandler)
-    server.timeout = 300
-    flow.redirect_uri = f"http://127.0.0.1:{server.server_port}/"
-    with _allow_insecure_oauth_transport():
-        auth_url, state = flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="true",
-            prompt="consent",
-        )
-
-    session = _PendingGmailAuthSession(
-        state=str(state),
-        auth_url=str(auth_url),
-        redirect_uri=str(flow.redirect_uri),
-        started_at=datetime.now().isoformat(timespec="seconds"),
-    )
-    with _GMAIL_AUTH_LOCK:
-        _GMAIL_AUTH_SESSION = session
-
-    def _serve_once() -> None:
-        try:
-            server.handle_request()
-        finally:
-            server.server_close()
-
-    threading.Thread(target=_serve_once, name="gmail-oauth-callback", daemon=True).start()
-    return session
-
-
-def _gmail_automation_status() -> dict[str, Any]:
-    credentials_path = resolve_gmail_credentials_path()
-    token_path = resolve_gmail_token_path()
-    credentials_present = credentials_path.exists()
-    token_present = token_path.exists()
-    connected = False
-    token_detail = "Missing token"
-    if token_present:
-        try:
-            creds = Credentials.from_authorized_user_file(str(token_path), GmailTasksAutomation.SCOPES)
-            connected = bool(getattr(creds, "valid", False))
-            if connected:
-                token_detail = "Authorized"
-                _clear_gmail_auth_session()
-            elif getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
-                token_detail = "Token expired but refreshable"
-            else:
-                token_detail = "Token present but invalid"
-        except Exception as exc:  # pragma: no cover - defensive
-            token_detail = f"Token unreadable ({type(exc).__name__})"
-    session = _current_gmail_auth_session()
-    pending_auth: dict[str, Any] | None = None
-    if session is not None and not session.completed:
-        pending_auth = {
-            "active": True,
-            "authUrl": session.auth_url,
-            "redirectUri": session.redirect_uri,
-            "startedAt": session.started_at,
-            "error": session.error,
-        }
-    elif session is not None and session.error:
-        pending_auth = {
-            "active": False,
-            "authUrl": session.auth_url,
-            "redirectUri": session.redirect_uri,
-            "startedAt": session.started_at,
-            "error": session.error,
-        }
-        if token_present:
-            _clear_gmail_auth_session()
-
-    status = {
-        "credentialsPresent": credentials_present,
-        "tokenPresent": token_present,
-        "connected": connected,
-        "credentialsPath": _safe_display_path(credentials_path, root=_REPO_ROOT),
-        "tokenPath": _safe_display_path(token_path, root=_REPO_ROOT),
-        "detail": token_detail if credentials_present else "Missing Gmail credentials file",
-        "setupDocPath": _safe_display_path(_REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT),
-    }
-    if pending_auth is not None:
-        status["pendingAuth"] = pending_auth
-    return status
-
-
-def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool) -> dict[str, Any]:
-    section = config.get(key)
-    if not isinstance(section, Mapping):
-        raise ValueError(f"Automation section missing or invalid: {key}")
-    automation = cast(Automation, hydra.utils.instantiate(section))
-    payload = {
-        **_automation_launch_metadata(automation),
-        "key": key,
-        "enabled": enabled,
-        "authRequired": _automation_requires_auth(key),
-        "defaultEnabled": key in _default_enabled_automation_keys(config),
-        "target": str(section.get("_target_") or ""),
-    }
-    if key == "gmail_tasks":
-        payload["connection"] = _gmail_automation_status()
-    return payload
-
-
-def _load_automation_inventory() -> list[dict[str, Any]]:
-    config = cast(DictConfig, load_config("automations", str(_CONFIG_DIR.resolve())))
-    available_keys = _available_automation_keys(config)
-    enabled_keys = set(_enabled_automation_keys(config))
-    inventory: list[dict[str, Any]] = []
-    for key in available_keys:
-        inventory.append(_automation_metadata_for_key(config, key, enabled=key in enabled_keys))
-    return inventory
-
-
-def _save_enabled_automations(keys: Sequence[str]) -> None:
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    available_keys = _available_automation_keys(config)
-    normalized = [key for key in available_keys if key in set(keys)]
-    config["automations"] = [_automation_ref(key) for key in normalized]
-    _save_yaml_config(_AUTOMATIONS_PATH, config)
-
-
-def _set_automation_enabled(key: str, *, enabled: bool) -> bool:
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    available_keys = _available_automation_keys(config)
-    if key not in available_keys:
-        return False
-
-    enabled_keys = _enabled_automation_keys(config)
-    next_keys = [item for item in enabled_keys if item != key]
-    if enabled:
-        insert_at = max(0, available_keys.index(key))
-        ordered = [item for item in available_keys if item in next_keys]
-        if key not in ordered:
-            ordered.insert(insert_at, key)
-        next_keys = ordered
-
-    config["automations"] = [_automation_ref(item) for item in next_keys]
-    _save_yaml_config(_AUTOMATIONS_PATH, config)
-    return True
-
-
-def _restart_dashboard_observer_if_managed() -> bool:
-    pid_dir = _dashboard_pid_dir()
-    observer_pid_path = pid_dir / "observer.pid"
-    if not observer_pid_path.exists():
-        return False
-
-    try:
-        observer_pid = int(observer_pid_path.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        logger.warning("Dashboard observer PID file is unreadable: {}", observer_pid_path)
-        return False
-
-    try:
-        os.kill(observer_pid, 0)
-    except OSError:
-        logger.warning("Dashboard observer PID is stale: {}", observer_pid)
-        return False
-
-    try:
-        os.kill(observer_pid, signal.SIGTERM)
-    except OSError as exc:
-        logger.warning("Failed to stop dashboard observer {}: {}", observer_pid, exc)
-        return False
-
-    observer_log_path = _dashboard_state_dir() / "observer.log"
-    observer_log_path.parent.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env["HYDRA_FULL_ERROR"] = "1"
-    env["TODOIST_AGENT_TRITON_MODEL_ID"] = os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID), DEFAULT_TRITON_MODEL_ID)
-    env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
-        str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
-    )
-    env["TODOIST_AGENT_TRITON_URL"] = os.getenv(str(EnvVar.AGENT_TRITON_URL), DEFAULT_TRITON_URL)
-
-    with observer_log_path.open("ab") as observer_log:
-        process = subprocess.Popen(  # noqa: S603  # pylint: disable=consider-using-with
-            [
-                "uv",
-                "run",
-                "python3",
-                "-m",
-                "todoist.run_observer",
-                "--config-dir",
-                str(_CONFIG_DIR),
-                "--config-name",
-                "automations",
-            ],
-            cwd=str(_REPO_ROOT),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=observer_log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    observer_pid_path.write_text(str(process.pid), encoding="utf-8")
-    logger.info("Restarted managed dashboard observer with pid {}", process.pid)
-    return True
-
-
-def _automation_run_signal_metadata(automation_name: str) -> dict[str, Any]:
-    payload = Cache().automation_run_signals.load()
-    signals = payload if isinstance(payload, dict) else {}
-    signal_payload = signals.get(automation_name)
-    if not isinstance(signal_payload, Mapping):
-        return {}
-    return {
-        "attemptCount": signal_payload.get("attemptCount"),
-        "successCount": signal_payload.get("successCount"),
-        "failureCount": signal_payload.get("failureCount"),
-        "skipCount": signal_payload.get("skipCount"),
-        "lastStatus": signal_payload.get("lastStatus"),
-        "lastStartedAt": signal_payload.get("lastStartedAt"),
-        "lastFinishedAt": signal_payload.get("lastFinishedAt"),
-        "lastDurationSeconds": signal_payload.get("lastDurationSeconds"),
-        "lastError": signal_payload.get("lastError"),
-        "lastSuccessAt": signal_payload.get("lastSuccessAt"),
-    }
-
-
-def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
-    launches = Cache().automation_launches.load().get(automation.name, [])
-    last_launch = launches[-1] if launches else None
-    last_launch_iso = _serialize_dt(last_launch)
-    return {
-        "name": automation.name,
-        "frequencyMinutes": automation.frequency,
-        "isLong": getattr(automation, "is_long", False),
-        "launchCount": len(launches),
-        "lastLaunch": last_launch_iso,
-        **_automation_run_signal_metadata(automation.name),
-    }
-
-
-@app.get("/api/admin/api_token", tags=["admin"])
-async def admin_api_token_status() -> dict[str, Any]:
-    token = _resolve_api_key()
-    env_path = _resolve_env_path()
-    return {
-        "configured": bool(token),
-        "masked": _mask_api_key(token),
-        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
-    }
-
-
-@app.post("/api/admin/api_token", tags=["admin"])
-async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    token = _normalize_api_key(payload.get("token"))
-    if not token:
-        raise HTTPException(status_code=400, detail="API token is required.")
-    if not _looks_like_api_key(token):
-        raise HTTPException(
-            status_code=400,
-            detail="API token looks invalid. Use the Todoist API token (no spaces, at least 20 characters).",
-        )
-    validate = payload.get("validate", True)
-    labels_count = None
-    if validate:
-        ok, detail, labels_count = _validate_api_token(token)
-        if not ok:
-            status = 400 if detail and ("403" in detail or "401" in detail) else 502
-            raise HTTPException(
-                status_code=status, detail=f"API token validation failed: {detail}"
-            )
-    env_path = _resolve_env_path()
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    set_key(str(env_path), "API_KEY", token)
-    os.environ["API_KEY"] = token
-    return {
-        "configured": True,
-        "masked": _mask_api_key(token),
-        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
-        "validated": bool(validate),
-        "labelsCount": labels_count,
-    }
-
-
-@app.post("/api/admin/api_token/validate", tags=["admin"])
-async def admin_validate_api_token(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    token = _normalize_api_key(payload.get("token")) or _resolve_api_key()
-    if not token:
-        return {"configured": False, "valid": False, "detail": "API token missing."}
-    ok, detail, labels_count = _validate_api_token(token)
-    return {
-        "configured": True,
-        "valid": ok,
-        "detail": detail or "",
-        "masked": _mask_api_key(token),
-        "labelsCount": labels_count,
-    }
-
-
-@app.delete("/api/admin/api_token", tags=["admin"])
-async def admin_clear_api_token() -> dict[str, Any]:
-    env_path = _resolve_env_path()
-    if env_path.exists():
-        unset_key(str(env_path), "API_KEY")
-    os.environ.pop("API_KEY", None)
-    return {"configured": False, "masked": "", "envPath": _safe_display_path(env_path, root=_REPO_ROOT)}
-
-
-@app.get("/api/admin/timezone", tags=["admin"])
-async def admin_timezone_status() -> dict[str, Any]:
-    return _resolve_timezone_status()
-
-
-@app.post("/api/admin/timezone", tags=["admin"])
-async def admin_set_timezone(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    timezone_name = _normalize_timezone(payload.get("timezone"))
-    if not timezone_name:
-        raise HTTPException(status_code=400, detail="Timezone is required.")
-    if not _is_valid_timezone_name(timezone_name):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Invalid timezone. Use a valid IANA timezone name "
-                "(example: Europe/Warsaw)."
-            ),
-        )
-    env_path = _resolve_env_path()
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    set_key(str(env_path), str(EnvVar.TIMEZONE), timezone_name)
-    os.environ[str(EnvVar.TIMEZONE)] = timezone_name
-    return _resolve_timezone_status()
-
-
-@app.delete("/api/admin/timezone", tags=["admin"])
-async def admin_clear_timezone() -> dict[str, Any]:
-    env_path = _resolve_env_path()
-    if env_path.exists():
-        unset_key(str(env_path), str(EnvVar.TIMEZONE))
-    os.environ.pop(str(EnvVar.TIMEZONE), None)
-    return _resolve_timezone_status()
-
-
-def _load_observer_state() -> dict[str, Any]:
-    try:
-        payload = Cache().observer_state.load()
-    except LocalStorageError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    return payload
-
-
-def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
-    enabled = bool(payload.get("enabled", True))
-    return {
-        "enabled": enabled,
-        "refreshIntervalMinutes": payload.get("refreshIntervalMinutes"),
-        "refreshIntervalSeconds": payload.get("refreshIntervalSeconds"),
-        "updatedAt": payload.get("updatedAt"),
-        "lastRunAt": payload.get("lastRunAt"),
-        "lastDurationSeconds": payload.get("lastDurationSeconds"),
-        "lastEvents": payload.get("lastEvents"),
-        "lastAutomationsRan": payload.get("lastAutomationsRan"),
-        "lastStatus": payload.get("lastStatus"),
-        "lastError": payload.get("lastError"),
-    }
-
-
-def _build_observer(db: Database) -> AutomationObserver:
-    config = load_config("automations", str(_CONFIG_DIR.resolve()))
-    activity_automation: Activity = hydra.utils.instantiate(
-        cast(DictConfig, config).activity
-    )
-    automations: list[Automation] = hydra.utils.instantiate(
-        cast(DictConfig, config).automations
-    )
-    short_automations = [auto for auto in automations if not isinstance(auto, Activity)]
-    return AutomationObserver(
-        db=db, automations=short_automations, activity=activity_automation
-    )
+    return await _llm_chat_component._llm_chat_snapshot()
+
+
+for _component_wrapper_name in _llm_chat_component._COMPONENT_EXPORTS:
+    if _component_wrapper_name in globals():
+        globals()[_component_wrapper_name]._component_wrapper_for = _component_wrapper_name
+del _component_wrapper_name
+
+
+def _call_automation_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
+    _automation_runtime_component._sync_api_globals()
+    return getattr(_automation_runtime_component, name)(*args, **kwargs)
+
+
+def _make_automation_runtime_wrapper(name: str):
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _call_automation_runtime(name, *args, **kwargs)
+
+    _wrapper.__name__ = name
+    _wrapper._component_wrapper_for = name
+    return _wrapper
+
+
+_AUTOMATION_RUNTIME_EXPORTS = (
+    "_serialize_dt",
+    "_run_automation_sync",
+    "_run_all_automations_sync",
+    "_load_automations",
+    "_available_automation_keys",
+    "_automation_ref",
+    "_automation_requires_auth",
+    "_default_enabled_automation_keys",
+    "_configured_enabled_automation_keys",
+    "_enabled_automation_keys",
+    "_clear_gmail_auth_session",
+    "_current_gmail_auth_session",
+    "_write_gmail_token",
+    "_allow_insecure_oauth_transport",
+    "_start_gmail_manual_auth_session",
+    "_gmail_automation_status",
+    "_automation_metadata_for_key",
+    "_load_automation_inventory",
+    "_save_enabled_automations",
+    "_set_automation_enabled",
+    "_restart_dashboard_observer_if_managed",
+    "_automation_run_signal_metadata",
+    "_automation_launch_metadata",
+    "_load_observer_state",
+    "_serialize_observer_state",
+    "_build_observer",
+)
+for _name in _AUTOMATION_RUNTIME_EXPORTS:
+    globals()[_name] = _make_automation_runtime_wrapper(_name)
+_PendingGmailAuthSession = _automation_runtime_component._PendingGmailAuthSession
 
 
 def _log_files() -> list[dict[str, Any]]:
@@ -2859,165 +819,35 @@ def _log_files() -> list[dict[str, Any]]:
     return logs
 
 
-@dataclass(frozen=True)
-class _RuntimeLogSpec:
-    key: str
-    label: str
-    category: str
-    description: str
-    relative_path: str
-
-
 def _display_log_path(path: Path) -> str:
-    resolved = path.resolve()
-    for root in (_DATA_DIR.resolve(), Path(Cache().path).resolve()):
-        try:
-            return str(resolved.relative_to(root))
-        except ValueError:
-            continue
-    return str(resolved)
-
-
-def _runtime_log_specs() -> tuple[_RuntimeLogSpec, ...]:
-    return (
-        _RuntimeLogSpec(
-            key="api",
-            label="Backend API",
-            category="backend",
-            description="FastAPI and Uvicorn application output.",
-            relative_path="dashboard/api.log",
-        ),
-        _RuntimeLogSpec(
-            key="frontend",
-            label="Frontend",
-            category="frontend",
-            description="Next.js dashboard server output.",
-            relative_path="dashboard/frontend.log",
-        ),
-        _RuntimeLogSpec(
-            key="observer",
-            label="Observer",
-            category="observer",
-            description="Background observer polling and automation trigger output.",
-            relative_path="dashboard/observer.log",
-        ),
-        _RuntimeLogSpec(
-            key="triton",
-            label="Triton",
-            category="triton",
-            description="Triton container logs tailed by the dashboard launcher.",
-            relative_path="dashboard/triton.log",
-        ),
-        _RuntimeLogSpec(
-            key="triton_inference",
-            label="Triton Inference",
-            category="triton",
-            description="Per-request Triton model logs including grouped batch execution details.",
-            relative_path="dashboard/triton-inference.log",
-        ),
-        _RuntimeLogSpec(
-            key="automation",
-            label="Automation Jobs",
-            category="automation",
-            description="Shared automation runner output outside the dashboard stack.",
-            relative_path="automation.log",
-        ),
+    return _component_display_log_path(
+        path, data_dir=_DATA_DIR, cache_dir=Path(Cache().path)
     )
 
 
 def _runtime_log_path(spec: _RuntimeLogSpec) -> Path:
-    return (Path(Cache().path) / spec.relative_path).resolve()
+    return _component_runtime_log_path(spec, cache_dir=Path(Cache().path))
 
 
 def _runtime_log_sources() -> list[dict[str, Any]]:
-    sources: list[dict[str, Any]] = []
-    for spec in _runtime_log_specs():
-        path = _runtime_log_path(spec)
-        available = path.is_file()
-        size: int | None = None
-        mtime: str | None = None
-        if available:
-            try:
-                stat = path.stat()
-            except OSError:
-                available = False
-            else:
-                size = stat.st_size
-                mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
-        sources.append(
-            {
-                "id": spec.key,
-                "label": spec.label,
-                "kind": spec.category,
-                "description": spec.description,
-                "path": _display_log_path(path),
-                "available": available,
-                "inspectOnly": True,
-                "size": size,
-                "mtime": mtime,
-            }
-        )
-    return sources
+    return _component_runtime_log_sources(
+        data_dir=_DATA_DIR, cache_dir=Path(Cache().path)
+    )
 
 
 def _resolve_runtime_log_source(source: str) -> tuple[_RuntimeLogSpec, Path]:
-    key = source.strip().lower()
-    for spec in _runtime_log_specs():
-        if spec.key == key:
-            return spec, _runtime_log_path(spec)
-    raise HTTPException(status_code=404, detail=f"Unknown runtime log source: {source}")
+    return _component_resolve_runtime_log_source(source, cache_dir=Path(Cache().path))
 
 
 def _resolve_runtime_log_request(
     *, source: str | None = None, path: str | None = None
 ) -> tuple[_RuntimeLogSpec, Path]:
-    if source is not None and source.strip():
-        return _resolve_runtime_log_source(source)
-    if path is not None and path.strip():
-        normalized = path.strip()
-        for spec in _runtime_log_specs():
-            candidate = _runtime_log_path(spec)
-            if normalized in {spec.relative_path, _display_log_path(candidate)}:
-                return spec, candidate
-        raise HTTPException(status_code=404, detail=f"Unknown runtime log path: {path}")
-    raise HTTPException(status_code=400, detail="Missing runtime log source")
-
-
-@app.get("/api/runtime/logs", tags=["runtime"])
-async def runtime_logs() -> dict[str, Any]:
-    return {"inspectOnly": True, "sources": _runtime_log_sources()}
-
-
-@app.get("/api/runtime/logs/read", tags=["runtime"])
-async def runtime_read_log(
-    source: str | None = None,
-    path: str | None = None,
-    tail_lines: int = 120,
-    page: int = 1,
-) -> dict[str, Any]:
-    spec, abs_path = _resolve_runtime_log_request(source=source, path=path)
-    if not abs_path.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Runtime log is not available yet: {spec.label}",
-        )
-
-    stat = abs_path.stat()
-    payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
-    return {
-        "id": spec.key,
-        "source": spec.key,
-        "label": spec.label,
-        "kind": spec.category,
-        "category": spec.category,
-        "description": spec.description,
-        "path": _display_log_path(abs_path),
-        "available": True,
-        "inspectOnly": True,
-        "size": stat.st_size,
-        "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-        **payload,
-    }
+    return _component_resolve_runtime_log_request(
+        data_dir=_DATA_DIR,
+        cache_dir=Path(Cache().path),
+        source=source,
+        path=path,
+    )
 
 
 def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
@@ -3032,64 +862,6 @@ def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
     if suffix and candidate.suffix != suffix:
         raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
     return candidate
-
-
-@app.get("/api/admin/logs", tags=["admin"])
-async def admin_logs() -> dict[str, Any]:
-    return {"logs": _log_files()}
-
-
-def _read_log_file(path: Path, *, tail_lines: int, page: int) -> dict[str, Any]:
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-    except OSError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"Unable to read log file: {exc}"
-        ) from exc
-
-    total_lines = len(lines)
-    per_page = max(1, min(2000, int(tail_lines)))
-    total_pages = max(1, (total_lines + per_page - 1) // per_page)
-    page_i = max(1, min(int(page), total_pages))
-
-    end_line = total_lines - (page_i - 1) * per_page
-    start_line = max(0, end_line - per_page)
-    content = "".join(lines[start_line:end_line])
-    return {
-        "content": content,
-        "page": page_i,
-        "perPage": per_page,
-        "totalPages": total_pages,
-        "totalLines": total_lines,
-    }
-
-
-@app.get("/api/admin/logs/read", tags=["admin"])
-async def admin_read_log(
-    source: str | None = None,
-    path: str | None = None,
-    tail_lines: int = 40,
-    page: int = 1,
-) -> dict[str, Any]:
-    spec, abs_path = _resolve_runtime_log_request(source=source, path=path)
-    if not abs_path.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Runtime log is not available yet: {spec.label}",
-        )
-    stat = abs_path.stat()
-    payload = _read_log_file(abs_path, tail_lines=tail_lines, page=page)
-    return {
-        "source": spec.key,
-        "label": spec.label,
-        "category": spec.category,
-        "description": spec.description,
-        "path": _display_log_path(abs_path),
-        "size": stat.st_size,
-        "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-        **payload,
-    }
 
 
 def _available_mapping_files() -> list[str]:
@@ -3168,628 +940,26 @@ def _load_projects_for_adjustments_sync(
     return active_root, archived_root, archived_names, remappable_active_root
 
 
-def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
-    if not path.exists():
-        if required:
-            raise HTTPException(
-                status_code=404, detail=f"Missing config file: {path.name}"
-            )
-        return OmegaConf.create({})
-    try:
-        loaded = OmegaConf.load(path)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status_code=500, detail=f"Failed to read {path.name}: {exc}"
-        ) from exc
-    if loaded is None:
-        return OmegaConf.create({})
-    return cast(DictConfig, loaded)
+_TaskIngestNode = _task_ingest_component._TaskIngestNode
+_TaskIngestTree = _task_ingest_component._TaskIngestTree
 
+def _call_task_ingest_component(name: str, *args: Any, **kwargs: Any) -> Any:
+    _task_ingest_component._sync_api_globals()
+    return getattr(_task_ingest_component, name)(*args, **kwargs)
 
-def _save_yaml_config(path: Path, config: DictConfig) -> None:
-    try:
-        OmegaConf.save(config, path, resolve=False)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status_code=500, detail=f"Failed to write {path.name}: {exc}"
-        ) from exc
 
+def _make_task_ingest_wrapper(name: str):
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _call_task_ingest_component(name, *args, **kwargs)
 
-def _ensure_identifier(value: str, *, label: str) -> str:
-    cleaned = value.strip().lower()
-    if not cleaned or not _IDENTIFIER_RE.match(cleaned):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{label} must match /^[a-z][a-z0-9_-]*$/",
-        )
-    return cleaned
+    _wrapper.__name__ = name
+    _wrapper._component_wrapper_for = name
+    return _wrapper
 
 
-def _template_path(category: str, name: str) -> Path:
-    safe_category = _ensure_identifier(category, label="category")
-    safe_name = _ensure_identifier(name, label="template name")
-    return _TEMPLATES_DIR / safe_category / f"{safe_name}.yaml"
-
-
-def _template_defaults_key(category: str, name: str) -> str:
-    return f"templates/{category}@{category}.{name}"
-
-
-def _load_defaults_list(config: DictConfig) -> list[Any]:
-    defaults = config.get("defaults")
-    if defaults is None:
-        return []
-    data = OmegaConf.to_container(defaults, resolve=False)
-    return data if isinstance(data, list) else []
-
-
-def _normalize_template_node(raw: Mapping[str, Any]) -> dict[str, Any]:
-    content = str(raw.get("content", "")).strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="Template content is required")
-    payload: dict[str, Any] = {"content": content}
-    description = raw.get("description")
-    if description not in (None, ""):
-        payload["description"] = str(description)
-    due_delta = raw.get("due_date_days_difference")
-    if due_delta is None:
-        due_delta = raw.get("dueDateDaysDifference")
-    if due_delta not in (None, ""):
-        try:
-            payload["due_date_days_difference"] = int(due_delta)
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(
-                status_code=400, detail="due_date_days_difference must be an integer"
-            ) from exc
-    children = raw.get("children") or []
-    if children:
-        if not isinstance(children, list):
-            raise HTTPException(status_code=400, detail="children must be a list")
-        payload["children"] = [_normalize_template_node(child) for child in children]
-    return payload
-
-
-def _template_to_camel(raw: Mapping[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "content": raw.get("content", ""),
-    }
-    if raw.get("description") not in (None, ""):
-        payload["description"] = raw.get("description")
-    if raw.get("due_date_days_difference") not in (None, ""):
-        payload["dueDateDaysDifference"] = raw.get("due_date_days_difference")
-    children = raw.get("children") or []
-    if isinstance(children, list) and children:
-        payload["children"] = [
-            _template_to_camel(child)
-            for child in children
-            if isinstance(child, Mapping)
-        ]
-    return payload
-
-
-class _TaskIngestNode(BaseModel):
-    content: str
-    description: str | None = None
-    children: list["_TaskIngestNode"] = Field(default_factory=list)
-
-
-class _TaskIngestTree(BaseModel):
-    tasks: list[_TaskIngestNode] = Field(default_factory=list)
-
-
-_TaskIngestNode.model_rebuild()
-
-
-_BULLET_LINE_RE = re.compile(r"^(?P<indent>\s*)(?:[-*+]|(?:\d+|[A-Za-z])[.)])\s+(?P<content>.+?)\s*$")
-
-
-def _task_ingest_db() -> Database:
-    if _state.db is not None:
-        return _state.db
-    return Database(str(_resolve_env_path()))
-
-
-def _task_ingest_project_payload(projects: Sequence[Project]) -> list[dict[str, Any]]:
-    active_projects = [
-        project
-        for project in projects
-        if not project.is_archived
-        and not project.project_entry.is_archived
-        and not project.project_entry.is_deleted
-    ]
-    by_id = {project.id: project for project in active_projects}
-
-    def project_path(project: Project) -> list[str]:
-        names: list[str] = []
-        current: Project | None = project
-        seen: set[str] = set()
-        while current is not None and current.id not in seen:
-            seen.add(current.id)
-            names.append(current.project_entry.name)
-            parent_id = current.project_entry.parent_id
-            current = by_id.get(str(parent_id)) if parent_id else None
-        return list(reversed(names))
-
-    payload = []
-    for project in active_projects:
-        path = project_path(project)
-        payload.append(
-            {
-                "id": project.id,
-                "name": project.project_entry.name,
-                "label": " / ".join(path),
-                "parentId": project.project_entry.parent_id,
-            }
-        )
-    payload.sort(key=lambda item: str(item["label"]).lower())
-    return payload
-
-
-def _load_task_ingest_projects_sync(refresh: bool) -> list[dict[str, Any]]:
-    dbio = _task_ingest_db() if not refresh else Database(str(_resolve_env_path()))
-    return _task_ingest_project_payload(dbio.fetch_projects(include_tasks=False))
-
-
-def _task_ingest_total_nodes(tasks: Sequence[Mapping[str, Any]]) -> int:
-    total = 0
-    for task in tasks:
-        total += 1
-        children = task.get("children")
-        if isinstance(children, list):
-            total += _task_ingest_total_nodes(
-                [child for child in children if isinstance(child, Mapping)]
-            )
-    return total
-
-
-def _task_ingest_trim_text(value: Any) -> str:
-    return _sanitize_text(value) or ""
-
-
-def _normalize_task_ingest_node(
-    raw: Mapping[str, Any],
-    *,
-    depth: int = 1,
-    max_depth: int = 3,
-    include_descriptions: bool = True,
-) -> dict[str, Any] | None:
-    content = _task_ingest_trim_text(raw.get("content"))
-    if not content:
-        return None
-    node: dict[str, Any] = {"content": content}
-    description = _task_ingest_trim_text(raw.get("description"))
-    if include_descriptions and description:
-        node["description"] = description
-    if depth < max_depth:
-        raw_children = raw.get("children")
-        if isinstance(raw_children, list):
-            children = [
-                normalized
-                for child in raw_children
-                if isinstance(child, Mapping)
-                for normalized in [
-                    _normalize_task_ingest_node(
-                        child,
-                        depth=depth + 1,
-                        max_depth=max_depth,
-                        include_descriptions=include_descriptions,
-                    )
-                ]
-                if normalized is not None
-            ]
-            if children:
-                node["children"] = children
-    return node
-
-
-def _task_ingest_tree_payload(tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    return _task_ingest_tree_payload_with_options(tasks, max_depth=3, include_descriptions=True)
-
-
-def _task_ingest_tree_payload_with_options(
-    tasks: Sequence[Mapping[str, Any]], *, max_depth: int, include_descriptions: bool
-) -> list[dict[str, Any]]:
-    return [
-        normalized
-        for task in tasks
-        if isinstance(task, Mapping)
-        for normalized in [
-            _normalize_task_ingest_node(
-                task,
-                max_depth=max_depth,
-                include_descriptions=include_descriptions,
-            )
-        ]
-        if normalized is not None
-    ]
-
-
-def _task_ingest_options(payload: Mapping[str, Any]) -> dict[str, Any]:
-    raw_options = payload.get("options")
-    options = raw_options if isinstance(raw_options, Mapping) else payload
-
-    requested_depth = options.get("maxDepth")
-    max_depth = 3
-    if isinstance(requested_depth, int):
-        max_depth = requested_depth
-    elif isinstance(requested_depth, str) and requested_depth.strip().isdigit():
-        max_depth = int(requested_depth.strip())
-    max_depth = min(4, max(2, max_depth))
-
-    granularity = _task_ingest_trim_text(options.get("granularity")).lower() or "balanced"
-    if granularity not in {"compact", "balanced", "detailed"}:
-        granularity = "balanced"
-
-    preference = _task_ingest_trim_text(options.get("preference")).lower() or "action-first"
-    if preference not in {"action-first", "milestone-driven", "checklist-heavy", "meeting-notes"}:
-        preference = "action-first"
-
-    include_descriptions_raw = options.get("includeDescriptions")
-    include_descriptions = True if include_descriptions_raw is None else bool(include_descriptions_raw)
-
-    return {
-        "maxDepth": max_depth,
-        "granularity": granularity,
-        "preference": preference,
-        "includeDescriptions": include_descriptions,
-    }
-
-
-def _heuristic_task_ingest_tree(raw_content: str, *, granularity: str) -> list[dict[str, Any]]:
-    lines = raw_content.splitlines()
-    roots: list[dict[str, Any]] = []
-    stack: list[tuple[int, dict[str, Any]]] = [(-1, {"children": roots})]
-    current_node: dict[str, Any] | None = None
-    preamble: list[str] = []
-
-    for raw_line in lines:
-        line = raw_line.rstrip()
-        stripped = line.strip()
-        if not stripped:
-            current_node = None
-            continue
-        match = _BULLET_LINE_RE.match(line)
-        if match:
-            indent = len(match.group("indent").replace("\t", "    "))
-            content = _task_ingest_trim_text(match.group("content"))
-            if not content:
-                continue
-            node = {"content": content, "children": []}
-            while len(stack) > 1 and indent <= stack[-1][0]:
-                stack.pop()
-            parent = stack[-1][1]
-            parent.setdefault("children", []).append(node)
-            stack.append((indent, node))
-            current_node = node
-            continue
-        if current_node is not None:
-            description = _task_ingest_trim_text(current_node.get("description"))
-            current_node["description"] = f"{description}\n{stripped}".strip() if description else stripped
-        else:
-            preamble.append(stripped)
-
-    if roots:
-        heading = _task_ingest_trim_text(preamble[0]) if preamble else ""
-        if heading:
-            wrapper = {"content": heading, "children": roots}
-            if len(preamble) > 1:
-                wrapper["description"] = "\n".join(preamble[1:])
-            return [wrapper]
-        return roots
-
-    paragraphs = [segment.strip() for segment in re.split(r"\n\s*\n+", raw_content) if segment.strip()]
-    if len(paragraphs) > 1:
-        tasks: list[dict[str, Any]] = []
-        for paragraph in paragraphs:
-            paragraph_lines = [part.strip() for part in paragraph.splitlines() if part.strip()]
-            if not paragraph_lines:
-                continue
-            node: dict[str, Any] = {"content": paragraph_lines[0]}
-            if len(paragraph_lines) > 1:
-                node["description"] = "\n".join(paragraph_lines[1:])
-            tasks.append(node)
-        if tasks:
-            return tasks
-
-    sentence_limit = {"compact": 5, "balanced": 8, "detailed": 12}[granularity]
-    sentences = [
-        sentence.strip(" -\t")
-        for sentence in re.split(r"(?:\n|;|(?<=\.)\s+)", raw_content)
-        if sentence.strip(" -\t")
-    ]
-    if not sentences:
-        return []
-    if len(sentences) == 1:
-        return [{"content": sentences[0]}]
-    return [{"content": sentence} for sentence in sentences[:sentence_limit]]
-
-
-def _task_ingest_from_breakdown(nodes: Sequence[BreakdownNode]) -> list[dict[str, Any]]:
-    payload: list[dict[str, Any]] = []
-    for node in nodes:
-        item: dict[str, Any] = {"content": _task_ingest_trim_text(node.content)}
-        if not item["content"]:
-            continue
-        description = _task_ingest_trim_text(node.description)
-        if description:
-            item["description"] = description
-        children = _task_ingest_from_breakdown(node.children)
-        if children:
-            item["children"] = children
-        payload.append(item)
-    return payload
-
-
-def _task_ingest_build_llm_messages(
-    raw_content: str,
-    *,
-    max_depth: int,
-    granularity: str,
-    preference: str,
-    include_descriptions: bool,
-) -> list[dict[str, str]]:
-    granularity_instruction = {
-        "compact": "Prefer fewer, broader tasks and avoid over-splitting.",
-        "balanced": "Aim for a practical middle ground between clarity and brevity.",
-        "detailed": "Break the work down more aggressively into clear substeps when useful.",
-    }[granularity]
-    preference_instruction = {
-        "action-first": "Favor concrete next actions over abstract buckets.",
-        "milestone-driven": "Group subtasks under visible milestones when useful.",
-        "checklist-heavy": "Prefer crisp checklist-style subtasks.",
-        "meeting-notes": "Turn notes into decisions, follow-ups, and owners where possible.",
-    }[preference]
-    return [
-        {
-            "role": MessageRole.SYSTEM.value,
-            "content": (
-                "Rewrite the pasted source into an actionable Todoist task tree. "
-                "Return only concrete tasks. Keep titles concise and imperative. "
-                + (
-                    "Use descriptions only for supporting context. "
-                    if include_descriptions
-                    else "Avoid descriptions unless absolutely required. "
-                )
-                + f"Keep nesting to at most {max_depth} levels total. "
-                f"{granularity_instruction} "
-                f"{preference_instruction}"
-            ),
-        },
-        {
-            "role": MessageRole.USER.value,
-            "content": raw_content,
-        },
-    ]
-
-
-def _task_ingest_rewrite_with_llm_sync(
-    raw_content: str,
-    *,
-    max_depth: int,
-    granularity: str,
-    preference: str,
-    include_descriptions: bool,
-) -> tuple[list[dict[str, Any]], str] | None:
-    async_loaded_model = _LLM_CHAT_MODEL
-    model: _LlmChatModel | None = async_loaded_model
-    created_model = False
-    if model is None:
-        settings = _resolve_llm_chat_settings()
-        try:
-            model = _build_llm_from_settings(settings, max_output_tokens=768)
-            created_model = True
-        except (TypeError, ValueError) as exc:
-            logger.warning(f"Task ingest LLM unavailable: {type(exc).__name__}: {exc}")
-    if model is None:
-        return None
-    try:
-        breakdown = model.structured_chat(
-            _task_ingest_build_llm_messages(
-                raw_content,
-                max_depth=max_depth,
-                granularity=granularity,
-                preference=preference,
-                include_descriptions=include_descriptions,
-            ),
-            TaskBreakdown,
-        )
-        tasks = _task_ingest_tree_payload_with_options(
-            _task_ingest_from_breakdown(breakdown.children),
-            max_depth=max_depth,
-            include_descriptions=include_descriptions,
-        )
-        if tasks:
-            source = "llm"
-            if created_model and isinstance(model, TransformersMistral3ChatModel):
-                source = "transformers"
-            elif created_model and isinstance(model, TritonGenerateChatModel):
-                source = "triton"
-            elif created_model and isinstance(model, OpenAIResponsesChatModel):
-                source = "openai"
-            elif not created_model:
-                source = "loaded-model"
-            return tasks, source
-    except Exception as exc:  # pragma: no cover - fallback path
-        logger.warning(f"Task ingest LLM rewrite failed: {type(exc).__name__}: {exc}")
-    return None
-
-
-def _task_ingest_preview_sync(
-    raw_content: str,
-    *,
-    max_depth: int,
-    granularity: str,
-    preference: str,
-    include_descriptions: bool,
-) -> tuple[list[dict[str, Any]], str]:
-    llm_result = _task_ingest_rewrite_with_llm_sync(
-        raw_content,
-        max_depth=max_depth,
-        granularity=granularity,
-        preference=preference,
-        include_descriptions=include_descriptions,
-    )
-    if llm_result is not None:
-        return llm_result
-    return (
-        _task_ingest_tree_payload_with_options(
-            _heuristic_task_ingest_tree(raw_content, granularity=granularity),
-            max_depth=max_depth,
-            include_descriptions=include_descriptions,
-        ),
-        "outline",
-    )
-
-
-def _task_ingest_create_node_sync(
-    dbio: Database,
-    *,
-    project_id: str,
-    node: Mapping[str, Any],
-    parent_id: str | None = None,
-    created: list[dict[str, Any]],
-) -> None:
-    payload = dbio.insert_task(
-        content=str(node["content"]),
-        description=_task_ingest_trim_text(node.get("description")) or None,
-        project_id=project_id if parent_id is None else None,
-        parent_id=parent_id,
-    )
-    task_id = _task_ingest_trim_text(payload.get("id"))
-    if not task_id:
-        raise RuntimeError(f"Failed to create task: {node['content']}")
-    created.append(
-        {
-            "id": task_id,
-            "content": str(node["content"]),
-            "parentId": parent_id,
-            "projectId": project_id,
-        }
-    )
-    children = node.get("children")
-    if not isinstance(children, list):
-        return
-    for child in children:
-        if isinstance(child, Mapping):
-            _task_ingest_create_node_sync(
-                dbio,
-                project_id=project_id,
-                node=child,
-                parent_id=task_id,
-                created=created,
-            )
-
-
-def _task_ingest_create_sync(project_id: str, tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    dbio = _task_ingest_db()
-    created: list[dict[str, Any]] = []
-    for task in tasks:
-        _task_ingest_create_node_sync(
-            dbio,
-            project_id=project_id,
-            node=task,
-            created=created,
-        )
-    return created
-
-
-def _load_status_update_projects_sync(refresh: bool) -> list[dict[str, Any]]:
-    dbio = _status_update_db() if not refresh else Database(str(_resolve_env_path()))
-    return load_status_update_projects(dbio)
-
-
-def _status_update_parse_date(value: Any, *, field: str) -> date:
-    parsed = _task_ingest_trim_text(value)
-    if not parsed:
-        raise HTTPException(status_code=400, detail=f"{field} is required")
-    try:
-        return date.fromisoformat(parsed)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DD") from exc
-
-
-@app.get("/api/admin/task_ingest/projects", tags=["admin"])
-async def admin_task_ingest_projects(refresh: bool = False) -> dict[str, Any]:
-    try:
-        projects = await asyncio.to_thread(_load_task_ingest_projects_sync, refresh)
-    except Exception as exc:  # pragma: no cover - network safety
-        raise HTTPException(
-            status_code=500, detail=f"Failed to load projects: {type(exc).__name__}"
-        ) from exc
-    return {"projects": projects}
-
-
-@app.post("/api/admin/task_ingest/preview", tags=["admin"])
-async def admin_task_ingest_preview(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    raw_content = _task_ingest_trim_text(payload.get("rawContent"))
-    if not raw_content:
-        raise HTTPException(status_code=400, detail="rawContent is required")
-    options = _task_ingest_options(payload)
-    tasks, source = await asyncio.to_thread(
-        _task_ingest_preview_sync,
-        raw_content,
-        max_depth=int(options["maxDepth"]),
-        granularity=str(options["granularity"]),
-        preference=str(options["preference"]),
-        include_descriptions=bool(options["includeDescriptions"]),
-    )
-    if not tasks:
-        raise HTTPException(status_code=400, detail="Could not derive any tasks from the pasted content.")
-    return {
-        "source": source,
-        "tasks": tasks,
-        "topLevelCount": len(tasks),
-        "totalCount": _task_ingest_total_nodes(tasks),
-        "maxDepth": options["maxDepth"],
-        "granularity": options["granularity"],
-        "preference": options["preference"],
-        "includeDescriptions": options["includeDescriptions"],
-    }
-
-
-@app.post("/api/admin/task_ingest/create", tags=["admin"])
-async def admin_task_ingest_create(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    project_id = _task_ingest_trim_text(payload.get("projectId"))
-    raw_content = _task_ingest_trim_text(payload.get("rawContent"))
-    tasks_payload = payload.get("tasks")
-    options = _task_ingest_options(payload)
-    if not project_id:
-        raise HTTPException(status_code=400, detail="projectId is required")
-    if isinstance(tasks_payload, list):
-        tasks = _task_ingest_tree_payload_with_options(
-            [task for task in tasks_payload if isinstance(task, Mapping)],
-            max_depth=int(options["maxDepth"]),
-            include_descriptions=bool(options["includeDescriptions"]),
-        )
-    elif raw_content:
-        tasks, _ = await asyncio.to_thread(
-            _task_ingest_preview_sync,
-            raw_content,
-            max_depth=int(options["maxDepth"]),
-            granularity=str(options["granularity"]),
-            preference=str(options["preference"]),
-            include_descriptions=bool(options["includeDescriptions"]),
-        )
-    else:
-        raise HTTPException(status_code=400, detail="tasks or rawContent is required")
-    if not tasks:
-        raise HTTPException(status_code=400, detail="No tasks to create")
-    try:
-        created = await asyncio.to_thread(_task_ingest_create_sync, project_id, tasks)
-    except Exception as exc:  # pragma: no cover - network safety
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create tasks: {exc}"
-        ) from exc
-    return {
-        "created": created,
-        "createdCount": len(created),
-        "topLevelCount": len(tasks),
-    }
-
+for _name in _task_ingest_component._COMPONENT_EXPORTS:
+    if _name not in {"_TaskIngestNode", "_TaskIngestTree"}:
+        globals()[_name] = _make_task_ingest_wrapper(_name)
 
 def _status_update_db() -> Database:
     if _state.db is not None:
@@ -3797,823 +967,17 @@ def _status_update_db() -> Database:
     return Database(str(_resolve_env_path()))
 
 
-@app.get("/api/admin/status_update/projects", tags=["admin"])
-async def admin_status_update_projects(refresh: bool = False) -> dict[str, Any]:
-    try:
-        projects = await asyncio.to_thread(_load_status_update_projects_sync, refresh)
-    except Exception as exc:  # pragma: no cover - network safety
-        raise HTTPException(
-            status_code=500, detail=f"Failed to load projects: {type(exc).__name__}"
-        ) from exc
-    return {"projects": projects}
-
-
-@app.post("/api/admin/status_update/generate", tags=["admin"])
-async def admin_status_update_generate(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
-
-    raw_project_ids = payload.get("projectIds")
-    if not isinstance(raw_project_ids, Sequence) or isinstance(raw_project_ids, str):
-        raise HTTPException(status_code=400, detail="projectIds must be a list of strings")
-    project_ids = [str(value).strip() for value in raw_project_ids if str(value).strip()]
-    if not project_ids:
-        raise HTTPException(status_code=400, detail="projectIds must contain at least one project id")
-
-    beg = _status_update_parse_date(payload.get("beg"), field="beg")
-    end = _status_update_parse_date(payload.get("end"), field="end")
-    sync_label = _task_ingest_trim_text(payload.get("syncLabel"))
-    preset = _task_ingest_trim_text(payload.get("preset"))
-    await _ensure_state(refresh=False)
-    dbio = _status_update_db()
-    try:
-        beg_dt = datetime.combine(beg, datetime.min.time())
-        end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time())
-        report = await asyncio.to_thread(
-            build_status_update_report,
-            dbio,
-            project_ids=project_ids,
-            beg=beg_dt,
-            end=end_dt,
-            sync_label=sync_label,
-            df_activity=_state.df_activity,
-            preset=preset,
-        )
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - network safety
-        raise HTTPException(
-            status_code=500, detail=f"Failed to generate status update: {type(exc).__name__}"
-        ) from exc
-    selection = dict(report.get("selection") or {})
-    requested_projects = list(selection.get("requestedProjects") or [])
-    expanded_projects = list(selection.get("expandedProjects") or [])
-    tasks = list(report.get("completedTasks") or [])
-
-    project_payloads: list[dict[str, Any]] = []
-    for project in expanded_projects:
-        project_id = str(project.get("id") or "")
-        project_tasks = [task for task in tasks if str(task.get("projectId") or "") == project_id]
-        project_payloads.append(
-            {
-                "id": project_id,
-                "name": project.get("name"),
-                "label": project.get("label"),
-                "completedCount": sum(int(task.get("completionCount") or 0) for task in project_tasks),
-                "commentCount": sum(int(task.get("commentCount") or 0) for task in project_tasks),
-                "tasks": project_tasks,
-            }
-        )
-
-    selection.update(
-        {
-            "beg": beg.isoformat(),
-            "end": end_dt.isoformat(timespec="seconds"),
-            "projectIds": list(project_ids),
-            "syncLabel": report.get("syncLabel") or sync_label or "Status update",
-            "preset": preset or None,
-        }
-    )
-
-    comment_count = sum(int(task.get("commentCount") or 0) for task in tasks)
-    response = {
-        "generatedAt": report.get("generatedAt"),
-        "syncLabel": report.get("syncLabel") or sync_label or "Status update",
-        "range": {
-            "beg": beg_dt.isoformat(timespec="seconds"),
-            "end": end_dt.isoformat(timespec="seconds"),
-        },
-        "selection": selection,
-        "summary": {
-            "selectedProjectCount": len(requested_projects),
-            "expandedProjectCount": len(expanded_projects),
-            "completedEventCount": len(report.get("completedTaskEvents") or []),
-            "completedTaskCount": len(tasks),
-            "commentedTaskCount": sum(1 for task in tasks if int(task.get("commentCount") or 0) > 0),
-            "commentCount": comment_count,
-        },
-        "summaryText": (
-            f"Completed {len(tasks)} tasks across {len(project_payloads)} projects, "
-            f"grounded by {comment_count} comments."
-        ),
-        "stats": {
-            "completedCount": len(tasks),
-            "commentCount": comment_count,
-            "projectCount": len(project_payloads),
-            "activityCount": len(report.get("completedTaskEvents") or []),
-        },
-        "projects": project_payloads,
-        "tasks": tasks,
-        "selectedProjects": requested_projects,
-        "markdown": report.get("markdown"),
-        "warnings": report.get("warnings") or [],
-        "completedTasks": report.get("completedTasks") or [],
-        "completedTaskEvents": report.get("completedTaskEvents") or [],
-    }
-    return response
-
-
-@app.get("/api/admin/project_adjustments", tags=["admin"])
-async def admin_project_adjustments(
-    file: str | None = None, refresh: bool = False
-) -> dict[str, Any]:
-    """Return mapping files, current mapping content, and project lists for building adjustments."""
-
-    try:
-        selected = normalize_adjustment_filename(file) if file else _available_mapping_files()[0]
-        mappings, archived_parents = _load_mapping_file(selected)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    warning: str | None = None
-    try:
-        (
-            active_root,
-            archived_root,
-            archived_names,
-            remappable_active_root,
-        ) = cast(
-            tuple[list[str], list[str], list[str], list[str]],
-            await asyncio.to_thread(
-                _load_projects_for_adjustments_sync,
-                refresh,
-            ),
-        )
-    except Exception as exc:  # pragma: no cover - network safety
-        logger.warning(f"Failed loading project lists for adjustments: {exc}")
-        active_root = []
-        archived_root = []
-        archived_names = []
-        remappable_active_root = []
-        warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
-    source_projects = sorted(set(archived_names) | set(remappable_active_root))
-    unmapped_source_projects = [name for name in source_projects if name not in mappings]
-    archived_parents = sorted(
-        [name for name in archived_parents if name in archived_names]
-    )
-
-    return {
-        "files": _available_mapping_files(),
-        "selectedFile": selected,
-        "mappings": mappings,
-        "activeRootProjects": active_root,
-        "archivedRootProjects": archived_root,
-        "remappableActiveRootProjects": remappable_active_root,
-        "archivedParentProjects": archived_parents,
-        "archivedProjects": archived_names,
-        "sourceProjects": source_projects,
-        "unmappedSourceProjects": unmapped_source_projects,
-        "warning": warning,
-    }
-
-
-@app.put("/api/admin/project_adjustments", tags=["admin"])
-async def admin_save_project_adjustments(
-    file: str,
-    refresh: bool = True,
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    """Save mapping dict to the selected mapping file."""
-
-    mappings: dict[str, str]
-    archived_parents: list[str]
-    refresh_warning: str | None = None
-    if isinstance(payload.get("mappings"), dict) or "archivedParents" in payload:
-        mappings = cast(dict[str, str], payload.get("mappings") or {})
-        archived_parents = cast(list[str], payload.get("archivedParents") or [])
-    else:
-        mappings = payload if isinstance(payload, dict) else {}
-        archived_parents = []
-
-    if not isinstance(mappings, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) for k, v in mappings.items()
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Body must be a JSON object of string->string mappings",
-        )
-    if not isinstance(archived_parents, list) or not all(
-        isinstance(name, str) for name in archived_parents
-    ):
-        raise HTTPException(
-            status_code=400, detail="archivedParents must be a list of strings"
-        )
-
-    try:
-        safe_filename = normalize_adjustment_filename(file)
-        async with _ADMIN_LOCK:
-            _save_mapping_file(safe_filename, mappings, archived_parents)
-            if refresh:
-                try:
-                    await _ensure_state(refresh=True)
-                except Exception as exc:  # pragma: no cover - network safety
-                    logger.warning(f"Failed refreshing dashboard state after saving adjustments: {exc}")
-                    refresh_warning = (
-                        f"Saved, but dashboard refresh failed ({type(exc).__name__})."
-                    )
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "saved": True,
-        "file": safe_filename,
-        "count": len(mappings),
-        "archivedParents": len(archived_parents),
-        "warning": refresh_warning,
-    }
-
-
-def _llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
-    raw = config.get("llm_breakdown") if hasattr(config, "get") else None
-    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
-    if not isinstance(data, dict):
-        data = {}
-
-    variants_raw = data.get("variants") or {}
-    variants: dict[str, Any] = {}
-    if isinstance(variants_raw, Mapping):
-        for key, value in variants_raw.items():
-            if not isinstance(value, Mapping):
-                continue
-            variants[str(key)] = {
-                "instruction": value.get("instruction", ""),
-                "maxDepth": value.get("max_depth"),
-                "maxChildren": value.get("max_children"),
-                "queueDepth": value.get("queue_depth"),
-            }
-
-    return {
-        "labelPrefix": data.get("label_prefix", "llm-"),
-        "defaultVariant": data.get("default_variant", "breakdown"),
-        "maxDepth": data.get("max_depth", 3),
-        "maxChildren": data.get("max_children", 6),
-        "maxTotalTasks": data.get("max_total_tasks", 60),
-        "maxQueueDepth": data.get("max_queue_depth", 1),
-        "autoQueueChildren": data.get("auto_queue_children", True),
-        "variants": variants,
-    }
-
-
-@app.get("/api/admin/llm_breakdown/settings", tags=["admin"])
-async def admin_llm_breakdown_settings() -> dict[str, Any]:
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    return {
-        "settings": _llm_breakdown_settings_payload(config),
-        "basePrompt": BASE_SYSTEM_PROMPT,
-    }
-
-
-@app.put("/api/admin/llm_breakdown/settings", tags=["admin"])
-async def admin_update_llm_breakdown_settings(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
-
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    lb_config = config.get("llm_breakdown") or {}
-
-    def _coerce_int(value: Any, field: str) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(
-                status_code=400, detail=f"{field} must be an integer"
-            ) from exc
-
-    updates: dict[str, Any] = {}
-    if "labelPrefix" in payload:
-        updates["label_prefix"] = str(payload["labelPrefix"]).strip()
-    if "defaultVariant" in payload:
-        updates["default_variant"] = str(payload["defaultVariant"]).strip()
-    if "maxDepth" in payload:
-        updates["max_depth"] = _coerce_int(payload["maxDepth"], "maxDepth")
-    if "maxChildren" in payload:
-        updates["max_children"] = _coerce_int(payload["maxChildren"], "maxChildren")
-    if "maxTotalTasks" in payload:
-        updates["max_total_tasks"] = _coerce_int(
-            payload["maxTotalTasks"], "maxTotalTasks"
-        )
-    if "maxQueueDepth" in payload:
-        updates["max_queue_depth"] = _coerce_int(
-            payload["maxQueueDepth"], "maxQueueDepth"
-        )
-    if "autoQueueChildren" in payload:
-        updates["auto_queue_children"] = bool(payload["autoQueueChildren"])
-
-    if "variants" in payload:
-        variants_raw = payload.get("variants")
-        if not isinstance(variants_raw, Mapping):
-            raise HTTPException(status_code=400, detail="variants must be an object")
-        variants: dict[str, Any] = {}
-        for key, value in variants_raw.items():
-            if not isinstance(value, Mapping):
-                raise HTTPException(
-                    status_code=400, detail=f"Variant {key} must be an object"
-                )
-            instruction = str(value.get("instruction", "")).strip()
-            variant_payload: dict[str, Any] = {"instruction": instruction}
-            if "maxDepth" in value and value.get("maxDepth") not in (None, ""):
-                variant_payload["max_depth"] = _coerce_int(
-                    value.get("maxDepth"), "maxDepth"
-                )
-            if "maxChildren" in value and value.get("maxChildren") not in (None, ""):
-                variant_payload["max_children"] = _coerce_int(
-                    value.get("maxChildren"), "maxChildren"
-                )
-            if "queueDepth" in value and value.get("queueDepth") not in (None, ""):
-                variant_payload["queue_depth"] = _coerce_int(
-                    value.get("queueDepth"), "queueDepth"
-                )
-            variants[str(key).strip()] = variant_payload
-        updates["variants"] = variants
-
-    if isinstance(lb_config, DictConfig):
-        for key, value in updates.items():
-            lb_config[key] = value
-    elif isinstance(lb_config, dict):
-        lb_config.update(updates)
-    else:
-        lb_config = updates
-
-    if "variants" in updates or "default_variant" in updates:
-        snapshot = (
-            OmegaConf.to_container(lb_config, resolve=False)
-            if isinstance(lb_config, DictConfig)
-            else lb_config
-        )
-        default_variant = updates.get("default_variant") or (
-            snapshot.get("default_variant") if isinstance(snapshot, Mapping) else None
-        )
-        variants_value = updates.get("variants") or (
-            snapshot.get("variants") if isinstance(snapshot, Mapping) else None
-        )
-        if (
-            default_variant
-            and isinstance(variants_value, Mapping)
-            and default_variant not in variants_value
-        ):
-            raise HTTPException(
-                status_code=400, detail="defaultVariant must exist in variants"
-            )
-
-    config["llm_breakdown"] = lb_config
-    async with _ADMIN_LOCK:
-        _save_yaml_config(_AUTOMATIONS_PATH, config)
-
-    return {
-        "saved": True,
-        "settings": _llm_breakdown_settings_payload(config),
-        "basePrompt": BASE_SYSTEM_PROMPT,
-    }
-
-
-def _multiplication_settings_payload(config: DictConfig) -> dict[str, Any]:
-    raw = config.get("multiply") if hasattr(config, "get") else None
-    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
-    if not isinstance(data, dict):
-        data = {}
-
-    defaults = MultiplyConfig()
-    config_data = data.get("config") if isinstance(data.get("config"), Mapping) else {}
-    if not isinstance(config_data, Mapping):
-        config_data = {}
-
-    return {
-        "flatLeafTemplate": config_data.get(
-            "flat_leaf_template", defaults.flat_leaf_template
-        ),
-        "deepLeafTemplate": config_data.get(
-            "deep_leaf_template", defaults.deep_leaf_template
-        ),
-        "flatLabelRegex": config_data.get(
-            "flat_label_regex", defaults.flat_label_regex
-        ),
-        "deepLabelRegex": config_data.get(
-            "deep_label_regex", defaults.deep_label_regex
-        ),
-    }
-
-
 def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
-    raw = config.get("urgency") if hasattr(config, "get") else None
-    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
-    if not isinstance(data, dict):
-        data = {}
-    defaults = DEFAULT_URGENCY_SETTINGS
-    badge_labels = data.get("badge_labels") if isinstance(data.get("badge_labels"), Mapping) else {}
-    badge_labels = badge_labels if isinstance(badge_labels, Mapping) else {}
-    thresholds = data.get("warn_priority_thresholds")
-    if not isinstance(thresholds, list):
-        thresholds = list(defaults["warn_priority_thresholds"])
-    fire_labels = data.get("fire_labels")
-    if not isinstance(fire_labels, list):
-        fire_label_value = str(data.get("fire_label", defaults["fire_label"])).strip()
-        fire_labels = [fire_label_value] if fire_label_value else list(defaults["fire_labels"])
-    try:
-        config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
-    except ValueError:
-        config_path = str(_DASHBOARD_CONFIG_PATH)
-
-    return {
-        "enabled": bool(data.get("enabled", defaults["enabled"])),
-        "fireLabel": data.get("fire_label", defaults["fire_label"]),
-        "fireLabels": fire_labels,
-        "warnPriorityThresholds": thresholds,
-        "warnPriorityMinCount": data.get(
-            "warn_priority_min_count", defaults["warn_priority_min_count"]
-        ),
-        "warnDueWithinDays": data.get(
-            "warn_due_within_days", defaults["warn_due_within_days"]
-        ),
-        "warnDueMinCount": data.get(
-            "warn_due_min_count", defaults["warn_due_min_count"]
-        ),
-        "warnDeadlineWithinDays": data.get(
-            "warn_deadline_within_days", defaults["warn_deadline_within_days"]
-        ),
-        "warnDeadlineMinCount": data.get(
-            "warn_deadline_min_count", defaults["warn_deadline_min_count"]
-        ),
-        "dangerOnFireLabel": bool(
-            data.get("danger_on_fire_label", defaults["danger_on_fire_label"])
-        ),
-        "warnOnPriority": bool(
-            data.get("warn_on_priority", defaults["warn_on_priority"])
-        ),
-        "warnOnDue": bool(data.get("warn_on_due", defaults["warn_on_due"])),
-        "warnOnDeadline": bool(
-            data.get("warn_on_deadline", defaults["warn_on_deadline"])
-        ),
-        "warnSummaryLabel": data.get(
-            "warn_summary_label", defaults["warn_summary_label"]
-        ),
-        "dangerSummaryLabel": data.get(
-            "danger_summary_label", defaults["danger_summary_label"]
-        ),
-        "badgeLabels": {
-            "good": badge_labels.get("good", defaults["badge_labels"]["good"]),
-            "warn": badge_labels.get("warn", defaults["badge_labels"]["warn"]),
-            "danger": badge_labels.get("danger", defaults["badge_labels"]["danger"]),
-        },
-        "configPath": config_path,
-    }
-
-
-@app.get("/api/admin/dashboard/settings", tags=["admin"])
-async def admin_dashboard_settings() -> dict[str, Any]:
-    config = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
-    try:
-        config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
-    except ValueError:
-        config_path = str(_DASHBOARD_CONFIG_PATH)
-    return {
-        "settings": _dashboard_settings_payload(config),
-        "editTargets": [
-            {
-                "key": "urgency",
-                "label": "Urgency watch badge",
-                "icon": "wrench",
-                "configPath": config_path,
-                "anchor": "dashboard-settings",
-            }
-        ],
-    }
-
-
-@app.get("/api/admin/dashboard/labels", tags=["admin"])
-async def admin_dashboard_labels() -> dict[str, Any]:
-    dbio = Database(str(_resolve_env_path()))
-    label_colors = dbio.fetch_label_colors()
-    labels: list[dict[str, Any]] = []
-    for item in dbio.list_labels():
-        name = item["name"].strip()
-        labels.append(
-            {
-                "name": name,
-                "color": label_colors.get(name),
-            }
-        )
-    if not any(item["name"] == DEFAULT_URGENCY_SETTINGS["fire_label"] for item in labels):
-        labels.append(
-            {
-                "name": DEFAULT_URGENCY_SETTINGS["fire_label"],
-                "color": label_colors.get(DEFAULT_URGENCY_SETTINGS["fire_label"]),
-            }
-        )
-    labels.sort(key=lambda item: item["name"].lower())
-    return {"labels": labels}
-
-
-@app.put("/api/admin/dashboard/settings", tags=["admin"])
-async def admin_update_dashboard_settings(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
-
-    config = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
-    urgency = config.get("urgency") or {}
-    if not isinstance(urgency, Mapping):
-        urgency = {}
-    urgency = dict(urgency)
-
-    def _coerce_int(value: Any, field: str) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
-
-    if "enabled" in payload:
-        urgency["enabled"] = bool(payload["enabled"])
-    if "fireLabel" in payload:
-        urgency["fire_label"] = str(payload["fireLabel"]).strip()
-    if "fireLabels" in payload:
-        fire_labels = payload["fireLabels"]
-        if not isinstance(fire_labels, Sequence) or isinstance(fire_labels, str):
-            raise HTTPException(status_code=400, detail="fireLabels must be a list")
-        urgency["fire_labels"] = [
-            str(value).strip() for value in fire_labels if str(value).strip()
-        ]
-        if urgency["fire_labels"]:
-            urgency["fire_label"] = urgency["fire_labels"][0]
-    if "warnPriorityThresholds" in payload:
-        thresholds = payload["warnPriorityThresholds"]
-        if not isinstance(thresholds, Sequence):
-            raise HTTPException(status_code=400, detail="warnPriorityThresholds must be a list")
-        urgency["warn_priority_thresholds"] = [
-            _coerce_int(value, "warnPriorityThresholds") for value in thresholds
-        ]
-    if "warnPriorityMinCount" in payload:
-        urgency["warn_priority_min_count"] = max(
-            1, _coerce_int(payload["warnPriorityMinCount"], "warnPriorityMinCount")
-        )
-    if "warnDueWithinDays" in payload:
-        urgency["warn_due_within_days"] = _coerce_int(
-            payload["warnDueWithinDays"], "warnDueWithinDays"
-        )
-    if "warnDueMinCount" in payload:
-        urgency["warn_due_min_count"] = max(
-            1, _coerce_int(payload["warnDueMinCount"], "warnDueMinCount")
-        )
-    if "warnDeadlineWithinDays" in payload:
-        urgency["warn_deadline_within_days"] = _coerce_int(
-            payload["warnDeadlineWithinDays"], "warnDeadlineWithinDays"
-        )
-    if "warnDeadlineMinCount" in payload:
-        urgency["warn_deadline_min_count"] = max(
-            1, _coerce_int(payload["warnDeadlineMinCount"], "warnDeadlineMinCount")
-        )
-    if "dangerOnFireLabel" in payload:
-        urgency["danger_on_fire_label"] = bool(payload["dangerOnFireLabel"])
-    if "warnOnPriority" in payload:
-        urgency["warn_on_priority"] = bool(payload["warnOnPriority"])
-    if "warnOnDue" in payload:
-        urgency["warn_on_due"] = bool(payload["warnOnDue"])
-    if "warnOnDeadline" in payload:
-        urgency["warn_on_deadline"] = bool(payload["warnOnDeadline"])
-    if "warnSummaryLabel" in payload:
-        urgency["warn_summary_label"] = str(payload["warnSummaryLabel"]).strip()
-    if "dangerSummaryLabel" in payload:
-        urgency["danger_summary_label"] = str(payload["dangerSummaryLabel"]).strip()
-    if "badgeLabels" in payload:
-        badge_labels = payload["badgeLabels"]
-        if not isinstance(badge_labels, Mapping):
-            raise HTTPException(status_code=400, detail="badgeLabels must be an object")
-        urgency["badge_labels"] = {
-            "good": str(badge_labels.get("good") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]).strip(),
-            "warn": str(badge_labels.get("warn") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]).strip(),
-            "danger": str(badge_labels.get("danger") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]).strip(),
-        }
-
-    config["urgency"] = urgency
-    async with _ADMIN_LOCK:
-        _save_yaml_config(_DASHBOARD_CONFIG_PATH, config)
-
-    try:
-        config_path = str(_DASHBOARD_CONFIG_PATH.relative_to(_REPO_ROOT))
-    except ValueError:
-        config_path = str(_DASHBOARD_CONFIG_PATH)
-
-    return {
-        "saved": True,
-        "settings": _dashboard_settings_payload(config),
-        "editTargets": [
-            {
-                "key": "urgency",
-                "label": "Urgency watch badge",
-                "icon": "wrench",
-                "configPath": config_path,
-                "anchor": "dashboard-settings",
-            }
-        ],
-    }
-
-
-@app.get("/api/admin/multiplication", tags=["admin"])
-async def admin_multiplication_settings() -> dict[str, Any]:
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    return {"settings": _multiplication_settings_payload(config)}
-
-
-@app.put("/api/admin/multiplication", tags=["admin"])
-async def admin_update_multiplication_settings(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
-
-    flat_template = str(payload.get("flatLeafTemplate", "")).strip()
-    deep_template = str(payload.get("deepLeafTemplate", "")).strip()
-    if not flat_template or not deep_template:
-        raise HTTPException(
-            status_code=400, detail="flatLeafTemplate and deepLeafTemplate are required"
-        )
-
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    multiply_cfg = config.get("multiply") or {}
-    existing = (
-        OmegaConf.to_container(multiply_cfg, resolve=False) if multiply_cfg else {}
+    return _component_dashboard_settings_payload(
+        config,
+        dashboard_config_path=_DASHBOARD_CONFIG_PATH,
+        repo_root=_REPO_ROOT,
     )
-    if not isinstance(existing, dict):
-        existing = {}
-    config_data = (
-        existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
-    )
-    if not isinstance(config_data, Mapping):
-        config_data = {}
-    config_data = dict(config_data)
-    config_data["flat_leaf_template"] = flat_template
-    config_data["deep_leaf_template"] = deep_template
-
-    existing["config"] = config_data
-    config["multiply"] = existing
-
-    async with _ADMIN_LOCK:
-        _save_yaml_config(_AUTOMATIONS_PATH, config)
-
-    return {"saved": True, "settings": _multiplication_settings_payload(config)}
 
 
 def _template_summary(path: Path) -> dict[str, Any]:
-    cfg = _read_yaml_config(path)
-    data = OmegaConf.to_container(cfg, resolve=False)
-    if not isinstance(data, dict):
-        data = {}
-    category = path.parent.name
-    name = path.stem
-    raw_children = data.get("children")
-    children: list[Any] = raw_children if isinstance(raw_children, list) else []
-    return {
-        "category": category,
-        "name": name,
-        "title": data.get("content", name),
-        "description": data.get("description"),
-        "path": str(path.relative_to(_CONFIG_DIR)),
-        "label": f"template-{name}",
-        "childrenCount": len(children),
-    }
-
-
-@app.get("/api/admin/templates", tags=["admin"])
-async def admin_templates() -> dict[str, Any]:
-    if not _TEMPLATES_DIR.exists():
-        return {"templates": [], "categories": []}
-    templates: list[dict[str, Any]] = []
-    categories: set[str] = set()
-    for category_dir in sorted(_TEMPLATES_DIR.iterdir()):
-        if not category_dir.is_dir():
-            continue
-        categories.add(category_dir.name)
-        for file in sorted(category_dir.glob("*.yaml")):
-            templates.append(_template_summary(file))
-    return {"templates": templates, "categories": sorted(categories)}
-
-
-@app.get("/api/admin/templates/{category}/{name}", tags=["admin"])
-async def admin_template_detail(category: str, name: str) -> dict[str, Any]:
-    safe_category = _ensure_identifier(category, label="category")
-    safe_name = _ensure_identifier(name, label="template name")
-    path = _template_path(safe_category, safe_name)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Template not found")
-    cfg = _read_yaml_config(path)
-    data = OmegaConf.to_container(cfg, resolve=False)
-    if not isinstance(data, dict):
-        data = {}
-    template_payload = cast(Mapping[str, Any], data)
-    return {
-        "category": safe_category,
-        "name": safe_name,
-        "label": f"template-{safe_name}",
-        "template": _template_to_camel(template_payload),
-    }
-
-
-@app.post("/api/admin/templates", tags=["admin"])
-async def admin_create_template(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
-
-    category = _ensure_identifier(str(payload.get("category", "")), label="category")
-    name = _ensure_identifier(str(payload.get("name", "")), label="template name")
-    template = payload.get("template")
-    if not isinstance(template, Mapping):
-        raise HTTPException(status_code=400, detail="template must be an object")
-
-    path = _template_path(category, name)
-    if path.exists():
-        raise HTTPException(status_code=409, detail="Template already exists")
-
-    normalized = _normalize_template_node(template)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _save_yaml_config(path, OmegaConf.create(normalized))
-
-    templates_cfg = _read_yaml_config(_TEMPLATES_REGISTRY_PATH)
-    defaults = _load_defaults_list(templates_cfg)
-    entry_key = _template_defaults_key(category, name)
-    if not any(isinstance(item, Mapping) and entry_key in item for item in defaults):
-        defaults.append({entry_key: name})
-        templates_cfg["defaults"] = defaults
-
-    automations_cfg = _read_yaml_config(_AUTOMATIONS_PATH)
-    template_cfg = automations_cfg.get("template") or {}
-    task_templates = (
-        OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False)
-        if template_cfg
-        else {}
+    return _component_template_summary(
+        path,
+        config_dir=_CONFIG_DIR,
+        read_config=lambda item: _read_yaml_config(item),
     )
-    if not isinstance(task_templates, dict):
-        task_templates = {}
-    task_templates[name] = f"${{{category}.{name}}}"
-    template_cfg["task_templates"] = task_templates
-    automations_cfg["template"] = template_cfg
-    async with _ADMIN_LOCK:
-        _save_yaml_config(_TEMPLATES_REGISTRY_PATH, templates_cfg)
-        _save_yaml_config(_AUTOMATIONS_PATH, automations_cfg)
-
-    return {"created": True, "category": category, "name": name}
-
-
-@app.put("/api/admin/templates/{category}/{name}", tags=["admin"])
-async def admin_update_template(
-    category: str,
-    name: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    safe_category = _ensure_identifier(category, label="category")
-    safe_name = _ensure_identifier(name, label="template name")
-    template = payload.get("template")
-    if not isinstance(template, Mapping):
-        raise HTTPException(status_code=400, detail="template must be an object")
-
-    path = _template_path(safe_category, safe_name)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    normalized = _normalize_template_node(template)
-    async with _ADMIN_LOCK:
-        _save_yaml_config(path, OmegaConf.create(normalized))
-    return {"saved": True, "category": safe_category, "name": safe_name}
-
-
-@app.delete("/api/admin/templates/{category}/{name}", tags=["admin"])
-async def admin_delete_template(category: str, name: str) -> dict[str, Any]:
-    safe_category = _ensure_identifier(category, label="category")
-    safe_name = _ensure_identifier(name, label="template name")
-    path = _template_path(safe_category, safe_name)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    path.unlink()
-
-    templates_cfg = _read_yaml_config(_TEMPLATES_REGISTRY_PATH)
-    defaults = _load_defaults_list(templates_cfg)
-    entry_key = _template_defaults_key(safe_category, safe_name)
-    defaults = [
-        item
-        for item in defaults
-        if not (isinstance(item, Mapping) and entry_key in item)
-    ]
-    templates_cfg["defaults"] = defaults
-
-    automations_cfg = _read_yaml_config(_AUTOMATIONS_PATH)
-    template_cfg = automations_cfg.get("template") or {}
-    task_templates = (
-        OmegaConf.to_container(template_cfg.get("task_templates"), resolve=False)
-        if template_cfg
-        else {}
-    )
-    if isinstance(task_templates, dict) and safe_name in task_templates:
-        del task_templates[safe_name]
-    template_cfg["task_templates"] = task_templates
-    automations_cfg["template"] = template_cfg
-    async with _ADMIN_LOCK:
-        _save_yaml_config(_TEMPLATES_REGISTRY_PATH, templates_cfg)
-        _save_yaml_config(_AUTOMATIONS_PATH, automations_cfg)
-
-    return {"deleted": True, "category": safe_category, "name": safe_name}

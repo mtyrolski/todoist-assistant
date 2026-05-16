@@ -10,7 +10,8 @@ from todoist.env import EnvVar
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
+DEFAULT_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
+SUPPORTED_MODEL_IDS = frozenset({DEFAULT_MODEL_ID})
 
 
 def _sanitize_env_text(value: object) -> str | None:
@@ -20,13 +21,20 @@ def _sanitize_env_text(value: object) -> str | None:
     return text or None
 
 
+def _coerce_supported_model_id(value: object) -> str:
+    model_id = _sanitize_env_text(value)
+    if model_id in SUPPORTED_MODEL_IDS:
+        return model_id
+    return DEFAULT_MODEL_ID
+
+
 def resolve_runtime_env_path(
     *,
     repo_root: Path | None = None,
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     data_dir = _sanitize_env_text(env.get(str(EnvVar.DATA_DIR)))
     if data_dir:
         return Path(data_dir).expanduser().resolve() / ".env"
@@ -78,16 +86,14 @@ def resolve_triton_launch_settings(
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     env_path = resolve_runtime_env_path(repo_root=repo_root, cwd=cwd, environ=env)
     file_values = load_runtime_env_values(env_path)
     default_url = f"http://127.0.0.1:{_sanitize_env_text(env.get('TODOIST_TRITON_HTTP_PORT')) or '8003'}"
 
-    model_id = (
-        _sanitize_env_text(env.get("TRITON_MODEL_ID"))
-        or _sanitize_env_text(env.get(str(EnvVar.AGENT_TRITON_MODEL_ID)))
-        or _sanitize_env_text(file_values.get(str(EnvVar.AGENT_TRITON_MODEL_ID)))
-        or DEFAULT_TRITON_MODEL_ID
+    model_id = _coerce_supported_model_id(
+        _sanitize_env_text(env.get(str(EnvVar.AGENT_MODEL_ID)))
+        or _sanitize_env_text(file_values.get(str(EnvVar.AGENT_MODEL_ID)))
     )
     model_name = (
         _sanitize_env_text(env.get("TRITON_MODEL_NAME"))

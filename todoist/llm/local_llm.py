@@ -5,6 +5,7 @@ This wrapper keeps dependencies explicit and avoids mutating tokenizer internals
 style and use `pydantic` for strict structured output parsing.
 """
 
+# pyright: reportPrivateImportUsage=false
 
 # === LOCAL LLM MODEL =========================================================
 
@@ -38,7 +39,7 @@ from .types import MessageRole, PromptToken
 from .usage import record_llm_usage
 
 
-DEFAULT_MODEL_ID = "mistralai/Ministral-3-3B-Instruct-2512"
+DEFAULT_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 Device = Literal["cpu", "cuda", "mps"]
 DType = Literal["auto", "float16", "bfloat16", "float32"]
 T = TypeVar("T", bound=BaseModel)
@@ -111,7 +112,7 @@ class TransformersMistral3ChatModel:
 
     def chat(self, messages: Sequence[dict[str, str]]) -> str:
         logger.info("LLM chat messages:\n{}", json.dumps(list(messages), ensure_ascii=False, indent=2))
-        prompt = _render_mistral_instruct_prompt(messages, self._tokenizer)
+        prompt = _render_chat_prompt(messages, self._tokenizer)
         logger.debug("Rendered prompt ({} chars)", len(prompt))
         return self._generate_text(prompt, operation="chat")
 
@@ -136,7 +137,7 @@ class TransformersMistral3ChatModel:
             schema.__name__,
             json.dumps(prompt_messages, ensure_ascii=False, indent=2),
         )
-        prompt = _render_mistral_instruct_prompt(prompt_messages, self._tokenizer)
+        prompt = _render_chat_prompt(prompt_messages, self._tokenizer)
         logger.debug("Rendered prompt ({} chars)", len(prompt))
         raw = self._generate_text(
             prompt,
@@ -196,7 +197,8 @@ class TransformersMistral3ChatModel:
 
         new_tokens = generated[0][input_len:]
         output_token_count = int(getattr(new_tokens, "shape", [len(new_tokens)])[-1]) if len(new_tokens) else 0
-        text = self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        decoded_text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
+        text = decoded_text.strip() if isinstance(decoded_text, str) else "".join(decoded_text).strip()
         record_llm_usage(
             backend="transformers_local",
             model_id=self.config.model_id,
@@ -671,6 +673,41 @@ def _float8_target_dtype(model: Any, *, preferred: torch.dtype | None) -> torch.
         if buf.dtype not in float8_dtypes:
             return buf.dtype
     return torch.float32
+
+
+def _render_chat_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase) -> str:
+    apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
+    if callable(apply_chat_template):
+        template_fn = cast(Callable[..., object], apply_chat_template)
+        payload = [
+            {
+                "role": str(message.get("role") or "").strip().lower(),
+                "content": str(message.get("content") or "").strip(),
+            }
+            for message in messages
+            if str(message.get("content") or "").strip()
+        ]
+        try:
+            rendered = template_fn(  # pylint: disable=not-callable
+                payload,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            if isinstance(rendered, str) and rendered.strip():
+                return rendered.strip()
+        except (TypeError, ValueError, NotImplementedError):
+            try:
+                rendered = template_fn(  # pylint: disable=not-callable
+                    payload,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                if isinstance(rendered, str) and rendered.strip():
+                    return rendered.strip()
+            except (TypeError, ValueError, NotImplementedError):
+                pass
+    return _render_mistral_instruct_prompt(messages, tokenizer)
 
 
 def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase) -> str:

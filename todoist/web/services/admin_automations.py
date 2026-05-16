@@ -42,11 +42,7 @@ from todoist.dashboard_settings import (
     update_observer_settings,
 )
 from todoist.env import EnvVar
-from todoist.llm import (
-    DEFAULT_TRITON_MODEL_ID,
-    DEFAULT_TRITON_MODEL_NAME,
-    DEFAULT_TRITON_URL,
-)
+from todoist.llm import DEFAULT_MODEL_ID, DEFAULT_TRITON_MODEL_NAME, DEFAULT_TRITON_URL
 from todoist.utils import Cache, LocalStorageError, get_log_level, load_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -368,9 +364,7 @@ def _restart_dashboard_observer_if_managed(
     observer_log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["HYDRA_FULL_ERROR"] = "1"
-    env["TODOIST_AGENT_TRITON_MODEL_ID"] = os.getenv(
-        str(EnvVar.AGENT_TRITON_MODEL_ID), DEFAULT_TRITON_MODEL_ID
-    )
+    env["TODOIST_AGENT_MODEL_ID"] = os.getenv(str(EnvVar.AGENT_MODEL_ID), DEFAULT_MODEL_ID)
     env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
         str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
     )

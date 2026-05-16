@@ -108,7 +108,7 @@ def _extract_model_id_from_triton_entrypoint(model_dir: Path, versions: list[str
             continue
 
         match = re.search(
-            r'TODOIST_AGENT_TRITON_MODEL_ID"\s*,\s*"([^"]+)"',
+            r'TODOIST_AGENT_(?:TRITON_)?MODEL_ID"\s*,\s*"([^"]+)"',
             model_text,
         )
         if match:

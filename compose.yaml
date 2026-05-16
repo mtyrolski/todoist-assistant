@@ -75,7 +75,7 @@ services:
       HF_HOME: /root/.cache/huggingface
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
       TRANSFORMERS_CACHE: /root/.cache/huggingface/transformers
-      TODOIST_AGENT_TRITON_MODEL_ID: ${TODOIST_AGENT_TRITON_MODEL_ID:-mistralai/Ministral-3-3B-Instruct-2512}
+      TODOIST_AGENT_MODEL_ID: ${TODOIST_AGENT_MODEL_ID:-Qwen/Qwen2.5-3B-Instruct}
       TODOIST_AGENT_TRITON_MODEL_NAME: ${TODOIST_AGENT_TRITON_MODEL_NAME:-todoist_llm}
       TODOIST_TRITON_DEVICE: ${TODOIST_TRITON_DEVICE:-cpu}
       TODOIST_TRITON_MODEL_DTYPE: ${TODOIST_TRITON_MODEL_DTYPE:-float32}

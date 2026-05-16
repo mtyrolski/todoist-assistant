@@ -9,8 +9,8 @@ import pytest
 
 from todoist.automations.llm_breakdown.models import TaskBreakdown
 from todoist.env import EnvVar
+from todoist.llm import DEFAULT_MODEL_ID
 from todoist.llm.triton_llm import (
-    DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     TritonChatConfig,
@@ -83,7 +83,7 @@ def test_triton_chat_posts_infer_request(monkeypatch, tmp_path) -> None:
         "Triton chat backend ready (base_url={}, model_name={}, model_id={})",
         DEFAULT_TRITON_URL,
         DEFAULT_TRITON_MODEL_NAME,
-        DEFAULT_TRITON_MODEL_ID,
+        DEFAULT_MODEL_ID,
     )
     mock_logger.debug.assert_any_call(
         "Triton chat request (messages={}, base_url={})",
@@ -129,7 +129,7 @@ def test_triton_chat_posts_infer_request(monkeypatch, tmp_path) -> None:
         "shape": [1, 1],
         "data": [[0.95]],
     }
-    usage = load_llm_usage_summary(selected_backend="triton_local", selected_model_id=DEFAULT_TRITON_MODEL_ID)
+    usage = load_llm_usage_summary(selected_backend="triton_local", selected_model_id=DEFAULT_MODEL_ID)
     assert usage["totals"]["inferenceCount"] == 1
     assert usage["totals"]["inputTokens"] == 1
     assert usage["totals"]["outputTokens"] == 1
@@ -164,7 +164,7 @@ def test_triton_structured_chat_parses_json(monkeypatch) -> None:
         )
 
     model = TritonGenerateChatModel(
-        TritonChatConfig(model_id=DEFAULT_TRITON_MODEL_ID, max_output_tokens=128)
+        TritonChatConfig(model_id=DEFAULT_MODEL_ID, max_output_tokens=128)
     )
     setattr(
         model,
