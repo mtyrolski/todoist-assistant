@@ -7,7 +7,6 @@ from .openai_llm import (
     OpenAIResponsesChatModel,
 )
 from .triton_llm import (
-    DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     TritonChatConfig,
@@ -18,7 +17,6 @@ from .types import MessageRole, PromptToken
 __all__ = [
     "DEFAULT_OPENAI_MODEL",
     "DEFAULT_MODEL_ID",
-    "DEFAULT_TRITON_MODEL_ID",
     "DEFAULT_TRITON_MODEL_NAME",
     "DEFAULT_TRITON_URL",
     "DType",

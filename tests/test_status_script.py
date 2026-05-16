@@ -23,7 +23,7 @@ def test_discover_triton_models_reads_repository(monkeypatch, tmp_path) -> None:
         '\n'.join(
             [
                 "def initialize() -> None:",
-                '    model_id = _env("TODOIST_AGENT_TRITON_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
+                '    model_id = _env("TODOIST_AGENT_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
             ]
         ),
         encoding="utf-8",
@@ -62,7 +62,7 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
         '\n'.join(
             [
                 "def initialize() -> None:",
-                '    model_id = _env("TODOIST_AGENT_TRITON_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
+                '    model_id = _env("TODOIST_AGENT_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
             ]
         ),
         encoding="utf-8",

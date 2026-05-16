@@ -57,7 +57,7 @@ def test_breakdown_uses_selected_device_for_transformers(monkeypatch, tmp_path) 
     assert isinstance(llm, _FakeTransformers)
     config = captured["config"]
     assert getattr(config, "device") == "cuda"
-    assert getattr(config, "model_id") == "mistralai/Mistral-Nemo-Instruct-2407"
+    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"
 
 
 def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> None:
@@ -78,7 +78,7 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     monkeypatch.delenv(str(EnvVar.AGENT_BACKEND), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_TRITON_URL), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), raising=False)
-    monkeypatch.delenv(str(EnvVar.AGENT_TRITON_MODEL_ID), raising=False)
+    monkeypatch.delenv(str(EnvVar.AGENT_MODEL_ID), raising=False)
     monkeypatch.delenv("OPEN_AI_KEY_NAME", raising=False)
     monkeypatch.chdir(tmp_path)
 
@@ -107,7 +107,7 @@ def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
     monkeypatch.setenv(str(EnvVar.AGENT_TRITON_URL), "http://127.0.0.1:9100")
     monkeypatch.setenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), "todoist_llm")
-    monkeypatch.setenv(str(EnvVar.AGENT_TRITON_MODEL_ID), "Qwen/Qwen2.5-0.5B-Instruct")
+    monkeypatch.setenv(str(EnvVar.AGENT_MODEL_ID), "Qwen/Qwen2.5-0.5B-Instruct")
 
     captured: dict[str, object] = {}
 
@@ -127,4 +127,4 @@ def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
     config = captured["config"]
     assert getattr(config, "base_url") == "http://127.0.0.1:9100"
     assert getattr(config, "model_name") == "todoist_llm"
-    assert getattr(config, "model_id") == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"

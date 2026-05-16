@@ -235,6 +235,24 @@ def _llm_model_options_payload(
     if selected and selected not in seen:
         payload.insert(0, {"id": selected, "label": selected, "selected": True})
     return payload
+def _model_option_ids(options: Sequence[Mapping[str, str]]) -> set[str]:
+    _sync_api_globals()
+    return {
+        option_id
+        for option in options
+        if (option_id := _sanitize_text(option.get("id")))
+    }
+def _coerce_model_option_id(
+    raw: Any,
+    *,
+    options: Sequence[Mapping[str, str]],
+    default: str,
+) -> str:
+    _sync_api_globals()
+    model_id = _sanitize_text(raw)
+    if model_id and model_id in _model_option_ids(options):
+        return model_id
+    return default
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
@@ -280,13 +298,15 @@ def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
         or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
     ) or DEFAULT_TRITON_MODEL_NAME
-    model_id = _sanitize_text(
-        os.getenv(str(EnvVar.AGENT_TRITON_MODEL_ID))
-        or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_ID))
-    ) or DEFAULT_TRITON_MODEL_ID
+    model_id = _coerce_model_option_id(
+        os.getenv(str(EnvVar.AGENT_MODEL_ID))
+        or file_values.get(str(EnvVar.AGENT_MODEL_ID)),
+        options=_TRITON_MODEL_OPTIONS,
+        default=DEFAULT_MODEL_ID,
+    )
     os.environ[str(EnvVar.AGENT_TRITON_URL)] = base_url
     os.environ[str(EnvVar.AGENT_TRITON_MODEL_NAME)] = model_name
-    os.environ[str(EnvVar.AGENT_TRITON_MODEL_ID)] = model_id
+    os.environ[str(EnvVar.AGENT_MODEL_ID)] = model_id
     return {
         "baseUrl": base_url,
         "modelName": model_name,
@@ -317,9 +337,11 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     available_devices = _available_llm_chat_devices()
     openai_settings = _resolve_openai_settings(file_values)
     triton_settings = _resolve_triton_settings(file_values)
-    local_model_id = _sanitize_text(
-        os.getenv(local_model_key) or file_values.get(local_model_key)
-    ) or DEFAULT_MODEL_ID
+    local_model_id = _coerce_model_option_id(
+        os.getenv(local_model_key) or file_values.get(local_model_key),
+        options=_LOCAL_MODEL_OPTIONS,
+        default=DEFAULT_MODEL_ID,
+    )
 
     backend = _normalize_llm_chat_backend(
         os.getenv(backend_key) or file_values.get(backend_key)
@@ -406,7 +428,11 @@ def _build_llm_from_settings(
         config = coerce_model_config(
             {
                 "device": settings.get("device") or _LLM_CHAT_DEVICE_DEFAULT,
-                "model_id": settings.get("localModelId") or DEFAULT_MODEL_ID,
+                "model_id": _coerce_model_option_id(
+                    settings.get("localModelId"),
+                    options=_LOCAL_MODEL_OPTIONS,
+                    default=DEFAULT_MODEL_ID,
+                ),
                 "max_new_tokens": max_output_tokens,
             }
         )
@@ -420,7 +446,11 @@ def _build_llm_from_settings(
             TritonChatConfig(
                 base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
                 model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
-                model_id=str(triton_settings.get("modelId") or DEFAULT_TRITON_MODEL_ID),
+                model_id=_coerce_model_option_id(
+                    triton_settings.get("modelId"),
+                    options=_TRITON_MODEL_OPTIONS,
+                    default=DEFAULT_MODEL_ID,
+                ),
                 max_output_tokens=max_output_tokens,
             )
         )

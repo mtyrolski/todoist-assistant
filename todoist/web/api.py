@@ -67,7 +67,6 @@ from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNod
 from todoist.llm import (
     DEFAULT_MODEL_ID,
     DEFAULT_OPENAI_MODEL,
-    DEFAULT_TRITON_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     MessageRole,
@@ -79,6 +78,7 @@ from todoist.llm import (
 )
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
+from todoist.llm.model_catalog import LOCAL_MODEL_OPTIONS, OPENAI_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -246,29 +246,9 @@ _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
-_LOCAL_MODEL_OPTIONS = [
-    {"id": DEFAULT_MODEL_ID, "label": "Qwen 2.5 3B Instruct"},
-    {"id": "mistralai/Mistral-7B-Instruct-v0.3", "label": "Mistral 7B Instruct v0.3"},
-    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
-    {"id": "mistralai/Mistral-Small-3.1-24B-Instruct-2503", "label": "Mistral Small 3.1 24B Instruct"},
-    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
-    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
-    {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
-]
-_OPENAI_MODEL_OPTIONS = [
-    {"id": "gpt-5-nano", "label": "GPT-5 nano"},
-    {"id": "gpt-5-mini", "label": "GPT-5 mini"},
-    {"id": "gpt-5", "label": "GPT-5"},
-    {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
-    {"id": "gpt-4.1", "label": "GPT-4.1"},
-]
-_TRITON_MODEL_OPTIONS = [
-    {"id": DEFAULT_TRITON_MODEL_ID, "label": "Qwen 2.5 3B Instruct"},
-    {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen 2.5 1.5B Instruct"},
-    {"id": "Qwen/Qwen2.5-0.5B-Instruct", "label": "Qwen 2.5 0.5B Instruct"},
-    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "label": "Mistral Nemo Instruct 2407"},
-    {"id": "meta-llama/Llama-3.2-3B-Instruct", "label": "Llama 3.2 3B Instruct"},
-]
+_LOCAL_MODEL_OPTIONS = LOCAL_MODEL_OPTIONS
+_OPENAI_MODEL_OPTIONS = OPENAI_MODEL_OPTIONS
+_TRITON_MODEL_OPTIONS = TRITON_MODEL_OPTIONS
 
 def _resolve_timezone_status() -> dict[str, Any]:
     env_path = _resolve_env_path()

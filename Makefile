@@ -1,10 +1,10 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
-TRITON_MODEL_ID ?=
+MODEL_ID ?=
 TRITON_MODEL_NAME ?=
 TRITON_URL ?=
 
@@ -37,7 +37,7 @@ reinstall_frontend: # force reinstall frontend deps (clean node_modules)
 reinstall: reinstall_frontend # convenience alias
 
 run_api:
-	@TODOIST_AGENT_TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	@TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" \
 	TODOIST_AGENT_TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
 	TODOIST_AGENT_TRITON_URL="$(TRITON_URL)" \
 	uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
@@ -48,7 +48,7 @@ run_frontend: ensure_frontend_deps
 run_dashboard: run_dashboard_cpu
 
 run_dashboard_cpu: ensure_frontend_deps
-	@TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	@MODEL_ID="$(MODEL_ID)" \
 	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
 	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -56,7 +56,7 @@ run_dashboard_cpu: ensure_frontend_deps
 	bash ./scripts/dashboard_stack.sh start cpu
 
 run_dashboard_gpu: ensure_frontend_deps
-	@TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	@MODEL_ID="$(MODEL_ID)" \
 	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
 	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -75,6 +75,9 @@ triton_shell:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh triton-shell
+
+download_models: ## Download configured Hugging Face local/Triton models with progress
+	PYTHONPATH=. uv run python3 -m scripts.download_models $(DOWNLOAD_MODELS_ARGS)
 
 run_demo: ensure_frontend_deps
 	@bash -c '\
@@ -109,7 +112,7 @@ run_demo: ensure_frontend_deps
 	'
 
 run_observer:
-	@HYDRA_FULL_ERROR=1 TODOIST_AGENT_TRITON_MODEL_ID="$(TRITON_MODEL_ID)" \
+	@HYDRA_FULL_ERROR=1 TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" \
 	TODOIST_AGENT_TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
 	TODOIST_AGENT_TRITON_URL="$(TRITON_URL)" \
 	uv run python3 -m todoist.run_observer --config-dir configs --config-name automations

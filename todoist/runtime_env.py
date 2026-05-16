@@ -10,7 +10,8 @@ from todoist.env import EnvVar
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
+SUPPORTED_MODEL_IDS = frozenset({DEFAULT_MODEL_ID})
 
 
 def _sanitize_env_text(value: object) -> str | None:
@@ -18,6 +19,13 @@ def _sanitize_env_text(value: object) -> str | None:
         return None
     text = str(value).strip().strip("'\"")
     return text or None
+
+
+def _coerce_supported_model_id(value: object) -> str:
+    model_id = _sanitize_env_text(value)
+    if model_id in SUPPORTED_MODEL_IDS:
+        return model_id
+    return DEFAULT_MODEL_ID
 
 
 def resolve_runtime_env_path(
@@ -83,11 +91,9 @@ def resolve_triton_launch_settings(
     file_values = load_runtime_env_values(env_path)
     default_url = f"http://127.0.0.1:{_sanitize_env_text(env.get('TODOIST_TRITON_HTTP_PORT')) or '8003'}"
 
-    model_id = (
-        _sanitize_env_text(env.get("TRITON_MODEL_ID"))
-        or _sanitize_env_text(env.get(str(EnvVar.AGENT_TRITON_MODEL_ID)))
-        or _sanitize_env_text(file_values.get(str(EnvVar.AGENT_TRITON_MODEL_ID)))
-        or DEFAULT_TRITON_MODEL_ID
+    model_id = _coerce_supported_model_id(
+        _sanitize_env_text(env.get(str(EnvVar.AGENT_MODEL_ID)))
+        or _sanitize_env_text(file_values.get(str(EnvVar.AGENT_MODEL_ID)))
     )
     model_name = (
         _sanitize_env_text(env.get("TRITON_MODEL_NAME"))

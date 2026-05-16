@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from .local_llm import (
+    DEFAULT_MODEL_ID,
     _load_tokenizer,
     _render_chat_prompt,
     _schema_instructions,
@@ -21,14 +22,13 @@ from .usage import record_llm_usage
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
-DEFAULT_TRITON_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass(frozen=True)
 class TritonChatConfig:
     model_name: str = DEFAULT_TRITON_MODEL_NAME
-    model_id: str = DEFAULT_TRITON_MODEL_ID
+    model_id: str = DEFAULT_MODEL_ID
     base_url: str = DEFAULT_TRITON_URL
     temperature: float = 0.2
     top_p: float = 0.95

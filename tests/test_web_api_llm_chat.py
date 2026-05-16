@@ -85,7 +85,7 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
         json={
             "backend": "transformers_local",
             "device": "cuda",
-            "localModelId": "Qwen/Qwen2.5-1.5B-Instruct",
+            "localModelId": "Qwen/Qwen2.5-3B-Instruct",
         },
     )
 
@@ -93,10 +93,10 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     payload = res.json()
     assert payload["backend"] == "transformers_local"
     assert payload["device"] == "cuda"
-    assert payload["localModelId"] == "Qwen/Qwen2.5-1.5B-Instruct"
+    assert payload["localModelId"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["reloadedRequired"] is True
     assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_DEVICE='cuda'") >= 0
-    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-1.5B-Instruct'") >= 0
+    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'") >= 0
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
 
@@ -110,6 +110,7 @@ def test_llm_chat_settings_response_does_not_expose_secret_key(
                 "OPEN_AI_SECRET_KEY='sk-test'",
                 "OPEN_AI_KEY_NAME='primary-key'",
                 "OPEN_AI_MODEL='gpt-5-mini'",
+                "TODOIST_AGENT_MODEL_ID='openai/gpt-oss-20b'",
             ]
         ),
         encoding="utf-8",
@@ -131,12 +132,14 @@ def test_llm_chat_settings_response_does_not_expose_secret_key(
     assert payload["openai"]["model"] == "gpt-5-mini"
     assert "secretKey" not in payload["openai"]
     assert payload["envPath"] == ".env"
-    assert "mistralai/Mistral-Nemo-Instruct-2407" in {
-        option["id"] for option in payload["localModelOptions"]
-    }
-    assert "mistralai/Mistral-Nemo-Instruct-2407" in {
-        option["id"] for option in payload["triton"]["modelOptions"]
-    }
+    assert [option["id"] for option in payload["localModelOptions"]] == [
+        "Qwen/Qwen2.5-3B-Instruct"
+    ]
+    assert payload["localModelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert [option["id"] for option in payload["triton"]["modelOptions"]] == [
+        "Qwen/Qwen2.5-3B-Instruct"
+    ]
+    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
     assert "gpt-5-nano" in {option["id"] for option in payload["openai"]["modelOptions"]}
 
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
@@ -146,6 +149,21 @@ def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> Non
     res = client.put(
         "/api/llm_chat/settings",
         json={"backend": "transformers_local", "device": "cuda"},
+    )
+
+    assert res.status_code == 400
+
+def test_llm_chat_update_settings_rejects_unsupported_local_model(monkeypatch) -> None:
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/llm_chat/settings",
+        json={
+            "backend": "transformers_local",
+            "device": "cpu",
+            "localModelId": "openai/gpt-oss-20b",
+        },
     )
 
     assert res.status_code == 400
@@ -207,7 +225,7 @@ def test_llm_chat_update_settings_supports_triton_backend(
         json={
             "backend": "triton_local",
             "device": "cpu",
-            "tritonModelId": "Qwen/Qwen2.5-1.5B-Instruct",
+            "tritonModelId": "Qwen/Qwen2.5-3B-Instruct",
         },
     )
 
@@ -216,10 +234,11 @@ def test_llm_chat_update_settings_supports_triton_backend(
     assert payload["backend"] == "triton_local"
     assert payload["triton"]["healthy"] is True
     assert payload["triton"]["modelName"] == "todoist_llm"
-    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-1.5B-Instruct"
+    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert payload["localModelId"] == "Qwen/Qwen2.5-3B-Instruct"
     saved = env_path.read_text(encoding="utf-8")
     assert "TODOIST_AGENT_BACKEND='triton_local'" in saved
-    assert "TODOIST_AGENT_TRITON_MODEL_ID='Qwen/Qwen2.5-1.5B-Instruct'" in saved
+    assert "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'" in saved
 
 def test_llm_chat_send_requires_message() -> None:
     """Test /api/llm_chat/send validates message is required."""

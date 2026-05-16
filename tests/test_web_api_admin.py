@@ -1032,5 +1032,5 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
     assert source == "transformers"
     assert tasks[0]["content"] == "Draft roadmap"
     config = captured["config"]
-    assert getattr(config, "model_id") == "mistralai/Mistral-Nemo-Instruct-2407"
+    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"
     assert getattr(config, "max_new_tokens") == 768

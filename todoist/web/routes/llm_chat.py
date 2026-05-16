@@ -61,6 +61,13 @@ async def llm_chat_update_settings(
     local_model_id = _sanitize_text(payload.get("localModelId")) or settings["localModelId"]
     openai_model = _sanitize_text(payload.get("openaiModel")) or settings["openai"]["model"]
     triton_model_id = _sanitize_text(payload.get("tritonModelId")) or settings["triton"]["modelId"]
+    local_model_ids = {str(item["id"]) for item in settings["localModelOptions"]}
+    triton_model_ids = {str(item["id"]) for item in settings["triton"]["modelOptions"]}
+    if local_model_id not in local_model_ids:
+        raise HTTPException(status_code=400, detail="Unsupported local LLM model.")
+    if triton_model_id not in triton_model_ids:
+        raise HTTPException(status_code=400, detail="Unsupported Triton LLM model.")
+    model_id = triton_model_id if backend == "triton_local" else local_model_id
 
     enabled, loading = await _llm_chat_model_status()
     if loading:
@@ -73,14 +80,12 @@ async def llm_chat_update_settings(
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
     set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
-    set_key(str(env_path), str(EnvVar.AGENT_MODEL_ID), local_model_id)
+    set_key(str(env_path), str(EnvVar.AGENT_MODEL_ID), model_id)
     set_key(str(env_path), "OPEN_AI_MODEL", openai_model)
-    set_key(str(env_path), str(EnvVar.AGENT_TRITON_MODEL_ID), triton_model_id)
     os.environ[str(EnvVar.AGENT_BACKEND)] = backend
     os.environ[str(EnvVar.AGENT_DEVICE)] = device
-    os.environ[str(EnvVar.AGENT_MODEL_ID)] = local_model_id
+    os.environ[str(EnvVar.AGENT_MODEL_ID)] = model_id
     os.environ["OPEN_AI_MODEL"] = openai_model
-    os.environ[str(EnvVar.AGENT_TRITON_MODEL_ID)] = triton_model_id
 
     if enabled:
         await _reset_llm_chat_runtime()
