@@ -41,7 +41,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @dataclass(frozen=True)
 class BreakdownSettings:
-    label_prefix: str = "llm-"
+    label_prefix: str = "ai-"
     default_variant: str = "breakdown"
     max_depth: int = 3
     max_children: int = 6
@@ -53,7 +53,7 @@ class BreakdownSettings:
     max_queue_depth: int = 1
     auto_queue_children: bool = True
     track_progress: bool = True
-    failed_label: str = "llm-breakdown-failed"
+    failed_label: str = "ai-breakdown-failed"
     max_failures_per_task: int = 3
 
 
@@ -76,7 +76,7 @@ def _coerce_settings(
     unknown = set(payload) - allowed
     if unknown:
         unknown_list = ", ".join(sorted(unknown))
-        raise TypeError(f"Unexpected LLM breakdown settings: {unknown_list}")
+        raise TypeError(f"Unexpected AI breakdown settings: {unknown_list}")
 
     return BreakdownSettings(**payload)
 
@@ -91,7 +91,7 @@ class LLMBreakdown(Automation):
         model_config: LocalChatConfig | Mapping[str, Any] | None = None,
         **overrides: Any,
     ):
-        super().__init__("LLM Breakdown", frequency_in_minutes)
+        super().__init__("@ai-breakdown", frequency_in_minutes)
 
         settings_obj = _coerce_settings(settings, overrides)
 
@@ -108,7 +108,7 @@ class LLMBreakdown(Automation):
         self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
         self.auto_queue_children = settings_obj.auto_queue_children
         self.track_progress = settings_obj.track_progress
-        self.failed_label = _sanitize_text(settings_obj.failed_label) or "llm-breakdown-failed"
+        self.failed_label = _sanitize_text(settings_obj.failed_label) or "ai-breakdown-failed"
         self.failed_label_lower = self.failed_label.lower()
         self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
@@ -134,7 +134,7 @@ class LLMBreakdown(Automation):
         try:
             self._progress_storage.save(payload)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to save LLM breakdown progress: {}", exc)
+            logger.warning("Failed to save AI breakdown progress: {}", exc)
 
     def _progress_load(self) -> dict[str, Any]:
         if not self.track_progress:
@@ -142,7 +142,7 @@ class LLMBreakdown(Automation):
         try:
             payload = self._progress_storage.load()
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to load LLM breakdown progress: {}", exc)
+            logger.warning("Failed to load AI breakdown progress: {}", exc)
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -152,7 +152,7 @@ class LLMBreakdown(Automation):
         try:
             payload = self._queue_storage.load()
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to load LLM breakdown queue: {}", exc)
+            logger.warning("Failed to load AI breakdown queue: {}", exc)
             return []
         if not isinstance(payload, list):
             return []
@@ -180,7 +180,7 @@ class LLMBreakdown(Automation):
         try:
             self._queue_storage.save(cast(Any, items))
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to save LLM breakdown queue: {}", exc)
+            logger.warning("Failed to save AI breakdown queue: {}", exc)
 
     @staticmethod
     def _resolve_env_path() -> Path:
@@ -494,11 +494,11 @@ class LLMBreakdown(Automation):
         refresh = getattr(db, "reset", None)
         if callable(refresh):
             try:
-                logger.debug("Refreshing active Todoist tasks before LLM breakdown selection")
+                logger.debug("Refreshing active Todoist tasks before AI breakdown selection")
                 refresh()
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
-                    "Failed to refresh active Todoist tasks before LLM breakdown selection: {}",
+                    "Failed to refresh active Todoist tasks before AI breakdown selection: {}",
                     exc,
                 )
         run_breakdown(self, db)

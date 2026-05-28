@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict, cast
 
 from tqdm import tqdm
 from todoist.utils import TODOIST_COLOR_NAME_TO_RGB
@@ -11,6 +11,7 @@ from todoist.api.client import EndpointCallResult
 class LabelRecord(TypedDict):
     name: str
     color: str
+    id: NotRequired[str]
 
 
 class DatabaseLabels:
@@ -47,7 +48,34 @@ class DatabaseLabels:
     def list_labels(self) -> list[LabelRecord]:
         """Return a shallow copy of fetched label records."""
 
-        return [{"name": label["name"], "color": label["color"]} for label in self._labels]
+        return [cast(LabelRecord, dict(label)) for label in self._labels]
+
+    def delete_label_by_name(self, label_name: str) -> bool:
+        """Delete a personal Todoist label by name when it exists locally."""
+
+        label = next((item for item in self._labels if item["name"] == label_name), None)
+        if label is None:
+            logger.debug(f"Label {label_name!r} not found; skipping delete.")
+            return False
+        label_id = label.get("id")
+        if not label_id:
+            logger.warning(f"Label {label_name!r} has no id; cannot delete it.")
+            return False
+
+        spec = RequestSpec(
+            endpoint=TodoistEndpoints.DELETE_LABEL.format(label_id=label_id),
+            headers={"Content-Type": "application/json"},
+            rate_limited=True,
+        )
+        result = self._api_client.request(spec, operation_name=f"delete label {label_name}")
+        if result.status_code not in (200, 204):
+            logger.error("Unexpected status when deleting label", status=result.status_code)
+            return False
+
+        self._labels = [item for item in self._labels if item.get("id") != label_id]
+        self._mapping_label_name_to_color.pop(label_name, None)
+        logger.warning(f"Deleted Todoist label {label_name!r} (id={label_id}).")
+        return True
 
     def _fetch_label_data(self) -> None:
         """
@@ -102,7 +130,13 @@ class DatabaseLabels:
             color = item.get("color")
             if not isinstance(name, str) or not isinstance(color, str):
                 raise RuntimeError(f"Unexpected label shape returned from {operation_name}")
-            typed_results.append({"name": name, "color": color})
+            record: LabelRecord = {"name": name, "color": color}
+            label_id = item.get("id")
+            if isinstance(label_id, str):
+                record["id"] = label_id
+            elif isinstance(label_id, int):
+                record["id"] = str(label_id)
+            typed_results.append(record)
         next_cursor = payload.get("next_cursor")
         return typed_results, str(next_cursor) if isinstance(next_cursor, str) else None
 

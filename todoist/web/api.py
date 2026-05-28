@@ -124,6 +124,7 @@ from todoist.web.api_components.settings import (
     dashboard_settings_payload as _component_dashboard_settings_payload,
     llm_breakdown_settings_payload as _llm_breakdown_settings_payload,
     multiplication_settings_payload as _multiplication_settings_payload,
+    stale_tasks_settings_payload as _stale_tasks_settings_payload,
 )
 from todoist.web.api_components.templates import (
     ensure_identifier as _ensure_identifier,

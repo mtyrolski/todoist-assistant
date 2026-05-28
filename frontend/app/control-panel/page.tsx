@@ -8,6 +8,7 @@ import { LoadingBar } from "../components/LoadingBar";
 import { ObserverControl } from "../components/ObserverControl";
 import { PageHeader } from "../components/PageHeader";
 import { ServiceMonitor } from "../components/ServiceMonitor";
+import { StaleTaskSettings } from "../components/StaleTaskSettings";
 import { StatusPills } from "../components/StatusPills";
 import { useApiHealth, useDashboardStatus, useLlmBreakdownProgress, useSyncLabel } from "../lib/dashboardHooks";
 
@@ -54,6 +55,11 @@ export default function ControlPanelPage() {
             }}
           />
           <DashboardSettings
+            onAfterMutation={() => {
+              refreshStatus();
+            }}
+          />
+          <StaleTaskSettings
             onAfterMutation={() => {
               refreshStatus();
             }}

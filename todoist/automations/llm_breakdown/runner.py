@@ -35,7 +35,7 @@ def _post_task_comment(db: Database, task_id: str, content: str) -> None:
     try:
         db.create_comment(task_id=task_id, content=content)
     except Exception as exc:  # pragma: no cover - comment audit must not block rollout
-        logger.warning("Failed to create LLM breakdown comment for task {}: {}", task_id, exc)
+        logger.warning("Failed to create AI breakdown comment for task {}: {}", task_id, exc)
 
 
 def _llm_descriptor(automation: Any, llm: Any) -> str:
@@ -51,7 +51,7 @@ def _llm_descriptor(automation: Any, llm: Any) -> str:
 
 
 def _comment_header() -> str:
-    return "Todoist Assistant LLM Breakdown"
+    return "Todoist Assistant AI Breakdown"
 
 
 def _start_comment(*, run_id: str, request: Any, llm_descriptor: str) -> str:
@@ -130,7 +130,7 @@ def _task_failure_comment_count(db: Database, task_id: str) -> int:
     try:
         comments = db.fetch_task_comments(task_id)
     except Exception as exc:  # pragma: no cover - defensive retry policy
-        logger.warning("Failed to fetch LLM breakdown comments for task {}: {}", task_id, exc)
+        logger.warning("Failed to fetch AI breakdown comments for task {}: {}", task_id, exc)
         return 0
     return sum(
         1
@@ -151,7 +151,7 @@ def _failure_action_for_task(
 ) -> str:
     failure_count = _task_failure_comment_count(db, task.id) + 1
     max_failures = int(getattr(automation, "max_failures_per_task", 3))
-    failed_label = str(getattr(automation, "failed_label", "llm-breakdown-failed"))
+    failed_label = str(getattr(automation, "failed_label", "ai-breakdown-failed"))
     if source == "label" and failure_count >= max_failures:
         automation.mark_root_failed(db, task, label)
         return f"Failure limit reached ({failure_count}/{max_failures}); replaced label with {failed_label}."
@@ -159,7 +159,7 @@ def _failure_action_for_task(
 
 
 def run_breakdown(automation: Any, db: Database) -> None:
-    logger.info("Running LLM Breakdown automation")
+    logger.info("Running AI Breakdown automation")
     projects = db.fetch_projects(include_tasks=True)
     all_tasks: list[Task] = [task for project in projects for task in project.tasks]
     logger.debug(f"Found {len(all_tasks)} tasks in total")
@@ -210,7 +210,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
     cleanup_label_tasks = selection.cleanup_label_tasks
 
     logger.info(
-        "LLM breakdown selection prepared {} candidate(s), {} cleanup task(s), {} dropped queue item(s)",
+        "AI breakdown selection prepared {} candidate(s), {} cleanup task(s), {} dropped queue item(s)",
         len(candidates),
         len(cleanup_label_tasks),
         len(drop_queue_ids),
@@ -235,7 +235,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 track_processed=track_processed,
             )
             automation.progress_save(idle_progress)
-        logger.info("No LLM breakdown tasks queued.")
+        logger.info("No AI breakdown tasks queued.")
         return
 
     limit = automation.max_tasks_per_tick
@@ -243,7 +243,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
     tasks_total = len(candidates)
     tasks_pending = tasks_total - len(tasks_to_process)
     logger.info(
-        "LLM breakdown will process {} task(s) this tick (candidates={}, max_tasks_per_tick={})",
+        "AI breakdown will process {} task(s) this tick (candidates={}, max_tasks_per_tick={})",
         len(tasks_to_process),
         tasks_total,
         limit,
@@ -320,7 +320,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
         fallback_reason: str | None = None
         if result.error is not None or result.breakdown is None:
             error_message = result.error or "unknown error"
-            logger.error("LLM breakdown failed for task {}: {}", task.id, error_message)
+            logger.error("AI breakdown failed for task {}: {}", task.id, error_message)
             action = _failure_action_for_task(
                 automation,
                 db,
@@ -436,7 +436,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
             error_message = "; ".join(context.errors[:3])
             if len(context.errors) > 3:
                 error_message = f"{error_message}; and {len(context.errors) - 3} more"
-            logger.error("LLM breakdown insert failed for task {}: {}", task.id, error_message)
+            logger.error("AI breakdown insert failed for task {}: {}", task.id, error_message)
             _post_task_comment(
                 db,
                 task.id,

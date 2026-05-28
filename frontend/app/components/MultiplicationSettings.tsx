@@ -7,6 +7,9 @@ type MultiplicationSettings = {
   deepLeafTemplate: string;
   flatLabelRegex: string;
   deepLabelRegex: string;
+  deepChildLabel: string;
+  cleanupUnusedLabels: boolean;
+  cleanupUnusedLabelsAfterDays: number;
 };
 
 type MultiplicationResponse = {
@@ -74,7 +77,10 @@ export function MultiplicationSettings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           flatLeafTemplate: draft.flatLeafTemplate,
-          deepLeafTemplate: draft.deepLeafTemplate
+          deepLeafTemplate: draft.deepLeafTemplate,
+          deepChildLabel: draft.deepChildLabel,
+          cleanupUnusedLabels: draft.cleanupUnusedLabels,
+          cleanupUnusedLabelsAfterDays: draft.cleanupUnusedLabelsAfterDays
         })
       });
       const payload = (await res.json()) as MultiplicationResponse & { detail?: string };
@@ -120,6 +126,35 @@ export function MultiplicationSettings() {
                   onChange={(e) => setDraft({ ...draft, deepLeafTemplate: e.target.value })}
                 />
                 <span className="muted tiny">Pattern: {draft.deepLabelRegex}</span>
+              </label>
+              <label className="field">
+                <span className="muted tiny">Generated subtask label</span>
+                <input
+                  className="textInput"
+                  value={draft.deepChildLabel}
+                  onChange={(e) => setDraft({ ...draft, deepChildLabel: e.target.value })}
+                />
+                <span className="muted tiny">Todoist displays this as @{draft.deepChildLabel || "effort-point"}.</span>
+              </label>
+              <label className="field">
+                <span className="muted tiny">Clean unused X labels</span>
+                <input
+                  type="checkbox"
+                  checked={draft.cleanupUnusedLabels}
+                  onChange={(e) => setDraft({ ...draft, cleanupUnusedLabels: e.target.checked })}
+                />
+              </label>
+              <label className="field">
+                <span className="muted tiny">Unused label retention days</span>
+                <input
+                  className="textInput"
+                  type="number"
+                  min={0}
+                  value={draft.cleanupUnusedLabelsAfterDays}
+                  onChange={(e) =>
+                    setDraft({ ...draft, cleanupUnusedLabelsAfterDays: Math.max(0, Number(e.target.value) || 0) })
+                  }
+                />
               </label>
             </div>
           )}

@@ -33,6 +33,8 @@ RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "integration_launches.joblib",
     "automation_launches.joblib",
     "automation_run_signals.joblib",
+    "stale_task_warnings.joblib",
+    "multiplication_label_usage.joblib",
     "habit_tracker_posts.joblib",
     "processed_gmail_messages.joblib",
     "dashboard_state.joblib",
@@ -371,6 +373,8 @@ class Cache:
         self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
         self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
         self.automation_run_signals = LocalStorage(join(self.path, 'automation_run_signals.joblib'), dict)
+        self.stale_task_warnings = LocalStorage(join(self.path, 'stale_task_warnings.joblib'), dict)
+        self.multiplication_label_usage = LocalStorage(join(self.path, 'multiplication_label_usage.joblib'), dict)
         self.habit_tracker_posts = LocalStorage(join(self.path, 'habit_tracker_posts.joblib'), dict)
         self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)
         self.dashboard_state = LocalStorage(join(self.path, 'dashboard_state.joblib'), dict)

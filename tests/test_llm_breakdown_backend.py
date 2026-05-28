@@ -1,4 +1,4 @@
-"""Tests for LLM breakdown backend selection."""
+"""Tests for AI breakdown backend selection."""
 
 from todoist.automations.llm_breakdown.automation import LLMBreakdown
 from todoist.env import EnvVar

@@ -8,7 +8,7 @@ export default function TaskRolloutRulesPage() {
     <>
       <PageHeader
         eyebrow="Task Rollout Rules"
-        title="LLM Breakdown Configuration"
+        title="AI Breakdown Configuration"
         lede="Tune how tasks are expanded into structured subtasks. Use variants to control depth, tone, and queueing."
       />
       <TaskRolloutRules />

@@ -505,6 +505,30 @@ async def admin_update_multiplication_settings(
     config_data = dict(config_data)
     config_data["flat_leaf_template"] = flat_template
     config_data["deep_leaf_template"] = deep_template
+    if "deepChildLabel" in payload:
+        deep_child_label = str(payload.get("deepChildLabel", "")).strip()
+        if not deep_child_label:
+            raise HTTPException(status_code=400, detail="deepChildLabel is required")
+        config_data["deep_child_label"] = deep_child_label
+    if "cleanupUnusedLabels" in payload:
+        config_data["cleanup_unused_labels"] = bool(payload.get("cleanupUnusedLabels"))
+    if "cleanupUnusedLabelsAfterDays" in payload:
+        raw_days = payload.get("cleanupUnusedLabelsAfterDays")
+        if raw_days is None:
+            raise HTTPException(
+                status_code=400,
+                detail="cleanupUnusedLabelsAfterDays must be a non-negative integer",
+            )
+        try:
+            config_data["cleanup_unused_labels_after_days"] = max(
+                0,
+                int(raw_days),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="cleanupUnusedLabelsAfterDays must be a non-negative integer",
+            ) from exc
 
     existing["config"] = config_data
     config["multiply"] = existing
@@ -513,6 +537,77 @@ async def admin_update_multiplication_settings(
         _save_yaml_config(_AUTOMATIONS_PATH, config)
 
     return {"saved": True, "settings": _multiplication_settings_payload(config)}
+
+@router.get("/api/admin/stale_tasks", tags=["admin"])
+async def admin_stale_tasks_settings() -> dict[str, Any]:
+    _sync_api_globals(globals())
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    return {"settings": _stale_tasks_settings_payload(config)}
+
+@router.put("/api/admin/stale_tasks", tags=["admin"])
+async def admin_update_stale_tasks_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    _sync_api_globals(globals())
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    def non_negative_int(key: str) -> int:
+        raw_value = payload.get(key)
+        if raw_value is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{key} must be a non-negative integer",
+            )
+        try:
+            return max(0, int(raw_value))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{key} must be a non-negative integer",
+            ) from exc
+
+    old_after_days = non_negative_int("oldAfterDays")
+    very_old_after_days = non_negative_int("veryOldAfterDays")
+    delete_after_warning_days = non_negative_int("deleteAfterWarningDays")
+    warning_label = str(payload.get("warningLabel", "")).strip()
+    very_old_label = str(payload.get("veryOldLabel", "")).strip()
+    if not warning_label or not very_old_label:
+        raise HTTPException(
+            status_code=400,
+            detail="warningLabel and veryOldLabel are required",
+        )
+    if very_old_after_days < old_after_days:
+        raise HTTPException(
+            status_code=400,
+            detail="veryOldAfterDays must be greater than or equal to oldAfterDays",
+        )
+
+    config = _read_yaml_config(_AUTOMATIONS_PATH)
+    stale_cfg = config.get("stale_tasks") or {}
+    existing = OmegaConf.to_container(stale_cfg, resolve=False) if stale_cfg else {}
+    if not isinstance(existing, dict):
+        existing = {}
+    config_data = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    if not isinstance(config_data, Mapping):
+        config_data = {}
+    config_data = dict(config_data)
+    config_data["old_after_days"] = old_after_days
+    config_data["very_old_after_days"] = very_old_after_days
+    config_data["old_label"] = warning_label
+    config_data["very_old_label"] = very_old_label
+    config_data["delete_after_warning_days"] = delete_after_warning_days
+    existing["config"] = config_data
+    if "dryRun" in payload:
+        existing["dry_run"] = bool(payload.get("dryRun"))
+    if "maxUpdatesPerTick" in payload:
+        existing["max_updates_per_tick"] = non_negative_int("maxUpdatesPerTick")
+    config["stale_tasks"] = existing
+
+    async with _ADMIN_LOCK:
+        _save_yaml_config(_AUTOMATIONS_PATH, config)
+
+    return {"saved": True, "settings": _stale_tasks_settings_payload(config)}
 
 @router.get("/api/admin/templates", tags=["admin"])
 async def admin_templates() -> dict[str, Any]:

@@ -220,7 +220,7 @@ export function LlmRuntimeSettings({
             <div className="chatSectionHeaderMain">
               <p className="rowTitle">AI usage</p>
               <p className="muted tiny">
-                Local cumulative stats across dashboard chat, task ingest, and LLM breakdown work.
+                Local cumulative stats across dashboard chat, task ingest, and AI breakdown work.
               </p>
             </div>
             <div className="chatSectionMeta">
@@ -305,11 +305,11 @@ export function LlmRuntimeSettings({
         </div>
         <div className="grid2">
           <div className="control">
-            <label className="muted tiny" htmlFor={compact ? "llm-backend-compact" : "llm-backend-prominent"}>
+            <label className="muted tiny" htmlFor={compact ? "ai-backend-compact" : "ai-backend-prominent"}>
               Backend
             </label>
             <select
-              id={compact ? "llm-backend-compact" : "llm-backend-prominent"}
+              id={compact ? "ai-backend-compact" : "ai-backend-prominent"}
               className="dateInput"
               value={llmBackendDraft}
               onChange={(e) => setLlmBackendDraft(e.target.value)}
@@ -323,11 +323,11 @@ export function LlmRuntimeSettings({
             </select>
           </div>
           <div className="control">
-            <label className="muted tiny" htmlFor={compact ? "llm-model-compact" : "llm-model-prominent"}>
+            <label className="muted tiny" htmlFor={compact ? "ai-model-compact" : "ai-model-prominent"}>
               Model
             </label>
             <select
-              id={compact ? "llm-model-compact" : "llm-model-prominent"}
+              id={compact ? "ai-model-compact" : "ai-model-prominent"}
               className="dateInput"
               value={llmModelDraft}
               onChange={(e) => setLlmModelDraft(e.target.value)}
@@ -342,11 +342,11 @@ export function LlmRuntimeSettings({
           </div>
         </div>
         <div className="control">
-          <label className="muted tiny" htmlFor={compact ? "llm-device-compact" : "llm-device-prominent"}>
+          <label className="muted tiny" htmlFor={compact ? "ai-device-compact" : "ai-device-prominent"}>
             Device {llmUsesRemoteDevice ? "(managed by backend)" : "(local runtime)"}
           </label>
           <select
-            id={compact ? "llm-device-compact" : "llm-device-prominent"}
+            id={compact ? "ai-device-compact" : "ai-device-prominent"}
             className="dateInput"
             value={llmDeviceDraft}
             onChange={(e) => setLlmDeviceDraft(e.target.value)}

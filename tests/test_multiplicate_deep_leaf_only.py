@@ -95,7 +95,7 @@ def test_deep_label_on_non_leaf_creates_subtasks_and_removes_multiplier_label():
         "Parent - 3/3",
     ]
     assert all(i.get("parent_id") == "1" for i in db.inserts)
-    assert all(i.get("labels") == ["work"] for i in db.inserts)
+    assert all(i.get("labels") == ["work", "effort-point"] for i in db.inserts)
     assert db.updated == [("1", {"labels": ["work"]})]
     assert not db.removed_ids
 
@@ -114,6 +114,6 @@ def test_deep_label_prioritized_over_flat_label():
         "Do thing - 2/2",
     ]
     assert all(i.get("parent_id") == "1" for i in db.inserts)
-    assert all(i.get("labels") == ["work"] for i in db.inserts)
+    assert all(i.get("labels") == ["work", "effort-point"] for i in db.inserts)
     # Both multiplier labels removed from the parent
     assert db.updated == [("1", {"labels": ["work"]})]

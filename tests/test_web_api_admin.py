@@ -457,6 +457,94 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> N
     saved = config_path.read_text(encoding="utf-8")
     assert "- ${gmail_tasks}" in saved
 
+def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "stale_tasks:",
+                "  _target_: todoist.automations.stale_tasks.StaleTasksAutomation",
+                "  name: Stale Tasks",
+                "  frequency_in_minutes: 1440",
+                "  config:",
+                "    old_after_days: 30",
+                "    very_old_after_days: 90",
+                "    old_label: old",
+                "    very_old_label: very-old",
+                "  dry_run: true",
+                "  max_updates_per_tick: 25",
+                "automations:",
+                "  - ${stale_tasks}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/admin/stale_tasks",
+        json={
+            "oldAfterDays": 14,
+            "veryOldAfterDays": 45,
+            "warningLabel": "stale-warning",
+            "veryOldLabel": "stale-critical",
+            "deleteAfterWarningDays": 5,
+            "dryRun": False,
+            "maxUpdatesPerTick": 10,
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["settings"]["deleteAfterWarningDays"] == 5
+    assert payload["settings"]["dryRun"] is False
+    saved = config_path.read_text(encoding="utf-8")
+    assert "old_label: stale-warning" in saved
+    assert "delete_after_warning_days: 5" in saved
+    assert "dry_run: false" in saved
+
+def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "multiply:",
+                "  _target_: todoist.automations.multiplicate.Multiply",
+                "  frequency_in_minutes: 0.1",
+                "automations:",
+                "  - ${multiply}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/admin/multiplication",
+        json={
+            "flatLeafTemplate": "{base} #{i}",
+            "deepLeafTemplate": "{base} - {i}/{n}",
+            "deepChildLabel": "effort-point",
+            "cleanupUnusedLabels": True,
+            "cleanupUnusedLabelsAfterDays": 3,
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["settings"]["cleanupUnusedLabels"] is True
+    assert payload["settings"]["cleanupUnusedLabelsAfterDays"] == 3
+    assert payload["settings"]["deepChildLabel"] == "effort-point"
+    saved = config_path.read_text(encoding="utf-8")
+    assert "deep_child_label: effort-point" in saved
+    assert "cleanup_unused_labels_after_days: 3" in saved
+
 def test_set_automation_enabled_disables_config_entry(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "automations.yaml"
     config_path.write_text(

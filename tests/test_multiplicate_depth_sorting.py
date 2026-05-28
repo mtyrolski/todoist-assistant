@@ -54,6 +54,7 @@ class _FakeDb:
     def __init__(self, tasks: list[Task]):
         self._projects = [SimpleNamespace(tasks=tasks)]
         self.removed_ids: list[str] = []
+        self.updated_ids: list[str] = []
 
     def fetch_projects(self, include_tasks: bool = True):
         _ = include_tasks
@@ -66,6 +67,11 @@ class _FakeDb:
         self.removed_ids.append(task_id)
         return True
 
+    def update_task(self, task_id: str, **kwargs):
+        _ = kwargs
+        self.updated_ids.append(task_id)
+        return {"id": task_id}
+
 
 def test_tasks_sorted_by_depth_child_before_parent():
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="P", labels=["X2"]))
@@ -75,4 +81,5 @@ def test_tasks_sorted_by_depth_child_before_parent():
     db = _FakeDb(tasks=[child, parent])
     Multiply()._tick(cast(Database, db))
 
-    assert db.removed_ids == ["2", "1"]
+    assert db.updated_ids == ["2", "1"]
+    assert db.removed_ids == []

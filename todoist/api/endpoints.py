@@ -33,6 +33,7 @@ class TodoistEndpoints:
 
     # Labels
     LIST_LABELS = Endpoint("list_labels", "GET", f"{API_BASE}/labels")
+    DELETE_LABEL = Endpoint("delete_label", "DELETE", f"{API_BASE}/labels/{{label_id}}")
 
     # Activity
     LIST_ACTIVITY = Endpoint("list_activity", "GET", f"{API_BASE}/activities")

@@ -6,7 +6,7 @@ from loguru import logger
 from todoist.llm import LocalChatConfig
 
 
-# === LLM BREAKDOWN CONFIG ===================================================
+# === AI BREAKDOWN CONFIG ====================================================
 
 DEFAULT_VARIANTS: dict[str, dict[str, Any]] = {
     "breakdown": {
@@ -71,7 +71,7 @@ def resolve_variant(
         variant_key = default_variant
     variant_cfg = variants.get(variant_key)
     if variant_cfg is None:
-        logger.warning("Unknown LLM variant '{}'; falling back to '{}'", variant_key, default_variant)
+        logger.warning("Unknown AI breakdown variant '{}'; falling back to '{}'", variant_key, default_variant)
         variant_key = default_variant
         variant_cfg = variants.get(variant_key, {})
     return variant_key, dict(variant_cfg)

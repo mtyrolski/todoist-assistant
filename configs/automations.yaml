@@ -9,6 +9,10 @@ activity:
 multiply:
   _target_: todoist.automations.multiplicate.Multiply
   frequency_in_minutes: 0.1
+  config:
+    deep_child_label: effort-point
+    cleanup_unused_labels: true
+    cleanup_unused_labels_after_days: 7
 gmail_tasks:
   _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
   name: Gmail Tasks
@@ -28,6 +32,7 @@ stale_tasks:
     very_old_after_days: 90
     old_label: old
     very_old_label: very-old
+    delete_after_warning_days: 7
     exempt_labels:
     - no_stale
     - track_habit
@@ -45,7 +50,7 @@ template:
 llm_breakdown:
   _target_: todoist.automations.llm_breakdown.LLMBreakdown
   frequency_in_minutes: 0.1
-  label_prefix: llm-
+  label_prefix: ai-
   default_variant: breakdown
   max_depth: 3
   max_children: 6
