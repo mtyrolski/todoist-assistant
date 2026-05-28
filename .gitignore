@@ -18,6 +18,7 @@ scripts/*
 !scripts/check_versions.py
 !scripts/check_explicit_any.py
 !scripts/clear_local_env.py
+!scripts/create_task_tree.py
 !scripts/download_models.py
 !scripts/dashboard_stack.sh
 !scripts/status.py
