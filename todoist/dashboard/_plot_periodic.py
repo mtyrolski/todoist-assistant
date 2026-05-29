@@ -6,7 +6,6 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from todoist.dashboard._plot_common import (
-    _ALL_TASKS_TOTAL_ACCENT,
     _ALL_TASKS_TOTAL_COLOR,
     apply_dashboard_axes,
     forecast_period_total,
@@ -357,8 +356,8 @@ def _add_total_overlay_periodic_traces(
             marker=dict(
                 symbol="circle",
                 size=14,
-                color=_ALL_TASKS_TOTAL_ACCENT,
-                opacity=0.95,
+                color=_ALL_TASKS_TOTAL_COLOR,
+                opacity=0.82,
             ),
             name="All Projects (forecast)",
             legendgroup="all-projects-total",
@@ -468,8 +467,8 @@ def _add_total_overlay_cumulative_traces(
             marker=dict(
                 symbol="circle",
                 size=14,
-                color=_ALL_TASKS_TOTAL_ACCENT,
-                opacity=0.95,
+                color=_ALL_TASKS_TOTAL_COLOR,
+                opacity=0.82,
             ),
             name="All Projects (forecast)",
             legendgroup="all-projects-total",

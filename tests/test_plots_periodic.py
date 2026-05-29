@@ -244,6 +244,15 @@ def _normalized_trace_x(trace: Any) -> list[pd.Timestamp]:
     ]
 
 
+def _trace_marker_color(trace: Any) -> str:
+    return str(getattr(getattr(trace, "marker", None), "color", ""))
+
+
+def _trace_marker_line_color(trace: Any) -> str:
+    marker_line = getattr(getattr(trace, "marker", None), "line", None)
+    return str(getattr(marker_line, "color", ""))
+
+
 def test_plot_completed_tasks_periodically_keeps_current_week():
     """Current partial period should surface as 'so far' + forecast markers (no dotted connector)."""
 
@@ -310,6 +319,46 @@ def test_plot_completed_tasks_periodically_dashes_current_month_when_range_exten
     )
     assert getattr(getattr(forecast_line, "line", None), "dash", None) == "dash"
     assert _normalized_trace_x(forecast_line)[-1] == current_month_label
+
+
+def test_plot_completed_tasks_periodically_uses_matching_forecast_marker_colors(
+    monkeypatch: Any,
+):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 5, 13, 12, 0, 0))
+    df = _monthly_completion_df()
+    fig = plot_completed_tasks_periodically(
+        df,
+        datetime(2024, 4, 1),
+        datetime(2024, 7, 15),
+        granularity="ME",
+        project_colors={"Project A": "#123456"},
+    )
+
+    traces = cast(tuple[Any, ...], fig.data)
+    project_so_far = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "Project A (so far)"
+    )
+    project_forecast = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "Project A (forecast)"
+    )
+    total_so_far = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "All Projects (so far)"
+    )
+    total_forecast = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "All Projects (forecast)"
+    )
+
+    assert _trace_marker_line_color(project_so_far) == "#123456"
+    assert _trace_marker_color(project_forecast) == "#123456"
+    assert _trace_marker_color(total_forecast) == _trace_marker_line_color(total_so_far)
 
 
 def test_plot_completed_tasks_periodically_does_not_forecast_stale_history(
@@ -429,6 +478,46 @@ def test_cumsum_completed_tasks_periodically_dashes_current_month_when_range_ext
     )
     assert getattr(getattr(forecast_line, "line", None), "dash", None) == "dash"
     assert _normalized_trace_x(forecast_line)[-1] == current_month_label
+
+
+def test_cumsum_completed_tasks_periodically_uses_matching_forecast_marker_colors(
+    monkeypatch: Any,
+):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 5, 13, 12, 0, 0))
+    df = _monthly_completion_df()
+    fig = cumsum_completed_tasks_periodically(
+        df,
+        datetime(2024, 4, 1),
+        datetime(2024, 7, 15),
+        granularity="ME",
+        project_colors={"Project A": "#123456"},
+    )
+
+    traces = cast(tuple[Any, ...], fig.data)
+    project_so_far = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "Project A (so far)"
+    )
+    project_forecast = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "Project A (forecast)"
+    )
+    total_so_far = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "All Projects (so far)"
+    )
+    total_forecast = next(
+        trace
+        for trace in traces
+        if str(getattr(trace, "name", "")) == "All Projects (forecast)"
+    )
+
+    assert _trace_marker_line_color(project_so_far) == "#123456"
+    assert _trace_marker_color(project_forecast) == "#123456"
+    assert _trace_marker_color(total_forecast) == _trace_marker_line_color(total_so_far)
 
 
 def test_plot_completed_tasks_periodically_hides_inactive_projects_in_range():
