@@ -90,7 +90,7 @@ def test_resolve_triton_launch_settings_falls_back_from_unsupported_model(
 ) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
-        "TODOIST_AGENT_MODEL_ID='openai/gpt-oss-20b'",
+        "TODOIST_AGENT_MODEL_ID='not/supported'",
         encoding="utf-8",
     )
 

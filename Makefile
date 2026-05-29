@@ -7,6 +7,8 @@ DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 MODEL_ID ?=
 TRITON_MODEL_NAME ?=
 TRITON_URL ?=
+BACKEND ?= raw
+BACKEND_AI ?=
 
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
@@ -45,7 +47,21 @@ run_api:
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-run_dashboard: run_dashboard_cpu
+run_dashboard: ensure_frontend_deps
+	@backend="$(BACKEND)"; \
+	if [ -n "$(BACKEND_AI)" ]; then backend="$(BACKEND_AI)"; fi; \
+	case "$$backend" in \
+		raw|none|disabled) stack_backend="raw" ;; \
+		codex) stack_backend="codex" ;; \
+		triton|triton_local) stack_backend="triton" ;; \
+		*) echo "Unsupported dashboard backend: $$backend (use raw, codex, or triton)"; exit 2 ;; \
+	esac; \
+	MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start "$$stack_backend" cpu
 
 run_dashboard_cpu: ensure_frontend_deps
 	@MODEL_ID="$(MODEL_ID)" \
@@ -53,7 +69,7 @@ run_dashboard_cpu: ensure_frontend_deps
 	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start cpu
+	bash ./scripts/dashboard_stack.sh start triton cpu
 
 run_dashboard_gpu: ensure_frontend_deps
 	@MODEL_ID="$(MODEL_ID)" \
@@ -61,7 +77,7 @@ run_dashboard_gpu: ensure_frontend_deps
 	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start gpu
+	bash ./scripts/dashboard_stack.sh start triton gpu
 
 stop_dashboard:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \

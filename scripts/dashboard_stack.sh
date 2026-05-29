@@ -338,9 +338,22 @@ cleanup_failed_launch() {
     stop_pid_target "${PID_DIR}/api.pid" "API"
 }
 
+backend_env_value() {
+    local backend="${1}"
+    case "${backend}" in
+        raw) echo "disabled" ;;
+        codex) echo "codex" ;;
+        triton) echo "triton_local" ;;
+        *) echo "disabled" ;;
+    esac
+}
+
 start_dashboard() {
-    local mode="${1}"
-    log_note "Launching dashboard stack in ${mode} mode..."
+    local backend="${1}"
+    local mode="${2:-cpu}"
+    local ai_backend
+    ai_backend="$(backend_env_value "${backend}")"
+    log_note "Launching dashboard stack (backend=${backend}, triton_mode=${mode})..."
     for service in api observer frontend triton; do
         clear_stale_pid "${PID_DIR}/${service}.pid"
     done
@@ -350,20 +363,24 @@ start_dashboard() {
     fi
     ensure_port_free "${API_PORT}" "API"
     ensure_port_free "${FRONTEND_PORT}" "Frontend"
-    ensure_port_free "${TRITON_HTTP_PORT}" "Triton"
+    if [[ "${backend}" == "triton" ]]; then
+        ensure_port_free "${TRITON_HTTP_PORT}" "Triton"
+    fi
 
     trap 'cleanup_failed_launch "'"${mode}"'"' ERR
 
-    start_triton "${mode}"
+    if [[ "${backend}" == "triton" ]]; then
+        start_triton "${mode}"
+    fi
 
     log_note "Starting API on 127.0.0.1:${API_PORT}..."
-    nohup env TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
+    nohup env TODOIST_AGENT_BACKEND="${ai_backend}" TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
     local api_pid="$!"
     echo "${api_pid}" > "${PID_DIR}/api.pid"
     wait_for_process "${api_pid}" "API"
 
     log_note "Starting observer..."
-    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
+    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_BACKEND="${ai_backend}" TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
     local observer_pid="$!"
     echo "${observer_pid}" > "${PID_DIR}/observer.pid"
     wait_for_process "${observer_pid}" "Observer"
@@ -383,10 +400,18 @@ start_dashboard() {
 
     trap - ERR
 
-    log_note "Dashboard running (${mode} Triton)."
-    echo "  Triton:   http://127.0.0.1:${TRITON_HTTP_PORT}"
+    log_note "Dashboard running (backend=${backend})."
+    if [[ "${backend}" == "triton" ]]; then
+        echo "  Triton:   http://127.0.0.1:${TRITON_HTTP_PORT}"
+    fi
     echo "  API:      http://127.0.0.1:${API_PORT}"
-    echo "  Observer: enabled with dashboard startup"
+    if [[ "${backend}" == "raw" ]]; then
+        echo "  AI:       disabled"
+        echo "  Observer: enabled with AI backend disabled"
+    else
+        echo "  AI:       ${ai_backend}"
+        echo "  Observer: enabled with dashboard startup"
+    fi
     echo "  Frontend: http://127.0.0.1:${FRONTEND_PORT}"
     echo "  Logs:     ${STATE_DIR}"
 }
@@ -439,15 +464,20 @@ triton_shell() {
 
 main() {
     local command="${1:-}"
-    local mode="${2:-cpu}"
+    local backend="${2:-raw}"
+    local mode="${3:-cpu}"
 
     case "${command}" in
         start)
-            if [[ "${mode}" != "cpu" && "${mode}" != "gpu" ]]; then
-                echo "Usage: $0 start [cpu|gpu]"
+            if [[ "${backend}" != "raw" && "${backend}" != "codex" && "${backend}" != "triton" ]]; then
+                echo "Usage: $0 start [raw|codex|triton] [cpu|gpu]"
                 exit 1
             fi
-            start_dashboard "${mode}"
+            if [[ "${mode}" != "cpu" && "${mode}" != "gpu" ]]; then
+                echo "Usage: $0 start [raw|codex|triton] [cpu|gpu]"
+                exit 1
+            fi
+            start_dashboard "${backend}" "${mode}"
             ;;
         stop)
             stop_dashboard
@@ -456,7 +486,7 @@ main() {
             triton_shell
             ;;
         *)
-            echo "Usage: $0 {start [cpu|gpu]|stop|triton-shell}"
+            echo "Usage: $0 {start [raw|codex|triton] [cpu|gpu]|stop|triton-shell}"
             exit 1
             ;;
     esac
