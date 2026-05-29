@@ -93,7 +93,7 @@ def test_local_llm_initializes_and_generates(monkeypatch, tmp_path):
         assert llm.chat([{"role": MessageRole.USER, "content": "hi"}]) == "OK"
         parsed = llm.structured_chat([{"role": MessageRole.USER, "content": "hi"}], DummySchema)
         assert parsed.value == "ok"
-    usage = load_llm_usage_summary(selected_backend="transformers_local", selected_model_id="fake/model")
+    usage = load_llm_usage_summary(selected_backend="local", selected_model_id="fake/model")
     assert usage["totals"]["inferenceCount"] == 2
     assert usage["totals"]["chatCount"] == 1
     assert usage["totals"]["structuredCount"] == 1

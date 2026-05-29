@@ -1,11 +1,7 @@
 """Local LLM adapters and shared types."""
 
+from .codex_llm import DEFAULT_CODEX_MODEL, CodexChatConfig, CodexCliChatModel
 from .local_llm import DEFAULT_MODEL_ID, DType, Device, LocalChatConfig, TransformersMistral3ChatModel
-from .openai_llm import (
-    DEFAULT_OPENAI_MODEL,
-    OpenAIChatConfig,
-    OpenAIResponsesChatModel,
-)
 from .triton_llm import (
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
@@ -15,7 +11,9 @@ from .triton_llm import (
 from .types import MessageRole, PromptToken
 
 __all__ = [
-    "DEFAULT_OPENAI_MODEL",
+    "CodexChatConfig",
+    "CodexCliChatModel",
+    "DEFAULT_CODEX_MODEL",
     "DEFAULT_MODEL_ID",
     "DEFAULT_TRITON_MODEL_NAME",
     "DEFAULT_TRITON_URL",
@@ -23,8 +21,6 @@ __all__ = [
     "Device",
     "LocalChatConfig",
     "MessageRole",
-    "OpenAIChatConfig",
-    "OpenAIResponsesChatModel",
     "PromptToken",
     "TritonChatConfig",
     "TritonGenerateChatModel",

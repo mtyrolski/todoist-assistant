@@ -33,7 +33,7 @@ Use this mental model when exploring:
 - `todoist/dashboard/`: plotting and dashboard-specific data presentation
 - `todoist/web/`: FastAPI routes and dashboard payload shaping
 - `todoist/automations/`: activity sync, templates, multiplicate, observer, Gmail, LLM breakdown
-- `todoist/llm/`: local and OpenAI-backed chat/model helpers
+- `todoist/llm/`: local, Codex, and Triton-backed chat/model helpers
 - `todoist/agent/`: read-only chat and agent graph helpers
 - `frontend/app/`: Next.js app router UI
 - `configs/automations.yaml`: default automation wiring
@@ -94,7 +94,7 @@ When making changes, go to the nearest matching tests first:
 - plots/dashboard metrics: `tests/test_plots.py`, `tests/test_dashboard_utils.py`
 - automations: `tests/test_activity_automation.py`, `tests/test_observer.py`, `tests/test_gmail_automation.py`, `tests/test_llm_breakdown_backend.py`
 - CLI and telemetry: `tests/test_cli.py`, `tests/test_telemetry.py`
-- LLM/agent surfaces: `tests/test_local_llm.py`, `tests/test_openai_llm.py`, `tests/test_agent_graph.py`, `tests/test_repl_tool.py`
+- LLM/agent surfaces: `tests/test_local_llm.py`, `tests/test_agent_graph.py`, `tests/test_repl_tool.py`
 
 If you fix a bug, add or update the closest targeted test instead of relying only on full-suite coverage.
 

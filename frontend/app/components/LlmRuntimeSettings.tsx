@@ -42,13 +42,9 @@ type LlmSettingsStatus = {
   backendLabel: string;
   device: string;
   deviceLabel: string;
-  localModelId: string;
-  localModelOptions: LlmOption[];
   availableBackends: LlmOption[];
   availableDevices: LlmOption[];
-  openai: {
-    configured: boolean;
-    keyName?: string | null;
+  codex: {
     model?: string | null;
     modelOptions: LlmOption[];
   };
@@ -85,7 +81,7 @@ export function LlmRuntimeSettings({
   compact?: boolean;
 }) {
   const [llmStatus, setLlmStatus] = useState<LlmSettingsStatus | null>(null);
-  const [llmBackendDraft, setLlmBackendDraft] = useState("transformers_local");
+  const [llmBackendDraft, setLlmBackendDraft] = useState("disabled");
   const [llmDeviceDraft, setLlmDeviceDraft] = useState("cpu");
   const [llmModelDraft, setLlmModelDraft] = useState("");
   const [llmSaving, setLlmSaving] = useState(false);
@@ -103,11 +99,11 @@ export function LlmRuntimeSettings({
       setLlmBackendDraft(payload.backend);
       setLlmDeviceDraft(payload.device);
       setLlmModelDraft(
-        payload.backend === "openai"
-          ? payload.openai.model ?? ""
+        payload.backend === "codex"
+          ? payload.codex.model ?? ""
           : payload.backend === "triton_local"
             ? payload.triton.modelId ?? ""
-            : payload.localModelId
+            : ""
       );
     } catch (e) {
       setLlmStatus(null);
@@ -119,34 +115,34 @@ export function LlmRuntimeSettings({
     loadLlmSettings();
   }, [loadLlmSettings]);
 
-  const selectedLlmBackend = llmBackendDraft || llmStatus?.backend || "transformers_local";
-  const llmUsesRemoteDevice = selectedLlmBackend === "openai" || selectedLlmBackend === "triton_local";
+  const selectedLlmBackend = llmBackendDraft || llmStatus?.backend || "disabled";
+  const llmUsesRemoteDevice = selectedLlmBackend === "codex" || selectedLlmBackend === "triton_local";
   const modelOptions = useMemo(() => {
     if (!llmStatus) return [];
-    if (selectedLlmBackend === "openai") return llmStatus.openai.modelOptions;
+    if (selectedLlmBackend === "codex") return llmStatus.codex.modelOptions;
     if (selectedLlmBackend === "triton_local") return llmStatus.triton.modelOptions;
-    return llmStatus.localModelOptions;
+    return [];
   }, [llmStatus, selectedLlmBackend]);
 
   useEffect(() => {
     if (!llmStatus) return;
     setLlmModelDraft(
-      selectedLlmBackend === "openai"
-        ? llmStatus.openai.model ?? ""
+      selectedLlmBackend === "codex"
+        ? llmStatus.codex.model ?? ""
         : selectedLlmBackend === "triton_local"
           ? llmStatus.triton.modelId ?? ""
-          : llmStatus.localModelId
+          : ""
     );
   }, [llmStatus, selectedLlmBackend]);
 
   const llmSettingsChanged = useMemo(() => {
     if (!llmStatus) return false;
     const currentModel =
-      llmBackendDraft === "openai"
-        ? llmStatus.openai.model ?? ""
+      llmBackendDraft === "codex"
+        ? llmStatus.codex.model ?? ""
         : llmBackendDraft === "triton_local"
           ? llmStatus.triton.modelId ?? ""
-          : llmStatus.localModelId;
+          : "";
     return (
       llmBackendDraft !== llmStatus.backend ||
       llmDeviceDraft !== llmStatus.device ||
@@ -156,9 +152,10 @@ export function LlmRuntimeSettings({
 
   const currentSummary = useMemo(() => {
     if (!llmStatus) return "LLM settings unavailable";
-    if (llmStatus.backend === "openai") return `OpenAI • ${llmStatus.openai.model ?? "unknown model"}`;
+    if (llmStatus.backend === "disabled") return "AI disabled";
+    if (llmStatus.backend === "codex") return `Codex • ${llmStatus.codex.model ?? "unknown model"}`;
     if (llmStatus.backend === "triton_local") return `Triton • ${llmStatus.triton.modelId ?? "unknown model"}`;
-    return `Local Transformers • ${llmStatus.localModelId}`;
+    return llmStatus.backend;
   }, [llmStatus]);
 
   const saveLlmSettings = async () => {
@@ -172,8 +169,7 @@ export function LlmRuntimeSettings({
         body: JSON.stringify({
           backend: llmBackendDraft,
           device: llmDeviceDraft,
-          localModelId: llmBackendDraft === "transformers_local" ? llmModelDraft : llmStatus?.localModelId,
-          openaiModel: llmBackendDraft === "openai" ? llmModelDraft : llmStatus?.openai.model,
+          codexModel: llmBackendDraft === "codex" ? llmModelDraft : llmStatus?.codex.model,
           tritonModelId: llmBackendDraft === "triton_local" ? llmModelDraft : llmStatus?.triton.modelId
         })
       });
@@ -185,11 +181,11 @@ export function LlmRuntimeSettings({
       setLlmBackendDraft(payload.backend);
       setLlmDeviceDraft(payload.device);
       setLlmModelDraft(
-        payload.backend === "openai"
-          ? payload.openai.model ?? ""
+        payload.backend === "codex"
+          ? payload.codex.model ?? ""
           : payload.backend === "triton_local"
             ? payload.triton.modelId ?? ""
-            : payload.localModelId
+            : ""
       );
       setLlmNotice(payload.reloadedRequired ? "LLM updated. Re-enable chat to load the new model." : "LLM updated.");
       onAfterMutation?.();
@@ -313,7 +309,7 @@ export function LlmRuntimeSettings({
               className="dateInput"
               value={llmBackendDraft}
               onChange={(e) => setLlmBackendDraft(e.target.value)}
-              disabled={llmSaving || !llmStatus}
+              disabled={llmSaving || !llmStatus || modelOptions.length === 0}
             >
               {(llmStatus?.availableBackends ?? []).map((option) => (
                 <option key={option.id} value={option.id} disabled={option.available === false}>
@@ -361,11 +357,11 @@ export function LlmRuntimeSettings({
         </div>
         <div className="adminRow">
           <span className="muted tiny">
-            {selectedLlmBackend === "openai"
-              ? `OpenAI key: ${llmStatus?.openai.keyName ?? "default"}`
+            {selectedLlmBackend === "codex"
+                ? `Codex model: ${llmStatus?.codex.model ?? "unknown"}`
               : selectedLlmBackend === "triton_local"
                 ? `Triton endpoint: ${llmStatus?.triton.baseUrl ?? "unknown"}`
-                : `Local device: ${llmStatus?.deviceLabel ?? llmDeviceDraft}`}
+                : "AI functions disabled"}
           </span>
           <div className="adminRowRight">
             <button className="button buttonSmall" type="button" onClick={saveLlmSettings} disabled={llmSaving || !llmSettingsChanged}>

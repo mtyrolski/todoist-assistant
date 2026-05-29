@@ -60,25 +60,23 @@ from todoist.automations.gmail_tasks import (
 from todoist.automations.observer import AutomationObserver
 from todoist.automations.llm_breakdown.config import (
     BASE_SYSTEM_PROMPT,
-    coerce_model_config,
 )
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
 from todoist.llm import (
+    CodexCliChatModel,
+    DEFAULT_CODEX_MODEL,
     DEFAULT_MODEL_ID,
-    DEFAULT_OPENAI_MODEL,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     MessageRole,
-    OpenAIChatConfig,
-    OpenAIResponsesChatModel,
     TritonChatConfig,
     TritonGenerateChatModel,
-    TransformersMistral3ChatModel,
 )
+from todoist.llm.codex_llm import codex_config_from_values
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
-from todoist.llm.model_catalog import LOCAL_MODEL_OPTIONS, OPENAI_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
+from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -247,9 +245,8 @@ _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
-_LOCAL_MODEL_OPTIONS = LOCAL_MODEL_OPTIONS
-_OPENAI_MODEL_OPTIONS = OPENAI_MODEL_OPTIONS
 _TRITON_MODEL_OPTIONS = TRITON_MODEL_OPTIONS
+_CODEX_MODEL_OPTIONS = CODEX_MODEL_OPTIONS
 
 def _resolve_timezone_status() -> dict[str, Any]:
     env_path = _resolve_env_path()
@@ -308,11 +305,11 @@ _CHAT_ROLES = {
 }
 _CHAT_QUEUE_LIMIT = 200
 _LLM_CHAT_TIMEOUT_S = 60 * 60
-_LLM_CHAT_BACKEND_DEFAULT = "transformers_local"
+_LLM_CHAT_BACKEND_DEFAULT = "disabled"
 _LLM_CHAT_BACKEND_LABELS = {
-    "transformers_local": "Transformers local",
+    "disabled": "Disabled",
     "triton_local": "Triton local",
-    "openai": "OpenAI",
+    "codex": "Codex",
 }
 _LLM_CHAT_DEVICE_DEFAULT = "cpu"
 _LLM_CHAT_DEVICE_LABELS = {
@@ -325,7 +322,7 @@ _CHAT_SYSTEM_PROMPT = (
 )
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
-_LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel
+_LlmChatModel = CodexCliChatModel | TritonGenerateChatModel
 
 _LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
@@ -435,10 +432,10 @@ def _normalize_llm_chat_backend(raw: Any) -> str:
     return _llm_chat_component._normalize_llm_chat_backend(raw)
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
     return _llm_chat_component._normalize_llm_chat_device(raw, available_devices=available_devices)
-def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._resolve_openai_settings(file_values)
 def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._resolve_triton_settings(file_values)
+def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
+    return _llm_chat_component._resolve_codex_settings(file_values)
 def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
     return _llm_chat_component._triton_ready(triton_settings)
 def _resolve_llm_chat_settings() -> dict[str, Any]:

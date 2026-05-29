@@ -12,9 +12,6 @@ import todoist.web.api as web_api
 
 def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
-    monkeypatch.delenv("OPEN_AI_SECRET_KEY", raising=False)
-    monkeypatch.delenv("OPEN_AI_KEY_NAME", raising=False)
-    monkeypatch.delenv("OPEN_AI_MODEL", raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_DEVICE), raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_MODEL_ID), raising=False)
@@ -57,15 +54,16 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     # Verify disabled state
     assert payload["enabled"] is False
     assert payload["loading"] is False
-    assert payload["backend"]["selected"] == "transformers_local"
+    assert payload["backend"]["selected"] == "disabled"
     assert payload["backend"]["triton"]["configured"] is True
+    assert payload["backend"]["codex"]["model"] == "gpt-5.5"
     assert payload["backend"]["triton"]["modelId"] in {
         option["id"] for option in payload["backend"]["triton"]["modelOptions"]
     }
-    assert payload["model"]["selected"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert payload["model"]["selected"] == "disabled"
     assert payload["device"]["selected"] == "cpu"
     assert payload["usage"]["totals"]["inferenceCount"] == 0
-    assert payload["usage"]["current"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert payload["usage"]["current"]["modelId"] == "disabled"
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
 
@@ -83,41 +81,36 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     res = client.put(
         "/api/llm_chat/settings",
         json={
-            "backend": "transformers_local",
+            "backend": "codex",
             "device": "cuda",
-            "localModelId": "Qwen/Qwen2.5-3B-Instruct",
+            "codexModel": "gpt-5.5",
         },
     )
 
     assert res.status_code == 200
     payload = res.json()
-    assert payload["backend"] == "transformers_local"
+    assert payload["backend"] == "codex"
     assert payload["device"] == "cuda"
-    assert payload["localModelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert payload["codex"]["model"] == "gpt-5.5"
     assert payload["reloadedRequired"] is True
     assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_DEVICE='cuda'") >= 0
-    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'") >= 0
+    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_CODEX_MODEL='gpt-5.5'") >= 0
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
 
-def test_llm_chat_settings_response_does_not_expose_secret_key(
+def test_llm_chat_settings_response_exposes_codex_and_triton_options(
     monkeypatch, tmp_path
 ) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
         "\n".join(
             [
-                "OPEN_AI_SECRET_KEY='sk-test'",
-                "OPEN_AI_KEY_NAME='primary-key'",
-                "OPEN_AI_MODEL='gpt-5-mini'",
-                "TODOIST_AGENT_MODEL_ID='openai/gpt-oss-20b'",
+                "TODOIST_AGENT_CODEX_MODEL='gpt-5.5'",
+                "TODOIST_AGENT_MODEL_ID='not/supported'",
             ]
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("OPEN_AI_SECRET_KEY", "sk-test")
-    monkeypatch.setenv("OPEN_AI_KEY_NAME", "primary-key")
-    monkeypatch.setenv("OPEN_AI_MODEL", "gpt-5-mini")
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
     monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
@@ -127,20 +120,13 @@ def test_llm_chat_settings_response_does_not_expose_secret_key(
 
     assert res.status_code == 200
     payload = res.json()
-    assert payload["openai"]["configured"] is True
-    assert payload["openai"]["keyName"] == "primary-key"
-    assert payload["openai"]["model"] == "gpt-5-mini"
-    assert "secretKey" not in payload["openai"]
     assert payload["envPath"] == ".env"
-    assert [option["id"] for option in payload["localModelOptions"]] == [
-        "Qwen/Qwen2.5-3B-Instruct"
-    ]
-    assert payload["localModelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert payload["codex"]["model"] == "gpt-5.5"
+    assert "gpt-5.5" in {option["id"] for option in payload["codex"]["modelOptions"]}
     assert [option["id"] for option in payload["triton"]["modelOptions"]] == [
         "Qwen/Qwen2.5-3B-Instruct"
     ]
     assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
-    assert "gpt-5-nano" in {option["id"] for option in payload["openai"]["modelOptions"]}
 
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
@@ -148,43 +134,30 @@ def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> Non
     client = TestClient(web_api.app)
     res = client.put(
         "/api/llm_chat/settings",
-        json={"backend": "transformers_local", "device": "cuda"},
+        json={"backend": "codex", "device": "cuda"},
     )
 
     assert res.status_code == 400
 
-def test_llm_chat_update_settings_rejects_unsupported_local_model(monkeypatch) -> None:
+def test_llm_chat_update_settings_rejects_unsupported_codex_model(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
 
     client = TestClient(web_api.app)
     res = client.put(
         "/api/llm_chat/settings",
         json={
-            "backend": "transformers_local",
+            "backend": "codex",
             "device": "cpu",
-            "localModelId": "openai/gpt-oss-20b",
+            "codexModel": "not-a-codex-model",
         },
     )
 
     assert res.status_code == 400
 
-def test_llm_chat_update_settings_supports_openai_backend(
+def test_llm_chat_update_settings_supports_codex_backend(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setenv("OPEN_AI_SECRET_KEY", "sk-test")
-    monkeypatch.setenv("OPEN_AI_KEY_NAME", "primary-key")
-    monkeypatch.setenv("OPEN_AI_MODEL", "gpt-5-mini")
     env_path = tmp_path / ".env"
-    env_path.write_text(
-        "\n".join(
-            [
-                "OPEN_AI_SECRET_KEY='sk-test'",
-                "OPEN_AI_KEY_NAME='primary-key'",
-                "OPEN_AI_MODEL='gpt-5-mini'",
-            ]
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
     monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
@@ -194,16 +167,13 @@ def test_llm_chat_update_settings_supports_openai_backend(
     client = TestClient(web_api.app)
     res = client.put(
         "/api/llm_chat/settings",
-        json={"backend": "openai", "device": "cpu"},
+        json={"backend": "codex", "device": "cpu", "codexModel": "gpt-5.5"},
     )
 
     assert res.status_code == 200
     payload = res.json()
-    assert payload["backend"] == "openai"
-    assert payload["openai"]["configured"] is True
-    assert payload["openai"]["keyName"] == "primary-key"
-    assert payload["openai"]["model"] == "gpt-5-mini"
-    assert "secretKey" not in payload["openai"]
+    assert payload["backend"] == "codex"
+    assert payload["codex"]["model"] == "gpt-5.5"
     assert payload["envPath"] == ".env"
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
@@ -235,7 +205,6 @@ def test_llm_chat_update_settings_supports_triton_backend(
     assert payload["triton"]["healthy"] is True
     assert payload["triton"]["modelName"] == "todoist_llm"
     assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
-    assert payload["localModelId"] == "Qwen/Qwen2.5-3B-Instruct"
     saved = env_path.read_text(encoding="utf-8")
     assert "TODOIST_AGENT_BACKEND='triton_local'" in saved
     assert "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'" in saved
