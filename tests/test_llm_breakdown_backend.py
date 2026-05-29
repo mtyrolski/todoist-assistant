@@ -1,63 +1,66 @@
 """Tests for AI breakdown backend selection."""
 
+import pytest
+from typing import cast
+
 from todoist.automations.llm_breakdown.automation import LLMBreakdown
+from todoist.database.base import Database
 from todoist.env import EnvVar
 
 
-def test_breakdown_uses_openai_backend_from_env(monkeypatch, tmp_path) -> None:
+def test_breakdown_uses_codex_backend_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "openai")
-    monkeypatch.setenv("OPEN_AI_SECRET_KEY", "sk-test")
-    monkeypatch.setenv("OPEN_AI_KEY_NAME", "primary-key")
-    monkeypatch.setenv("OPEN_AI_MODEL", "gpt-5-mini")
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
+    monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
 
     captured: dict[str, object] = {}
 
-    class _FakeOpenAI:
+    class _FakeCodex:
         def __init__(self, config):
             captured["config"] = config
 
     monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.OpenAIResponsesChatModel",
-        _FakeOpenAI,
+        "todoist.automations.llm_breakdown.automation.CodexCliChatModel",
+        _FakeCodex,
     )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
-    assert isinstance(llm, _FakeOpenAI)
+    assert isinstance(llm, _FakeCodex)
     config = captured["config"]
-    assert getattr(config, "api_key") == "sk-test"
-    assert getattr(config, "key_name") == "primary-key"
-    assert getattr(config, "model") == "gpt-5-mini"
+    assert getattr(config, "model") == "gpt-5.5"
+    assert getattr(config, "sandbox") == "read-only"
 
 
-def test_breakdown_uses_selected_device_for_transformers(monkeypatch, tmp_path) -> None:
+def test_breakdown_rejects_disabled_backend(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "transformers_local")
-    monkeypatch.setenv(str(EnvVar.AGENT_DEVICE), "cuda")
-    monkeypatch.setenv(str(EnvVar.AGENT_MODEL_ID), "mistralai/Mistral-Nemo-Instruct-2407")
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "disabled")
 
-    captured: dict[str, object] = {}
+    with pytest.raises(RuntimeError, match="disabled"):
+        LLMBreakdown().get_llm()
 
-    class _FakeTransformers:
-        def __init__(self, config):
-            captured["config"] = config
 
+def test_breakdown_tick_noops_when_backend_is_disabled(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "disabled")
+
+    automation = LLMBreakdown(frequency_in_minutes=0)
     monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.TransformersMistral3ChatModel",
-        _FakeTransformers,
+        automation,
+        "get_llm",
+        lambda: (_ for _ in ()).throw(AssertionError("disabled backend must not load an LLM")),
     )
 
-    automation = LLMBreakdown()
-    llm = automation.get_llm()
+    class _FakeDb:
+        def reset(self) -> None:  # pragma: no cover - should not be called
+            raise AssertionError("disabled backend must not refresh breakdown tasks")
 
-    assert isinstance(llm, _FakeTransformers)
-    config = captured["config"]
-    assert getattr(config, "device") == "cuda"
-    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"
+    assert automation.should_run_without_new_activity() is False
+    automation.tick(cast(Database, _FakeDb()))
 
 
 def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> None:
@@ -67,9 +70,8 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     env_path.write_text(
         "\n".join(
             [
-                "TODOIST_AGENT_BACKEND='openai'",
-                "OPEN_AI_SECRET_KEY='sk-test'",
-                "OPEN_AI_KEY_NAME='cache-key'",
+                "TODOIST_AGENT_BACKEND='codex'",
+                "TODOIST_AGENT_CODEX_MODEL='gpt-5'",
             ]
         ),
         encoding="utf-8",
@@ -79,26 +81,26 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     monkeypatch.delenv(str(EnvVar.AGENT_TRITON_URL), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_MODEL_ID), raising=False)
-    monkeypatch.delenv("OPEN_AI_KEY_NAME", raising=False)
+    monkeypatch.delenv(str(EnvVar.AGENT_CODEX_MODEL), raising=False)
     monkeypatch.chdir(tmp_path)
 
     captured: dict[str, object] = {}
 
-    class _FakeOpenAI:
+    class _FakeCodex:
         def __init__(self, config):
             captured["config"] = config
 
     monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.OpenAIResponsesChatModel",
-        _FakeOpenAI,
+        "todoist.automations.llm_breakdown.automation.CodexCliChatModel",
+        _FakeCodex,
     )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
-    assert isinstance(llm, _FakeOpenAI)
+    assert isinstance(llm, _FakeCodex)
     config = captured["config"]
-    assert getattr(config, "key_name") == "cache-key"
+    assert getattr(config, "model") == "gpt-5"
 
 
 def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:

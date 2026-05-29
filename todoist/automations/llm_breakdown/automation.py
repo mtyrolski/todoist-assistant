@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 from datetime import datetime
 import os
 from pathlib import Path
@@ -14,15 +14,13 @@ from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.env import EnvVar
 from todoist.llm import (
+    CodexCliChatModel,
     DEFAULT_MODEL_ID,
-    DEFAULT_OPENAI_MODEL,
     LocalChatConfig,
-    OpenAIChatConfig,
-    OpenAIResponsesChatModel,
     TritonChatConfig,
     TritonGenerateChatModel,
-    TransformersMistral3ChatModel,
 )
+from todoist.llm.codex_llm import codex_config_from_values
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.model_catalog import coerce_model_id_for_backend
 from todoist.runtime_env import resolve_runtime_env_path
@@ -41,7 +39,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @dataclass(frozen=True)
 class BreakdownSettings:
-    label_prefix: str = "ai-"
+    label_prefix: str = "ai-breakdown"
     default_variant: str = "breakdown"
     max_depth: int = 3
     max_children: int = 6
@@ -113,9 +111,7 @@ class LLMBreakdown(Automation):
         self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
-        self._llm: (
-            TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel | None
-        ) = None
+        self._llm: CodexCliChatModel | TritonGenerateChatModel | None = None
         self._llm_backend: str | None = None
         self._progress_storage = Cache().llm_breakdown_progress
         self._queue_storage = Cache().llm_breakdown_queue
@@ -196,41 +192,12 @@ class LLMBreakdown(Automation):
         values = self._env_values()
         backend = _sanitize_text(
             os.getenv(str(EnvVar.AGENT_BACKEND)) or values.get(str(EnvVar.AGENT_BACKEND))
-        ) or "transformers_local"
+        ) or "disabled"
         return backend.lower(), values
 
-    def _build_transformers_llm(self, values: Mapping[str, Any]) -> TransformersMistral3ChatModel:
-        updates: dict[str, Any] = {}
-        device = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_DEVICE)) or values.get(str(EnvVar.AGENT_DEVICE))
-        )
-        if device:
-            normalized_device = "cuda" if device.lower() == "gpu" else device.lower()
-            updates["device"] = cast(Any, normalized_device)
-        model_id = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_MODEL_ID)) or values.get(str(EnvVar.AGENT_MODEL_ID))
-        )
-        if model_id:
-            updates["model_id"] = coerce_model_id_for_backend(model_id, "local")
-        config = replace(self.model_config, **updates) if updates else self.model_config
-        return TransformersMistral3ChatModel(config)
-
     @staticmethod
-    def _build_openai_llm(values: Mapping[str, Any]) -> OpenAIResponsesChatModel:
-        api_key = _sanitize_text(
-            os.getenv("OPEN_AI_SECRET_KEY") or values.get("OPEN_AI_SECRET_KEY")
-        )
-        if not api_key:
-            raise RuntimeError("OpenAI backend selected but OPEN_AI_SECRET_KEY is missing.")
-        key_name = _sanitize_text(
-            os.getenv("OPEN_AI_KEY_NAME") or values.get("OPEN_AI_KEY_NAME")
-        )
-        model = _sanitize_text(
-            os.getenv("OPEN_AI_MODEL") or values.get("OPEN_AI_MODEL")
-        ) or DEFAULT_OPENAI_MODEL
-        return OpenAIResponsesChatModel(
-            OpenAIChatConfig(api_key=api_key, key_name=key_name, model=model)
-        )
+    def _build_codex_llm(values: Mapping[str, Any]) -> CodexCliChatModel:
+        return CodexCliChatModel(codex_config_from_values(values, cwd=_REPO_ROOT))
 
     def _build_triton_llm(self, values: Mapping[str, Any]) -> TritonGenerateChatModel:
         base_url = _sanitize_text(
@@ -258,16 +225,15 @@ class LLMBreakdown(Automation):
 
     def _get_llm(
         self,
-    ) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel:
+    ) -> CodexCliChatModel | TritonGenerateChatModel:
         backend, values = self._resolve_selected_backend()
         if self._llm is None or self._llm_backend != backend:
-            if backend == "openai":
-                self._llm = self._build_openai_llm(values)
+            if backend == "codex":
+                self._llm = self._build_codex_llm(values)
             elif backend == "triton_local":
                 self._llm = self._build_triton_llm(values)
             else:
-                self._llm = self._build_transformers_llm(values)
-                backend = "transformers_local"
+                raise RuntimeError("AI breakdown backend is disabled.")
             self._llm_backend = backend
         return self._llm
 
@@ -302,14 +268,14 @@ class LLMBreakdown(Automation):
 
     def get_llm(
         self,
-    ) -> TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel:
+    ) -> CodexCliChatModel | TritonGenerateChatModel:
         return self._get_llm()
 
     def selected_backend(self) -> str:
         backend, _values = self._resolve_selected_backend()
-        if backend in {"openai", "triton_local"}:
+        if backend in {"codex", "triton_local"}:
             return backend
-        return "transformers_local"
+        return "disabled"
 
     def llm_request_parallelism(self, task_count: int) -> int:
         if task_count <= 0:
@@ -332,7 +298,7 @@ class LLMBreakdown(Automation):
 
     def should_run_without_new_activity(self) -> bool:
         """Allow observer polling to process labeled tasks even without fresh activity."""
-        return True
+        return self.selected_backend() != "disabled"
 
     @staticmethod
     def _normalize_queue_depth(value: Any) -> int:
@@ -491,6 +457,9 @@ class LLMBreakdown(Automation):
         )
 
     def _tick(self, db: Database) -> None:
+        if self.selected_backend() == "disabled":
+            logger.info("Skipping AI Breakdown automation because AI backend is disabled.")
+            return
         refresh = getattr(db, "reset", None)
         if callable(refresh):
             try:

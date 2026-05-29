@@ -65,8 +65,12 @@ def resolve_variant(
     variants: Mapping[str, Mapping[str, Any]],
 ) -> tuple[str, dict[str, Any]]:
     label_lower = label.lower()
-    variant_key = label_lower[len(label_prefix_lower):].strip() if label_lower.startswith(
-        label_prefix_lower) else ""
+    variant_key = ""
+    if label_lower == label_prefix_lower:
+        variant_key = default_variant
+    elif label_lower.startswith(f"{label_prefix_lower}-"):
+        suffix = label_lower[len(label_prefix_lower) + 1:].strip()
+        variant_key = suffix if suffix.startswith(f"{default_variant}-") else f"{default_variant}-{suffix}"
     if not variant_key:
         variant_key = default_variant
     variant_cfg = variants.get(variant_key)

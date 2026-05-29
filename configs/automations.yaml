@@ -50,7 +50,7 @@ template:
 llm_breakdown:
   _target_: todoist.automations.llm_breakdown.LLMBreakdown
   frequency_in_minutes: 0.1
-  label_prefix: ai-
+  label_prefix: ai-breakdown
   default_variant: breakdown
   max_depth: 3
   max_children: 6

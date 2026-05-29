@@ -130,7 +130,7 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
     client = TestClient(web_api.app)
     response = client.put(
         "/api/admin/project_adjustments",
-        params={"file": "adj_private.py"},
+        params={"file": "adj_private.py", "refresh": "true"},
         json={"mappings": {"Archived Research": "Academy"}},
     )
 
@@ -1077,10 +1077,10 @@ def test_admin_run_observer_reports_idle_polling_automations(monkeypatch, tmp_pa
     assert payload["state"]["lastEvents"] == 0
     assert payload["state"]["lastAutomationsRan"] == 1
 
-def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monkeypatch) -> None:
+def test_task_ingest_rewrite_uses_selected_codex_model_when_runtime_is_idle(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeTransformers:
+    class _FakeCodex:
         def __init__(self, config):
             captured["config"] = config
 
@@ -1094,10 +1094,9 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
         web_api,
         "_resolve_llm_chat_settings",
         lambda: {
-            "backend": "transformers_local",
+            "backend": "codex",
             "device": "cpu",
-            "localModelId": "mistralai/Mistral-Nemo-Instruct-2407",
-            "openai": {"configured": False, "keyName": None, "model": "gpt-5-mini"},
+            "codex": {"model": "gpt-5.5", "modelOptions": []},
             "triton": {
                 "baseUrl": "http://127.0.0.1:8003",
                 "modelName": "todoist_llm",
@@ -1105,7 +1104,7 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
             },
         },
     )
-    monkeypatch.setattr(web_api, "TransformersMistral3ChatModel", _FakeTransformers)
+    monkeypatch.setattr(web_api, "CodexCliChatModel", _FakeCodex)
 
     result = web_api._task_ingest_rewrite_with_llm_sync(
         "Plan launch",
@@ -1117,8 +1116,7 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
 
     assert result is not None
     tasks, source = result
-    assert source == "transformers"
+    assert source == "codex"
     assert tasks[0]["content"] == "Draft roadmap"
     config = captured["config"]
-    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"
-    assert getattr(config, "max_new_tokens") == 768
+    assert getattr(config, "model") == "gpt-5.5"

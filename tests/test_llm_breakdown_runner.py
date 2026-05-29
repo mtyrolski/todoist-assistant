@@ -342,6 +342,27 @@ def test_run_breakdown_ignores_failed_breakdown_label(monkeypatch, tmp_path) -> 
     assert db.comments == []
 
 
+def test_run_breakdown_ignores_ai_import_label(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    task = make_task("task-1", content="Task 1", labels=["ai-import"], project_id="project-1")
+    db = _FakeDb([task])
+    automation = LLMBreakdown()
+
+    class _FakeLlm:
+        def structured_chat(self, messages, schema):  # pragma: no cover - should not be called
+            raise AssertionError("ai-import must not trigger breakdown")
+
+    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+
+    run_breakdown(automation, cast(Database, db))
+
+    assert db.insert_calls == []
+    assert db.updated == []
+    assert db.comments == []
+
+
 def test_run_breakdown_processes_tasks_even_when_children_already_exist(
     monkeypatch, tmp_path
 ) -> None:
@@ -424,6 +445,7 @@ def test_llm_breakdown_tick_refreshes_active_tasks_before_selecting_labels(
 ) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
     stale_task = make_task("task-1", content="Task 1", labels=[], project_id="project-1")
     refreshed_task = make_task(
