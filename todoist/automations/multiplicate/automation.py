@@ -275,6 +275,10 @@ class Multiply(Automation):
         self._flat_label_pattern = _compile(self.config.flat_label_regex)
         self._deep_label_pattern = _compile(self.config.deep_label_regex)
 
+    def should_run_without_new_activity(self) -> bool:
+        """Run from the observer even when multiplier labels predate the latest event poll."""
+        return True
+
     def _tick(self, db: Database) -> None:
         now = datetime.now()
         projects = db.fetch_projects(include_tasks=True)

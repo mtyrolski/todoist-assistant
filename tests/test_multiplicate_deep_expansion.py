@@ -114,6 +114,10 @@ def test_deep_label_creates_children_under_task_and_removes_multiplier_label():
     assert not db.removed_ids
 
 
+def test_multiply_runs_as_polling_automation_without_new_activity():
+    assert Multiply().should_run_without_new_activity() is True
+
+
 def test_multiplier_cleanup_deletes_unused_label_after_retention(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     Cache().multiplication_label_usage.save(
