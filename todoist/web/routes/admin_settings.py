@@ -71,7 +71,7 @@ async def admin_project_adjustments(
 @router.put("/api/admin/project_adjustments", tags=["admin"])
 async def admin_save_project_adjustments(
     file: str,
-    refresh: bool = True,
+    refresh: bool = False,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     _sync_api_globals(globals())

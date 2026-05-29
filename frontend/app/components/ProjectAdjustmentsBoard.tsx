@@ -20,6 +20,10 @@ type ProjectAdjustmentsResponse = {
   warning?: string | null;
 };
 
+type ApiErrorResponse = {
+  detail?: string;
+};
+
 type Variant = "wide" | "embedded";
 
 type Props = {
@@ -192,16 +196,20 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     for (const name of archivedParentsDraft) set.add(name);
     return set;
   }, [activeRoots, archivedParentsDraft]);
+  const archivedParentSet = useMemo(() => new Set(archivedParentsDraft), [archivedParentsDraft]);
 
   const mappedEntries = useMemo(
-    () => Object.entries(mappingDraft).filter(([, parent]) => Boolean(parent)),
-    [mappingDraft]
+    () =>
+      Object.entries(mappingDraft).filter(
+        ([archived, parent]) => Boolean(parent) && !archivedParentSet.has(archived)
+      ),
+    [mappingDraft, archivedParentSet]
   );
 
   const unmappedProjects = useMemo(() => {
     const mapped = new Set(mappedEntries.map(([archived]) => archived));
-    return sourceProjects.filter((p) => !mapped.has(p));
-  }, [sourceProjects, mappedEntries]);
+    return sourceProjects.filter((p) => !mapped.has(p) && !archivedParentSet.has(p));
+  }, [sourceProjects, mappedEntries, archivedParentSet]);
 
   const assignments = useMemo(() => {
     const result: Record<string, string[]> = {};
@@ -280,6 +288,12 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
 
   const addParent = (name: string) => {
     if (!name || !archivedProjects.includes(name)) return;
+    setMappingDraft((prev) => {
+      if (!(name in prev)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     setArchivedParentsDraft((prev) => {
       if (prev.includes(name)) return prev;
       const next = [...prev, name];
@@ -361,14 +375,18 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       setSaving(true);
       setError(null);
       setNotice(null);
-      const res = await fetch(`/api/admin/project_adjustments?file=${encodeURIComponent(adjustmentFile)}`, {
+      const qs = new URLSearchParams({ file: adjustmentFile, refresh: "false" });
+      const res = await fetch(`/api/admin/project_adjustments?${qs.toString()}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mappings: mappingDraft, archivedParents: archivedParentsDraft })
       });
-      if (!res.ok) throw new Error("Failed to save adjustments");
-      await loadAdjustments(adjustmentFile, true, true);
-      setNotice("Mappings saved.");
+      if (!res.ok) {
+        const payload = await readJson<ApiErrorResponse>(res);
+        throw new Error(payload.detail || "Failed to save adjustments");
+      }
+      await loadAdjustments(adjustmentFile, false, true);
+      setNotice("Mappings saved. Refresh dashboard data separately when you want charts recalculated.");
       onAfterSave?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save adjustments");
