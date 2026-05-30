@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from tests.factories import make_project, make_project_entry
 from todoist.database.db_tasks import DatabaseTasks
@@ -132,6 +133,8 @@ def test_build_status_update_report_filters_projects_dates_and_comments(monkeypa
         "completedTaskCount": 1,
         "commentedTaskCount": 1,
         "commentCount": 2,
+        "storyPointCount": 0,
+        "estimatedTaskCount": 0,
     }
     assert comments_seen == ["task-1"]
 
@@ -171,11 +174,35 @@ def test_build_status_update_report_handles_empty_range(monkeypatch) -> None:
         "completedTaskCount": 0,
         "commentedTaskCount": 0,
         "commentCount": 0,
+        "storyPointCount": 0,
+        "estimatedTaskCount": 0,
     }
     assert report["completedTasks"] == []
     assert report["warnings"] == []
     assert calls == []
     assert "No completed tasks were found" in report["markdown"]
+
+
+def test_build_status_update_report_aggregates_story_points(monkeypatch) -> None:
+    df = _status_update_df().iloc[[0, 1]].copy()
+    df.loc[:, "title"] = "Ship release - 5/10"
+    monkeypatch.setattr("todoist.status_update.load_activity_data", lambda db: df)
+
+    report = build_status_update_report(
+        _FakeDb(),
+        project_ids=["root-work"],
+        beg=datetime(2025, 2, 1, 0, 0, 0),
+        end=datetime(2025, 2, 6, 0, 0, 0),
+    )
+
+    assert report["summary"]["storyPointCount"] == 10
+    assert report["summary"]["estimatedTaskCount"] == 1
+    assert report["stats"]["storyPointCount"] == 10
+    assert report["completedTasks"][0]["storyPoints"] == 5
+    assert report["completedTasks"][0]["storyPointCount"] == 10
+    assert report["projectRollup"][0]["storyPointCount"] == 10
+    assert "Delivered 10 story points across 1 estimated task." in report["markdown"]
+    assert "| Work / Launches | 1 | 2 | 10 | 0 |" in report["markdown"]
 
 
 def test_build_status_update_report_degrades_when_comment_fetch_fails(monkeypatch) -> None:
@@ -197,6 +224,66 @@ def test_build_status_update_report_degrades_when_comment_fetch_fails(monkeypatc
     assert report["warnings"] == ["Comments unavailable for task task-1: RuntimeError"]
     assert report["completedTasks"][0]["comments"] == []
     assert "Comments: none" in report["markdown"]
+
+
+def test_build_status_update_report_dedupes_scope_and_reports_missing_projects(monkeypatch) -> None:
+    df = _status_update_df().iloc[[0]].copy()
+    monkeypatch.setattr("todoist.status_update.load_activity_data", lambda db: df)
+
+    report = build_status_update_report(
+        _FakeDb(),
+        project_ids=["root-work", "missing-project", "root-work"],
+        beg=datetime(2025, 2, 1, 0, 0, 0),
+        end=datetime(2025, 2, 6, 0, 0, 0),
+    )
+
+    assert report["selection"]["requestedProjectIds"] == ["root-work", "missing-project"]
+    assert report["selection"]["expandedProjectIds"] == ["root-work", "child-launch"]
+    assert report["summary"]["selectedProjectCount"] == 1
+    assert "Missing project ids ignored: missing-project" in report["markdown"]
+
+
+def test_build_status_update_report_limits_comments_and_accepts_body_alias(monkeypatch) -> None:
+    df = _status_update_df().iloc[[0]].copy()
+    monkeypatch.setattr("todoist.status_update.load_activity_data", lambda db: df)
+
+    report = build_status_update_report(
+        _FakeDb(),
+        project_ids=["root-work"],
+        beg=datetime(2025, 2, 1, 0, 0, 0),
+        end=datetime(2025, 2, 6, 0, 0, 0),
+        comment_limit_per_task=1,
+        comment_fetcher=lambda _task_id: [
+            {"id": "c1", "body": "First body comment"},
+            {"id": "c2", "content": "Second content comment"},
+        ],
+    )
+
+    task = report["completedTasks"][0]
+    assert task["commentCount"] == 2
+    assert task["comments"] == [
+        {
+            "id": "c1",
+            "content": "First body comment",
+            "snippet": "First body comment",
+            "createdAt": None,
+        }
+    ]
+    assert report["summary"]["commentCount"] == 2
+    assert "First body comment" in report["markdown"]
+    assert "Second content comment" not in report["markdown"]
+
+
+def test_build_status_update_report_rejects_invalid_date_range(monkeypatch) -> None:
+    monkeypatch.setattr("todoist.status_update.load_activity_data", lambda db: _status_update_df())
+
+    with pytest.raises(ValueError, match="beg must be before end"):
+        build_status_update_report(
+            _FakeDb(),
+            project_ids=["root-work"],
+            beg=datetime(2025, 2, 6, 0, 0, 0),
+            end=datetime(2025, 2, 6, 0, 0, 0),
+        )
 
 
 def test_fetch_task_comments_paginates_results(monkeypatch) -> None:

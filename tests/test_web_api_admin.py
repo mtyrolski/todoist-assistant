@@ -910,7 +910,7 @@ def test_admin_status_update_generate_builds_report_and_validates_input(monkeypa
             {
                 "date": "2025-01-02T10:00:00",
                 "id": "e1",
-                "title": "Launch notes",
+                "title": "Launch notes - 5/10",
                 "type": "completed",
                 "parent_project_id": "root-a",
                 "parent_project_name": "Alpha",
@@ -921,7 +921,7 @@ def test_admin_status_update_generate_builds_report_and_validates_input(monkeypa
             {
                 "date": "2025-01-03T10:00:00",
                 "id": "e2",
-                "title": "Draft follow-up",
+                "title": "Draft follow-up story-point-3",
                 "type": "completed",
                 "parent_project_id": "child-a",
                 "parent_project_name": "Alpha Child",
@@ -980,16 +980,25 @@ def test_admin_status_update_generate_builds_report_and_validates_input(monkeypa
         "completedTaskCount": 2,
         "commentedTaskCount": 2,
         "commentCount": 2,
+        "storyPointCount": 8,
+        "estimatedTaskCount": 2,
     }
-    assert payload["summaryText"] == "Completed 2 tasks across 2 projects, grounded by 2 comments."
+    assert payload["summaryText"] == "Completed 2 tasks across 2 active projects, delivering 8 story points, grounded by 2 comments."
     assert payload["stats"] == {
         "completedCount": 2,
         "commentCount": 2,
         "projectCount": 2,
         "activityCount": 2,
+        "storyPointCount": 8,
+        "estimatedTaskCount": 2,
     }
-    assert payload["completedTasks"][0]["content"] == "Launch notes"
+    assert payload["projects"][0]["storyPointCount"] == 5
+    assert payload["projects"][1]["storyPointCount"] == 3
+    assert payload["completedTasks"][0]["content"] == "Launch notes - 5/10"
+    assert payload["completedTasks"][0]["storyPointCount"] == 5
     assert payload["completedTasks"][0]["comments"][0]["content"] == "Shared the launch notes with the team"
+    assert payload["executiveSummary"][1] == "Delivered 8 story points across 2 estimated tasks."
+    assert payload["projectRollup"][0]["storyPointCount"] == 5
     assert "Weekly sync" in payload["markdown"]
     assert "Alpha Child" in payload["markdown"]
 
