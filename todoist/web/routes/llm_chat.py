@@ -123,8 +123,10 @@ async def llm_chat_send(
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
+    settings = _resolve_llm_chat_settings()
     enabled, loading = await _llm_chat_model_status()
-    if not (enabled or loading):
+    can_run_inline = settings["backend"] == "codex"
+    if not (enabled or loading or can_run_inline):
         raise HTTPException(
             status_code=409,
             detail="Model not loaded. Click Enable in the dashboard first.",
@@ -175,11 +177,20 @@ async def llm_chat_send(
         _save_llm_chat_queue(queue)
         _save_llm_chat_conversations(conversations)
 
-    if enabled or loading:
+    response_item = item
+    if can_run_inline and not (enabled or loading):
+        await _run_llm_chat_queue_inline()
+        async with _LLM_CHAT_STORAGE_LOCK:
+            queue = _load_llm_chat_queue()
+        response_item = next(
+            (queue_item for queue_item in queue if queue_item.get("id") == item["id"]),
+            item,
+        )
+    elif enabled or loading:
         await _maybe_start_llm_chat_worker()
     return {
         "queued": True,
-        "item": _queue_item_payload(item),
+        "item": _queue_item_payload(response_item),
         "conversationId": conversation_id,
     }
 

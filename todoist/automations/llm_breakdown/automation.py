@@ -188,12 +188,34 @@ class LLMBreakdown(Automation):
         file_values = dotenv_values(env_path) if env_path.exists() else {}
         return dict(file_values)
 
+    @staticmethod
+    def _normalize_backend(value: Any) -> str:
+        backend = (_sanitize_text(value) or "disabled").lower()
+        if backend == "triton":
+            return "triton_local"
+        if backend in {"raw", "none"}:
+            return "disabled"
+        return backend
+
+    @staticmethod
+    def _locked_backend() -> str | None:
+        raw_backend = os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK")
+        if _sanitize_text(raw_backend) is None:
+            return None
+        backend = LLMBreakdown._normalize_backend(raw_backend)
+        if backend in {"codex", "triton_local", "disabled"}:
+            return backend
+        return None
+
     def _resolve_selected_backend(self) -> tuple[str, dict[str, Any]]:
         values = self._env_values()
-        backend = _sanitize_text(
+        locked_backend = self._locked_backend()
+        if locked_backend is not None:
+            return locked_backend, values
+        backend = self._normalize_backend(
             os.getenv(str(EnvVar.AGENT_BACKEND)) or values.get(str(EnvVar.AGENT_BACKEND))
-        ) or "disabled"
-        return backend.lower(), values
+        )
+        return backend, values
 
     @staticmethod
     def _build_codex_llm(values: Mapping[str, Any]) -> CodexCliChatModel:

@@ -1,8 +1,11 @@
 """Tests for FastAPI LLM chat endpoints."""
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 import todoist.web.api as web_api
+from todoist.env import EnvVar
 
 # pylint: disable=protected-access
 
@@ -128,6 +131,53 @@ def test_llm_chat_settings_response_exposes_codex_and_triton_options(
     ]
     assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
 
+def test_llm_chat_settings_lock_hides_and_rejects_triton(
+    monkeypatch, tmp_path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "TODOIST_AGENT_BACKEND='triton_local'",
+                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
+                "TODOIST_AGENT_CODEX_MODEL='gpt-5.5'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK", "codex")
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
+
+    def _unexpected_triton_probe(_settings):
+        raise AssertionError("Triton should not be probed when the dashboard is locked to Codex")
+
+    monkeypatch.setattr(web_api, "_triton_ready", _unexpected_triton_probe)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/llm_chat/settings")
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["backend"] == "codex"
+    assert payload["lockedBackend"] == "codex"
+    assert [option["id"] for option in payload["availableBackends"]] == ["codex"]
+    assert payload["triton"] == {
+        "configured": False,
+        "healthy": False,
+        "baseUrl": "",
+        "modelName": "",
+        "modelId": "",
+        "modelOptions": [],
+    }
+
+    update = client.put(
+        "/api/llm_chat/settings",
+        json={"backend": "triton_local", "device": "cpu"},
+    )
+    assert update.status_code == 400
+    assert update.json()["detail"] == "Unsupported LLM backend."
+
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
 
@@ -231,6 +281,48 @@ def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
     assert res.status_code == 409
     payload = res.json()
     assert "Model not loaded" in payload["detail"]
+
+def test_llm_chat_send_allows_codex_inline_without_model_loaded(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
+    monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: False)
+
+    async def _mock_model_status():
+        return False, False
+
+    saved_queue = []
+    saved_conversations = []
+
+    def _mock_save_queue(items):
+        saved_queue.clear()
+        saved_queue.extend(items)
+
+    def _mock_save_conversations(items):
+        saved_conversations.clear()
+        saved_conversations.extend(items)
+
+    async def _mock_run_inline():
+        saved_queue[0]["status"] = "done"
+        saved_queue[0]["finished_at"] = web_api._now_iso()
+
+    monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
+    monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: list(saved_queue))
+    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
+    monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
+    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
+    monkeypatch.setattr(web_api, "_run_llm_chat_queue_inline", _mock_run_inline)
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/llm_chat/send", json={"message": "Run inline Codex"})
+
+    assert res.status_code == 200
+    assert res.json()["queued"] is True
+    assert res.json()["item"]["status"] == "done"
+    assert saved_queue[0]["status"] == "done"
+    assert saved_conversations[0]["title"] == "Run inline Codex"
 
 def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send creates a new conversation when no conversation_id provided."""
@@ -531,3 +623,228 @@ def test_build_chat_messages_filters_system_messages(monkeypatch) -> None:
     assert messages[3]["content"] == "User message 2"
     assert messages[4]["role"] == "user"
     assert messages[4]["content"] == "New user message"
+
+
+def test_llm_chat_queue_worker_saves_model_response(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", None)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_WORKER_RUNNING", False)
+
+    captured_messages: list[list[dict[str, str]]] = []
+
+    class _FakeChatModel:
+        def chat(self, messages):
+            captured_messages.append(messages)
+            return "worker-ok"
+
+    async def _run_worker() -> None:
+        monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", _FakeChatModel())
+        now = web_api._now_iso()
+        web_api._save_llm_chat_conversations(
+            [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "title": "Worker smoke",
+                    "created_at": now,
+                    "updated_at": now,
+                    "messages": [],
+                }
+            ]
+        )
+        web_api._save_llm_chat_queue(
+            [
+                {
+                    "id": "queue-1",
+                    "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "content": "Reply with worker-ok",
+                    "status": "queued",
+                    "created_at": now,
+                    "started_at": None,
+                    "finished_at": None,
+                    "error": None,
+                }
+            ]
+        )
+
+        await web_api._run_llm_chat_queue()
+
+    asyncio.run(_run_worker())
+
+    queue = web_api._load_llm_chat_queue()
+    conversations = web_api._load_llm_chat_conversations()
+
+    assert queue[0]["status"] == "done"
+    assert queue[0]["error"] is None
+    assert conversations[0]["messages"][-2:] == [
+        {
+            "role": "user",
+            "content": "Reply with worker-ok",
+            "created_at": conversations[0]["messages"][-2]["created_at"],
+        },
+        {
+            "role": "assistant",
+            "content": "worker-ok",
+            "created_at": conversations[0]["messages"][-1]["created_at"],
+        },
+    ]
+    assert captured_messages[0][-1] == {
+        "role": web_api.MessageRole.USER.value,
+        "content": "Reply with worker-ok",
+    }
+
+
+def test_llm_chat_queue_worker_builds_codex_inline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", None)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_WORKER_RUNNING", False)
+
+    captured_settings: list[dict[str, object]] = []
+
+    class _FakeChatModel:
+        def chat(self, messages):
+            assert messages[-1]["content"] == "Reply with inline-ok"
+            return "inline-ok"
+
+    def _fake_build_model(settings, *, max_output_tokens: int):
+        captured_settings.append(dict(settings))
+        assert max_output_tokens == 256
+        return _FakeChatModel()
+
+    original_resolve_settings = getattr(web_api, "_resolve_llm_chat_settings")
+    original_build_model = getattr(web_api, "_build_llm_from_settings")
+    setattr(
+        web_api,
+        "_resolve_llm_chat_settings",
+        lambda: {
+            "backend": "codex",
+            "device": "cpu",
+            "codex": {"model": "gpt-5.5", "modelOptions": []},
+            "triton": {},
+        },
+    )
+    setattr(web_api, "_build_llm_from_settings", _fake_build_model)
+    web_api._llm_chat_component._sync_api_globals()
+    monkeypatch.setattr(web_api, "_build_llm_chat_agent_sync", lambda _model: None)
+
+    async def _run_worker() -> None:
+        now = web_api._now_iso()
+        web_api._save_llm_chat_conversations(
+            [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "title": "Inline worker smoke",
+                    "created_at": now,
+                    "updated_at": now,
+                    "messages": [],
+                }
+            ]
+        )
+        web_api._save_llm_chat_queue(
+            [
+                {
+                    "id": "queue-inline",
+                    "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "content": "Reply with inline-ok",
+                    "status": "queued",
+                    "created_at": now,
+                    "started_at": None,
+                    "finished_at": None,
+                    "error": None,
+                }
+            ]
+        )
+
+        monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
+        monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+        await web_api._run_llm_chat_queue()
+
+    try:
+        asyncio.run(_run_worker())
+    finally:
+        setattr(web_api, "_resolve_llm_chat_settings", original_resolve_settings)
+        setattr(web_api, "_build_llm_from_settings", original_build_model)
+        web_api._llm_chat_component._sync_api_globals()
+
+    queue = web_api._load_llm_chat_queue()
+    conversations = web_api._load_llm_chat_conversations()
+
+    assert captured_settings[0]["backend"] == "codex"
+    assert web_api._LLM_CHAT_MODEL is not None
+    assert web_api._LLM_CHAT_MODEL_LOADING is False
+    assert queue[0]["status"] == "done"
+    assert queue[0]["error"] is None
+    assert conversations[0]["messages"][-1]["content"] == "inline-ok"
+
+
+def test_llm_chat_queue_worker_marks_inline_codex_load_failure(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", None)
+    monkeypatch.setattr(web_api, "_LLM_CHAT_WORKER_RUNNING", False)
+
+    def _fake_build_model(_settings, *, max_output_tokens: int):
+        assert max_output_tokens == 256
+        raise ValueError("codex unavailable")
+
+    original_resolve_settings = getattr(web_api, "_resolve_llm_chat_settings")
+    original_build_model = getattr(web_api, "_build_llm_from_settings")
+    setattr(
+        web_api,
+        "_resolve_llm_chat_settings",
+        lambda: {
+            "backend": "codex",
+            "device": "cpu",
+            "codex": {"model": "gpt-5.5", "modelOptions": []},
+            "triton": {},
+        },
+    )
+    setattr(web_api, "_build_llm_from_settings", _fake_build_model)
+    web_api._llm_chat_component._sync_api_globals()
+
+    async def _run_worker() -> None:
+        now = web_api._now_iso()
+        web_api._save_llm_chat_conversations(
+            [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "title": "Inline failure smoke",
+                    "created_at": now,
+                    "updated_at": now,
+                    "messages": [],
+                }
+            ]
+        )
+        web_api._save_llm_chat_queue(
+            [
+                {
+                    "id": "queue-inline-fail",
+                    "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "content": "This should fail",
+                    "status": "queued",
+                    "created_at": now,
+                    "started_at": None,
+                    "finished_at": None,
+                    "error": None,
+                }
+            ]
+        )
+
+        await web_api._run_llm_chat_queue()
+
+    try:
+        asyncio.run(_run_worker())
+    finally:
+        setattr(web_api, "_resolve_llm_chat_settings", original_resolve_settings)
+        setattr(web_api, "_build_llm_from_settings", original_build_model)
+        web_api._llm_chat_component._sync_api_globals()
+
+    queue = web_api._load_llm_chat_queue()
+    conversations = web_api._load_llm_chat_conversations()
+
+    assert queue[0]["status"] == "failed"
+    assert queue[0]["finished_at"]
+    assert queue[0]["error"] == "ValueError: codex unavailable"
+    assert conversations[0]["messages"] == []

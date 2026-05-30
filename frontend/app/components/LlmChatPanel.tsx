@@ -51,6 +51,7 @@ type ChatStatus = {
     selected: string;
     label: string;
     active: string | null;
+    locked?: string | null;
     options: ChatOption[];
     codex?: {
       model?: string | null;
@@ -88,7 +89,6 @@ Local or hosted model for quick analysis and summaries.
 - Pick a backend before loading the model.
 - Enable loads the selected backend on demand.
 - Codex uses the local Codex CLI.
-- Triton hosts the Hugging Face model server-side and can batch requests dynamically.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
 
@@ -316,6 +316,7 @@ export function LlmChatPanel() {
   const backendIsServerHosted = isServerHostedBackend(selectedBackendId);
   const currentBackendIsServerHosted = isServerHostedBackend(currentBackendId);
   const deviceControlDisabled = savingSettings || loading || backendIsServerHosted;
+  const backendControlDisabled = savingSettings || loading || backendOptions.length <= 1;
   const settingsChanged =
     !!status && (backendDraft !== status.backend.selected || deviceDraft !== status.device.selected);
   const backendStatusLabel = status
@@ -391,7 +392,7 @@ export function LlmChatPanel() {
             className="select"
             value={backendDraft}
             onChange={(event) => setBackendDraft(event.target.value)}
-            disabled={savingSettings || loading}
+            disabled={backendControlDisabled}
           >
             {backendOptions.map((option) => (
               <option key={option.id} value={option.id} disabled={!option.available}>

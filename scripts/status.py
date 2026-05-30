@@ -213,7 +213,29 @@ def _fetch_http_code(url: str) -> tuple[bool, int | None, str | None]:
         return False, None, str(exc.reason)
 
 
-def _print_services(payload: dict[str, Any]) -> None:
+def _backend_payload(llm_payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(llm_payload, dict):
+        return {}
+    backend = llm_payload.get("backend")
+    return backend if isinstance(backend, dict) else {}
+
+
+def _backend_label(llm_payload: dict[str, Any] | None) -> str:
+    backend = _backend_payload(llm_payload)
+    return str(backend.get("label") or backend.get("selected") or "unknown").strip()
+
+
+def _backend_selected(llm_payload: dict[str, Any] | None) -> str:
+    backend = _backend_payload(llm_payload)
+    return str(backend.get("selected") or backend.get("label") or "").strip().lower()
+
+
+def _triton_required(llm_payload: dict[str, Any] | None) -> bool:
+    selected = _backend_selected(llm_payload)
+    return selected in {"triton", "triton_local"} or "triton" in selected
+
+
+def _print_services(payload: dict[str, Any], llm_payload: dict[str, Any] | None = None) -> None:
     services = payload.get("services")
     if not isinstance(services, list) or not services:
         _print_line("Dashboard", "warn", "no service entries returned")
@@ -225,6 +247,10 @@ def _print_services(payload: dict[str, Any]) -> None:
         name = str(service.get("name") or "Unknown")
         status = str(service.get("status") or "neutral")
         detail = str(service.get("detail") or "no detail")
+        if name.lower() == "triton" and not _triton_required(llm_payload):
+            backend_label = _backend_label(llm_payload) or "current"
+            _print_line(name, "neutral", f"not required for {backend_label} backend")
+            continue
         _print_line(name, status, detail)
 
 
@@ -248,7 +274,8 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
     queue = queue_raw if isinstance(queue_raw, dict) else {}
 
     backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
-    backend_status = "ok" if payload.get("enabled") else "warn"
+    backend_selected = str(backend.get("selected") or backend_label).strip().lower()
+    backend_status = "ok" if payload.get("enabled") or backend_selected in {"codex", "triton_local", "triton"} else "warn"
     _print_line("Backend", backend_status, backend_label)
 
     model_active = str(model.get("active") or model.get("selected") or "unknown")
@@ -274,9 +301,12 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
 
 def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
     _section("Triton Inventory")
+    if not _triton_required(llm_payload):
+        backend_label = _backend_label(llm_payload) or "current"
+        _print_line("Endpoint", "neutral", f"not required for {backend_label} backend")
+        return
     llm_payload = llm_payload if isinstance(llm_payload, dict) else {}
-    backend = llm_payload.get("backend")
-    backend_payload = backend if isinstance(backend, dict) else {}
+    backend_payload = _backend_payload(llm_payload)
     triton_payload = backend_payload.get("triton")
     triton = triton_payload if isinstance(triton_payload, dict) else {}
     triton_base_url = str(triton.get("baseUrl") or "").strip()
@@ -354,7 +384,7 @@ def main() -> int:
         _print_line("Dashboard", "down", f"status endpoint unavailable ({error})")
         return 0
 
-    _print_services(dashboard_status.payload)
+    _print_services(dashboard_status.payload, llm_snapshot.payload if llm_snapshot.ok else None)
     print()
     _print_triton_models(llm_snapshot.payload if llm_snapshot.ok else None)
     return 0

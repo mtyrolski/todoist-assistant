@@ -103,6 +103,52 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     assert getattr(config, "model") == "gpt-5"
 
 
+def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    env_path = cache_dir / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "TODOIST_AGENT_BACKEND='triton_local'",
+                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
+                "TODOIST_AGENT_CODEX_MODEL='gpt-5.5'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
+    monkeypatch.setenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK", "codex")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    class _FakeCodex:
+        def __init__(self, config):
+            captured["config"] = config
+
+    class _UnexpectedTriton:
+        def __init__(self, config):
+            raise AssertionError(f"Triton must not be constructed under a Codex launch lock: {config}")
+
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.CodexCliChatModel",
+        _FakeCodex,
+    )
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.TritonGenerateChatModel",
+        _UnexpectedTriton,
+    )
+
+    automation = LLMBreakdown()
+    llm = automation.get_llm()
+
+    assert automation.selected_backend() == "codex"
+    assert isinstance(llm, _FakeCodex)
+    assert getattr(captured["config"], "model") == "gpt-5.5"
+
+
 def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)

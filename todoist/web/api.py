@@ -537,21 +537,57 @@ async def _maybe_start_llm_chat_worker() -> None:
     async with _LLM_CHAT_WORKER_LOCK:
         if _LLM_CHAT_WORKER_RUNNING:
             return
-        if _LLM_CHAT_MODEL is None:
+        if _LLM_CHAT_MODEL is None and _LLM_CHAT_MODEL_LOADING:
+            return
+        if _LLM_CHAT_MODEL is None and _resolve_llm_chat_settings()["backend"] != "codex":
             return
         _LLM_CHAT_WORKER_RUNNING = True
     asyncio.create_task(_run_llm_chat_queue())
+
+
+async def _load_inline_codex_chat_model() -> tuple[_LlmChatModel | None, str | None]:
+    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
+    settings = _resolve_llm_chat_settings()
+    if settings["backend"] != "codex":
+        return None, "Model not loaded. Click Enable in the dashboard first."
+
+    async with _LLM_CHAT_MODEL_LOCK:
+        if _LLM_CHAT_MODEL is not None:
+            return _LLM_CHAT_MODEL, None
+        if _LLM_CHAT_MODEL_LOADING:
+            return None, "Model is still loading."
+        _LLM_CHAT_MODEL_LOADING = True
+
+    try:
+        model = await asyncio.to_thread(
+            _build_llm_from_settings,
+            settings,
+            max_output_tokens=256,
+        )
+        async with _LLM_CHAT_MODEL_LOCK:
+            _LLM_CHAT_MODEL = model
+        return model, None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"Failed to load inline Codex chat model: {exc}")
+        return None, f"{type(exc).__name__}: {exc}"
+    finally:
+        async with _LLM_CHAT_MODEL_LOCK:
+            _LLM_CHAT_MODEL_LOADING = False
+
+
+async def _run_llm_chat_queue_inline() -> None:
+    global _LLM_CHAT_WORKER_RUNNING
+    async with _LLM_CHAT_WORKER_LOCK:
+        if _LLM_CHAT_WORKER_RUNNING:
+            return
+        _LLM_CHAT_WORKER_RUNNING = True
+    await _run_llm_chat_queue()
 
 
 async def _run_llm_chat_queue() -> None:
     global _LLM_CHAT_WORKER_RUNNING
     try:
         while True:
-            async with _LLM_CHAT_MODEL_LOCK:
-                model = _LLM_CHAT_MODEL
-            if model is None:
-                return
-
             async with _LLM_CHAT_STORAGE_LOCK:
                 queue = _load_llm_chat_queue()
                 if _expire_llm_chat_queue(queue, datetime.now()):
@@ -573,6 +609,24 @@ async def _run_llm_chat_queue() -> None:
                     ),
                     None,
                 )
+
+            async with _LLM_CHAT_MODEL_LOCK:
+                model = _LLM_CHAT_MODEL
+            if model is None:
+                model, load_error = await _load_inline_codex_chat_model()
+                if model is None:
+                    async with _LLM_CHAT_STORAGE_LOCK:
+                        queue = _load_llm_chat_queue()
+                        for item in queue:
+                            if item.get("id") == next_item["id"]:
+                                if item.get("status") != "running":
+                                    break
+                                item["status"] = "failed"
+                                item["finished_at"] = _now_iso()
+                                item["error"] = load_error or "Model unavailable"
+                                break
+                        _save_llm_chat_queue(queue)
+                    continue
 
             if conversation is None:
                 async with _LLM_CHAT_STORAGE_LOCK:

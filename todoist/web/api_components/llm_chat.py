@@ -256,9 +256,32 @@ def _coerce_model_option_id(
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
+    if value == "triton":
+        value = "triton_local"
+    if value in {"raw", "none"}:
+        value = "disabled"
     if value in _LLM_CHAT_BACKEND_LABELS:
         return value
     return _LLM_CHAT_BACKEND_DEFAULT
+def _locked_llm_chat_backend() -> str | None:
+    _sync_api_globals()
+    value = str(os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK") or "").strip().lower()
+    if not value:
+        return None
+    if value == "triton":
+        value = "triton_local"
+    if value in {"raw", "none"}:
+        value = "disabled"
+    return value if value in _LLM_CHAT_BACKEND_LABELS else None
+def _available_llm_chat_backends(backend: str) -> set[str]:
+    _sync_api_globals()
+    locked_backend = _locked_llm_chat_backend()
+    if locked_backend:
+        return {locked_backend}
+    available = {"disabled", "triton_local", "codex"}
+    if backend in _LLM_CHAT_BACKEND_LABELS:
+        available.add(backend)
+    return available
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
@@ -326,10 +349,24 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     file_values = dotenv_values(env_path) if env_path.exists() else {}
     available_devices = _available_llm_chat_devices()
     codex_settings = _resolve_codex_settings(file_values)
-    triton_settings = _resolve_triton_settings(file_values)
 
     backend = _normalize_llm_chat_backend(
         os.getenv(backend_key) or file_values.get(backend_key)
+    )
+    locked_backend = _locked_llm_chat_backend()
+    if locked_backend:
+        backend = locked_backend
+    available_backend_ids = _available_llm_chat_backends(backend)
+    triton_available = "triton_local" in available_backend_ids or backend == "triton_local"
+    triton_settings = (
+        _resolve_triton_settings(file_values)
+        if triton_available
+        else {
+            "baseUrl": "",
+            "modelName": "",
+            "modelId": "",
+            "modelOptions": [],
+        }
     )
     device = _normalize_llm_chat_device(
         os.getenv(device_key) or file_values.get(device_key),
@@ -348,17 +385,17 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     return {
         "backend": backend,
         "backendLabel": _LLM_CHAT_BACKEND_LABELS[backend],
+        "lockedBackend": locked_backend,
         "device": device,
         "deviceLabel": _LLM_CHAT_DEVICE_LABELS[device],
         "availableBackends": [
             {
                 "id": backend_id,
                 "label": label,
-                "available": (
-                    backend_id in {"disabled", "triton_local", "codex"}
-                ),
+                "available": backend_id in available_backend_ids,
             }
             for backend_id, label in _LLM_CHAT_BACKEND_LABELS.items()
+            if backend_id in available_backend_ids
         ],
         "availableDevices": [
             {
@@ -370,8 +407,8 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
         ],
         "codex": codex_settings,
         "triton": {
-            "configured": True,
-            "healthy": _triton_ready(triton_settings),
+            "configured": triton_available,
+            "healthy": _triton_ready(triton_settings) if triton_available else False,
             "baseUrl": triton_settings["baseUrl"],
             "modelName": triton_settings["modelName"],
             "modelId": triton_settings["modelId"],
@@ -461,6 +498,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "selected": settings["backend"],
             "label": settings["backendLabel"],
             "active": settings["backend"] if enabled or loading else None,
+            "locked": settings["lockedBackend"],
             "options": settings["availableBackends"],
             "codex": settings["codex"],
             "triton": {

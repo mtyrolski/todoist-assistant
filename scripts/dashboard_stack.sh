@@ -230,6 +230,64 @@ port_listener_details() {
     ss -ltnp "( sport = :${port} )" 2>/dev/null | tail -n +2 | sed '/^[[:space:]]*$/d'
 }
 
+port_listener_pids() {
+    local port="${1}"
+    ss -ltnp "( sport = :${port} )" 2>/dev/null \
+        | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+        | sort -u
+}
+
+process_cmdline() {
+    local pid="${1}"
+    tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true
+}
+
+process_cwd() {
+    local pid="${1}"
+    readlink -f "/proc/${pid}/cwd" 2>/dev/null || true
+}
+
+is_repo_dashboard_process() {
+    local pid="${1}"
+    local service="${2}"
+    local cwd cmd
+    cwd="$(process_cwd "${pid}")"
+    cmd="$(process_cmdline "${pid}")"
+    case "${service}" in
+        api)
+            [[ "${cwd}" == "${REPO_ROOT}" && "${cmd}" == *"uvicorn todoist.web.api:app"* ]]
+            ;;
+        frontend)
+            [[ "${cwd}" == "${REPO_ROOT}/frontend" && "${cmd}" == *"next"* ]]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+cleanup_stale_port_for_service() {
+    local port="${1}"
+    local label="${2}"
+    local service="${3}"
+    local cleaned=0
+    local pid
+    while IFS= read -r pid; do
+        [[ -n "${pid}" ]] || continue
+        if is_repo_dashboard_process "${pid}" "${service}"; then
+            log_note "Cleaning up untracked ${label} process on port ${port} (pid ${pid})..."
+            local tmp_pid_file="${PID_DIR}/.${service}-${pid}.stale.pid"
+            printf '%s\n' "${pid}" > "${tmp_pid_file}"
+            stop_pid_target "${tmp_pid_file}" "${label}"
+            cleaned=1
+        fi
+    done < <(port_listener_pids "${port}")
+
+    if [[ "${cleaned}" -eq 1 ]]; then
+        sleep 0.5
+    fi
+}
+
 ensure_port_free() {
     local port="${1}"
     local label="${2}"
@@ -361,6 +419,8 @@ start_dashboard() {
         echo "Dashboard stack is already running. Use make stop_dashboard first."
         return 1
     fi
+    cleanup_stale_port_for_service "${API_PORT}" "API" api
+    cleanup_stale_port_for_service "${FRONTEND_PORT}" "Frontend" frontend
     ensure_port_free "${API_PORT}" "API"
     ensure_port_free "${FRONTEND_PORT}" "Frontend"
     if [[ "${backend}" == "triton" ]]; then
@@ -374,13 +434,13 @@ start_dashboard() {
     fi
 
     log_note "Starting API on 127.0.0.1:${API_PORT}..."
-    nohup env TODOIST_AGENT_BACKEND="${ai_backend}" TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
+    nohup env TODOIST_AGENT_BACKEND="${ai_backend}" TODOIST_DASHBOARD_LLM_BACKEND_LOCK="${ai_backend}" TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
     local api_pid="$!"
     echo "${api_pid}" > "${PID_DIR}/api.pid"
     wait_for_process "${api_pid}" "API"
 
     log_note "Starting observer..."
-    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_BACKEND="${ai_backend}" TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
+    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_BACKEND="${ai_backend}" TODOIST_DASHBOARD_LLM_BACKEND_LOCK="${ai_backend}" TODOIST_AGENT_MODEL_ID="${MODEL_ID}" TODOIST_AGENT_TRITON_MODEL_NAME="${TRITON_MODEL_NAME}" TODOIST_AGENT_TRITON_URL="${TRITON_URL}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
     local observer_pid="$!"
     echo "${observer_pid}" > "${PID_DIR}/observer.pid"
     wait_for_process "${observer_pid}" "Observer"

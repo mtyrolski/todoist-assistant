@@ -40,6 +40,7 @@ type LlmUsageSnapshot = {
 type LlmSettingsStatus = {
   backend: string;
   backendLabel: string;
+  lockedBackend?: string | null;
   device: string;
   deviceLabel: string;
   availableBackends: LlmOption[];
@@ -309,7 +310,7 @@ export function LlmRuntimeSettings({
               className="dateInput"
               value={llmBackendDraft}
               onChange={(e) => setLlmBackendDraft(e.target.value)}
-              disabled={llmSaving || !llmStatus || modelOptions.length === 0}
+              disabled={llmSaving || !llmStatus || (llmStatus.availableBackends ?? []).length <= 1}
             >
               {(llmStatus?.availableBackends ?? []).map((option) => (
                 <option key={option.id} value={option.id} disabled={option.available === false}>
