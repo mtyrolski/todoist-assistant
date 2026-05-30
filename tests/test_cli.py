@@ -33,11 +33,11 @@ def test_enable_telemetry_shows_missing_endpoint_note(monkeypatch, tmp_path: Pat
 
 
 def test_version_check_reports_update(monkeypatch) -> None:
-    monkeypatch.setattr(cli, "get_version", lambda: "0.3.2")
-    monkeypatch.setattr(cli, "_fetch_latest_release", lambda: {"tag_name": "v0.3.2"})
+    monkeypatch.setattr(cli, "get_version", lambda: "0.3.3")
+    monkeypatch.setattr(cli, "_fetch_latest_release", lambda: {"tag_name": "v0.3.3"})
 
     result = runner.invoke(cli.app, ["version", "--check"])
 
     assert result.exit_code == 0
-    assert "0.3.2" in result.stdout
+    assert "0.3.3" in result.stdout
     assert "Update available" not in result.stdout

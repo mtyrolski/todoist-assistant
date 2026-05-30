@@ -2,7 +2,7 @@
 
 Start here if you want the practical docs instead of browsing the repository tree.
 
-Latest stable release: `v0.3.2`
+Latest stable release: `v0.3.3`
 
 ## Pick the path you need
 
@@ -25,5 +25,4 @@ Latest stable release: `v0.3.2`
 
 ## Release history
 
-- Changelog: [../CHANGELOG.md](../CHANGELOG.md)
-- Stable release notes: [v0.3.2-release-notes.md](v0.3.2-release-notes.md)
+- GitHub Releases: <https://github.com/mtyrolski/todoist-assistant/releases>
