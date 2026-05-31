@@ -1090,9 +1090,6 @@ def test_task_ingest_rewrite_uses_selected_codex_model_when_runtime_is_idle(monk
     captured: dict[str, object] = {}
 
     class _FakeCodex:
-        def __init__(self, config):
-            captured["config"] = config
-
         def structured_chat(self, _messages, _schema):
             return web_api.TaskBreakdown(
                 children=[web_api.BreakdownNode(content="Draft roadmap", description="from llm")]
@@ -1113,7 +1110,14 @@ def test_task_ingest_rewrite_uses_selected_codex_model_when_runtime_is_idle(monk
             },
         },
     )
-    monkeypatch.setattr(web_api, "CodexCliChatModel", _FakeCodex)
+    def _fake_codex_builder(values, *, cwd):
+        captured["values"] = values
+        captured["cwd"] = cwd
+        model = _FakeCodex()
+        model._todoist_llm_backend = "codex"
+        return model
+
+    monkeypatch.setattr(web_api, "build_codex_chat_model", _fake_codex_builder)
 
     result = web_api._task_ingest_rewrite_with_llm_sync(
         "Plan launch",
@@ -1127,5 +1131,4 @@ def test_task_ingest_rewrite_uses_selected_codex_model_when_runtime_is_idle(monk
     tasks, source = result
     assert source == "codex"
     assert tasks[0]["content"] == "Draft roadmap"
-    config = captured["config"]
-    assert getattr(config, "model") == "gpt-5.5"
+    assert captured["cwd"] == web_api._REPO_ROOT

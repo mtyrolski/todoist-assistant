@@ -17,21 +17,20 @@ def test_breakdown_uses_codex_backend_from_env(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 
     class _FakeCodex:
-        def __init__(self, config):
-            captured["config"] = config
+        pass
 
-    monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.CodexCliChatModel",
-        _FakeCodex,
-    )
+    def _fake_codex_builder(values, *, cwd):
+        captured["values"] = values
+        captured["cwd"] = cwd
+        return _FakeCodex()
+
+    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_codex_chat_model", _fake_codex_builder)
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
     assert isinstance(llm, _FakeCodex)
-    config = captured["config"]
-    assert getattr(config, "model") == "gpt-5.5"
-    assert getattr(config, "sandbox") == "read-only"
+    assert captured["values"] == {}
 
 
 def test_breakdown_rejects_disabled_backend(monkeypatch, tmp_path) -> None:
@@ -87,20 +86,20 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     captured: dict[str, object] = {}
 
     class _FakeCodex:
-        def __init__(self, config):
-            captured["config"] = config
+        pass
 
-    monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.CodexCliChatModel",
-        _FakeCodex,
-    )
+    def _fake_codex_builder(values, *, cwd):
+        captured["values"] = values
+        captured["cwd"] = cwd
+        return _FakeCodex()
+
+    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_codex_chat_model", _fake_codex_builder)
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
     assert isinstance(llm, _FakeCodex)
-    config = captured["config"]
-    assert getattr(config, "model") == "gpt-5"
+    assert captured["values"][str(EnvVar.AGENT_CODEX_MODEL)] == "gpt-5"
 
 
 def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> None:
@@ -125,28 +124,25 @@ def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> No
     captured: dict[str, object] = {}
 
     class _FakeCodex:
-        def __init__(self, config):
-            captured["config"] = config
+        pass
 
-    class _UnexpectedTriton:
-        def __init__(self, config):
-            raise AssertionError(f"Triton must not be constructed under a Codex launch lock: {config}")
+    def _fake_codex_builder(values, *, cwd):
+        captured["values"] = values
+        captured["cwd"] = cwd
+        return _FakeCodex()
 
-    monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.CodexCliChatModel",
-        _FakeCodex,
-    )
-    monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.TritonGenerateChatModel",
-        _UnexpectedTriton,
-    )
+    def _unexpected_triton_builder(**kwargs):
+        raise AssertionError(f"Triton must not be constructed under a Codex launch lock: {kwargs}")
+
+    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_codex_chat_model", _fake_codex_builder)
+    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_triton_chat_model", _unexpected_triton_builder)
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
     assert automation.selected_backend() == "codex"
     assert isinstance(llm, _FakeCodex)
-    assert getattr(captured["config"], "model") == "gpt-5.5"
+    assert captured["values"][str(EnvVar.AGENT_CODEX_MODEL)] == "gpt-5.5"
 
 
 def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
@@ -160,19 +156,19 @@ def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 
     class _FakeTriton:
-        def __init__(self, config):
-            captured["config"] = config
+        pass
 
-    monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.TritonGenerateChatModel",
-        _FakeTriton,
-    )
+    def _fake_triton_builder(**kwargs):
+        captured["config"] = kwargs
+        return _FakeTriton()
+
+    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_triton_chat_model", _fake_triton_builder)
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
     assert isinstance(llm, _FakeTriton)
     config = captured["config"]
-    assert getattr(config, "base_url") == "http://127.0.0.1:9100"
-    assert getattr(config, "model_name") == "todoist_llm"
-    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"
+    assert config["base_url"] == "http://127.0.0.1:9100"
+    assert config["model_name"] == "todoist_llm"
+    assert config["model_id"] == "Qwen/Qwen2.5-3B-Instruct"

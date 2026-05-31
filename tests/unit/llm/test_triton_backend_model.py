@@ -15,7 +15,7 @@ import pytest
 
 def _load_triton_backend_module() -> Any:
     module_path = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[3]
         / "deploy"
         / "triton"
         / "model_repository"

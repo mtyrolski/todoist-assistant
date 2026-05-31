@@ -1,6 +1,5 @@
 """Tests for the Codex CLI LLM adapter."""
 
-from __future__ import annotations
 
 from pathlib import Path
 import subprocess

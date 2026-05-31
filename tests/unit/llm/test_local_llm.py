@@ -40,7 +40,7 @@ class FakeTokenizer:
 
 
 class FakeConfig:
-    model_type = "mistral3"
+    model_type = "fake"
 
 
 class FakeChatTemplateTokenizer:
@@ -86,9 +86,9 @@ class DummySchema(BaseModel):
 def test_local_llm_initializes_and_generates(monkeypatch, tmp_path):
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     cfg = LocalChatConfig(model_id="fake/model", max_new_tokens=4)
-    with patch("todoist.llm.local_llm.AutoTokenizer", new=FakeTokenizer), \
+    with patch("todoist.llm.tokenizer.AutoTokenizer", new=FakeTokenizer), \
          patch("todoist.llm.local_llm.AutoConfig.from_pretrained", new=lambda *_a, **_k: FakeConfig()), \
-         patch("todoist.llm.local_llm.Mistral3ForConditionalGeneration", new=FakeModel):
+         patch("todoist.llm.local_llm.AutoModelForCausalLM.from_pretrained", new=FakeModel.from_pretrained):
         llm = TransformersMistral3ChatModel(cfg)
         assert llm.chat([{"role": MessageRole.USER, "content": "hi"}]) == "OK"
         parsed = llm.structured_chat([{"role": MessageRole.USER, "content": "hi"}], DummySchema)
