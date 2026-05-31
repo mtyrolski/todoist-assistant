@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-from __future__ import annotations
 
 from datetime import datetime
 from typing import Any

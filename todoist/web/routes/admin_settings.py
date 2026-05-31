@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence

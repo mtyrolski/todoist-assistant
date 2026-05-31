@@ -2,7 +2,6 @@
 
 """Pretty-print local app and service status for the dashboard stack."""
 
-from __future__ import annotations
 
 import json
 import os

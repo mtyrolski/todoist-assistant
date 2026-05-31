@@ -2,7 +2,6 @@
 
 # pylint: disable=protected-access,cyclic-import
 
-from __future__ import annotations
 
 
 def _web_api():

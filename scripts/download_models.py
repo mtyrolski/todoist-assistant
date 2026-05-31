@@ -1,6 +1,5 @@
 """Download configured Hugging Face models into the local cache."""
 
-from __future__ import annotations
 
 from argparse import ArgumentParser, Namespace
 from collections.abc import Sequence

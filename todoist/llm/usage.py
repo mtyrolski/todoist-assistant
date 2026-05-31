@@ -1,6 +1,5 @@
 """Persistent LLM usage counters shared across local AI flows."""
 
-from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime

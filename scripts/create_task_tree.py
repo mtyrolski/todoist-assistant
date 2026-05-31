@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Create nested Todoist task trees from inline JSON."""
 
-from __future__ import annotations
 
 import argparse
 import json

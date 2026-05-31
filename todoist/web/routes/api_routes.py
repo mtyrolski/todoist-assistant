@@ -1,6 +1,5 @@
 """FastAPI route aggregator for the web API."""
 
-from __future__ import annotations
 
 from fastapi import APIRouter
 

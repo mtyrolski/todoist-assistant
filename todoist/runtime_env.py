@@ -1,6 +1,5 @@
 """Helpers for resolving local runtime environment files and Triton settings."""
 
-from __future__ import annotations
 
 from collections.abc import Mapping
 import os

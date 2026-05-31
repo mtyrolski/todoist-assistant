@@ -2,7 +2,6 @@
 
 """Remove local runtime state created by the Todoist Assistant."""
 
-from __future__ import annotations
 
 import os
 import shutil
