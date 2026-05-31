@@ -57,6 +57,15 @@ FastAPI application and API surface used by the dashboard and local integrations
 
 Optional LLM integration and summary helpers.
 
+The package is split so backend-neutral configuration, constants, model catalog,
+and structured-output parsing can be imported without loading a backend. Backend
+modules are loaded lazily from the selected environment value:
+- `config.py`, `constants.py`, `model_catalog.py`, `structured.py`: safe shared surface
+- `codex_llm.py`: Codex CLI adapter
+- `triton_llm.py`: Triton inference adapter
+- `local_llm.py`: direct Transformers adapter used by the CLI agent
+- `factory.py`: facade for constructing only the selected backend
+
 ### `todoist.agent`
 
 Local agent and chat helpers built on top of cached Todoist data.
@@ -99,6 +108,20 @@ See [../core/README.md](../core/README.md) for packaging details.
 - `make run_dashboard`: start API + frontend
 - `make run_observer`: run background refresh loop
 - `make chat_agent`: start local read-only chat flow
+
+## Test layout
+
+The pytest suite is intentionally nested by behavior:
+
+- `tests/api/`: FastAPI and API-client behavior
+- `tests/integration/`: CLI and script workflow checks
+- `tests/unit/core/`: shared types, utilities, runtime environment, statistics
+- `tests/unit/database/`: persistence and dataframe loading
+- `tests/unit/dashboard/`: dashboard payload and Plotly helpers
+- `tests/unit/llm/`: optional AI backend adapters and lazy-loading contracts
+- `tests/unit/agent/`: local agent graph and REPL tool
+- `tests/unit/automations/`: automation entry points plus subdomains
+- `tests/macos/` and `tests/windows/`: platform packaging checks
 
 ## Where to look first
 

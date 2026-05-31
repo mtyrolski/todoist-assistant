@@ -169,7 +169,15 @@ Automation setup lives in [`configs/automations.yaml`](configs/automations.yaml)
 
 - Local summaries over cached Todoist history
 - Read-only dashboard chat
-- Triton-backed local model support for the AI stack
+- AI task breakdown for labeled Todoist tasks
+
+AI is opt-in. Set `TODOIST_AGENT_BACKEND` in `.env` to choose the backend:
+
+- `disabled`: default; no AI backend module is loaded
+- `codex`: uses the local Codex CLI backend for read-only chat and task breakdown
+- `triton_local`: uses the local Triton inference endpoint and the configured catalog model
+
+Currently supported models are the catalog entries in `todoist/llm/model_catalog.py`. The project does not currently support arbitrary OpenAI-compatible HTTP endpoints, Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard, or write-capable AI agents.
 
 Usage details: [docs/USAGE.md](docs/USAGE.md)
 
@@ -179,7 +187,7 @@ Usage details: [docs/USAGE.md](docs/USAGE.md)
 - [`frontend/`](frontend) contains the Next.js dashboard
 - [`configs/`](configs) contains automation and dashboard configuration
 - [`docs/`](docs) contains longer-form documentation
-- [`tests/`](tests) contains the test suite and coverage notes
+- [`tests/`](tests) contains API, integration, platform, and nested unit test segments
 - [`core/`](core) contains the core-only package variant
 
 Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
@@ -197,12 +205,10 @@ Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
 
 ## Checks
 
-Run these before opening or closing documentation-adjacent code changes:
+Run this before closing code changes:
 
 ```bash
-make typecheck
-make lint
-make test
+make test_all
 make coverage
 ```
 
