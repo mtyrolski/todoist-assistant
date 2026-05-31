@@ -130,7 +130,7 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
     client = TestClient(web_api.app)
     response = client.put(
         "/api/admin/project_adjustments",
-        params={"file": "adj_private.py"},
+        params={"file": "adj_private.py", "refresh": "true"},
         json={"mappings": {"Archived Research": "Academy"}},
     )
 
@@ -456,6 +456,94 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> N
     assert res.status_code == 200
     saved = config_path.read_text(encoding="utf-8")
     assert "- ${gmail_tasks}" in saved
+
+def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "stale_tasks:",
+                "  _target_: todoist.automations.stale_tasks.StaleTasksAutomation",
+                "  name: Stale Tasks",
+                "  frequency_in_minutes: 1440",
+                "  config:",
+                "    old_after_days: 30",
+                "    very_old_after_days: 90",
+                "    old_label: old",
+                "    very_old_label: very-old",
+                "  dry_run: true",
+                "  max_updates_per_tick: 25",
+                "automations:",
+                "  - ${stale_tasks}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/admin/stale_tasks",
+        json={
+            "oldAfterDays": 14,
+            "veryOldAfterDays": 45,
+            "warningLabel": "stale-warning",
+            "veryOldLabel": "stale-critical",
+            "deleteAfterWarningDays": 5,
+            "dryRun": False,
+            "maxUpdatesPerTick": 10,
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["settings"]["deleteAfterWarningDays"] == 5
+    assert payload["settings"]["dryRun"] is False
+    saved = config_path.read_text(encoding="utf-8")
+    assert "old_label: stale-warning" in saved
+    assert "delete_after_warning_days: 5" in saved
+    assert "dry_run: false" in saved
+
+def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "automations.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "defaults:",
+                "  - _self_",
+                "multiply:",
+                "  _target_: todoist.automations.multiplicate.Multiply",
+                "  frequency_in_minutes: 0.1",
+                "automations:",
+                "  - ${multiply}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/admin/multiplication",
+        json={
+            "flatLeafTemplate": "{base} #{i}",
+            "deepLeafTemplate": "{base} - {i}/{n}",
+            "deepChildLabel": "effort-point",
+            "cleanupUnusedLabels": True,
+            "cleanupUnusedLabelsAfterDays": 3,
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["settings"]["cleanupUnusedLabels"] is True
+    assert payload["settings"]["cleanupUnusedLabelsAfterDays"] == 3
+    assert payload["settings"]["deepChildLabel"] == "effort-point"
+    saved = config_path.read_text(encoding="utf-8")
+    assert "deep_child_label: effort-point" in saved
+    assert "cleanup_unused_labels_after_days: 3" in saved
 
 def test_set_automation_enabled_disables_config_entry(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "automations.yaml"
@@ -822,7 +910,7 @@ def test_admin_status_update_generate_builds_report_and_validates_input(monkeypa
             {
                 "date": "2025-01-02T10:00:00",
                 "id": "e1",
-                "title": "Launch notes",
+                "title": "Launch notes - 5/10",
                 "type": "completed",
                 "parent_project_id": "root-a",
                 "parent_project_name": "Alpha",
@@ -833,7 +921,7 @@ def test_admin_status_update_generate_builds_report_and_validates_input(monkeypa
             {
                 "date": "2025-01-03T10:00:00",
                 "id": "e2",
-                "title": "Draft follow-up",
+                "title": "Draft follow-up story-point-3",
                 "type": "completed",
                 "parent_project_id": "child-a",
                 "parent_project_name": "Alpha Child",
@@ -892,16 +980,25 @@ def test_admin_status_update_generate_builds_report_and_validates_input(monkeypa
         "completedTaskCount": 2,
         "commentedTaskCount": 2,
         "commentCount": 2,
+        "storyPointCount": 8,
+        "estimatedTaskCount": 2,
     }
-    assert payload["summaryText"] == "Completed 2 tasks across 2 projects, grounded by 2 comments."
+    assert payload["summaryText"] == "Completed 2 tasks across 2 active projects, delivering 8 story points, grounded by 2 comments."
     assert payload["stats"] == {
         "completedCount": 2,
         "commentCount": 2,
         "projectCount": 2,
         "activityCount": 2,
+        "storyPointCount": 8,
+        "estimatedTaskCount": 2,
     }
-    assert payload["completedTasks"][0]["content"] == "Launch notes"
+    assert payload["projects"][0]["storyPointCount"] == 5
+    assert payload["projects"][1]["storyPointCount"] == 3
+    assert payload["completedTasks"][0]["content"] == "Launch notes - 5/10"
+    assert payload["completedTasks"][0]["storyPointCount"] == 5
     assert payload["completedTasks"][0]["comments"][0]["content"] == "Shared the launch notes with the team"
+    assert payload["executiveSummary"][1] == "Delivered 8 story points across 2 estimated tasks."
+    assert payload["projectRollup"][0]["storyPointCount"] == 5
     assert "Weekly sync" in payload["markdown"]
     assert "Alpha Child" in payload["markdown"]
 
@@ -989,10 +1086,10 @@ def test_admin_run_observer_reports_idle_polling_automations(monkeypatch, tmp_pa
     assert payload["state"]["lastEvents"] == 0
     assert payload["state"]["lastAutomationsRan"] == 1
 
-def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monkeypatch) -> None:
+def test_task_ingest_rewrite_uses_selected_codex_model_when_runtime_is_idle(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeTransformers:
+    class _FakeCodex:
         def __init__(self, config):
             captured["config"] = config
 
@@ -1006,10 +1103,9 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
         web_api,
         "_resolve_llm_chat_settings",
         lambda: {
-            "backend": "transformers_local",
+            "backend": "codex",
             "device": "cpu",
-            "localModelId": "mistralai/Mistral-Nemo-Instruct-2407",
-            "openai": {"configured": False, "keyName": None, "model": "gpt-5-mini"},
+            "codex": {"model": "gpt-5.5", "modelOptions": []},
             "triton": {
                 "baseUrl": "http://127.0.0.1:8003",
                 "modelName": "todoist_llm",
@@ -1017,7 +1113,7 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
             },
         },
     )
-    monkeypatch.setattr(web_api, "TransformersMistral3ChatModel", _FakeTransformers)
+    monkeypatch.setattr(web_api, "CodexCliChatModel", _FakeCodex)
 
     result = web_api._task_ingest_rewrite_with_llm_sync(
         "Plan launch",
@@ -1029,8 +1125,7 @@ def test_task_ingest_rewrite_uses_selected_local_model_when_runtime_is_idle(monk
 
     assert result is not None
     tasks, source = result
-    assert source == "transformers"
+    assert source == "codex"
     assert tasks[0]["content"] == "Draft roadmap"
     config = captured["config"]
-    assert getattr(config, "model_id") == "Qwen/Qwen2.5-3B-Instruct"
-    assert getattr(config, "max_new_tokens") == 768
+    assert getattr(config, "model") == "gpt-5.5"

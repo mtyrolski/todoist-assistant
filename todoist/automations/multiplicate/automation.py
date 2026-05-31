@@ -1,5 +1,6 @@
 import argparse
 import re
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence, cast
@@ -13,6 +14,7 @@ from todoist.constants import TaskField
 from todoist.database.base import Database
 from todoist.database.db_tasks import TaskTemplateInsertRequest
 from todoist.types import Task, TaskEntry
+from todoist.utils import Cache
 
 
 _MULTIPLICATION_LABEL_PATTERN = re.compile(r"^X(?P<n>\d+)$")
@@ -49,7 +51,7 @@ def extract_multiplication_factor(label: str) -> int:
 
 @dataclass(frozen=True, slots=True)
 class MultiplyConfig:
-    # Flat multiplication via labels like X3
+    # Legacy flat labels like X3 are removed from tasks; they no longer expand inline copies.
     flat_label_regex: str = r"^X(?P<n>\d+)$"
     flat_leaf_template: str = "{base} story-point-{i}"
 
@@ -57,6 +59,9 @@ class MultiplyConfig:
     # - creates N subtasks under the labeled task
     deep_label_regex: str = r"^_X(?P<n>\d+)$"
     deep_leaf_template: str = "{base} - {i}/{n}"
+    deep_child_label: str = "effort-point"
+    cleanup_unused_labels: bool = True
+    cleanup_unused_labels_after_days: int = 7
 
 
 def _compile(pattern: str) -> re.Pattern[str]:
@@ -74,6 +79,16 @@ def _filter_out_multiplier_labels(
         for label in labels
         if flat_label_pattern.match(label) is None and deep_label_pattern.match(label) is None
     ]
+
+
+def _append_unique_label(labels: Iterable[str], label: str) -> list[str]:
+    normalized = label.strip()
+    result = list(labels)
+    if not normalized:
+        return result
+    if all(item.strip().lower() != normalized.lower() for item in result):
+        result.append(normalized)
+    return result
 
 
 def _task_parent_id(task: Task) -> str | None:
@@ -248,32 +263,34 @@ class Multiply(Automation):
         elif isinstance(config, MultiplyConfig):
             self.config = config
         elif isinstance(config, (Mapping, DictConfig)):
-            self.config = MultiplyConfig(**dict(config))
+            config_data = dict(config)
+            if "cleanup_unused_labels_after_days" in config_data:
+                config_data["cleanup_unused_labels_after_days"] = max(
+                    0, int(config_data["cleanup_unused_labels_after_days"])
+                )
+            self.config = MultiplyConfig(**config_data)
         else:
             raise TypeError("config must be MultiplyConfig or Mapping[str, Any]")
 
         self._flat_label_pattern = _compile(self.config.flat_label_regex)
         self._deep_label_pattern = _compile(self.config.deep_label_regex)
 
+    def should_run_without_new_activity(self) -> bool:
+        """Run from the observer even when multiplier labels predate the latest event poll."""
+        return True
+
     def _tick(self, db: Database) -> None:
+        now = datetime.now()
         projects = db.fetch_projects(include_tasks=True)
         all_tasks: list[Task] = [task for project in projects for task in project.tasks]
         logger.debug(f"Found {len(all_tasks)} tasks in total")
+        seen_multiplier_labels = self._multiplier_labels_on_tasks(all_tasks)
+        self._record_multiplier_label_usage(seen_multiplier_labels, now=now)
 
         children_by_parent = _build_children_by_parent(all_tasks)
 
-        parent_ids: set[str] = set()
-        for task in all_tasks:
-            parent_id = _task_parent_id(task)
-            if parent_id is not None:
-                parent_ids.add(parent_id)
-
         tasks_to_process = self._select_tasks_to_process(all_tasks)
         tasks_to_process = _depth_sort_children_first(tasks_to_process)
-
-        # When a parent task is expanded we may delete the original. Any later child
-        # expansions must point at the newly created parent copies.
-        flat_expansions: dict[str, list[str]] = {}
 
         # Expanding a parent may delete its entire subtree; skip any later processing.
         deleted_ids: set[str] = set()
@@ -282,18 +299,11 @@ class Multiply(Automation):
         for task in tasks_to_process:
             if task.id in deleted_ids:
                 continue
-            is_leaf = task.id not in parent_ids
-            parent_targets = _resolve_parent_targets(task, flat_expansions=flat_expansions)
-            created_ids, removed_ids, created_task_infos = self._process_task(
+            _, removed_ids, created_task_infos = self._process_task(
                 db,
                 task,
-                _is_leaf=is_leaf,
-                parent_targets=parent_targets,
-                children_by_parent=children_by_parent,
             )
             deleted_ids.update(removed_ids)
-            if created_ids:
-                flat_expansions[task.id] = created_ids
 
             # Update children_by_parent to remove deleted tasks so later parent
             # expansions don't try to clone already-deleted children.
@@ -331,6 +341,128 @@ class Multiply(Automation):
                     placeholder_task = _make_placeholder_task(info)
                     children_by_parent.setdefault(info.parent_id, []).append(placeholder_task)
 
+        self._cleanup_unused_multiplier_labels(
+            db,
+            seen_multiplier_labels=seen_multiplier_labels,
+            now=now,
+        )
+
+    def _multiplier_labels_on_tasks(self, tasks: Iterable[Task]) -> set[str]:
+        labels: set[str] = set()
+        for task in tasks:
+            for label in task.task_entry.labels:
+                if (
+                    self._flat_label_pattern.match(label) is not None
+                    or self._deep_label_pattern.match(label) is not None
+                ):
+                    labels.add(label)
+        return labels
+
+    @staticmethod
+    def _load_multiplier_label_usage() -> dict[str, dict[str, Any]]:
+        payload = Cache().multiplication_label_usage.load()
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _save_multiplier_label_usage(payload: dict[str, dict[str, Any]]) -> None:
+        Cache().multiplication_label_usage.save(payload)
+
+    @staticmethod
+    def _label_last_seen_at(record: Mapping[str, Any] | None) -> datetime | None:
+        if record is None:
+            return None
+        value = record.get("lastSeenAt")
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        return None
+
+    def _record_multiplier_label_usage(self, labels: Iterable[str], *, now: datetime) -> None:
+        usage = self._load_multiplier_label_usage()
+        for label in labels:
+            usage[label] = {"lastSeenAt": now}
+        self._save_multiplier_label_usage(usage)
+
+    def _cleanup_unused_multiplier_labels(
+        self,
+        db: Database,
+        *,
+        seen_multiplier_labels: set[str],
+        now: datetime,
+    ) -> None:
+        if not self.config.cleanup_unused_labels:
+            return
+        list_labels = getattr(db, "list_labels", None)
+        delete_label_by_name = getattr(db, "delete_label_by_name", None)
+        if not callable(list_labels) or not callable(delete_label_by_name):
+            return
+
+        usage = self._load_multiplier_label_usage()
+        try:
+            raw_labels = list_labels()
+        except Exception as exc:  # pragma: no cover - defensive around API failures
+            logger.warning(f"Failed to list labels for multiplier cleanup: {exc}")
+            return
+        if not isinstance(raw_labels, Sequence):
+            logger.warning("Failed to list labels for multiplier cleanup: unexpected payload")
+            return
+        labels = cast(Sequence[object], raw_labels)
+
+        cutoff = timedelta(days=self.config.cleanup_unused_labels_after_days)
+        changed = False
+        for label_record in labels:
+            if not isinstance(label_record, Mapping):
+                continue
+            raw_name = label_record.get("name")
+            if not isinstance(raw_name, str):
+                continue
+            if (
+                self._flat_label_pattern.match(raw_name) is None
+                and self._deep_label_pattern.match(raw_name) is None
+            ):
+                continue
+            if raw_name in seen_multiplier_labels:
+                continue
+
+            last_seen_at = self._label_last_seen_at(usage.get(raw_name))
+            if last_seen_at is None:
+                logger.warning(
+                    "Deleting unused multiplier label {!r}; it is not attached to any active task and has no recent usage record.",
+                    raw_name,
+                )
+            elif now - last_seen_at < cutoff:
+                logger.debug(
+                    "Keeping unused multiplier label {!r}; last seen at {} and retention is {} day(s).",
+                    raw_name,
+                    last_seen_at.isoformat(timespec="seconds"),
+                    self.config.cleanup_unused_labels_after_days,
+                )
+                continue
+            else:
+                logger.warning(
+                    "Deleting unused multiplier label {!r}; last seen at {} and retention is {} day(s).",
+                    raw_name,
+                    last_seen_at.isoformat(timespec="seconds"),
+                    self.config.cleanup_unused_labels_after_days,
+                )
+
+            try:
+                deleted = bool(delete_label_by_name(raw_name))
+            except Exception as exc:  # pragma: no cover - defensive around API failures
+                logger.warning(f"Failed to delete unused multiplier label {raw_name!r}: {exc}")
+                continue
+            if deleted:
+                usage.pop(raw_name, None)
+                changed = True
+                logger.info(f"Deleted unused multiplier label {raw_name!r}.")
+
+        if changed:
+            self._save_multiplier_label_usage(usage)
+
     def _select_tasks_to_process(self, all_tasks: list[Task]) -> list[Task]:
         selected: list[Task] = []
         for task in all_tasks:
@@ -344,10 +476,6 @@ class Multiply(Automation):
         self,
         db: Database,
         task: Task,
-        *,
-        _is_leaf: bool,
-        parent_targets: Sequence[str | None],
-        children_by_parent: dict[str, list[Task]],
     ) -> tuple[list[str], set[str], list[_CreatedTaskInfo]]:
         try:
             flat_n = _flat_factor_from_labels(task.task_entry.labels, self._flat_label_pattern)
@@ -369,13 +497,19 @@ class Multiply(Automation):
             return [], set(), created_task_infos
 
         if flat_n is not None:
-            return self._expand_flat(
-                db,
-                task,
-                flat_n,
-                parent_targets=parent_targets,
-                children_by_parent=children_by_parent,
+            labels = _filter_out_multiplier_labels(
+                task.task_entry.labels,
+                flat_label_pattern=self._flat_label_pattern,
+                deep_label_pattern=self._deep_label_pattern,
             )
+            db.update_task(task.id, labels=labels)
+            logger.info(
+                "Removed legacy flat multiplier label from task {} ({!r}); labels are now {}.",
+                task.id,
+                task.task_entry.content,
+                labels,
+            )
+            return [], set(), []
 
         return [], set(), []
 
@@ -495,11 +629,12 @@ class Multiply(Automation):
         Returns info about created subtasks for tracking in children_by_parent.
         """
 
-        labels = _filter_out_multiplier_labels(
+        parent_labels = _filter_out_multiplier_labels(
             task.task_entry.labels,
             flat_label_pattern=self._flat_label_pattern,
             deep_label_pattern=self._deep_label_pattern,
         )
+        child_labels = _append_unique_label(parent_labels, self.config.deep_child_label)
 
         created_task_infos: list[_CreatedTaskInfo] = []
         base = task.task_entry.content
@@ -513,7 +648,7 @@ class Multiply(Automation):
                     template=task,
                     overrides={
                         TaskField.CONTENT.value: leaf_title,
-                        TaskField.LABELS.value: labels,
+                        TaskField.LABELS.value: child_labels,
                         TaskField.PARENT_ID.value: task.id,
                     },
                 )
@@ -524,17 +659,29 @@ class Multiply(Automation):
         for leaf_title, created in zip(leaf_titles, created_batch, strict=False):
             new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
             if new_id:
+                logger.info(
+                    "Created effort-point subtask {} ({!r}) under task {} with labels {}.",
+                    new_id,
+                    leaf_title,
+                    task.id,
+                    child_labels,
+                )
                 created_task_infos.append(_CreatedTaskInfo(
                     id=new_id,
                     content=leaf_title,
-                    labels=list(labels),
+                    labels=list(child_labels),
                     parent_id=task.id,
                     source_task=task,
                 ))
 
         # Remove multiplier labels to keep the automation idempotent.
-        logger.debug(f"Updating task {task.id} to remove multiplier label, new labels: {labels}")
-        db.update_task(task.id, labels=labels)
+        db.update_task(task.id, labels=parent_labels)
+        logger.info(
+            "Removed deep multiplier label from task {} ({!r}); labels are now {}.",
+            task.id,
+            task.task_entry.content,
+            parent_labels,
+        )
 
         return created_task_infos
 

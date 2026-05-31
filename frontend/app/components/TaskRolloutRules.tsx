@@ -57,14 +57,14 @@ export function TaskRolloutRules() {
       const res = await fetch("/api/admin/llm_breakdown/settings");
       const payload = (await res.json()) as RolloutResponse;
       if (!res.ok) {
-        throw new Error("Failed to load LLM breakdown settings");
+        throw new Error("Failed to load AI breakdown settings");
       }
       setSettings(payload.settings);
       setDraft(payload.settings);
       setBasePrompt(payload.basePrompt);
       setSelectedVariant(payload.settings.defaultVariant);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load LLM breakdown settings");
+      setError(err instanceof Error ? err.message : "Failed to load AI breakdown settings");
     } finally {
       setLoading(false);
     }
@@ -195,9 +195,9 @@ export function TaskRolloutRules() {
           <h2>How task rollout works</h2>
         </header>
         <p className="muted tiny">
-          Apply a label that starts with <strong>{draft?.labelPrefix ?? "llm-"}</strong> to any Todoist task. The
+          Apply a label that starts with <strong>{draft?.labelPrefix ?? "ai-"}</strong> to any Todoist task. The
           automation will generate structured subtasks using the selected variant. The label after the prefix selects
-          the variant, for example <strong>{draft?.labelPrefix ?? "llm-"}breakdown</strong>.
+          the variant, for example <strong>{draft?.labelPrefix ?? "ai-"}breakdown</strong>.
         </p>
       </div>
 

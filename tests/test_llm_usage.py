@@ -8,14 +8,14 @@ def test_record_llm_usage_aggregates_totals_and_selected_model(monkeypatch, tmp_
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
 
     record_llm_usage(
-        backend="transformers_local",
+        backend="codex",
         model_id="mistralai/Ministral-3-3B-Instruct-2512",
         operation="chat",
         input_tokens=12,
         output_tokens=5,
     )
     record_llm_usage(
-        backend="transformers_local",
+        backend="codex",
         model_id="mistralai/Ministral-3-3B-Instruct-2512",
         operation="structured_chat",
         input_tokens=20,
@@ -30,7 +30,7 @@ def test_record_llm_usage_aggregates_totals_and_selected_model(monkeypatch, tmp_
     )
 
     usage = load_llm_usage_summary(
-        selected_backend="transformers_local",
+        selected_backend="codex",
         selected_model_id="mistralai/Ministral-3-3B-Instruct-2512",
     )
 

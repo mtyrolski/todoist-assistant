@@ -76,8 +76,8 @@ class _TestMultiply(Multiply):
         self._tick(db)
 
 
-def test_flat_expansion_clones_existing_children_under_new_parent_copies():
-    # Parent is multiplied; its existing child has no multiply label.
+def test_flat_label_is_removed_without_inline_rollout():
+    # Flat Xn rollout is no longer supported; the automation only removes the label.
     parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
     child = Task(
         id="2",
@@ -87,17 +87,9 @@ def test_flat_expansion_clones_existing_children_under_new_parent_copies():
     db = _FakeDb(tasks=[parent, child])
     _TestMultiply().run_once(db)
 
-    parent_inserts = [i for i in db.inserts if i.get("content", "").startswith("Parent")]
-    assert len(parent_inserts) == 2
-
-    # Child must be cloned under each newly-created Parent copy.
-    child_inserts = [i for i in db.inserts if i.get("content") == "Child"]
-    assert len(child_inserts) == 2
-    assert {i.get("parent_id") for i in child_inserts} == {"new1", "new2"}
-
-    # Both originals removed (child first, then parent)
-    assert "2" in db.removed_ids
-    assert "1" in db.removed_ids
+    assert db.inserts == []
+    assert db.removed_ids == []
+    assert db.updated == [("1", {"labels": []})]
 
 
 def test_deep_label_creates_subtasks():
@@ -117,6 +109,7 @@ def test_deep_label_creates_subtasks():
     assert len(leaves) == 5
     assert leaves[0]["content"] == "Testowo inner - 1/5"
     assert leaves[-1]["content"] == "Testowo inner - 5/5"
+    assert all(item.get("labels") == ["work", "effort-point"] for item in leaves)
 
     assert db.updated == [("1", {"labels": ["work"]})]
     assert not db.removed_ids

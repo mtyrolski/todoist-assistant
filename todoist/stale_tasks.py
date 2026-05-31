@@ -1,11 +1,16 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Sequence
+from enum import StrEnum
+from typing import Sequence
 
 from todoist.stats import extract_task_due_date, try_parse_date
 from todoist.types import Project, Task
 
-StaleState = Literal["skip", "fresh", "old", "very_old"]
+class StaleState(StrEnum):
+    SKIP = "skip"
+    FRESH = "fresh"
+    OLD = "old"
+    VERY_OLD = "very_old"
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +19,7 @@ class StaleTaskConfig:
     very_old_after_days: int = 90
     old_label: str = "old"
     very_old_label: str = "very-old"
+    delete_after_warning_days: int = 7
     exempt_labels: tuple[str, ...] = ("no_stale", "track_habit")
     exclude_recurring: bool = True
     exclude_due_within_days: int = 7
@@ -40,6 +46,20 @@ def _managed_label_names(config: StaleTaskConfig) -> tuple[str, str]:
     return (_normalize_label(config.old_label), _normalize_label(config.very_old_label))
 
 
+def managed_stale_label_names(config: StaleTaskConfig) -> set[str]:
+    return set(_managed_label_names(config))
+
+
+def stale_label_for_state(
+    state: StaleState,
+    *,
+    config: StaleTaskConfig,
+) -> str:
+    if state is StaleState.VERY_OLD:
+        return config.very_old_label
+    return config.old_label
+
+
 def _task_last_touched_at(task: Task) -> datetime | None:
     candidates = [
         try_parse_date(value)
@@ -55,7 +75,7 @@ def _task_last_touched_at(task: Task) -> datetime | None:
 def _desired_labels_for_state(
     current_labels: Sequence[str],
     *,
-    state: Literal["fresh", "old", "very_old"],
+    state: StaleState,
     config: StaleTaskConfig,
 ) -> list[str]:
     managed_labels = set(_managed_label_names(config))
@@ -64,9 +84,9 @@ def _desired_labels_for_state(
         for label in current_labels
         if _normalize_label(label) not in managed_labels
     ]
-    if state == "old":
+    if state is StaleState.OLD:
         return [*preserved, config.old_label]
-    if state == "very_old":
+    if state is StaleState.VERY_OLD:
         return [*preserved, config.very_old_label]
     return preserved
 
@@ -79,7 +99,7 @@ def evaluate_task_staleness(
 ) -> StaleTaskDecision:
     def skip(reason: str, due_at: datetime | None = None) -> StaleTaskDecision:
         return StaleTaskDecision(
-            state="skip",
+            state=StaleState.SKIP,
             reason=reason,
             stale_days=None,
             last_touched_at=None,
@@ -115,11 +135,11 @@ def evaluate_task_staleness(
         return skip("missing_timestamp", due_at=due_at)
 
     stale_days = max(0, (now.date() - last_touched_at.date()).days)
-    state: Literal["fresh", "old", "very_old"] = "fresh"
+    state = StaleState.FRESH
     if stale_days >= config.very_old_after_days:
-        state = "very_old"
+        state = StaleState.VERY_OLD
     elif stale_days >= config.old_after_days:
-        state = "old"
+        state = StaleState.OLD
 
     desired_labels = _desired_labels_for_state(current_labels, state=state, config=config)
     should_update = desired_labels != current_labels

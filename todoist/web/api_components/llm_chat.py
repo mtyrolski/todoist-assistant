@@ -256,9 +256,32 @@ def _coerce_model_option_id(
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
+    if value == "triton":
+        value = "triton_local"
+    if value in {"raw", "none"}:
+        value = "disabled"
     if value in _LLM_CHAT_BACKEND_LABELS:
         return value
     return _LLM_CHAT_BACKEND_DEFAULT
+def _locked_llm_chat_backend() -> str | None:
+    _sync_api_globals()
+    value = str(os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK") or "").strip().lower()
+    if not value:
+        return None
+    if value == "triton":
+        value = "triton_local"
+    if value in {"raw", "none"}:
+        value = "disabled"
+    return value if value in _LLM_CHAT_BACKEND_LABELS else None
+def _available_llm_chat_backends(backend: str) -> set[str]:
+    _sync_api_globals()
+    locked_backend = _locked_llm_chat_backend()
+    if locked_backend:
+        return {locked_backend}
+    available = {"disabled", "triton_local", "codex"}
+    if backend in _LLM_CHAT_BACKEND_LABELS:
+        available.add(backend)
+    return available
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
@@ -267,27 +290,18 @@ def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) ->
     if value in available_devices:
         return value
     return _LLM_CHAT_DEVICE_DEFAULT
-def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
+def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
-    secret_key = _sanitize_text(
-        os.getenv("OPEN_AI_SECRET_KEY") or file_values.get("OPEN_AI_SECRET_KEY")
+    model = _coerce_model_option_id(
+        os.getenv(str(EnvVar.AGENT_CODEX_MODEL))
+        or file_values.get(str(EnvVar.AGENT_CODEX_MODEL)),
+        options=_CODEX_MODEL_OPTIONS,
+        default=DEFAULT_CODEX_MODEL,
     )
-    key_name = _sanitize_text(
-        os.getenv("OPEN_AI_KEY_NAME") or file_values.get("OPEN_AI_KEY_NAME")
-    )
-    model = _sanitize_text(
-        os.getenv("OPEN_AI_MODEL") or file_values.get("OPEN_AI_MODEL")
-    ) or DEFAULT_OPENAI_MODEL
-    if secret_key:
-        os.environ["OPEN_AI_SECRET_KEY"] = secret_key
-    if key_name:
-        os.environ["OPEN_AI_KEY_NAME"] = key_name
-    os.environ["OPEN_AI_MODEL"] = model
+    os.environ[str(EnvVar.AGENT_CODEX_MODEL)] = model
     return {
-        "configured": bool(secret_key),
-        "keyName": key_name,
         "model": model,
-        "modelOptions": _llm_model_options_payload(_OPENAI_MODEL_OPTIONS, model),
+        "modelOptions": _llm_model_options_payload(_CODEX_MODEL_OPTIONS, model),
     }
 def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
@@ -332,55 +346,56 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     env_path = _resolve_env_path()
     backend_key = str(EnvVar.AGENT_BACKEND)
     device_key = str(EnvVar.AGENT_DEVICE)
-    local_model_key = str(EnvVar.AGENT_MODEL_ID)
     file_values = dotenv_values(env_path) if env_path.exists() else {}
     available_devices = _available_llm_chat_devices()
-    openai_settings = _resolve_openai_settings(file_values)
-    triton_settings = _resolve_triton_settings(file_values)
-    local_model_id = _coerce_model_option_id(
-        os.getenv(local_model_key) or file_values.get(local_model_key),
-        options=_LOCAL_MODEL_OPTIONS,
-        default=DEFAULT_MODEL_ID,
-    )
+    codex_settings = _resolve_codex_settings(file_values)
 
     backend = _normalize_llm_chat_backend(
         os.getenv(backend_key) or file_values.get(backend_key)
+    )
+    locked_backend = _locked_llm_chat_backend()
+    if locked_backend:
+        backend = locked_backend
+    available_backend_ids = _available_llm_chat_backends(backend)
+    triton_available = "triton_local" in available_backend_ids or backend == "triton_local"
+    triton_settings = (
+        _resolve_triton_settings(file_values)
+        if triton_available
+        else {
+            "baseUrl": "",
+            "modelName": "",
+            "modelId": "",
+            "modelOptions": [],
+        }
     )
     device = _normalize_llm_chat_device(
         os.getenv(device_key) or file_values.get(device_key),
         available_devices=available_devices,
     )
-    if backend == "openai" and not openai_settings["configured"]:
-        backend = _LLM_CHAT_BACKEND_DEFAULT
     os.environ[backend_key] = backend
     os.environ[device_key] = device
-    os.environ[local_model_key] = local_model_id
     selected_model_id = (
-        openai_settings["model"]
-        if backend == "openai"
+        codex_settings["model"]
+        if backend == "codex"
         else triton_settings["modelId"]
         if backend == "triton_local"
-        else local_model_id
+        else "disabled"
     )
 
     return {
         "backend": backend,
         "backendLabel": _LLM_CHAT_BACKEND_LABELS[backend],
+        "lockedBackend": locked_backend,
         "device": device,
         "deviceLabel": _LLM_CHAT_DEVICE_LABELS[device],
-        "localModelId": local_model_id,
-        "localModelOptions": _llm_model_options_payload(_LOCAL_MODEL_OPTIONS, local_model_id),
         "availableBackends": [
             {
                 "id": backend_id,
                 "label": label,
-                "available": (
-                    backend_id == "transformers_local"
-                    or backend_id == "triton_local"
-                    or (backend_id == "openai" and openai_settings["configured"])
-                ),
+                "available": backend_id in available_backend_ids,
             }
             for backend_id, label in _LLM_CHAT_BACKEND_LABELS.items()
+            if backend_id in available_backend_ids
         ],
         "availableDevices": [
             {
@@ -390,15 +405,10 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             }
             for device_id, label in _LLM_CHAT_DEVICE_LABELS.items()
         ],
-        "openai": {
-            "configured": openai_settings["configured"],
-            "keyName": openai_settings["keyName"],
-            "model": openai_settings["model"],
-            "modelOptions": openai_settings["modelOptions"],
-        },
+        "codex": codex_settings,
         "triton": {
-            "configured": True,
-            "healthy": _triton_ready(triton_settings),
+            "configured": triton_available,
+            "healthy": _triton_ready(triton_settings) if triton_available else False,
             "baseUrl": triton_settings["baseUrl"],
             "modelName": triton_settings["modelName"],
             "modelId": triton_settings["modelId"],
@@ -413,9 +423,6 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
 def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
     public = dict(settings)
-    openai_settings = dict(public.get("openai") or {})
-    openai_settings.pop("secretKey", None)
-    public["openai"] = openai_settings
     return public
 def _build_llm_from_settings(
     settings: Mapping[str, Any],
@@ -424,20 +431,6 @@ def _build_llm_from_settings(
 ) -> _LlmChatModel:
     _sync_api_globals()
     backend = str(settings.get("backend") or _LLM_CHAT_BACKEND_DEFAULT)
-    if backend == "transformers_local":
-        config = coerce_model_config(
-            {
-                "device": settings.get("device") or _LLM_CHAT_DEVICE_DEFAULT,
-                "model_id": _coerce_model_option_id(
-                    settings.get("localModelId"),
-                    options=_LOCAL_MODEL_OPTIONS,
-                    default=DEFAULT_MODEL_ID,
-                ),
-                "max_new_tokens": max_output_tokens,
-            }
-        )
-        return TransformersMistral3ChatModel(config)
-
     if backend == "triton_local":
         triton_settings = settings.get("triton")
         if not isinstance(triton_settings, Mapping):
@@ -455,21 +448,10 @@ def _build_llm_from_settings(
             )
         )
 
-    if backend == "openai":
-        openai_settings = settings.get("openai")
-        if not isinstance(openai_settings, Mapping):
-            raise ValueError("OpenAI settings are unavailable.")
-        secret_key = _sanitize_text(os.getenv("OPEN_AI_SECRET_KEY"))
-        if not secret_key:
-            raise ValueError("OpenAI backend is not configured.")
-        return OpenAIResponsesChatModel(
-            OpenAIChatConfig(
-                api_key=secret_key,
-                key_name=_sanitize_text(openai_settings.get("keyName")),
-                model=str(openai_settings.get("model") or DEFAULT_OPENAI_MODEL),
-                max_output_tokens=max_output_tokens,
-            )
-        )
+    if backend == "codex":
+        env_path = _resolve_env_path()
+        values = dotenv_values(env_path) if env_path.exists() else {}
+        return CodexCliChatModel(codex_config_from_values(values, cwd=_REPO_ROOT))
 
     raise ValueError(f"Unsupported LLM backend: {backend}")
 def _build_chat_messages(
@@ -516,13 +498,9 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "selected": settings["backend"],
             "label": settings["backendLabel"],
             "active": settings["backend"] if enabled or loading else None,
+            "locked": settings["lockedBackend"],
             "options": settings["availableBackends"],
-            "openai": {
-                "configured": settings["openai"]["configured"],
-                "keyName": settings["openai"]["keyName"],
-                "model": settings["openai"]["model"],
-                "modelOptions": settings["openai"]["modelOptions"],
-            },
+            "codex": settings["codex"],
             "triton": {
                 "configured": settings["triton"]["configured"],
                 "healthy": settings["triton"]["healthy"],
@@ -535,35 +513,29 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         },
         "model": {
             "selected": (
-                settings["openai"]["model"]
-                if settings["backend"] == "openai"
+                settings["codex"]["model"]
+                if settings["backend"] == "codex"
                 else settings["triton"]["modelId"]
                 if settings["backend"] == "triton_local"
-                else settings["localModelId"]
+                else "disabled"
             ),
             "label": (
-                settings["openai"]["model"]
-                if settings["backend"] == "openai"
+                settings["codex"]["model"]
+                if settings["backend"] == "codex"
                 else settings["triton"]["modelId"]
                 if settings["backend"] == "triton_local"
-                else settings["localModelId"]
+                else "AI disabled"
             ),
             "active": (
-                settings["openai"]["model"]
-                if (enabled or loading) and settings["backend"] == "openai"
+                settings["codex"]["model"]
+                if (enabled or loading) and settings["backend"] == "codex"
                 else settings["triton"]["modelId"]
                 if (enabled or loading) and settings["backend"] == "triton_local"
-                else settings["localModelId"]
-                if (enabled or loading) and settings["backend"] == "transformers_local"
                 else None
             ),
-            "local": {
-                "selected": settings["localModelId"],
-                "options": settings["localModelOptions"],
-            },
-            "openai": {
-                "selected": settings["openai"]["model"],
-                "options": settings["openai"]["modelOptions"],
+            "codex": {
+                "selected": settings["codex"]["model"],
+                "options": settings["codex"]["modelOptions"],
             },
             "triton": {
                 "selected": settings["triton"]["modelId"],
@@ -575,9 +547,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "selected": settings["device"],
             "label": settings["deviceLabel"],
             "active": (
-                settings["device"]
-                if (enabled or loading) and settings["backend"] == "transformers_local"
-                else None
+                None
             ),
             "options": settings["availableDevices"],
             "envPath": settings["envPath"],
@@ -595,5 +565,5 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         "conversations": summaries,
     }
 
-_COMPONENT_EXPORTS = ('_available_llm_chat_devices', '_build_chat_messages', '_build_llm_from_settings', '_conversation_summary', '_expire_llm_chat_queue', '_llm_chat_snapshot', '_llm_model_options_payload', '_load_llm_chat_conversations', '_load_llm_chat_queue', '_normalize_chat_conversation', '_normalize_chat_message', '_normalize_chat_queue_item', '_normalize_llm_chat_backend', '_normalize_llm_chat_device', '_parse_iso_timestamp', '_prune_queue', '_public_llm_chat_settings', '_queue_item_payload', '_resolve_llm_chat_settings', '_resolve_openai_settings', '_resolve_triton_settings', '_save_llm_chat_conversations', '_save_llm_chat_queue', '_triton_ready', '_truncate_text')
+_COMPONENT_EXPORTS = ('_available_llm_chat_devices', '_build_chat_messages', '_build_llm_from_settings', '_conversation_summary', '_expire_llm_chat_queue', '_llm_chat_snapshot', '_llm_model_options_payload', '_load_llm_chat_conversations', '_load_llm_chat_queue', '_normalize_chat_conversation', '_normalize_chat_message', '_normalize_chat_queue_item', '_normalize_llm_chat_backend', '_normalize_llm_chat_device', '_parse_iso_timestamp', '_prune_queue', '_public_llm_chat_settings', '_queue_item_payload', '_resolve_codex_settings', '_resolve_llm_chat_settings', '_resolve_triton_settings', '_save_llm_chat_conversations', '_save_llm_chat_queue', '_triton_ready', '_truncate_text')
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}

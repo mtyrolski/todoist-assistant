@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+import re
 from typing import Any, Callable, Protocol, Sequence, cast
 
 import pandas as pd
@@ -32,6 +33,42 @@ def _truncate(text: str, *, max_len: int = 180) -> str:
     if len(normalized) <= max_len:
         return normalized
     return f"{normalized[: max_len - 1].rstrip()}…"
+
+
+_STORY_POINT_PATTERNS = (
+    re.compile(r"\bstory[-_\s]?points?[-:\s]+(\d{1,3})\b", re.IGNORECASE),
+    re.compile(r"\beffort[-_\s]?points?[-:\s]+(\d{1,3})\b", re.IGNORECASE),
+    re.compile(r"\b(?:sp|pts|points?)\s*[:=-]\s*(\d{1,3})\b", re.IGNORECASE),
+    re.compile(r"(?:^|[\s(\[-])(\d{1,3})\s*(?:pts?|points?)\b", re.IGNORECASE),
+    re.compile(r"(?:^|[\s-])(\d{1,3})\s*/\s*(?:10|13|20|100)\s*$", re.IGNORECASE),
+    re.compile(r"\b(\d{1,3})\s*/\s*(?:10|13|20|100)\b", re.IGNORECASE),
+)
+
+
+def _extract_story_points(text: str) -> int | None:
+    normalized = _clean_text(text)
+    if not normalized:
+        return None
+    for pattern in _STORY_POINT_PATTERNS:
+        match = pattern.search(normalized)
+        if match is None:
+            continue
+        value = int(match.group(1))
+        if 0 < value <= 100:
+            return value
+    return None
+
+
+def _plural(value: int, singular: str, plural: str | None = None) -> str:
+    suffix = singular if value == 1 else plural or f"{singular}s"
+    return f"{value} {suffix}"
+
+
+def _task_story_point_count(task: dict[str, Any]) -> int:
+    points = int(task.get("storyPoints") or 0)
+    if points <= 0:
+        return 0
+    return points * int(task.get("completionCount") or 1)
 
 
 def _project_path(project: Project, projects_by_id: dict[str, Project]) -> list[str]:
@@ -251,11 +288,13 @@ def build_status_update_report(
             project_id = _clean_text(row.get("parent_project_id"))
             project_name = _clean_text(row.get("parent_project_name")) or _get_project_name(project_id, project_index)
             completed_at = _format_iso_date(row.name)
+            content = _clean_text(row.get("title")) or "(untitled task)"
+            story_points = _extract_story_points(content)
             task_record = tasks_by_id.setdefault(
                 task_id,
                 {
                     "taskId": task_id,
-                    "content": _clean_text(row.get("title")) or "(untitled task)",
+                    "content": content,
                     "projectId": project_id or None,
                     "projectName": project_name or "(unknown)",
                     "projectLabel": _get_project_title(project_index[project_id], project_index)
@@ -268,9 +307,14 @@ def build_status_update_report(
                     "completionCount": 0,
                     "comments": [],
                     "commentCount": 0,
+                    "storyPoints": story_points,
+                    "storyPointCount": 0,
                 },
             )
+            if task_record["storyPoints"] is None and story_points is not None:
+                task_record["storyPoints"] = story_points
             task_record["completionCount"] += 1
+            task_record["storyPointCount"] = _task_story_point_count(task_record)
             if completed_at:
                 task_record["completionHistory"].append(completed_at)
                 task_record["completedAt"] = completed_at
@@ -324,27 +368,134 @@ def build_status_update_report(
     total_unique_tasks = len(tasks)
     total_commented_tasks = sum(1 for item in tasks if int(item["commentCount"]) > 0)
     total_comments_loaded = sum(int(item["commentCount"]) for item in tasks)
+    total_story_points = sum(_task_story_point_count(item) for item in tasks)
+    total_estimated_tasks = sum(1 for item in tasks if int(item.get("storyPoints") or 0) > 0)
 
     report_label = sync_label or "Status update"
     period_beg = beg.isoformat(timespec="seconds")
     period_end = end.isoformat(timespec="seconds")
 
-    markdown_lines = [
-        f"# {report_label}",
-        "",
-        f"- Range: {period_beg} to {period_end}",
-        f"- Selected projects: {len(selected_projects)}",
-        f"- Expanded project scope: {len(expanded_projects)}",
-        f"- Completed task events: {total_completion_events}",
-        f"- Unique completed tasks: {total_unique_tasks}",
-        f"- Tasks with comments: {total_commented_tasks}",
+    project_rollup: list[dict[str, Any]] = []
+    for project in expanded_projects:
+        project_tasks = grouped_tasks.get(project.id, [])
+        completion_count = sum(int(task.get("completionCount") or 0) for task in project_tasks)
+        story_point_count = sum(_task_story_point_count(task) for task in project_tasks)
+        comment_count = sum(int(task.get("commentCount") or 0) for task in project_tasks)
+        if not project_tasks and not comment_count:
+            continue
+        project_rollup.append(
+            {
+                "id": project.id,
+                "name": project.project_entry.name,
+                "label": _get_project_title(project, project_index),
+                "completedTaskCount": len(project_tasks),
+                "completionEventCount": completion_count,
+                "storyPointCount": story_point_count,
+                "estimatedTaskCount": sum(1 for task in project_tasks if int(task.get("storyPoints") or 0) > 0),
+                "commentCount": comment_count,
+            }
+        )
+
+    project_rollup.sort(
+        key=lambda item: (
+            -int(item["storyPointCount"]),
+            -int(item["completionEventCount"]),
+            str(item["label"]).lower(),
+        )
+    )
+
+    executive_summary = [
+        (
+            f"Completed {_plural(total_unique_tasks, 'task')} "
+            f"({_plural(total_completion_events, 'completion event')}) across "
+            f"{_plural(len(project_rollup), 'active project')}."
+        )
     ]
+    if total_story_points:
+        executive_summary.append(
+            f"Delivered {_plural(total_story_points, 'story point')} across "
+            f"{_plural(total_estimated_tasks, 'estimated task')}."
+        )
+    else:
+        executive_summary.append("No story-point estimates were detected in completed task names.")
+    if total_comments_loaded:
+        executive_summary.append(
+            f"Evidence includes {_plural(total_comments_loaded, 'comment')} on "
+            f"{_plural(total_commented_tasks, 'completed task')}."
+        )
+    else:
+        executive_summary.append("No task comments were returned for the completed work.")
+    if project_rollup:
+        top_projects = project_rollup[:3]
+        focus = "; ".join(
+            (
+                f"{project['label']} "
+                f"({_plural(int(project['completedTaskCount']), 'task')}, "
+                f"{_plural(int(project['storyPointCount']), 'point')})"
+            )
+            for project in top_projects
+        )
+        executive_summary.append(f"Main focus: {focus}.")
+
+    markdown_lines = [f"# {report_label}", "", "## Executive summary"]
+    markdown_lines.extend(f"- {line}" for line in executive_summary)
+    markdown_lines.extend(
+        [
+            "",
+            "## Scope",
+            f"- Range: {period_beg} to {period_end}",
+            f"- Selected projects: {len(selected_projects)}",
+            f"- Expanded project scope: {len(expanded_projects)}",
+        ]
+    )
     if missing_project_ids:
         markdown_lines.append(f"- Missing project ids ignored: {', '.join(sorted(missing_project_ids))}")
 
-    markdown_lines.extend(["", "## Accomplishments"])
+    markdown_lines.extend(["", "## Project rollup"])
+    if project_rollup:
+        markdown_lines.extend(
+            [
+                "| Project | Tasks | Completions | Story points | Comments |",
+                "| --- | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for project in project_rollup:
+            markdown_lines.append(
+                f"| {project['label']} | {project['completedTaskCount']} | "
+                f"{project['completionEventCount']} | {project['storyPointCount']} | {project['commentCount']} |"
+            )
+    else:
+        markdown_lines.append("No completed tasks were found for the selected projects and range.")
+
+    markdown_lines.extend(["", "## Key completed work"])
     if not tasks:
-        markdown_lines.extend(["No completed tasks were found for the selected projects and range."])
+        markdown_lines.append("No completed tasks were found for the selected projects and range.")
+    else:
+        key_tasks = sorted(
+            tasks,
+            key=lambda item: (
+                -_task_story_point_count(item),
+                -int(item.get("completionCount") or 0),
+                str(item.get("content") or "").lower(),
+            ),
+        )[:12]
+        for task in key_tasks:
+            details = [
+                str(task["projectLabel"]),
+                _plural(int(task["completionCount"]), "completion"),
+            ]
+            story_point_count = _task_story_point_count(task)
+            if story_point_count:
+                details.append(_plural(story_point_count, "story point"))
+            if task["comments"]:
+                details.append(_plural(int(task["commentCount"]), "comment"))
+            markdown_lines.append(f"- {task['content']} — {'; '.join(details)}")
+            if task["comments"]:
+                markdown_lines.append(f"  - Evidence: {task['comments'][0]['snippet']}")
+
+    markdown_lines.extend(["", "## Evidence appendix"])
+    if not tasks:
+        markdown_lines.append("No source evidence was available.")
     else:
         for project in expanded_projects:
             project_tasks = grouped_tasks.get(project.id)
@@ -353,9 +504,13 @@ def build_status_update_report(
             markdown_lines.extend(["", f"### {_get_project_title(project, project_index)}"])
             for task in project_tasks:
                 completion_dates = ", ".join(str(value) for value in task["completionHistory"])
+                point_suffix = ""
+                story_point_count = _task_story_point_count(task)
+                if story_point_count:
+                    point_suffix = f", {_plural(story_point_count, 'story point')}"
                 markdown_lines.append(
                     f"- {task['content']} ({int(task['completionCount'])} completion"
-                    f"{'s' if int(task['completionCount']) != 1 else ''})"
+                    f"{'s' if int(task['completionCount']) != 1 else ''}{point_suffix})"
                 )
                 markdown_lines.append(f"  - Completed at: {completion_dates}")
                 if task["comments"]:
@@ -370,13 +525,17 @@ def build_status_update_report(
         "commentCount": total_comments_loaded,
         "projectCount": len(expanded_projects),
         "activityCount": total_completion_events,
+        "storyPointCount": total_story_points,
+        "estimatedTaskCount": total_estimated_tasks,
     }
     summary_text = (
-        f"Completed {total_unique_tasks} task{'s' if total_unique_tasks != 1 else ''} "
-        f"across {len(expanded_projects)} project{'s' if len(expanded_projects) != 1 else ''}"
+        f"Completed {_plural(total_unique_tasks, 'task')} "
+        f"across {_plural(len(project_rollup), 'active project')}"
     )
+    if total_story_points:
+        summary_text += f", delivering {_plural(total_story_points, 'story point')}"
     if total_comments_loaded:
-        summary_text += f", grounded by {total_comments_loaded} comment{'s' if total_comments_loaded != 1 else ''}."
+        summary_text += f", grounded by {_plural(total_comments_loaded, 'comment')}."
     else:
         summary_text += "."
 
@@ -403,8 +562,12 @@ def build_status_update_report(
             "completedTaskCount": total_unique_tasks,
             "commentedTaskCount": total_commented_tasks,
             "commentCount": total_comments_loaded,
+            "storyPointCount": total_story_points,
+            "estimatedTaskCount": total_estimated_tasks,
         },
         "summaryText": summary_text,
+        "executiveSummary": executive_summary,
+        "projectRollup": project_rollup,
         "stats": stats,
         "selectedProjects": requested_project_payload,
         "completedTasks": tasks,

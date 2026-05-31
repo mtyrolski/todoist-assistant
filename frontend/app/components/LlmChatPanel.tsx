@@ -51,10 +51,9 @@ type ChatStatus = {
     selected: string;
     label: string;
     active: string | null;
+    locked?: string | null;
     options: ChatOption[];
-    openai?: {
-      configured: boolean;
-      keyName?: string | null;
+    codex?: {
       model?: string | null;
     };
     envPath?: string;
@@ -79,18 +78,17 @@ type ChatStatus = {
 };
 
 const POLL_MS = 5000;
-const LOCAL_BACKEND_ID = "transformers_local";
+const DISABLED_BACKEND_ID = "disabled";
+const CODEX_BACKEND_ID = "codex";
 const TRITON_BACKEND_ID = "triton_local";
-const SERVER_HOSTED_BACKENDS = new Set(["openai", TRITON_BACKEND_ID]);
+const SERVER_HOSTED_BACKENDS = new Set([CODEX_BACKEND_ID, TRITON_BACKEND_ID]);
 const CHAT_HELP = `**LLM Chat**
 Local or hosted model for quick analysis and summaries.
 
 - Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
 - Pick a backend before loading the model.
-- Device selection only applies to the in-process local Transformers backend.
 - Enable loads the selected backend on demand.
-- OpenAI uses the credentials configured in your local \`.env\`.
-- Triton hosts the Hugging Face model server-side and can batch requests dynamically.
+- Codex uses the local Codex CLI.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
 
@@ -118,8 +116,8 @@ function isServerHostedBackend(backendId?: string | null): boolean {
 
 function backendDisplayName(backendId: string, fallbackLabel?: string): string {
   if (backendId === TRITON_BACKEND_ID) return "Triton Inference Server";
-  if (backendId === "openai") return "OpenAI";
-  if (backendId === LOCAL_BACKEND_ID) return "Transformers local";
+  if (backendId === CODEX_BACKEND_ID) return "Codex";
+  if (backendId === DISABLED_BACKEND_ID) return "Disabled";
   return fallbackLabel ?? backendId;
 }
 
@@ -139,7 +137,7 @@ export function LlmChatPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const [lastConversationId, setLastConversationId] = useState<string | null>(null);
-  const [backendDraft, setBackendDraft] = useState("transformers_local");
+  const [backendDraft, setBackendDraft] = useState(DISABLED_BACKEND_ID);
   const [deviceDraft, setDeviceDraft] = useState("cpu");
 
   const refreshStatus = useCallback(async (silent = false) => {
@@ -313,30 +311,31 @@ export function LlmChatPanel() {
     : "Queue unavailable";
   const backendOptions = status?.backend.options ?? [];
   const deviceOptions = status?.device.options ?? [];
-  const currentBackendId = status?.backend.selected ?? LOCAL_BACKEND_ID;
-  const selectedBackendId = backendDraft || status?.backend.selected || LOCAL_BACKEND_ID;
+  const currentBackendId = status?.backend.selected ?? DISABLED_BACKEND_ID;
+  const selectedBackendId = backendDraft || status?.backend.selected || DISABLED_BACKEND_ID;
   const backendIsServerHosted = isServerHostedBackend(selectedBackendId);
   const currentBackendIsServerHosted = isServerHostedBackend(currentBackendId);
   const deviceControlDisabled = savingSettings || loading || backendIsServerHosted;
+  const backendControlDisabled = savingSettings || loading || backendOptions.length <= 1;
   const settingsChanged =
     !!status && (backendDraft !== status.backend.selected || deviceDraft !== status.device.selected);
   const backendStatusLabel = status
     ? `Backend: ${backendDisplayName(currentBackendId, status.backend.label)}${
-        currentBackendId === "openai" && status.backend.openai?.model
-          ? ` (${status.backend.openai.model})`
+        currentBackendId === CODEX_BACKEND_ID && status.backend.codex?.model
+          ? ` (${status.backend.codex.model})`
           : ""
       }`
     : null;
   const deviceStatusLabel = status
     ? currentBackendIsServerHosted
-      ? `Device: managed by ${currentBackendId === TRITON_BACKEND_ID ? "Triton" : "remote backend"}`
+      ? `Device: managed by ${currentBackendId === TRITON_BACKEND_ID ? "Triton" : "backend"}`
       : `Device: ${status.device.label}`
     : null;
   const deviceHelpText = backendIsServerHosted
     ? selectedBackendId === TRITON_BACKEND_ID
       ? "Triton hosts the model server-side, so local device selection does not apply."
-      : "This backend runs remotely, so local device selection does not apply."
-    : "Local Transformers uses the selected device on this machine.";
+      : "Codex manages execution through the CLI, so local device selection does not apply."
+    : "AI functions are disabled.";
 
   const pendingForSelected = useMemo(() => {
     if (!selectedConversationId || !queue?.items) return [];
@@ -393,7 +392,7 @@ export function LlmChatPanel() {
             className="select"
             value={backendDraft}
             onChange={(event) => setBackendDraft(event.target.value)}
-            disabled={savingSettings || loading}
+            disabled={backendControlDisabled}
           >
             {backendOptions.map((option) => (
               <option key={option.id} value={option.id} disabled={!option.available}>
@@ -430,10 +429,9 @@ export function LlmChatPanel() {
           >
             {savingSettings ? "Saving..." : "Apply"}
           </button>
-          {backendDraft === "openai" && status?.backend.openai?.configured ? (
+          {backendDraft === CODEX_BACKEND_ID && status?.backend.codex?.model ? (
             <span className="muted tiny">
-              OpenAI model: {status.backend.openai.model ?? "unknown"}
-              {status.backend.openai.keyName ? ` | key: ${status.backend.openai.keyName}` : ""}
+              Codex model: {status.backend.codex.model}
             </span>
           ) : null}
           {status?.backend.envPath ? <span className="muted tiny">{status.backend.envPath}</span> : null}

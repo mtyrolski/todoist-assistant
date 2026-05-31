@@ -118,6 +118,9 @@ def collect_candidates(
 
     for item in queue_items:
         task_id = item["task_id"]
+        if not is_llm_label(item["label"], automation.label_prefix_lower):
+            drop_queue_ids.add(task_id)
+            continue
         task = tasks_by_id.get(task_id) or fetch_task(task_id, False)
         if task is None:
             drop_queue_ids.add(task_id)
@@ -219,6 +222,11 @@ def build_task_lookup(tasks: Iterable[Task]) -> dict[str, Task]:
 
 def find_llm_label(labels: Iterable[str], prefix_lower: str) -> str | None:
     for label in labels:
-        if label.lower().startswith(prefix_lower):
+        if is_llm_label(label, prefix_lower):
             return label
     return None
+
+
+def is_llm_label(label: str, prefix_lower: str) -> bool:
+    label_lower = label.lower()
+    return label_lower == prefix_lower or label_lower.startswith(f"{prefix_lower}-")

@@ -26,7 +26,7 @@ export type LlmBreakdownProgress = {
   recent?: LlmBreakdownResult[];
 };
 
-const BREAKDOWN_HELP = `**LLM Breakdown Queue**
+const BREAKDOWN_HELP = `**AI Breakdown Queue**
 Tracks background breakdown jobs for the assistant.
 
 - Shows current task, totals, and recent results.
@@ -67,8 +67,8 @@ export function LlmBreakdownStatus({
     <section className="card">
       <header className="cardHeader">
         <div className="cardTitleRow">
-          <h2>LLM Breakdown Queue</h2>
-          <InfoTip label="About LLM breakdown queue" content={BREAKDOWN_HELP} />
+          <h2>AI Breakdown Queue</h2>
+          <InfoTip label="About AI breakdown queue" content={BREAKDOWN_HELP} />
         </div>
         <button className="button buttonSmall" type="button" onClick={onRefresh} disabled={loading}>
           {loading ? "Loading…" : "Refresh"}

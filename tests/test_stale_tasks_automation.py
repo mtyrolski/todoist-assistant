@@ -5,12 +5,14 @@ from unittest.mock import patch
 from tests.factories import make_project, make_project_entry, make_task
 from todoist.automations.stale_tasks import StaleTasksAutomation
 from todoist.database.base import Database
+from todoist.utils import Cache
 
 
 class _FakeDb:
     def __init__(self, projects):
         self.projects = projects
         self.updates: list[tuple[str, dict[str, object]]] = []
+        self.removed: list[str] = []
 
     def fetch_projects(self, include_tasks: bool = True):
         assert include_tasks is True
@@ -25,6 +27,10 @@ class _FakeDb:
                     if task.id == task_id:
                         task.task_entry.labels = list(labels)
         return {}
+
+    def remove_task(self, task_id: str) -> bool:
+        self.removed.append(task_id)
+        return True
 
 
 def _project_with_tasks():
@@ -169,3 +175,60 @@ def test_stale_tasks_automation_is_idempotent_after_updates(
     assert result == []
     assert db.updates == []
     assert automation.last_run_summary["counts"]["candidateUpdates"] == 0
+
+
+def test_stale_tasks_automation_removes_task_after_warning_grace_period(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    task = make_task(
+        "task-stale",
+        content="Expired stale task",
+        labels=["ops", "old"],
+        added_at="2025-01-01T00:00:00Z",
+        updated_at="2025-01-05T00:00:00Z",
+    )
+    db = _FakeDb(
+        [
+            make_project(
+                project_id="project-1",
+                project_entry=make_project_entry(project_id="project-1", name="Backlog"),
+                tasks=[task],
+            )
+        ]
+    )
+    Cache().stale_task_warnings.save(
+        {
+            "task-stale": {
+                "warningLabel": "old",
+                "warningLabelAddedAt": "2025-03-10T12:00:00",
+            }
+        }
+    )
+    automation = StaleTasksAutomation(
+        frequency_in_minutes=0,
+        dry_run=False,
+        config={
+            "old_after_days": 30,
+            "very_old_after_days": 90,
+            "delete_after_warning_days": 7,
+        },
+    )
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None) -> datetime:
+            _ = tz
+            return datetime(2025, 3, 20, 12, 0, 0)
+
+    with patch(
+        "todoist.automations.stale_tasks.automation.datetime",
+        _FixedDateTime,
+    ):
+        result = automation.tick(cast(Database, db))
+
+    assert [item["taskId"] for item in result] == ["task-stale"]
+    assert result[0]["state"] == "remove"
+    assert db.removed == ["task-stale"]
+    assert db.updates == []
+    assert Cache().stale_task_warnings.load() == {}

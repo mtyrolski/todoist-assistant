@@ -378,12 +378,10 @@ def _task_ingest_rewrite_with_llm_sync(
         )
         if tasks:
             source = "llm"
-            if created_model and isinstance(model, TransformersMistral3ChatModel):
-                source = "transformers"
-            elif created_model and isinstance(model, TritonGenerateChatModel):
+            if created_model and isinstance(model, TritonGenerateChatModel):
                 source = "triton"
-            elif created_model and isinstance(model, OpenAIResponsesChatModel):
-                source = "openai"
+            elif created_model and isinstance(model, CodexCliChatModel):
+                source = "codex"
             elif not created_model:
                 source = "loaded-model"
             return tasks, source

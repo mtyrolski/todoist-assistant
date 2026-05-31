@@ -60,25 +60,23 @@ from todoist.automations.gmail_tasks import (
 from todoist.automations.observer import AutomationObserver
 from todoist.automations.llm_breakdown.config import (
     BASE_SYSTEM_PROMPT,
-    coerce_model_config,
 )
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
 from todoist.llm import (
+    CodexCliChatModel,
+    DEFAULT_CODEX_MODEL,
     DEFAULT_MODEL_ID,
-    DEFAULT_OPENAI_MODEL,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     MessageRole,
-    OpenAIChatConfig,
-    OpenAIResponsesChatModel,
     TritonChatConfig,
     TritonGenerateChatModel,
-    TransformersMistral3ChatModel,
 )
+from todoist.llm.codex_llm import codex_config_from_values
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
-from todoist.llm.model_catalog import LOCAL_MODEL_OPTIONS, OPENAI_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
+from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
 from todoist.dashboard_settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -124,6 +122,7 @@ from todoist.web.api_components.settings import (
     dashboard_settings_payload as _component_dashboard_settings_payload,
     llm_breakdown_settings_payload as _llm_breakdown_settings_payload,
     multiplication_settings_payload as _multiplication_settings_payload,
+    stale_tasks_settings_payload as _stale_tasks_settings_payload,
 )
 from todoist.web.api_components.templates import (
     ensure_identifier as _ensure_identifier,
@@ -246,9 +245,8 @@ _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
-_LOCAL_MODEL_OPTIONS = LOCAL_MODEL_OPTIONS
-_OPENAI_MODEL_OPTIONS = OPENAI_MODEL_OPTIONS
 _TRITON_MODEL_OPTIONS = TRITON_MODEL_OPTIONS
+_CODEX_MODEL_OPTIONS = CODEX_MODEL_OPTIONS
 
 def _resolve_timezone_status() -> dict[str, Any]:
     env_path = _resolve_env_path()
@@ -307,11 +305,11 @@ _CHAT_ROLES = {
 }
 _CHAT_QUEUE_LIMIT = 200
 _LLM_CHAT_TIMEOUT_S = 60 * 60
-_LLM_CHAT_BACKEND_DEFAULT = "transformers_local"
+_LLM_CHAT_BACKEND_DEFAULT = "disabled"
 _LLM_CHAT_BACKEND_LABELS = {
-    "transformers_local": "Transformers local",
+    "disabled": "Disabled",
     "triton_local": "Triton local",
-    "openai": "OpenAI",
+    "codex": "Codex",
 }
 _LLM_CHAT_DEVICE_DEFAULT = "cpu"
 _LLM_CHAT_DEVICE_LABELS = {
@@ -324,7 +322,7 @@ _CHAT_SYSTEM_PROMPT = (
 )
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
-_LlmChatModel = TransformersMistral3ChatModel | OpenAIResponsesChatModel | TritonGenerateChatModel
+_LlmChatModel = CodexCliChatModel | TritonGenerateChatModel
 
 _LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
@@ -434,10 +432,10 @@ def _normalize_llm_chat_backend(raw: Any) -> str:
     return _llm_chat_component._normalize_llm_chat_backend(raw)
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
     return _llm_chat_component._normalize_llm_chat_device(raw, available_devices=available_devices)
-def _resolve_openai_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._resolve_openai_settings(file_values)
 def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._resolve_triton_settings(file_values)
+def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
+    return _llm_chat_component._resolve_codex_settings(file_values)
 def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
     return _llm_chat_component._triton_ready(triton_settings)
 def _resolve_llm_chat_settings() -> dict[str, Any]:
@@ -539,21 +537,57 @@ async def _maybe_start_llm_chat_worker() -> None:
     async with _LLM_CHAT_WORKER_LOCK:
         if _LLM_CHAT_WORKER_RUNNING:
             return
-        if _LLM_CHAT_MODEL is None:
+        if _LLM_CHAT_MODEL is None and _LLM_CHAT_MODEL_LOADING:
+            return
+        if _LLM_CHAT_MODEL is None and _resolve_llm_chat_settings()["backend"] != "codex":
             return
         _LLM_CHAT_WORKER_RUNNING = True
     asyncio.create_task(_run_llm_chat_queue())
+
+
+async def _load_inline_codex_chat_model() -> tuple[_LlmChatModel | None, str | None]:
+    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
+    settings = _resolve_llm_chat_settings()
+    if settings["backend"] != "codex":
+        return None, "Model not loaded. Click Enable in the dashboard first."
+
+    async with _LLM_CHAT_MODEL_LOCK:
+        if _LLM_CHAT_MODEL is not None:
+            return _LLM_CHAT_MODEL, None
+        if _LLM_CHAT_MODEL_LOADING:
+            return None, "Model is still loading."
+        _LLM_CHAT_MODEL_LOADING = True
+
+    try:
+        model = await asyncio.to_thread(
+            _build_llm_from_settings,
+            settings,
+            max_output_tokens=256,
+        )
+        async with _LLM_CHAT_MODEL_LOCK:
+            _LLM_CHAT_MODEL = model
+        return model, None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"Failed to load inline Codex chat model: {exc}")
+        return None, f"{type(exc).__name__}: {exc}"
+    finally:
+        async with _LLM_CHAT_MODEL_LOCK:
+            _LLM_CHAT_MODEL_LOADING = False
+
+
+async def _run_llm_chat_queue_inline() -> None:
+    global _LLM_CHAT_WORKER_RUNNING
+    async with _LLM_CHAT_WORKER_LOCK:
+        if _LLM_CHAT_WORKER_RUNNING:
+            return
+        _LLM_CHAT_WORKER_RUNNING = True
+    await _run_llm_chat_queue()
 
 
 async def _run_llm_chat_queue() -> None:
     global _LLM_CHAT_WORKER_RUNNING
     try:
         while True:
-            async with _LLM_CHAT_MODEL_LOCK:
-                model = _LLM_CHAT_MODEL
-            if model is None:
-                return
-
             async with _LLM_CHAT_STORAGE_LOCK:
                 queue = _load_llm_chat_queue()
                 if _expire_llm_chat_queue(queue, datetime.now()):
@@ -575,6 +609,24 @@ async def _run_llm_chat_queue() -> None:
                     ),
                     None,
                 )
+
+            async with _LLM_CHAT_MODEL_LOCK:
+                model = _LLM_CHAT_MODEL
+            if model is None:
+                model, load_error = await _load_inline_codex_chat_model()
+                if model is None:
+                    async with _LLM_CHAT_STORAGE_LOCK:
+                        queue = _load_llm_chat_queue()
+                        for item in queue:
+                            if item.get("id") == next_item["id"]:
+                                if item.get("status") != "running":
+                                    break
+                                item["status"] = "failed"
+                                item["finished_at"] = _now_iso()
+                                item["error"] = load_error or "Model unavailable"
+                                break
+                        _save_llm_chat_queue(queue)
+                    continue
 
             if conversation is None:
                 async with _LLM_CHAT_STORAGE_LOCK:

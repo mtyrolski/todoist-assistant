@@ -82,7 +82,7 @@ async def dashboard_progress() -> dict[str, Any]:
 @router.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
 async def dashboard_llm_breakdown() -> dict[str, Any]:
     _sync_api_globals(globals())
-    """Return LLM breakdown queue progress."""
+    """Return AI breakdown queue progress."""
 
     return _llm_breakdown_snapshot()
 

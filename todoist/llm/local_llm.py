@@ -200,7 +200,7 @@ class TransformersMistral3ChatModel:
         decoded_text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
         text = decoded_text.strip() if isinstance(decoded_text, str) else "".join(decoded_text).strip()
         record_llm_usage(
-            backend="transformers_local",
+            backend="local",
             model_id=self.config.model_id,
             operation=operation,
             input_tokens=input_len,

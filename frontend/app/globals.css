@@ -3238,7 +3238,7 @@ textarea.textInput {
   margin: 0;
   font-size: clamp(30px, 4vw, 48px);
   line-height: 1.02;
-  letter-spacing: -0.05em;
+  letter-spacing: 0;
   max-width: 16ch;
 }
 
@@ -3426,12 +3426,16 @@ textarea.textInput {
 }
 
 .statusUpdateOutput {
-  position: sticky;
-  top: 18px;
+  position: relative;
+  z-index: 1;
 }
 
 .statusUpdateMarkdown {
   min-height: 320px;
+  max-height: 520px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: auto;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, "Liberation Mono", monospace;
   line-height: 1.55;
@@ -3445,6 +3449,8 @@ textarea.textInput {
 .statusUpdateEvidenceItem {
   display: grid;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
   padding: 14px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -3461,6 +3467,7 @@ textarea.textInput {
 .statusUpdateEvidenceTitle {
   margin: 0 0 4px;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .statusUpdateEvidenceSummary {

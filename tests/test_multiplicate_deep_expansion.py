@@ -1,11 +1,14 @@
 from types import SimpleNamespace
 from typing import cast
+from datetime import datetime
+from unittest.mock import patch
 
 # pylint: disable=protected-access
 
 from todoist.automations.multiplicate import Multiply
 from todoist.database.base import Database
 from todoist.types import Task, TaskEntry
+from todoist.utils import Cache
 
 
 def _task_entry(
@@ -56,6 +59,8 @@ class _FakeDb:
         self.removed_ids: list[str] = []
         self.updated: dict = {}
         self._counter = 0
+        self.labels: list[dict[str, str]] = []
+        self.deleted_labels: list[str] = []
 
     def fetch_projects(self, include_tasks: bool = True):
         _ = include_tasks
@@ -74,6 +79,13 @@ class _FakeDb:
         _ = task_id
         self.updated = kwargs
         return {"id": task_id}
+
+    def list_labels(self):
+        return list(self.labels)
+
+    def delete_label_by_name(self, label_name: str) -> bool:
+        self.deleted_labels.append(label_name)
+        return True
 
 
 def test_deep_label_creates_children_under_task_and_removes_multiplier_label():
@@ -95,8 +107,48 @@ def test_deep_label_creates_children_under_task_and_removes_multiplier_label():
         "Do thing - 3/3",
     ]
     assert all(i.get("parent_id") == "1" for i in db.inserts)
-    assert all(i.get("labels") == ["work"] for i in db.inserts)
+    assert all(i.get("labels") == ["work", "effort-point"] for i in db.inserts)
 
     # multiplier label removed from the parent for idempotency
     assert db.updated == {"labels": ["work"]}
     assert not db.removed_ids
+
+
+def test_multiply_runs_as_polling_automation_without_new_activity():
+    assert Multiply().should_run_without_new_activity() is True
+
+
+def test_multiplier_cleanup_deletes_unused_label_after_retention(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    Cache().multiplication_label_usage.save(
+        {"_X3": {"lastSeenAt": "2025-03-10T12:00:00"}}
+    )
+    db = _FakeDb(tasks=[])
+    db.labels = [{"id": "label-1", "name": "_X3", "color": "blue"}]
+    automation = Multiply(config={"cleanup_unused_labels_after_days": 7})
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None) -> datetime:
+            _ = tz
+            return datetime(2025, 3, 20, 12, 0, 0)
+
+    with patch(
+        "todoist.automations.multiplicate.automation.datetime",
+        _FixedDateTime,
+    ):
+        automation._tick(cast(Database, db))
+
+    assert db.deleted_labels == ["_X3"]
+    assert Cache().multiplication_label_usage.load() == {}
+
+
+def test_multiplier_cleanup_deletes_untracked_unused_label_immediately(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    db = _FakeDb(tasks=[])
+    db.labels = [{"id": "label-1", "name": "_X90", "color": "blue"}]
+
+    Multiply(config={"cleanup_unused_labels_after_days": 7})._tick(cast(Database, db))
+
+    assert db.deleted_labels == ["_X90"]
+    assert Cache().multiplication_label_usage.load() == {}

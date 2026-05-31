@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from .local_llm import DEFAULT_MODEL_ID
+from .codex_llm import DEFAULT_CODEX_MODEL
 
 
 class ModelOption(TypedDict):
@@ -16,12 +17,9 @@ LOCAL_MODEL_OPTIONS: tuple[ModelOption, ...] = (
     {"id": DEFAULT_MODEL_ID, "label": "Qwen 2.5 3B Instruct"},
 )
 
-OPENAI_MODEL_OPTIONS: tuple[ModelOption, ...] = (
-    {"id": "gpt-5-nano", "label": "GPT-5 nano"},
-    {"id": "gpt-5-mini", "label": "GPT-5 mini"},
+CODEX_MODEL_OPTIONS: tuple[ModelOption, ...] = (
+    {"id": DEFAULT_CODEX_MODEL, "label": "GPT-5.5"},
     {"id": "gpt-5", "label": "GPT-5"},
-    {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
-    {"id": "gpt-4.1", "label": "GPT-4.1"},
 )
 
 TRITON_MODEL_OPTIONS: tuple[ModelOption, ...] = (

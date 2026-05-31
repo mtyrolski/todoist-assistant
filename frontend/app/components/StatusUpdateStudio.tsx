@@ -43,6 +43,8 @@ type StatusUpdateSummary = {
   completedTaskCount?: number;
   commentedTaskCount?: number;
   commentCount?: number;
+  storyPointCount?: number;
+  estimatedTaskCount?: number;
 };
 
 type StatusUpdateSelection = {
@@ -80,6 +82,8 @@ type StatusUpdateReport = {
     commentCount?: number;
     projectCount?: number;
     activityCount?: number;
+    storyPointCount?: number;
+    estimatedTaskCount?: number;
   };
 };
 
@@ -213,7 +217,9 @@ function getSummaryStats(report: StatusUpdateReport | null): StatusUpdateReport[
       completedCount: report.summary.completedTaskCount,
       commentCount: report.summary.commentCount,
       projectCount: report.summary.expandedProjectCount,
-      activityCount: report.summary.completedEventCount
+      activityCount: report.summary.completedEventCount,
+      storyPointCount: report.summary.storyPointCount,
+      estimatedTaskCount: report.summary.estimatedTaskCount
     };
   }
   return null;
@@ -584,6 +590,12 @@ export function StatusUpdateStudio() {
             )}
             <div className="statusUpdateMetaRow">
               <span className="pill">{stats?.completedCount ?? completedTasks.length} completed tasks</span>
+              {stats?.storyPointCount ? (
+                <span className="pill pill-good">
+                  {stats.storyPointCount} story points
+                  {stats.estimatedTaskCount ? ` from ${stats.estimatedTaskCount} estimated tasks` : ""}
+                </span>
+              ) : null}
               <span className="pill">{stats?.commentCount ?? completedTasks.reduce((total, task) => total + (task.comments?.length ?? 0), 0)} comments</span>
               <span className="pill">{stats?.projectCount ?? selectedProjects.length} projects</span>
             </div>

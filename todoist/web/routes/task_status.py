@@ -168,6 +168,8 @@ async def admin_status_update_generate(
                 "label": project.get("label"),
                 "completedCount": sum(int(task.get("completionCount") or 0) for task in project_tasks),
                 "commentCount": sum(int(task.get("commentCount") or 0) for task in project_tasks),
+                "storyPointCount": sum(int(task.get("storyPointCount") or 0) for task in project_tasks),
+                "estimatedTaskCount": sum(1 for task in project_tasks if int(task.get("storyPoints") or 0) > 0),
                 "tasks": project_tasks,
             }
         )
@@ -183,6 +185,10 @@ async def admin_status_update_generate(
     )
 
     comment_count = sum(int(task.get("commentCount") or 0) for task in tasks)
+    story_point_count = sum(int(task.get("storyPointCount") or 0) for task in tasks)
+    estimated_task_count = sum(1 for task in tasks if int(task.get("storyPoints") or 0) > 0)
+    report_summary = dict(report.get("summary") or {})
+    report_stats = dict(report.get("stats") or {})
     response = {
         "generatedAt": report.get("generatedAt"),
         "syncLabel": report.get("syncLabel") or sync_label or "Status update",
@@ -192,26 +198,35 @@ async def admin_status_update_generate(
         },
         "selection": selection,
         "summary": {
-            "selectedProjectCount": len(requested_projects),
-            "expandedProjectCount": len(expanded_projects),
-            "completedEventCount": len(report.get("completedTaskEvents") or []),
-            "completedTaskCount": len(tasks),
-            "commentedTaskCount": sum(1 for task in tasks if int(task.get("commentCount") or 0) > 0),
-            "commentCount": comment_count,
+            "selectedProjectCount": int(report_summary.get("selectedProjectCount") or len(requested_projects)),
+            "expandedProjectCount": int(report_summary.get("expandedProjectCount") or len(expanded_projects)),
+            "completedEventCount": int(
+                report_summary.get("completedEventCount") or len(report.get("completedTaskEvents") or [])
+            ),
+            "completedTaskCount": int(report_summary.get("completedTaskCount") or len(tasks)),
+            "commentedTaskCount": int(
+                report_summary.get("commentedTaskCount")
+                or sum(1 for task in tasks if int(task.get("commentCount") or 0) > 0)
+            ),
+            "commentCount": int(report_summary.get("commentCount") or comment_count),
+            "storyPointCount": int(report_summary.get("storyPointCount") or story_point_count),
+            "estimatedTaskCount": int(report_summary.get("estimatedTaskCount") or estimated_task_count),
         },
-        "summaryText": (
-            f"Completed {len(tasks)} tasks across {len(project_payloads)} projects, "
-            f"grounded by {comment_count} comments."
-        ),
+        "summaryText": report.get("summaryText")
+        or f"Completed {len(tasks)} tasks across {len(project_payloads)} projects, grounded by {comment_count} comments.",
         "stats": {
-            "completedCount": len(tasks),
-            "commentCount": comment_count,
-            "projectCount": len(project_payloads),
-            "activityCount": len(report.get("completedTaskEvents") or []),
+            "completedCount": int(report_stats.get("completedCount") or len(tasks)),
+            "commentCount": int(report_stats.get("commentCount") or comment_count),
+            "projectCount": int(report_stats.get("projectCount") or len(project_payloads)),
+            "activityCount": int(report_stats.get("activityCount") or len(report.get("completedTaskEvents") or [])),
+            "storyPointCount": int(report_stats.get("storyPointCount") or story_point_count),
+            "estimatedTaskCount": int(report_stats.get("estimatedTaskCount") or estimated_task_count),
         },
         "projects": project_payloads,
         "tasks": tasks,
         "selectedProjects": requested_projects,
+        "executiveSummary": report.get("executiveSummary") or [],
+        "projectRollup": report.get("projectRollup") or [],
         "markdown": report.get("markdown"),
         "warnings": report.get("warnings") or [],
         "completedTasks": report.get("completedTasks") or [],
