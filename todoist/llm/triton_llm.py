@@ -10,18 +10,13 @@ import httpx
 from loguru import logger
 from pydantic import BaseModel
 
-from .local_llm import (
-    DEFAULT_MODEL_ID,
-    _load_tokenizer,
-    _render_chat_prompt,
-    _schema_instructions,
-    _try_parse_structured_output,
-)
+from .constants import DEFAULT_MODEL_ID, DEFAULT_TRITON_MODEL_NAME, DEFAULT_TRITON_URL
+from .prompts import _render_chat_prompt
+from .structured import _schema_instructions, _try_parse_structured_output
+from .tokenizer import _load_tokenizer
 from .usage import record_llm_usage
 
 
-DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
-DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
 T = TypeVar("T", bound=BaseModel)
 
 

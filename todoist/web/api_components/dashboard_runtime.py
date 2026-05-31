@@ -3,9 +3,13 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,global-variable-undefined,used-before-assignment
 
-from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+from todoist.database.base import Database
+from todoist.types import Event, Project
 
 
 def _sync_api_globals() -> None:

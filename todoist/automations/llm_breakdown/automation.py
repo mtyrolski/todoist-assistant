@@ -13,14 +13,8 @@ from dotenv import dotenv_values
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.env import EnvVar
-from todoist.llm import (
-    CodexCliChatModel,
-    DEFAULT_MODEL_ID,
-    LocalChatConfig,
-    TritonChatConfig,
-    TritonGenerateChatModel,
-)
-from todoist.llm.codex_llm import codex_config_from_values
+from todoist.llm import DEFAULT_MODEL_ID, LocalChatConfig
+from todoist.llm.factory import ChatModel, build_codex_chat_model, build_triton_chat_model
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.model_catalog import coerce_model_id_for_backend
 from todoist.runtime_env import resolve_runtime_env_path
@@ -111,7 +105,7 @@ class LLMBreakdown(Automation):
         self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
         self.model_config = coerce_model_config(model_config)
-        self._llm: CodexCliChatModel | TritonGenerateChatModel | None = None
+        self._llm: ChatModel | None = None
         self._llm_backend: str | None = None
         self._progress_storage = Cache().llm_breakdown_progress
         self._queue_storage = Cache().llm_breakdown_queue
@@ -218,10 +212,10 @@ class LLMBreakdown(Automation):
         return backend, values
 
     @staticmethod
-    def _build_codex_llm(values: Mapping[str, Any]) -> CodexCliChatModel:
-        return CodexCliChatModel(codex_config_from_values(values, cwd=_REPO_ROOT))
+    def _build_codex_llm(values: Mapping[str, Any]) -> ChatModel:
+        return build_codex_chat_model(values, cwd=_REPO_ROOT)
 
-    def _build_triton_llm(self, values: Mapping[str, Any]) -> TritonGenerateChatModel:
+    def _build_triton_llm(self, values: Mapping[str, Any]) -> ChatModel:
         base_url = _sanitize_text(
             os.getenv(str(EnvVar.AGENT_TRITON_URL)) or values.get(str(EnvVar.AGENT_TRITON_URL))
         )
@@ -234,20 +228,18 @@ class LLMBreakdown(Automation):
             or values.get(str(EnvVar.AGENT_MODEL_ID))
         )
         coerced_model_id = coerce_model_id_for_backend(model_id, "triton")
-        return TritonGenerateChatModel(
-            TritonChatConfig(
-                base_url=base_url or TritonChatConfig().base_url,
-                model_name=model_name or TritonChatConfig().model_name,
-                model_id=coerced_model_id or DEFAULT_MODEL_ID,
-                temperature=float(self.model_config.temperature),
-                top_p=float(self.model_config.top_p),
-                max_output_tokens=int(self.model_config.max_new_tokens),
-            )
+        return build_triton_chat_model(
+            base_url=base_url,
+            model_name=model_name,
+            model_id=coerced_model_id or DEFAULT_MODEL_ID,
+            temperature=float(self.model_config.temperature),
+            top_p=float(self.model_config.top_p),
+            max_output_tokens=int(self.model_config.max_new_tokens),
         )
 
     def _get_llm(
         self,
-    ) -> CodexCliChatModel | TritonGenerateChatModel:
+    ) -> ChatModel:
         backend, values = self._resolve_selected_backend()
         if self._llm is None or self._llm_backend != backend:
             if backend == "codex":
@@ -290,7 +282,7 @@ class LLMBreakdown(Automation):
 
     def get_llm(
         self,
-    ) -> CodexCliChatModel | TritonGenerateChatModel:
+    ) -> ChatModel:
         return self._get_llm()
 
     def selected_backend(self) -> str:

@@ -3,7 +3,7 @@ from typing import Any
 
 from loguru import logger
 
-from todoist.llm import LocalChatConfig
+from todoist.llm.config import LocalChatConfig
 
 
 # === AI BREAKDOWN CONFIG ====================================================

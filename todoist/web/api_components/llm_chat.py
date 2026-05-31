@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,line-too-long
 
-from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -428,30 +427,28 @@ def _build_llm_from_settings(
     settings: Mapping[str, Any],
     *,
     max_output_tokens: int,
-) -> _LlmChatModel:
+) -> Any:
     _sync_api_globals()
     backend = str(settings.get("backend") or _LLM_CHAT_BACKEND_DEFAULT)
     if backend == "triton_local":
         triton_settings = settings.get("triton")
         if not isinstance(triton_settings, Mapping):
             raise ValueError("Triton settings are unavailable.")
-        return TritonGenerateChatModel(
-            TritonChatConfig(
-                base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
-                model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
-                model_id=_coerce_model_option_id(
-                    triton_settings.get("modelId"),
-                    options=_TRITON_MODEL_OPTIONS,
-                    default=DEFAULT_MODEL_ID,
-                ),
-                max_output_tokens=max_output_tokens,
-            )
+        return build_triton_chat_model(
+            base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
+            model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
+            model_id=_coerce_model_option_id(
+                triton_settings.get("modelId"),
+                options=_TRITON_MODEL_OPTIONS,
+                default=DEFAULT_MODEL_ID,
+            ),
+            max_output_tokens=max_output_tokens,
         )
 
     if backend == "codex":
         env_path = _resolve_env_path()
         values = dotenv_values(env_path) if env_path.exists() else {}
-        return CodexCliChatModel(codex_config_from_values(values, cwd=_REPO_ROOT))
+        return build_codex_chat_model(values, cwd=_REPO_ROOT)
 
     raise ValueError(f"Unsupported LLM backend: {backend}")
 def _build_chat_messages(

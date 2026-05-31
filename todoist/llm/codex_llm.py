@@ -1,6 +1,5 @@
 """Codex CLI chat adapter."""
 
-from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -13,12 +12,12 @@ from typing import TypeVar
 from loguru import logger
 from pydantic import BaseModel
 
-from .local_llm import _schema_instructions, _try_parse_structured_output
+from .constants import DEFAULT_CODEX_MODEL
+from .structured import _schema_instructions, _try_parse_structured_output
 from .types import MessageRole
 from .usage import record_llm_usage
 
 
-DEFAULT_CODEX_MODEL = "gpt-5.5"
 T = TypeVar("T", bound=BaseModel)
 
 

@@ -3,14 +3,18 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable
 
-from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import date
+from pathlib import Path
 import re
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from todoist.automations.llm_breakdown.models import BreakdownNode
+from todoist.database.base import Database
+from todoist.types import Project
 
 
 def _sync_api_globals():
@@ -378,9 +382,10 @@ def _task_ingest_rewrite_with_llm_sync(
         )
         if tasks:
             source = "llm"
-            if created_model and isinstance(model, TritonGenerateChatModel):
+            backend = model_backend(model)
+            if created_model and backend == "triton_local":
                 source = "triton"
-            elif created_model and isinstance(model, CodexCliChatModel):
+            elif created_model and backend == "codex":
                 source = "codex"
             elif not created_model:
                 source = "loaded-model"

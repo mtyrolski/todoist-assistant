@@ -10,50 +10,35 @@ style and use `pydantic` for strict structured output parsing.
 # === LOCAL LLM MODEL =========================================================
 
 from collections import defaultdict
-from contextlib import suppress
-from dataclasses import dataclass
 from collections.abc import Callable
 import json
 from pathlib import Path
-import re
-from typing import Any, Literal, Protocol, Sequence, TypeVar, cast
+from typing import Any, Protocol, Sequence, TypeVar, cast
 
 import torch
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import logging as hub_logging
 from huggingface_hub.utils.tqdm import disable_progress_bars
 from loguru import logger
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from safetensors import safe_open
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
-    AutoTokenizer,
     PreTrainedTokenizerBase,
-    PreTrainedTokenizerFast,
 )
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from transformers.utils import logging as hf_logging
 
-from .types import MessageRole, PromptToken
+from .config import DEFAULT_MODEL_ID, DType, Device, LocalChatConfig
+from .prompts import _render_chat_prompt
+from .structured import _schema_instructions, _try_parse_structured_output
+from .tokenizer import _load_tokenizer
+from .types import MessageRole
 from .usage import record_llm_usage
 
 
-DEFAULT_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
-Device = Literal["cpu", "cuda", "mps"]
-DType = Literal["auto", "float16", "bfloat16", "float32"]
 T = TypeVar("T", bound=BaseModel)
-
-
-@dataclass(frozen=True)
-class LocalChatConfig:
-    model_id: str = DEFAULT_MODEL_ID
-    device: Device = "cpu"
-    dtype: DType = "auto"
-    temperature: float = 0.2
-    top_p: float = 0.95
-    max_new_tokens: int = 384
-    suppress_hf_warnings: bool = True
 
 
 class _GenerativeModel(Protocol):
@@ -209,38 +194,6 @@ class TransformersMistral3ChatModel:
         return text
 
 
-def _schema_instructions(schema: type[BaseModel]) -> str:
-    name = schema.__name__
-    if name == "InstructionSelection":
-        return "JSON only: {\"selected_ids\": [\"...\"]}. Use [] if none."
-    if name == "PlannerDecision":
-        return (
-            "JSON only with keys: plan, action, tool_code, final_answer.\n"
-            "action: \"tool\" or \"final\".\n"
-            "If action=tool -> tool_code required, final_answer null.\n"
-            "If action=final -> final_answer required, tool_code null.\n"
-            "plan can be empty."
-        )
-    if name == "TaskBreakdown":
-        return (
-            "JSON only with a top-level `children` array. "
-            "Each child object must include: `content`, `description`, `priority`, `expand`, and `children`.\n"
-            "Use short imperative phrases. No markdown, no numbering, no extra keys."
-        )
-
-    field_names = list(schema.model_fields)
-    if len(field_names) == 1:
-        field_name = field_names[0]
-        extra = " tool_code should be Python only (no markdown)." if field_name == "tool_code" else ""
-        return f"JSON only with key: {field_name}. Use null if unknown.{extra}"
-
-    schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-    return (
-        "Return ONLY valid JSON (no markdown, no code fences, no extra keys) matching this schema:\n"
-        f"{schema_json}"
-    )
-
-
 def _resolve_torch_dtype(dtype: DType) -> torch.dtype | None:
     if dtype == "float16":
         return torch.float16
@@ -249,196 +202,6 @@ def _resolve_torch_dtype(dtype: DType) -> torch.dtype | None:
     if dtype == "float32":
         return torch.float32
     return None
-
-
-def _strip_markdown_code_fence(text: str) -> str:
-    stripped = (text or "").strip()
-    if not stripped.startswith("```"):
-        return stripped
-
-    lines = stripped.splitlines()
-    if not lines or not lines[0].strip().startswith("```"):
-        return stripped
-
-    lines = lines[1:]
-    while lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
-def _extract_json_payload(text: str) -> str | None:
-    stripped = (text or "").strip()
-    decoder = json.JSONDecoder()
-    for idx, char in enumerate(stripped):
-        if char not in "{[":
-            continue
-        try:
-            _, end = decoder.raw_decode(stripped[idx:])
-        except json.JSONDecodeError:
-            continue
-        return stripped[idx: idx + end].strip()
-    return None
-
-
-def _try_parse_top_level_json_collection(raw: str, schema: type[T]) -> T | None:
-    if schema.__name__ != "TaskBreakdown":
-        return None
-    with suppress(ValueError, TypeError, ValidationError):
-        payload = json.loads(raw)
-        if isinstance(payload, list):
-            return schema.model_validate({"children": payload})
-    return None
-
-
-def _try_parse_structured_output(raw: str, schema: type[T]) -> T | None:
-    parsed: T | None = None
-    with suppress(ValidationError):
-        parsed = schema.model_validate_json(raw)
-    if parsed is None:
-        parsed = _try_parse_top_level_json_collection(raw, schema)
-
-    cleaned = _strip_markdown_code_fence(raw)
-    if parsed is None and cleaned != raw:
-        with suppress(ValidationError):
-            parsed = schema.model_validate_json(cleaned)
-        if parsed is None:
-            parsed = _try_parse_top_level_json_collection(cleaned, schema)
-
-    extracted = _extract_json_payload(cleaned)
-    if parsed is None and extracted is not None:
-        with suppress(ValidationError):
-            parsed = schema.model_validate_json(extracted)
-        if parsed is None:
-            parsed = _try_parse_top_level_json_collection(extracted, schema)
-
-    if parsed is None:
-        parsed = _try_parse_schema_fallback(cleaned, schema)
-    return parsed
-
-
-def _try_parse_schema_fallback(raw: str, schema: type[T]) -> T | None:
-    if schema.__name__ != "TaskBreakdown":
-        return None
-
-    content_lines = _extract_breakdown_content_lines(raw)
-    if content_lines:
-        with suppress(ValidationError):
-            return schema.model_validate({"children": [{"content": line} for line in content_lines]})
-
-    prefixed_lines = _extract_prefixed_breakdown_lines(raw)
-    if prefixed_lines:
-        with suppress(ValidationError):
-            return schema.model_validate({"children": [{"content": line} for line in prefixed_lines]})
-
-    numbered_lines = _extract_numbered_breakdown_lines(raw)
-    if numbered_lines:
-        with suppress(ValidationError):
-            return schema.model_validate({"children": [{"content": line} for line in numbered_lines]})
-    return None
-
-
-def _extract_breakdown_content_lines(raw: str) -> list[str]:
-    items: list[str] = []
-    for stripped in _iter_breakdown_candidate_lines(raw):
-        match = re.match(r"^(?:[-*]\s*)?content\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
-        if match is None:
-            continue
-        candidate = _normalize_breakdown_line(match.group(1))
-        if candidate and candidate not in items:
-            items.append(candidate)
-    return items
-
-
-def _extract_numbered_breakdown_lines(raw: str) -> list[str]:
-    ignored_prefixes = ("task:", "ancestors:", "children:", "expand:", "break down tasks:")
-    items: list[str] = []
-    for stripped in _iter_breakdown_candidate_lines(raw):
-        lowered = stripped.lower()
-        if lowered.startswith(ignored_prefixes):
-            continue
-        match = re.match(r"^(?:[-*]|\d+[.)])\s+(.+)$", stripped)
-        if match is None:
-            continue
-        candidate = _normalize_breakdown_line(match.group(1))
-        if candidate and candidate not in items:
-            items.append(candidate)
-    return items
-
-
-def _extract_prefixed_breakdown_lines(raw: str) -> list[str]:
-    items: list[str] = []
-    for stripped in _iter_breakdown_candidate_lines(raw):
-        match = re.match(
-            r"^(?:sub\s*task|task|step)\s*#?\s*\d+\s*[:.)-]\s+(.+)$",
-            stripped,
-            flags=re.IGNORECASE,
-        )
-        if match is None:
-            continue
-        candidate = _normalize_breakdown_line(match.group(1))
-        if candidate and candidate not in items:
-            items.append(candidate)
-    return items
-
-
-def _iter_breakdown_candidate_lines(raw: str) -> list[str]:
-    lines: list[str] = []
-    in_code_block = False
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
-            continue
-        if in_code_block:
-            continue
-        normalized = re.sub(
-            r"(?:\[(?:/?INST|CLS|END)\]\s*)+",
-            "",
-            stripped,
-            flags=re.IGNORECASE,
-        ).strip()
-        if normalized:
-            lines.append(normalized)
-    return lines
-
-
-def _normalize_breakdown_line(value: str) -> str | None:
-    text = re.sub(r"\*\*(.*?)\*\*", r"\1", value).strip()
-    text = re.sub(r"\s+", " ", text)
-    return text.strip(" -:\t") or None
-
-
-def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
-    try:
-        return AutoTokenizer.from_pretrained(model_id, use_fast=True)
-    except ValueError as exc:
-        if "TokenizersBackend" not in str(exc):
-            raise
-
-    repo_path = Path(
-        snapshot_download(
-            repo_id=model_id,
-            allow_patterns=[
-                "tokenizer.json",
-                "tokenizer_config.json",
-                "special_tokens_map.json",
-            ],
-        ))
-    tokenizer_json = repo_path / "tokenizer.json"
-    tokenizer_config_path = repo_path / "tokenizer_config.json"
-
-    init_kwargs: dict[str, Any] = {}
-    if tokenizer_config_path.exists():
-        tokenizer_cfg = json.loads(tokenizer_config_path.read_text(encoding="utf-8"))
-        for key in ("bos_token", "eos_token", "unk_token", "pad_token"):
-            value = tokenizer_cfg.get(key)
-            if isinstance(value, str) and value:
-                init_kwargs[key] = value
-        additional = tokenizer_cfg.get("additional_special_tokens") or tokenizer_cfg.get("extra_special_tokens")
-        if isinstance(additional, list):
-            init_kwargs["additional_special_tokens"] = [x for x in additional if isinstance(x, str) and x]
-
-    return PreTrainedTokenizerFast(tokenizer_file=str(tokenizer_json), **init_kwargs)
 
 
 def _resolve_pad_token_id(tokenizer: PreTrainedTokenizerBase) -> int:
@@ -673,88 +436,3 @@ def _float8_target_dtype(model: Any, *, preferred: torch.dtype | None) -> torch.
         if buf.dtype not in float8_dtypes:
             return buf.dtype
     return torch.float32
-
-
-def _render_chat_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase) -> str:
-    apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
-    if callable(apply_chat_template):
-        template_fn = cast(Callable[..., object], apply_chat_template)
-        payload = [
-            {
-                "role": str(message.get("role") or "").strip().lower(),
-                "content": str(message.get("content") or "").strip(),
-            }
-            for message in messages
-            if str(message.get("content") or "").strip()
-        ]
-        try:
-            rendered = template_fn(  # pylint: disable=not-callable
-                payload,
-                tokenize=False,
-                add_generation_prompt=True,
-                enable_thinking=False,
-            )
-            if isinstance(rendered, str) and rendered.strip():
-                return rendered.strip()
-        except (TypeError, ValueError, NotImplementedError):
-            try:
-                rendered = template_fn(  # pylint: disable=not-callable
-                    payload,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                if isinstance(rendered, str) and rendered.strip():
-                    return rendered.strip()
-            except (TypeError, ValueError, NotImplementedError):
-                pass
-    return _render_mistral_instruct_prompt(messages, tokenizer)
-
-
-def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase) -> str:
-    system_parts: list[str] = []
-    turns: list[tuple[str, str | None]] = []
-
-    current_user: str | None = None
-    current_assistant: str | None = None
-
-    for msg in messages:
-        role = (msg.get("role") or "").lower()
-        content = (msg.get("content") or "").strip()
-        if not content:
-            continue
-        if role == MessageRole.SYSTEM:
-            system_parts.append(content)
-            continue
-        if role == MessageRole.USER:
-            if current_user is not None:
-                turns.append((current_user, current_assistant))
-            current_user = content
-            current_assistant = None
-            continue
-        if role == MessageRole.ASSISTANT:
-            current_assistant = content
-            continue
-
-    if current_user is not None:
-        turns.append((current_user, current_assistant))
-
-    if not turns:
-        raise ValueError("At least one user message is required")
-    if turns[-1][1] is not None:
-        raise ValueError("Last user message must be unanswered (append user message before generating)")
-
-    bos = tokenizer.bos_token or PromptToken.BOS_FALLBACK
-    eos = tokenizer.eos_token or PromptToken.EOS_FALLBACK
-    system_prefix = "\n\n".join(system_parts).strip()
-    if system_prefix:
-        system_prefix += "\n\n"
-
-    parts: list[str] = []
-    for i, (user_text, assistant_text) in enumerate(turns):
-        prefix = system_prefix if i == 0 else ""
-        inst = f"{bos}{PromptToken.INST_OPEN} {prefix}{user_text} {PromptToken.INST_CLOSE}"
-        if assistant_text is None:
-            parts.append(inst)
-        else:
-            parts.append(f"{inst} {assistant_text} {eos}")
-    return "".join(parts).strip()

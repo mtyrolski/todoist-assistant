@@ -4,8 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from .local_llm import DEFAULT_MODEL_ID
-from .codex_llm import DEFAULT_CODEX_MODEL
+from .constants import DEFAULT_CODEX_MODEL, DEFAULT_MODEL_ID
 
 
 class ModelOption(TypedDict):

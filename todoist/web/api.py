@@ -64,16 +64,13 @@ from todoist.automations.llm_breakdown.config import (
 from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
 from todoist.llm import (
-    CodexCliChatModel,
     DEFAULT_CODEX_MODEL,
     DEFAULT_MODEL_ID,
     DEFAULT_TRITON_MODEL_NAME,
     DEFAULT_TRITON_URL,
     MessageRole,
-    TritonChatConfig,
-    TritonGenerateChatModel,
 )
-from todoist.llm.codex_llm import codex_config_from_values
+from todoist.llm.factory import ChatModel, build_codex_chat_model, build_triton_chat_model, model_backend
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
 from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
@@ -322,7 +319,7 @@ _CHAT_SYSTEM_PROMPT = (
 )
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
-_LlmChatModel = CodexCliChatModel | TritonGenerateChatModel
+_LlmChatModel = ChatModel
 
 _LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
