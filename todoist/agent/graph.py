@@ -6,7 +6,7 @@ from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
-from todoist.agent.constants import NodeName
+from todoist.agent.graph_nodes.naming import GraphNodeName
 from todoist.agent.nodes import (
     AgentNodes,
     AgentState,
@@ -33,22 +33,25 @@ class TodoistAgentGraph:
         )
 
         graph = StateGraph(AgentState)
-        graph.add_node(NodeName.INITIAL_PROMPT, nodes.initial_prompt)
-        graph.add_node(NodeName.SELECT_INSTRUCTIONS, nodes.select_instructions)
-        graph.add_node(NodeName.PLANNER, nodes.planner)
-        graph.add_node(NodeName.EXECUTOR, nodes.executor)
-        graph.add_node(NodeName.OUTPUT, nodes.output)
+        graph.add_node(GraphNodeName.INITIAL_PROMPT, nodes.initial_prompt)
+        graph.add_node(GraphNodeName.SELECT_INSTRUCTIONS, nodes.select_instructions)
+        graph.add_node(GraphNodeName.PLANNER, nodes.planner)
+        graph.add_node(GraphNodeName.EXECUTOR, nodes.executor)
+        graph.add_node(GraphNodeName.OUTPUT, nodes.output)
 
-        graph.set_entry_point(NodeName.INITIAL_PROMPT)
-        graph.add_edge(NodeName.INITIAL_PROMPT, NodeName.SELECT_INSTRUCTIONS)
-        graph.add_edge(NodeName.SELECT_INSTRUCTIONS, NodeName.PLANNER)
+        graph.set_entry_point(GraphNodeName.INITIAL_PROMPT)
+        graph.add_edge(GraphNodeName.INITIAL_PROMPT, GraphNodeName.SELECT_INSTRUCTIONS)
+        graph.add_edge(GraphNodeName.SELECT_INSTRUCTIONS, GraphNodeName.PLANNER)
         graph.add_conditional_edges(
-            NodeName.PLANNER,
+            GraphNodeName.PLANNER,
             nodes.route_after_planner,
-            {NodeName.EXECUTOR: NodeName.EXECUTOR, NodeName.OUTPUT: NodeName.OUTPUT},
+            {
+                GraphNodeName.EXECUTOR: GraphNodeName.EXECUTOR,
+                GraphNodeName.OUTPUT: GraphNodeName.OUTPUT,
+            },
         )
-        graph.add_edge(NodeName.EXECUTOR, NodeName.PLANNER)
-        graph.add_edge(NodeName.OUTPUT, END)
+        graph.add_edge(GraphNodeName.EXECUTOR, GraphNodeName.PLANNER)
+        graph.add_edge(GraphNodeName.OUTPUT, END)
 
         return graph.compile()
 

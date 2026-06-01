@@ -5,7 +5,8 @@ from typing import TypeVar, cast
 
 from pydantic import BaseModel
 
-from todoist.agent.constants import PlannerAction
+from todoist.agent.constants import NodeName, PlannerAction
+from todoist.agent.graph_nodes.naming import GraphNodeName
 from todoist.agent.graph import AgentState, InstructionSelection, PlannerDecision, build_agent_graph
 from todoist.llm.types import MessageRole
 
@@ -65,6 +66,12 @@ def test_graph_runs_tool_then_outputs(tmp_path: Path):
     assert out["messages"][-1]["content"] == "done"
     assert any(m["role"] == MessageRole.ASSISTANT and "Calling python_repl" in m["content"] for m in out["messages"])
     assert any(m["role"] == MessageRole.USER and "python_repl output" in m["content"] for m in out["messages"])
+
+
+def test_default_graph_node_names_are_exposed_from_naming_module() -> None:
+    assert GraphNodeName.PLANNER == "planner"
+    assert GraphNodeName.EXECUTOR == "executor"
+    assert NodeName is GraphNodeName
 
 
 def test_planner_decision_normalizes_log_like_output():

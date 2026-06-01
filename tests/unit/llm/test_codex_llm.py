@@ -14,11 +14,21 @@ from todoist.llm.codex_llm import (
     CodexCliChatModel,
     codex_config_from_values,
 )
+from todoist.llm.codex_flags import CodexDangerousFlag, DANGEROUS_CODEX_FLAGS
 from todoist.automations.llm_breakdown.models import TaskBreakdown
 
 
 class _StrictPayload(BaseModel):
     value: int
+
+
+def test_dangerous_codex_flags_are_enum_backed_and_immutable() -> None:
+    assert DANGEROUS_CODEX_FLAGS == frozenset(CodexDangerousFlag)
+    assert CodexDangerousFlag.BYPASS_APPROVALS_AND_SANDBOX in DANGEROUS_CODEX_FLAGS
+    assert CodexDangerousFlag.BYPASS_HOOK_TRUST in DANGEROUS_CODEX_FLAGS
+    assert str(CodexDangerousFlag.BYPASS_APPROVALS_AND_SANDBOX) == (
+        "--dangerously-bypass-approvals-and-sandbox"
+    )
 
 
 def test_codex_chat_invokes_cli_and_reads_last_message(monkeypatch, tmp_path) -> None:

@@ -3,13 +3,10 @@
 
 from enum import StrEnum
 
+from todoist.agent.graph_nodes.naming import GraphNodeName
 
-class NodeName(StrEnum):
-    INITIAL_PROMPT = "initial_prompt"
-    SELECT_INSTRUCTIONS = "select_instructions"
-    PLANNER = "planner"
-    EXECUTOR = "executor"
-    OUTPUT = "output"
+
+NodeName = GraphNodeName
 
 
 class PlannerAction(StrEnum):

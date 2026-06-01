@@ -10,7 +10,8 @@ from typing import Protocol, Self, TypedDict, TypeVar
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from todoist.agent.constants import NodeName, PlannerAction
+from todoist.agent.constants import PlannerAction
+from todoist.agent.graph_nodes.naming import GraphNodeName
 from todoist.agent.prefabs import load_instruction_prefabs
 from todoist.agent.utils import build_planner_messages, last_user_text
 from todoist.llm.types import MessageRole
@@ -281,4 +282,4 @@ class AgentNodes:
         return {"messages": messages}
 
     def route_after_planner(self, state: AgentState) -> str:
-        return NodeName.EXECUTOR if state.get("pending_tool_code") else NodeName.OUTPUT
+        return GraphNodeName.EXECUTOR if state.get("pending_tool_code") else GraphNodeName.OUTPUT
