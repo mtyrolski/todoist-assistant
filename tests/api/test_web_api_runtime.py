@@ -1,5 +1,6 @@
 """Tests for FastAPI runtime and status endpoints."""
 
+import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -241,6 +242,39 @@ def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path) -> No
     assert payload["configured"] is True
     assert payload["masked"] == "••••2345"
     assert payload["envPath"] == ".env"
+
+def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path) -> None:
+    env_path = tmp_path / ".env"
+    token = "a" * 32
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setattr(web_api, "_validate_api_token", lambda _token: (True, None, 3))
+
+    client = TestClient(web_api.app)
+
+    save = client.post("/api/admin/api_token", json={"token": token, "validate": True})
+    assert save.status_code == 200
+    assert save.json()["configured"] is True
+    assert save.json()["validated"] is True
+    assert save.json()["labelsCount"] == 3
+    assert os.environ["API_KEY"] == token
+    assert f"API_KEY='{token}'" in env_path.read_text(encoding="utf-8")
+
+    status = client.get("/api/admin/api_token")
+    assert status.status_code == 200
+    assert status.json()["configured"] is True
+    assert status.json()["masked"] == "••••aaaa"
+
+    clear = client.delete("/api/admin/api_token")
+    assert clear.status_code == 200
+    assert clear.json()["configured"] is False
+    assert "API_KEY" not in os.environ
+
+    status_after_clear = client.get("/api/admin/api_token")
+    assert status_after_clear.status_code == 200
+    assert status_after_clear.json()["configured"] is False
+    assert status_after_clear.json()["masked"] == ""
+    assert "API_KEY" not in env_path.read_text(encoding="utf-8")
 
 def test_openapi_includes_app_version() -> None:
     client = TestClient(web_api.app)
