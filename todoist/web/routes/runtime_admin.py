@@ -72,7 +72,7 @@ async def admin_validate_api_token(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     _sync_api_globals(globals())
-    resolved_token, _env_path = _admin_api_token_from_env_path()
+    resolved_token, _ = _admin_api_token_from_env_path()
     token = _normalize_api_key(payload.get("token")) or resolved_token
     if not token:
         return {"configured": False, "valid": False, "detail": "API token missing."}

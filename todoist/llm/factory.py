@@ -2,27 +2,25 @@
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol, TypeVar
+
+from pydantic import BaseModel
 
 from .constants import DEFAULT_MODEL_ID, DEFAULT_TRITON_MODEL_NAME, DEFAULT_TRITON_URL
+
+_StructuredT = TypeVar("_StructuredT", bound=BaseModel)
+_ModelT = TypeVar("_ModelT", bound="ChatModel")
 
 
 class ChatModel(Protocol):
     def chat(self, messages: Sequence[dict[str, str]]) -> str: ...
 
-    def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[Any]) -> Any: ...
+    def structured_chat(
+        self, messages: Sequence[dict[str, str]], schema: type[_StructuredT]
+    ) -> _StructuredT: ...
 
 
-def normalize_backend(value: Any) -> str:
-    backend = str(value or "disabled").strip().strip("'\"").lower()
-    if backend == "triton":
-        return "triton_local"
-    if backend in {"raw", "none"}:
-        return "disabled"
-    return backend
-
-
-def mark_backend(model: ChatModel, backend: str) -> ChatModel:
+def mark_backend(model: _ModelT, backend: str) -> _ModelT:
     try:
         setattr(model, "_todoist_llm_backend", backend)
     except (AttributeError, TypeError):
