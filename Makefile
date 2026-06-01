@@ -1,7 +1,10 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format typecheck lint validate check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
+PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/download_models.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/run_make_checks.py scripts/status.py
+PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
+PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 MODEL_ID ?=
@@ -151,20 +154,35 @@ check_explicit_any: ## Reject `: Any =` variable annotations used as typecheck e
 	PYTHONPATH=. uv run python3 -m scripts.check_explicit_any
 
 pyright: ## Run Pyright type checks
-	PYTHONPATH=. uv run pyright --warnings
+	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)
 
 pylint: ## Run pylint
-	PYTHONPATH=. uv run pylint -j 0 todoist tests
+	PYTHONPATH=. uv run pylint -j 0 $(PY_SOURCE_PATHS)
 
 ruff: ## Run Ruff lint checks
-	PYTHONPATH=. uv run ruff check todoist tests scripts
+	PYTHONPATH=. uv run ruff check $(PY_SOURCE_PATHS)
 
 ruff_format: ## Check Ruff formatting
-	PYTHONPATH=. uv run ruff format --check todoist tests scripts
+	PYTHONPATH=. uv run ruff format --check $(PY_SOURCE_PATHS)
+
+pyright_all: ## Run Pyright on source, tests, and scripts
+	PYTHONPATH=. uv run pyright --warnings $(PY_CHECK_PATHS)
+
+pylint_all: ## Run pylint on source, tests, and scripts
+	PYTHONPATH=. uv run pylint -j 0 $(PY_CHECK_PATHS)
+
+ruff_all: ## Run Ruff on source, tests, and scripts
+	PYTHONPATH=. uv run ruff check $(PY_CHECK_PATHS)
 
 typecheck: check_explicit_any pyright ## Run explicit-Any and Pyright checks
 
 lint: pylint ruff ruff_format ## Run pylint and Ruff checks
+
+check_fast: ## Run quick source-only checks with verbose progress
+	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
+		--title check_fast \
+		check_explicit_any=explicit-any \
+		ruff=ruff
 
 check: ## Run all static quality checks in parallel with verbose progress
 	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
@@ -180,9 +198,9 @@ test_all: ## Run static checks and tests in parallel with verbose progress
 	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
 		--title test_all \
 		check_explicit_any=explicit-any \
-		pyright=pyright \
-		pylint=pylint \
-		ruff=ruff \
+		pyright_all=pyright-all \
+		pylint_all=pylint-all \
+		ruff_all=ruff-all \
 		test=pytest
 
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)

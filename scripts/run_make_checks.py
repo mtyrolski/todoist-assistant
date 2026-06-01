@@ -82,17 +82,14 @@ def _log_dir(title: str, log_root: str | None) -> Path:
 
 def _start_check(spec: CheckSpec, log_dir: Path) -> RunningCheck:
     log_path = log_dir / f"{spec.target}.log"
-    log_handle = log_path.open("wb")
-    try:
+    with log_path.open("wb") as log_handle:
+        # The child process must outlive this function so the runner can poll all checks.
+        # pylint: disable-next=consider-using-with
         process = subprocess.Popen(
             [os.environ.get("MAKE", "make"), "--no-print-directory", spec.target],
             stdout=log_handle,
             stderr=subprocess.STDOUT,
         )
-    except Exception:
-        log_handle.close()
-        raise
-    log_handle.close()
     return RunningCheck(
         spec=spec,
         log_path=log_path,

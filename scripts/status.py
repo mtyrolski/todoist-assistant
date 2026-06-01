@@ -130,22 +130,23 @@ def discover_triton_models() -> list[dict[str, Any]]:
         except OSError:
             continue
 
-        def _extract(field: str) -> str | None:
-            match = re.search(rf'^\s*{field}:\s*"([^"]+)"', config_text, re.MULTILINE)
-            return match.group(1) if match else None
-
         versions = sorted(child.name for child in model_dir.iterdir() if child.is_dir() and child.name.isdigit())
         discovered.append(
             {
-                "name": _extract("name") or model_dir.name,
-                "backend": _extract("backend"),
-                "platform": _extract("platform"),
+                "name": _extract_triton_config_field(config_text, "name") or model_dir.name,
+                "backend": _extract_triton_config_field(config_text, "backend"),
+                "platform": _extract_triton_config_field(config_text, "platform"),
                 "directory": model_dir.name,
                 "versions": versions,
                 "model_id": _extract_model_id_from_triton_entrypoint(model_dir, versions),
             }
         )
     return discovered
+
+
+def _extract_triton_config_field(config_text: str, field: str) -> str | None:
+    match = re.search(rf'^\s*{field}:\s*"([^"]+)"', config_text, re.MULTILINE)
+    return match.group(1) if match else None
 
 
 def discover_served_triton_models(base_url: str) -> list[dict[str, Any]]:

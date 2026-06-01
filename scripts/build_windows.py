@@ -20,7 +20,7 @@ SIGNTOOL_ENV = "WINDOWS_SIGNTOOL_PATH"
 
 def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
     try:
-        result = subprocess.run(cmd, cwd=cwd, env=env)
+        result = subprocess.run(cmd, cwd=cwd, env=env, check=False)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Command not found: {cmd[0]}") from exc
     if result.returncode != 0:
@@ -239,7 +239,11 @@ def _python_has_module(python_path: Path, module: str) -> bool:
         f"sys.exit(0 if importlib.util.find_spec('{module}') else 1)"
     )
     try:
-        result = subprocess.run([str(python_path), "-c", probe], capture_output=True)
+        result = subprocess.run(
+            [str(python_path), "-c", probe],
+            capture_output=True,
+            check=False,
+        )
     except FileNotFoundError:
         return False
     return result.returncode == 0
@@ -721,4 +725,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
