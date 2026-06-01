@@ -21,6 +21,7 @@ scripts/*
 !scripts/create_task_tree.py
 !scripts/download_models.py
 !scripts/dashboard_stack.sh
+!scripts/run_make_checks.py
 !scripts/status.py
 !scripts/macos/
 !scripts/macos/**
