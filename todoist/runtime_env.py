@@ -5,12 +5,15 @@ from collections.abc import Mapping
 import os
 from pathlib import Path
 
+from dotenv import dotenv_values, load_dotenv
+
 from todoist.env import EnvVar
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"
 DEFAULT_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 SUPPORTED_MODEL_IDS = frozenset({DEFAULT_MODEL_ID})
+LEGACY_AGENT_BACKEND_ENV = "TODOIST_LLM_BACKEND"
 
 
 def _sanitize_env_text(value: object) -> str | None:
@@ -47,36 +50,64 @@ def resolve_runtime_env_path(
     if cwd_env.exists():
         return cwd_env
 
-    root = (repo_root or Path(__file__).resolve().parents[1]).resolve()
-    return root / ".env"
+    if repo_root is not None:
+        return repo_root.resolve() / ".env"
+    return current_dir / ".env"
 
 
 def load_runtime_env_values(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
 
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        normalized_key = key.strip()
-        if not normalized_key:
-            continue
-        normalized_value = value.strip()
-        if (
-            len(normalized_value) >= 2
-            and normalized_value[:1] == normalized_value[-1:]
-            and normalized_value[:1] in {"'", '"'}
-        ):
-            normalized_value = normalized_value[1:-1]
-        values[normalized_key] = normalized_value
-    return values
+    return {
+        key: value
+        for key, value in dotenv_values(path).items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def load_local_dotenv(
+    *,
+    path: Path | None = None,
+    repo_root: Path | None = None,
+    cwd: Path | None = None,
+    override: bool = True,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    env_path = path or resolve_runtime_env_path(
+        repo_root=repo_root,
+        cwd=cwd,
+        environ=environ,
+    )
+    if env_path.exists():
+        load_dotenv(env_path, override=override)
+    return env_path
+
+
+def normalize_llm_backend(value: object) -> str:
+    backend = (_sanitize_env_text(value) or "disabled").lower()
+    if backend == "triton":
+        return "triton_local"
+    if backend in {"raw", "none"}:
+        return "disabled"
+    return backend
+
+
+def resolve_llm_backend(
+    *,
+    repo_root: Path | None = None,
+    cwd: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    env = os.environ if environ is None else environ
+    env_path = resolve_runtime_env_path(repo_root=repo_root, cwd=cwd, environ=env)
+    file_values = load_runtime_env_values(env_path)
+    return normalize_llm_backend(
+        env.get(str(EnvVar.AGENT_BACKEND))
+        or env.get(LEGACY_AGENT_BACKEND_ENV)
+        or file_values.get(str(EnvVar.AGENT_BACKEND))
+        or file_values.get(LEGACY_AGENT_BACKEND_ENV)
+    )
 
 
 def resolve_triton_launch_settings(

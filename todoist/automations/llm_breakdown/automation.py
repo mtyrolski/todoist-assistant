@@ -8,7 +8,6 @@ from typing import Any, cast
 from uuid import uuid4
 
 from loguru import logger
-from dotenv import dotenv_values
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database
@@ -17,7 +16,11 @@ from todoist.llm import DEFAULT_MODEL_ID, LocalChatConfig
 from todoist.llm.factory import ChatModel, build_codex_chat_model, build_triton_chat_model
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.model_catalog import coerce_model_id_for_backend
-from todoist.runtime_env import resolve_runtime_env_path
+from todoist.runtime_env import (
+    load_runtime_env_values,
+    normalize_llm_backend,
+    resolve_runtime_env_path,
+)
 from todoist.types import Task
 from todoist.utils import Cache
 
@@ -178,25 +181,14 @@ class LLMBreakdown(Automation):
 
     @staticmethod
     def _env_values() -> dict[str, Any]:
-        env_path = LLMBreakdown._resolve_env_path()
-        file_values = dotenv_values(env_path) if env_path.exists() else {}
-        return dict(file_values)
-
-    @staticmethod
-    def _normalize_backend(value: Any) -> str:
-        backend = (_sanitize_text(value) or "disabled").lower()
-        if backend == "triton":
-            return "triton_local"
-        if backend in {"raw", "none"}:
-            return "disabled"
-        return backend
+        return load_runtime_env_values(LLMBreakdown._resolve_env_path())
 
     @staticmethod
     def _locked_backend() -> str | None:
         raw_backend = os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK")
         if _sanitize_text(raw_backend) is None:
             return None
-        backend = LLMBreakdown._normalize_backend(raw_backend)
+        backend = normalize_llm_backend(raw_backend)
         if backend in {"codex", "triton_local", "disabled"}:
             return backend
         return None
@@ -206,7 +198,7 @@ class LLMBreakdown(Automation):
         locked_backend = self._locked_backend()
         if locked_backend is not None:
             return locked_backend, values
-        backend = self._normalize_backend(
+        backend = normalize_llm_backend(
             os.getenv(str(EnvVar.AGENT_BACKEND)) or values.get(str(EnvVar.AGENT_BACKEND))
         )
         return backend, values

@@ -1,6 +1,13 @@
+import os
 from pathlib import Path
 
-from todoist.runtime_env import resolve_runtime_env_path, resolve_triton_launch_settings
+from todoist.env import EnvVar
+from todoist.runtime_env import (
+    load_local_dotenv,
+    resolve_llm_backend,
+    resolve_runtime_env_path,
+    resolve_triton_launch_settings,
+)
 
 
 def test_resolve_runtime_env_path_prefers_cache_dir(tmp_path: Path) -> None:
@@ -14,6 +21,12 @@ def test_resolve_runtime_env_path_prefers_cache_dir(tmp_path: Path) -> None:
     )
 
     assert env_path == cache_dir / ".env"
+
+
+def test_resolve_runtime_env_path_defaults_to_cwd_without_repo_root(tmp_path: Path) -> None:
+    env_path = resolve_runtime_env_path(cwd=tmp_path, environ={})
+
+    assert env_path == tmp_path / ".env"
 
 
 def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(tmp_path: Path) -> None:
@@ -97,3 +110,38 @@ def test_resolve_triton_launch_settings_falls_back_from_unsupported_model(
     payload = resolve_triton_launch_settings(repo_root=tmp_path, cwd=tmp_path, environ={})
 
     assert payload["model_id"] == "Qwen/Qwen2.5-3B-Instruct"
+
+
+def test_resolve_llm_backend_reads_agent_backend_from_env_file(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "TODOIST_AGENT_BACKEND='codex'",
+        encoding="utf-8",
+    )
+
+    backend = resolve_llm_backend(repo_root=tmp_path, cwd=tmp_path, environ={})
+
+    assert backend == "codex"
+
+
+def test_resolve_llm_backend_supports_legacy_backend_env_name(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "TODOIST_LLM_BACKEND='triton'",
+        encoding="utf-8",
+    )
+
+    backend = resolve_llm_backend(repo_root=tmp_path, cwd=tmp_path, environ={})
+
+    assert backend == "triton_local"
+
+
+def test_load_local_dotenv_loads_resolved_env_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv(str(EnvVar.AGENT_BACKEND), raising=False)
+    (tmp_path / ".env").write_text(
+        "TODOIST_AGENT_BACKEND='codex'",
+        encoding="utf-8",
+    )
+
+    env_path = load_local_dotenv(repo_root=tmp_path, cwd=tmp_path)
+
+    assert env_path == tmp_path / ".env"
+    assert os.getenv(str(EnvVar.AGENT_BACKEND)) == "codex"
