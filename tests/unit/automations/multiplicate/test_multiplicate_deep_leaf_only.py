@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from todoist.automations.multiplicate import Multiply
-from todoist.types import Task, TaskEntry
+from todoist.core.types import Task, TaskEntry
 
 
 def _task_entry(
@@ -83,7 +83,9 @@ def test_deep_label_on_non_leaf_creates_subtasks_and_removes_multiplier_label():
     )
     child = Task(
         id="2",
-        task_entry=_task_entry(task_id="2", content="Child", labels=["work"], parent_id="1"),
+        task_entry=_task_entry(
+            task_id="2", content="Child", labels=["work"], parent_id="1"
+        ),
     )
 
     db = _FakeDb(tasks=[parent, child])
@@ -103,7 +105,9 @@ def test_deep_label_on_non_leaf_creates_subtasks_and_removes_multiplier_label():
 def test_deep_label_prioritized_over_flat_label():
     task = Task(
         id="1",
-        task_entry=_task_entry(task_id="1", content="Do thing", labels=["_X2", "X9", "work"]),
+        task_entry=_task_entry(
+            task_id="1", content="Do thing", labels=["_X2", "X9", "work"]
+        ),
     )
 
     db = _FakeDb(tasks=[task])

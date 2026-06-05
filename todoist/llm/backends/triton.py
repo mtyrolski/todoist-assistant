@@ -1,6 +1,5 @@
 """Triton chat adapter for the dashboard-hosted model."""
 
-
 from dataclasses import dataclass
 from collections.abc import Sequence
 import json
@@ -10,11 +9,15 @@ import httpx
 from loguru import logger
 from pydantic import BaseModel
 
-from .constants import DEFAULT_MODEL_ID, DEFAULT_TRITON_MODEL_NAME, DEFAULT_TRITON_URL
-from .prompts import _render_chat_prompt
-from .structured import _schema_instructions, _try_parse_structured_output
-from .tokenizer import _load_tokenizer
-from .usage import record_llm_usage
+from todoist.llm.constants import (
+    DEFAULT_MODEL_ID,
+    DEFAULT_TRITON_MODEL_NAME,
+    DEFAULT_TRITON_URL,
+)
+from todoist.llm.prompts import _render_chat_prompt
+from todoist.llm.structured import _schema_instructions, _try_parse_structured_output
+from todoist.llm.tokenizer import _load_tokenizer
+from todoist.llm.usage import record_llm_usage
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -94,16 +97,27 @@ class TritonGenerateChatModel:
         )
         parsed = _try_parse_structured_output(raw, schema)
         if parsed is not None and not _is_empty_structured_result(parsed):
-            logger.debug("Triton structured_chat parsed schema={} without repair", schema.__name__)
+            logger.debug(
+                "Triton structured_chat parsed schema={} without repair",
+                schema.__name__,
+            )
             return parsed
         if parsed is not None:
-            logger.warning("Triton structured_chat repairing empty output for schema={}", schema.__name__)
+            logger.warning(
+                "Triton structured_chat repairing empty output for schema={}",
+                schema.__name__,
+            )
         else:
-            logger.warning("Triton structured_chat repairing malformed output for schema={}", schema.__name__)
+            logger.warning(
+                "Triton structured_chat repairing malformed output for schema={}",
+                schema.__name__,
+            )
         repaired = self._repair_structured_output(raw, schema)
         parsed = _try_parse_structured_output(repaired, schema)
         if parsed is not None and not _is_empty_structured_result(parsed):
-            logger.debug("Triton structured_chat repair succeeded for schema={}", schema.__name__)
+            logger.debug(
+                "Triton structured_chat repair succeeded for schema={}", schema.__name__
+            )
             return parsed
         logger.error("Triton structured_chat failed for schema={}", schema.__name__)
         raise ValueError(f"Invalid structured output for {schema.__name__}: {raw}")
@@ -128,11 +142,17 @@ class TritonGenerateChatModel:
         max_output_tokens: int | None = None,
         operation: str = "chat",
     ) -> str:
-        resolved_do_sample = (self.config.temperature > 0) if do_sample is None else do_sample
-        resolved_temperature = self.config.temperature if temperature is None else temperature
+        resolved_do_sample = (
+            (self.config.temperature > 0) if do_sample is None else do_sample
+        )
+        resolved_temperature = (
+            self.config.temperature if temperature is None else temperature
+        )
         resolved_top_p = self.config.top_p if top_p is None else top_p
         resolved_max_output_tokens = (
-            self.config.max_output_tokens if max_output_tokens is None else max_output_tokens
+            self.config.max_output_tokens
+            if max_output_tokens is None
+            else max_output_tokens
         )
 
         logger.debug(
@@ -177,7 +197,7 @@ class TritonGenerateChatModel:
                         "datatype": "FP32",
                         "shape": [1, 1],
                         "data": [[resolved_top_p]],
-                    }
+                    },
                 ]
             },
         )

@@ -1,5 +1,5 @@
 from todoist import __version__
-from todoist.version import get_version
+from todoist.core.version import get_version
 
 
 def test_package_version_export_matches_helper() -> None:

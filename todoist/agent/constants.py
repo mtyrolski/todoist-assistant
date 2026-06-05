@@ -1,6 +1,5 @@
 """Agent constants and enums."""
 
-
 from enum import StrEnum
 
 from todoist.agent.graph_nodes.naming import GraphNodeName
@@ -16,9 +15,7 @@ class PlannerAction(StrEnum):
 
 PYTHON_TOOL_NAME = "python_repl"
 
-SYSTEM_PROMPT = (
-    "You are a local, read-only Todoist activity analyst. No external calls or modifications. Be brief."
-)
+SYSTEM_PROMPT = "You are a local, read-only Todoist activity analyst. No external calls or modifications. Be brief."
 
 TOOL_PROMPT = (
     f"Tool: {PYTHON_TOOL_NAME}. Use only when needed. Python only; no imports, files, or network. "
@@ -29,6 +26,4 @@ TOOL_PROMPT = (
     "extra_data. Also available: pd, np."
 )
 
-PLANNER_PROMPT = (
-    f"If you need {PYTHON_TOOL_NAME}, set action=tool; otherwise action=final. Keep plan empty unless useful."
-)
+PLANNER_PROMPT = f"If you need {PYTHON_TOOL_NAME}, set action=tool; otherwise action=final. Keep plan empty unless useful."

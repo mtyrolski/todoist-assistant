@@ -1,16 +1,19 @@
 """Tests for AI breakdown runner batching behavior."""
 
-
 from threading import Lock
 import time
 from typing import cast
 
 from tests.factories import make_project, make_task
 from todoist.automations.llm_breakdown.automation import LLMBreakdown
-from todoist.automations.llm_breakdown.models import BreakdownNode, ProgressKey, TaskBreakdown
+from todoist.automations.llm_breakdown.models import (
+    BreakdownNode,
+    ProgressKey,
+    TaskBreakdown,
+)
 from todoist.automations.llm_breakdown.runner import run_breakdown
 from todoist.database.base import Database
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 
 
 class _FakeDb:
@@ -36,7 +39,9 @@ class _FakeDb:
             raise RuntimeError("Item not found")
         return {"id": f"child-{len(self.insert_calls)}"}
 
-    def create_comment(self, *, task_id: str | None = None, project_id: str | None = None, content: str):
+    def create_comment(
+        self, *, task_id: str | None = None, project_id: str | None = None, content: str
+    ):
         assert task_id is not None
         assert project_id is None
         self.comments.append({"task_id": task_id, "content": content})
@@ -49,7 +54,9 @@ class _FakeDb:
 class _RefreshableFakeDb(_FakeDb):
     def __init__(self, initial_tasks, refreshed_tasks):
         super().__init__(initial_tasks)
-        self.refreshed_project = make_project(project_id="project-1", tasks=list(refreshed_tasks))
+        self.refreshed_project = make_project(
+            project_id="project-1", tasks=list(refreshed_tasks)
+        )
         self.reset_calls = 0
 
     def reset(self):
@@ -95,7 +102,9 @@ def test_run_breakdown_uses_concurrent_triton_requests(monkeypatch, tmp_path) ->
     assert len(db.updated) == 4
 
 
-def test_llm_request_parallelism_treats_zero_max_tasks_per_tick_as_unlimited(monkeypatch, tmp_path) -> None:
+def test_llm_request_parallelism_treats_zero_max_tasks_per_tick_as_unlimited(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
@@ -109,7 +118,9 @@ def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch, tmp_path) -> N
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
 
@@ -128,12 +139,19 @@ def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch, tmp_path) -> N
     assert db.insert_calls[0]["project_id"] is None
 
 
-def test_run_breakdown_recovers_with_fallback_after_insert_failure(monkeypatch, tmp_path) -> None:
+def test_run_breakdown_recovers_with_fallback_after_insert_failure(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
     tasks = [
-        make_task(f"task-{index}", content=f"Task {index}", labels=["ai-breakdown"], project_id="project-1")
+        make_task(
+            f"task-{index}",
+            content=f"Task {index}",
+            labels=["ai-breakdown"],
+            project_id="project-1",
+        )
         for index in range(2)
     ]
     db = _FakeDb(tasks)
@@ -155,8 +173,14 @@ def test_run_breakdown_recovers_with_fallback_after_insert_failure(monkeypatch, 
     assert isinstance(results, list)
     assert len(db.insert_calls) == 3
     assert db.insert_calls[1]["content"] == "Define first concrete step"
-    assert any(item.get("task_id") == "task-0" and item.get("status") == "completed" for item in results)
-    assert any(item.get("task_id") == "task-1" and item.get("status") == "completed" for item in results)
+    assert any(
+        item.get("task_id") == "task-0" and item.get("status") == "completed"
+        for item in results
+    )
+    assert any(
+        item.get("task_id") == "task-1" and item.get("status") == "completed"
+        for item in results
+    )
 
 
 def test_run_breakdown_uses_fallback_child_when_llm_returns_empty_breakdown(
@@ -165,7 +189,9 @@ def test_run_breakdown_uses_fallback_child_when_llm_returns_empty_breakdown(
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
 
@@ -191,7 +217,9 @@ def test_run_breakdown_retries_empty_llm_breakdown_before_fallback(
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
     calls = {"count": 0}
@@ -222,7 +250,9 @@ def test_run_breakdown_writes_todoist_comments_for_llm_interactions(
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
 
@@ -253,7 +283,9 @@ def test_run_breakdown_keeps_task_labeled_when_llm_generation_fails(
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
 
@@ -289,7 +321,9 @@ def test_run_breakdown_marks_task_failed_after_three_generation_failures(
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     db = _FakeDb([task])
     db.comments.extend(
         [
@@ -318,19 +352,29 @@ def test_run_breakdown_marks_task_failed_after_three_generation_failures(
     assert db.insert_calls == []
     assert db.updated == [("task-1", ["ai-breakdown-failed"])]
     assert "Status: failed" in db.comments[-1]["content"]
-    assert "Failure limit reached (3/3); replaced label with ai-breakdown-failed." in db.comments[-1]["content"]
+    assert (
+        "Failure limit reached (3/3); replaced label with ai-breakdown-failed."
+        in db.comments[-1]["content"]
+    )
 
 
 def test_run_breakdown_ignores_failed_breakdown_label(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-breakdown-failed"], project_id="project-1")
+    task = make_task(
+        "task-1",
+        content="Task 1",
+        labels=["ai-breakdown-failed"],
+        project_id="project-1",
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
 
     class _FakeLlm:
-        def structured_chat(self, messages, schema):  # pragma: no cover - should not be called
+        def structured_chat(
+            self, messages, schema
+        ):  # pragma: no cover - should not be called
             raise AssertionError("failed label should not be processed")
 
     monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
@@ -346,12 +390,16 @@ def test_run_breakdown_ignores_ai_import_label(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    task = make_task("task-1", content="Task 1", labels=["ai-import"], project_id="project-1")
+    task = make_task(
+        "task-1", content="Task 1", labels=["ai-import"], project_id="project-1"
+    )
     db = _FakeDb([task])
     automation = LLMBreakdown()
 
     class _FakeLlm:
-        def structured_chat(self, messages, schema):  # pragma: no cover - should not be called
+        def structured_chat(
+            self, messages, schema
+        ):  # pragma: no cover - should not be called
             raise AssertionError("ai-import must not trigger breakdown")
 
     monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
@@ -369,7 +417,9 @@ def test_run_breakdown_processes_tasks_even_when_children_already_exist(
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    parent = make_task("task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1")
+    parent = make_task(
+        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
+    )
     child = make_task(
         "child-1",
         content="Existing child",
@@ -402,13 +452,13 @@ def test_run_breakdown_processes_tasks_even_when_children_already_exist(
     assert db.updated == [("task-1", [])]
 
 
-def test_run_breakdown_expands_labeled_subtask_in_place(
-    monkeypatch, tmp_path
-) -> None:
+def test_run_breakdown_expands_labeled_subtask_in_place(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
-    root = make_task("task-root", content="Root task", labels=[], project_id="project-1")
+    root = make_task(
+        "task-root", content="Root task", labels=[], project_id="project-1"
+    )
     child = make_task(
         "task-child",
         content="Child task",
@@ -447,7 +497,9 @@ def test_llm_breakdown_tick_refreshes_active_tasks_before_selecting_labels(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
-    stale_task = make_task("task-1", content="Task 1", labels=[], project_id="project-1")
+    stale_task = make_task(
+        "task-1", content="Task 1", labels=[], project_id="project-1"
+    )
     refreshed_task = make_task(
         "task-1",
         content="Task 1",

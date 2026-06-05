@@ -11,20 +11,29 @@ from loguru import logger
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 from todoist.llm import DEFAULT_MODEL_ID, LocalChatConfig
-from todoist.llm.factory import ChatModel, build_codex_chat_model, build_triton_chat_model
+from todoist.llm.factory import (
+    ChatModel,
+    build_codex_chat_model,
+    build_triton_chat_model,
+)
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.model_catalog import coerce_model_id_for_backend
-from todoist.runtime_env import (
+from todoist.core.runtime_env import (
     load_runtime_env_values,
     normalize_llm_backend,
     resolve_runtime_env_path,
 )
-from todoist.types import Task
-from todoist.utils import Cache
+from todoist.core.types import Task
+from todoist.core.utils import Cache
 
-from .config import build_system_prompt, coerce_model_config, merge_variants, resolve_variant
+from .config import (
+    build_system_prompt,
+    coerce_model_config,
+    merge_variants,
+    resolve_variant,
+)
 from .models import BreakdownNode, InsertContext, QueueItem
 from .runner import run_breakdown
 
@@ -62,7 +71,10 @@ def _coerce_settings(
     payload: dict[str, Any] = {}
     if settings is not None:
         if isinstance(settings, BreakdownSettings):
-            payload = {field.name: getattr(settings, field.name) for field in fields(BreakdownSettings)}
+            payload = {
+                field.name: getattr(settings, field.name)
+                for field in fields(BreakdownSettings)
+            }
         else:
             payload = dict(settings)
     payload.update(overrides)
@@ -103,7 +115,9 @@ class LLMBreakdown(Automation):
         self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
         self.auto_queue_children = settings_obj.auto_queue_children
         self.track_progress = settings_obj.track_progress
-        self.failed_label = _sanitize_text(settings_obj.failed_label) or "ai-breakdown-failed"
+        self.failed_label = (
+            _sanitize_text(settings_obj.failed_label) or "ai-breakdown-failed"
+        )
         self.failed_label_lower = self.failed_label.lower()
         self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
@@ -199,7 +213,8 @@ class LLMBreakdown(Automation):
         if locked_backend is not None:
             return locked_backend, values
         backend = normalize_llm_backend(
-            os.getenv(str(EnvVar.AGENT_BACKEND)) or values.get(str(EnvVar.AGENT_BACKEND))
+            os.getenv(str(EnvVar.AGENT_BACKEND))
+            or values.get(str(EnvVar.AGENT_BACKEND))
         )
         return backend, values
 
@@ -209,7 +224,8 @@ class LLMBreakdown(Automation):
 
     def _build_triton_llm(self, values: Mapping[str, Any]) -> ChatModel:
         base_url = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_TRITON_URL)) or values.get(str(EnvVar.AGENT_TRITON_URL))
+            os.getenv(str(EnvVar.AGENT_TRITON_URL))
+            or values.get(str(EnvVar.AGENT_TRITON_URL))
         )
         model_name = _sanitize_text(
             os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
@@ -251,8 +267,12 @@ class LLMBreakdown(Automation):
             variants=self.variants,
         )
 
-    def _build_system_prompt(self, *, max_depth: int, max_children: int, instruction: str | None) -> str:
-        return build_system_prompt(max_depth=max_depth, max_children=max_children, instruction=instruction)
+    def _build_system_prompt(
+        self, *, max_depth: int, max_children: int, instruction: str | None
+    ) -> str:
+        return build_system_prompt(
+            max_depth=max_depth, max_children=max_children, instruction=instruction
+        )
 
     def now_iso(self) -> str:
         return self._now_iso()
@@ -299,8 +319,12 @@ class LLMBreakdown(Automation):
     def resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
         return self._resolve_variant(label)
 
-    def build_system_prompt(self, *, max_depth: int, max_children: int, instruction: str | None) -> str:
-        return self._build_system_prompt(max_depth=max_depth, max_children=max_children, instruction=instruction)
+    def build_system_prompt(
+        self, *, max_depth: int, max_children: int, instruction: str | None
+    ) -> str:
+        return self._build_system_prompt(
+            max_depth=max_depth, max_children=max_children, instruction=instruction
+        )
 
     def should_run_without_new_activity(self) -> bool:
         """Allow observer polling to process labeled tasks even without fresh activity."""
@@ -335,8 +359,12 @@ class LLMBreakdown(Automation):
         return labels or None
 
     @staticmethod
-    def _fallback_nodes(task: Task, *, reason: str | None = None) -> list[BreakdownNode]:
-        description_parts = [f"Fallback rollout for task: {task.task_entry.content.strip()}"]
+    def _fallback_nodes(
+        task: Task, *, reason: str | None = None
+    ) -> list[BreakdownNode]:
+        description_parts = [
+            f"Fallback rollout for task: {task.task_entry.content.strip()}"
+        ]
         task_description = _sanitize_text(task.task_entry.description)
         if task_description:
             description_parts.append(f"Context: {task_description}")
@@ -362,7 +390,9 @@ class LLMBreakdown(Automation):
             return
         db.update_task(task.id, labels=updated)
 
-    def _mark_root_failed(self, db: Database, task: Task, label_to_replace: str) -> None:
+    def _mark_root_failed(
+        self, db: Database, task: Task, label_to_replace: str
+    ) -> None:
         labels = task.task_entry.labels
         target = label_to_replace.lower()
         updated = [label for label in labels if label.lower() != target]
@@ -384,9 +414,12 @@ class LLMBreakdown(Automation):
     ) -> None:
         if depth > context.max_depth:
             return
-        for node in nodes[:context.max_children]:
+        for node in nodes[: context.max_children]:
             if context.created[0] >= context.max_total_tasks:
-                logger.warning("Reached max_total_tasks={}; truncating tree", context.max_total_tasks)
+                logger.warning(
+                    "Reached max_total_tasks={}; truncating tree",
+                    context.max_total_tasks,
+                )
                 return
             content = _sanitize_text(node.content)
             if not content:
@@ -397,7 +430,9 @@ class LLMBreakdown(Automation):
                 result = db.insert_task(
                     content=content,
                     description=description,
-                    project_id=root_task.task_entry.project_id if parent_id is None else None,
+                    project_id=root_task.task_entry.project_id
+                    if parent_id is None
+                    else None,
                     parent_id=parent_id,
                     priority=priority,
                     labels=context.labels,
@@ -434,10 +469,14 @@ class LLMBreakdown(Automation):
     def child_labels(self, task: Task) -> list[str] | None:
         return self._child_labels(task)
 
-    def fallback_nodes(self, task: Task, *, reason: str | None = None) -> list[BreakdownNode]:
+    def fallback_nodes(
+        self, task: Task, *, reason: str | None = None
+    ) -> list[BreakdownNode]:
         return self._fallback_nodes(task, reason=reason)
 
-    def update_root_labels(self, db: Database, task: Task, label_to_remove: str) -> None:
+    def update_root_labels(
+        self, db: Database, task: Task, label_to_remove: str
+    ) -> None:
         self._update_root_labels(db, task, label_to_remove)
 
     def mark_root_failed(self, db: Database, task: Task, label_to_replace: str) -> None:
@@ -464,12 +503,16 @@ class LLMBreakdown(Automation):
 
     def _tick(self, db: Database) -> None:
         if self.selected_backend() == "disabled":
-            logger.info("Skipping AI Breakdown automation because AI backend is disabled.")
+            logger.info(
+                "Skipping AI Breakdown automation because AI backend is disabled."
+            )
             return
         refresh = getattr(db, "reset", None)
         if callable(refresh):
             try:
-                logger.debug("Refreshing active Todoist tasks before AI breakdown selection")
+                logger.debug(
+                    "Refreshing active Todoist tasks before AI breakdown selection"
+                )
                 refresh()
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(

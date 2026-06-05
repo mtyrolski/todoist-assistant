@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-
 from datetime import datetime
 import os
 from pathlib import Path
@@ -16,6 +15,7 @@ from todoist.web.routes.common import _sync_api_globals
 
 router = APIRouter()
 
+
 def _admin_api_token_from_env_path() -> tuple[str, Path]:
     env_path = _resolve_env_path()
     token = _normalize_api_key(os.getenv("API_KEY"))
@@ -24,6 +24,7 @@ def _admin_api_token_from_env_path() -> tuple[str, Path]:
         if token:
             os.environ["API_KEY"] = token
     return token, env_path
+
 
 @router.get("/api/admin/api_token", tags=["admin"])
 async def admin_api_token_status() -> dict[str, Any]:
@@ -34,6 +35,7 @@ async def admin_api_token_status() -> dict[str, Any]:
         "masked": _mask_api_key(token),
         "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
+
 
 @router.post("/api/admin/api_token", tags=["admin"])
 async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
@@ -67,6 +69,7 @@ async def admin_set_api_token(payload: dict[str, Any] = Body(...)) -> dict[str, 
         "labelsCount": labels_count,
     }
 
+
 @router.post("/api/admin/api_token/validate", tags=["admin"])
 async def admin_validate_api_token(
     payload: dict[str, Any] = Body(default_factory=dict),
@@ -85,6 +88,7 @@ async def admin_validate_api_token(
         "labelsCount": labels_count,
     }
 
+
 @router.delete("/api/admin/api_token", tags=["admin"])
 async def admin_clear_api_token() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -92,12 +96,18 @@ async def admin_clear_api_token() -> dict[str, Any]:
     if env_path.exists():
         unset_key(str(env_path), "API_KEY")
     os.environ.pop("API_KEY", None)
-    return {"configured": False, "masked": "", "envPath": _safe_display_path(env_path, root=_REPO_ROOT)}
+    return {
+        "configured": False,
+        "masked": "",
+        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
+    }
+
 
 @router.get("/api/admin/timezone", tags=["admin"])
 async def admin_timezone_status() -> dict[str, Any]:
     _sync_api_globals(globals())
     return _resolve_timezone_status()
+
 
 @router.post("/api/admin/timezone", tags=["admin"])
 async def admin_set_timezone(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
@@ -119,6 +129,7 @@ async def admin_set_timezone(payload: dict[str, Any] = Body(...)) -> dict[str, A
     os.environ[str(EnvVar.TIMEZONE)] = timezone_name
     return _resolve_timezone_status()
 
+
 @router.delete("/api/admin/timezone", tags=["admin"])
 async def admin_clear_timezone() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -128,10 +139,12 @@ async def admin_clear_timezone() -> dict[str, Any]:
     os.environ.pop(str(EnvVar.TIMEZONE), None)
     return _resolve_timezone_status()
 
+
 @router.get("/api/runtime/logs", tags=["runtime"])
 async def runtime_logs() -> dict[str, Any]:
     _sync_api_globals(globals())
     return {"inspectOnly": True, "sources": _runtime_log_sources()}
+
 
 @router.get("/api/runtime/logs/read", tags=["runtime"])
 async def runtime_read_log(
@@ -165,10 +178,12 @@ async def runtime_read_log(
         **payload,
     }
 
+
 @router.get("/api/admin/logs", tags=["admin"])
 async def admin_logs() -> dict[str, Any]:
     _sync_api_globals(globals())
     return {"logs": _log_files()}
+
 
 @router.get("/api/admin/logs/read", tags=["admin"])
 async def admin_read_log(

@@ -1,13 +1,12 @@
 """Helpers for resolving local runtime environment files and Triton settings."""
 
-
 from collections.abc import Mapping
 import os
 from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 
 DEFAULT_TRITON_URL = "http://127.0.0.1:8003"
 DEFAULT_TRITON_MODEL_NAME = "todoist_llm"

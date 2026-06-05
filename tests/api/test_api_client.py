@@ -38,7 +38,7 @@ def test_request_json_retries_using_retry_after_header():
     setattr(client.__dict__["_session_local"], "session", session)
     spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
 
-    with patch("todoist.utils.time.sleep") as mock_sleep:
+    with patch("todoist.core.utils.time.sleep") as mock_sleep:
         payload = client.request_json(spec, operation_name="list labels")
 
     assert payload == {"results": []}
@@ -56,7 +56,7 @@ def test_request_json_retries_using_payload_retry_after():
     setattr(client.__dict__["_session_local"], "session", session)
     spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
 
-    with patch("todoist.utils.time.sleep") as mock_sleep:
+    with patch("todoist.core.utils.time.sleep") as mock_sleep:
         payload = client.request_json(spec, operation_name="list labels")
 
     assert payload == {"results": [{"id": "label1"}]}
@@ -74,7 +74,7 @@ def test_request_json_uses_rpm_hint_when_retry_after_is_missing():
     setattr(client.__dict__["_session_local"], "session", session)
     spec = RequestSpec(endpoint=TodoistEndpoints.LIST_LABELS)
 
-    with patch("todoist.utils.time.sleep") as mock_sleep:
+    with patch("todoist.core.utils.time.sleep") as mock_sleep:
         payload = client.request_json(spec, operation_name="list labels")
 
     assert payload == {"results": []}

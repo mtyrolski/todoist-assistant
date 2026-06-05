@@ -21,7 +21,7 @@ def test_count_labeled_tasks_matches_fire_label_case_insensitively() -> None:
         make_project(
             tasks=[
                 make_task("a", labels=[FIRE_TASK_LABEL]),
-                make_task("b", labels=["Fire \U0001F9EF\U0001F692"]),
+                make_task("b", labels=["Fire \U0001f9ef\U0001f692"]),
                 make_task("c", labels=["other"]),
             ]
         ),
@@ -226,7 +226,10 @@ def test_evaluate_urgency_status_respects_custom_settings() -> None:
     assert status["counts"]["priorityTasks"] == 1
     assert status["counts"]["dueTasks"] == 1
     assert status["visibleChips"] == ["p1Tasks", "dueTasks"]
-    assert status["summary"] == "2 active tasks match the configured priority and due date thresholds."
+    assert (
+        status["summary"]
+        == "2 active tasks match the configured priority and due date thresholds."
+    )
 
 
 def test_evaluate_urgency_status_supports_multi_labels_and_minimum_thresholds() -> None:

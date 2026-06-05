@@ -39,8 +39,11 @@ from todoist.database.dataframe import (
     render_adjustments_file_content,
     resolve_personal_dir,
 )
-from todoist.status_update import build_status_update_report, load_status_update_projects
-from todoist.types import Event, Project
+from todoist.features.status_update import (
+    build_status_update_report,
+    load_status_update_projects,
+)
+from todoist.core.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
     plot_active_project_hierarchy,
@@ -70,11 +73,16 @@ from todoist.llm import (
     DEFAULT_TRITON_URL,
     MessageRole,
 )
-from todoist.llm.factory import ChatModel, build_codex_chat_model, build_triton_chat_model, model_backend
+from todoist.llm.factory import (
+    ChatModel,
+    build_codex_chat_model,
+    build_triton_chat_model,
+    model_backend,
+)
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
 from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
-from todoist.dashboard_settings import (
+from todoist.dashboard.settings import (
     load_dashboard_config,
     observer_settings_payload,
     resolve_dashboard_config_path,
@@ -135,8 +143,10 @@ from todoist.web.api_components.templates import (
 from todoist.web.api_components import llm_chat as _llm_chat_component
 from todoist.web.api_components import task_ingest as _task_ingest_component
 from todoist.web.api_components import dashboard_runtime as _dashboard_runtime_component
-from todoist.web.api_components import automation_runtime as _automation_runtime_component
-from todoist.utils import (
+from todoist.web.api_components import (
+    automation_runtime as _automation_runtime_component,
+)
+from todoist.core.utils import (
     Cache,
     LocalStorageError,
     automation_log_path,
@@ -146,9 +156,9 @@ from todoist.utils import (
     set_tqdm_progress_callback,
     get_tqdm_progress_callback,
 )
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
-from todoist.version import get_version
+from todoist.core.version import get_version
 
 if TYPE_CHECKING:
     from todoist.agent.graph import AgentState
@@ -169,13 +179,16 @@ app.add_middleware(
 app.include_router(_admin_automations_router)
 app.include_router(_api_routes_router)
 
+
 @app.get("/api/health", tags=["health"])
 async def healthcheck() -> dict[str, str]:
     """Simple readiness endpoint for the dashboard stack."""
 
     return {"status": "ok", "version": get_version()}
 
+
 Granularity = Literal["W", "ME", "3ME"]
+
 
 class _DashboardState:
     def __init__(self) -> None:
@@ -195,6 +208,7 @@ class _DashboardState:
             and self.demo_mode == demo_mode
         )
 
+
 @dataclass
 class _ProgressState:
     active: bool = False
@@ -207,6 +221,7 @@ class _ProgressState:
     sub_current: int | None = None
     sub_total: int | None = None
     error: str | None = None
+
 
 _state = _DashboardState()
 _progress_state = _ProgressState()
@@ -233,8 +248,10 @@ _TQDM_STEP_MAP = {
     "Querying activity data": 1,
 }
 
+
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
 
 _DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
@@ -244,6 +261,7 @@ _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
 _TRITON_MODEL_OPTIONS = TRITON_MODEL_OPTIONS
 _CODEX_MODEL_OPTIONS = CODEX_MODEL_OPTIONS
+
 
 def _resolve_timezone_status() -> dict[str, Any]:
     env_path = _resolve_env_path()
@@ -280,6 +298,7 @@ def _resolve_timezone_status() -> dict[str, Any]:
     payload["invalidOverride"] = override
     return payload
 
+
 @dataclass
 class _AdminJob:
     id: str
@@ -290,6 +309,7 @@ class _AdminJob:
     finished_at: str | None = None
     result: Any | None = None
     error: str | None = None
+
 
 _JOBS: dict[str, _AdminJob] = {}
 
@@ -330,27 +350,37 @@ _LLM_CHAT_WORKER_RUNNING = False
 _LLM_CHAT_AGENT = None
 _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
+
 def _call_dashboard_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
     _dashboard_runtime_component._sync_api_globals()
     return getattr(_dashboard_runtime_component, name)(*args, **kwargs)
 
+
 def _env_demo_mode() -> bool:
     return bool(_call_dashboard_runtime("_env_demo_mode"))
+
 
 def _run_async_in_main_loop(coro: Any) -> Any:
     return _call_dashboard_runtime("_run_async_in_main_loop", coro)
 
+
 async def _progress_snapshot() -> dict[str, Any]:
     return await _call_dashboard_runtime("_progress_snapshot")
 
-async def _set_progress(stage: str, step: int, total_steps: int = _PROGRESS_TOTAL_STEPS) -> None:
+
+async def _set_progress(
+    stage: str, step: int, total_steps: int = _PROGRESS_TOTAL_STEPS
+) -> None:
     await _call_dashboard_runtime("_set_progress", stage, step, total_steps)
+
 
 async def _finish_progress(error: str | None = None) -> None:
     await _call_dashboard_runtime("_finish_progress", error)
 
+
 def _build_tqdm_progress_callback():
     return _call_dashboard_runtime("_build_tqdm_progress_callback")
+
 
 def _activity_cache_signature() -> dict[str, int] | None:
     return _call_dashboard_runtime("_activity_cache_signature")
@@ -361,7 +391,9 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
 
 
 def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
-    return bool(_call_dashboard_runtime("_load_state_from_disk_cache", demo_mode=demo_mode))
+    return bool(
+        _call_dashboard_runtime("_load_state_from_disk_cache", demo_mode=demo_mode)
+    )
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
@@ -395,48 +427,92 @@ del _component_wrapper_name
 
 def _normalize_chat_message(raw: Any) -> dict[str, Any] | None:
     return _llm_chat_component._normalize_chat_message(raw)
+
+
 def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
     return _llm_chat_component._normalize_chat_conversation(raw)
+
+
 def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
     return _llm_chat_component._normalize_chat_queue_item(raw)
+
+
 def _load_llm_chat_conversations() -> list[dict[str, Any]]:
     return _llm_chat_component._load_llm_chat_conversations()
+
+
 def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
     return _llm_chat_component._save_llm_chat_conversations(conversations)
+
+
 def _load_llm_chat_queue() -> list[dict[str, Any]]:
     return _llm_chat_component._load_llm_chat_queue()
+
+
 def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
     return _llm_chat_component._save_llm_chat_queue(items)
+
+
 def _truncate_text(value: str, limit: int = 120) -> str:
     return _llm_chat_component._truncate_text(value, limit)
+
+
 def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._conversation_summary(conv)
+
+
 def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._queue_item_payload(item)
+
+
 def _parse_iso_timestamp(value: Any) -> datetime | None:
     return _llm_chat_component._parse_iso_timestamp(value)
+
+
 def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> bool:
     return _llm_chat_component._expire_llm_chat_queue(queue, now_dt)
+
+
 def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return _llm_chat_component._prune_queue(queue)
+
+
 def _available_llm_chat_devices() -> list[str]:
     return _llm_chat_component._available_llm_chat_devices()
+
+
 def _llm_model_options_payload(
     options: Sequence[Mapping[str, str]], selected: str
 ) -> list[dict[str, Any]]:
     return _llm_chat_component._llm_model_options_payload(options, selected)
+
+
 def _normalize_llm_chat_backend(raw: Any) -> str:
     return _llm_chat_component._normalize_llm_chat_backend(raw)
+
+
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
-    return _llm_chat_component._normalize_llm_chat_device(raw, available_devices=available_devices)
+    return _llm_chat_component._normalize_llm_chat_device(
+        raw, available_devices=available_devices
+    )
+
+
 def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._resolve_triton_settings(file_values)
+
+
 def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._resolve_codex_settings(file_values)
+
+
 def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
     return _llm_chat_component._triton_ready(triton_settings)
+
+
 def _resolve_llm_chat_settings() -> dict[str, Any]:
     return _llm_chat_component._resolve_llm_chat_settings()
+
+
 async def _reset_llm_chat_runtime() -> None:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING, _LLM_CHAT_AGENT
     async with _LLM_CHAT_MODEL_LOCK:
@@ -448,12 +524,18 @@ async def _reset_llm_chat_runtime() -> None:
 
 def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._public_llm_chat_settings(settings)
+
+
 def _build_llm_from_settings(
     settings: Mapping[str, Any],
     *,
     max_output_tokens: int,
 ) -> _LlmChatModel:
-    return _llm_chat_component._build_llm_from_settings(settings, max_output_tokens=max_output_tokens)
+    return _llm_chat_component._build_llm_from_settings(
+        settings, max_output_tokens=max_output_tokens
+    )
+
+
 async def _llm_chat_model_status() -> tuple[bool, bool]:
     async with _LLM_CHAT_MODEL_LOCK:
         return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
@@ -492,6 +574,8 @@ def _build_chat_messages(
     conversation: dict[str, Any], user_content: str
 ) -> list[dict[str, str]]:
     return _llm_chat_component._build_chat_messages(conversation, user_content)
+
+
 def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
     global _LLM_CHAT_AGENT
     try:
@@ -504,7 +588,8 @@ def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
 
     cache_path = os.getenv(str(EnvVar.AGENT_CACHE_PATH), str(_REPO_ROOT))
     prefabs_dir = os.getenv(
-        str(EnvVar.AGENT_INSTRUCTIONS_DIR), str(_REPO_ROOT / "configs/agent_instructions")
+        str(EnvVar.AGENT_INSTRUCTIONS_DIR),
+        str(_REPO_ROOT / "configs/agent_instructions"),
     )
     max_tool_loops_env = os.getenv(str(EnvVar.AGENT_MAX_TOOL_LOOPS), "8").strip()
     try:
@@ -536,7 +621,10 @@ async def _maybe_start_llm_chat_worker() -> None:
             return
         if _LLM_CHAT_MODEL is None and _LLM_CHAT_MODEL_LOADING:
             return
-        if _LLM_CHAT_MODEL is None and _resolve_llm_chat_settings()["backend"] != "codex":
+        if (
+            _LLM_CHAT_MODEL is None
+            and _resolve_llm_chat_settings()["backend"] != "codex"
+        ):
             return
         _LLM_CHAT_WORKER_RUNNING = True
     asyncio.create_task(_run_llm_chat_queue())
@@ -650,13 +738,13 @@ async def _run_llm_chat_queue() -> None:
                     state = cast(
                         "AgentState",
                         {
-                        "messages": [
-                            *base_messages,
-                            {
-                                "role": MessageRole.USER.value,
-                                "content": next_item["content"],
-                            },
-                        ]
+                            "messages": [
+                                *base_messages,
+                                {
+                                    "role": MessageRole.USER.value,
+                                    "content": next_item["content"],
+                                },
+                            ]
                         },
                     )
                     result = await asyncio.to_thread(agent.invoke, state)
@@ -798,7 +886,9 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
 
 for _component_wrapper_name in _llm_chat_component._COMPONENT_EXPORTS:
     if _component_wrapper_name in globals():
-        globals()[_component_wrapper_name]._component_wrapper_for = _component_wrapper_name
+        globals()[
+            _component_wrapper_name
+        ]._component_wrapper_for = _component_wrapper_name
 del _component_wrapper_name
 
 
@@ -904,7 +994,9 @@ def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
     candidate = raw.resolve() if raw.is_absolute() else (_DATA_DIR / raw).resolve()
 
     allowed_roots = {_DATA_DIR.resolve(), Path(Cache().path).resolve()}
-    if not any(candidate == root or root in candidate.parents for root in allowed_roots):
+    if not any(
+        candidate == root or root in candidate.parents for root in allowed_roots
+    ):
         raise HTTPException(
             status_code=400, detail="Path must be within data or cache directory"
         )
@@ -992,6 +1084,7 @@ def _load_projects_for_adjustments_sync(
 _TaskIngestNode = _task_ingest_component._TaskIngestNode
 _TaskIngestTree = _task_ingest_component._TaskIngestTree
 
+
 def _call_task_ingest_component(name: str, *args: Any, **kwargs: Any) -> Any:
     _task_ingest_component._sync_api_globals()
     return getattr(_task_ingest_component, name)(*args, **kwargs)
@@ -1009,6 +1102,7 @@ def _make_task_ingest_wrapper(name: str):
 for _name in _task_ingest_component._COMPONENT_EXPORTS:
     if _name not in {"_TaskIngestNode", "_TaskIngestTree"}:
         globals()[_name] = _make_task_ingest_wrapper(_name)
+
 
 def _status_update_db() -> Database:
     if _state.db is not None:

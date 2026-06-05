@@ -93,23 +93,27 @@ def main() -> int:
     if core_pyproject.exists() and core_version is None:
         mismatches.append("core/pyproject.toml is missing project.version")
     elif core_version and core_version != version:
-        mismatches.append(f"core/pyproject.toml version {core_version} != pyproject {version}")
+        mismatches.append(
+            f"core/pyproject.toml version {core_version} != pyproject {version}"
+        )
 
     frontend_package = repo_root / "frontend" / "package.json"
     frontend_version = read_package_json_version(frontend_package)
     if frontend_package.exists() and frontend_version is None:
         mismatches.append("frontend/package.json is missing version")
     elif frontend_version and frontend_version != version:
-        mismatches.append(f"frontend/package.json version {frontend_version} != pyproject {version}")
+        mismatches.append(
+            f"frontend/package.json version {frontend_version} != pyproject {version}"
+        )
 
     frontend_lock = repo_root / "frontend" / "package-lock.json"
-    lock_version, lock_package_version = read_package_lock_versions(
-        frontend_lock
-    )
+    lock_version, lock_package_version = read_package_lock_versions(frontend_lock)
     if frontend_lock.exists() and lock_version is None:
         mismatches.append("frontend/package-lock.json is missing top-level version")
     elif lock_version and lock_version != version:
-        mismatches.append(f"frontend/package-lock.json version {lock_version} != pyproject {version}")
+        mismatches.append(
+            f"frontend/package-lock.json version {lock_version} != pyproject {version}"
+        )
     if frontend_lock.exists() and lock_package_version is None:
         mismatches.append("frontend/package-lock.json is missing packages[''].version")
     elif lock_package_version and lock_package_version != version:
@@ -122,7 +126,9 @@ def main() -> int:
     if uv_lock.exists() and uv_lock_version is None:
         mismatches.append("uv.lock is missing todoist-assistant version")
     elif uv_lock_version and uv_lock_version != version:
-        mismatches.append(f"uv.lock todoist-assistant version {uv_lock_version} != pyproject {version}")
+        mismatches.append(
+            f"uv.lock todoist-assistant version {uv_lock_version} != pyproject {version}"
+        )
 
     formula = repo_root / "Formula" / "todoist-assistant.rb"
     formula_version = read_formula_version(formula)

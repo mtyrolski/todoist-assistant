@@ -5,7 +5,14 @@ import pandas as pd
 from todoist.dashboard.tasks import process_rescheduled_tasks
 
 
-def _build_task(task_factory, task_id: str, content: str, *, is_recurring: bool = False, due_date: str | None = None):
+def _build_task(
+    task_factory,
+    task_id: str,
+    content: str,
+    *,
+    is_recurring: bool = False,
+    due_date: str | None = None,
+):
     due = None
     if is_recurring:
         due = {"date": due_date or "2024-01-15", "is_recurring": True}
@@ -42,12 +49,21 @@ def test_filters_out_recurring_tasks(task_factory):
 
 
 def test_includes_historical_non_recurring_tasks(task_factory):
-    active_tasks = [_build_task(task_factory, "task1", "Current Task", due_date="2024-01-15")]
+    active_tasks = [
+        _build_task(task_factory, "task1", "Current Task", due_date="2024-01-15")
+    ]
     result = process_rescheduled_tasks(
-        _rescheduled_df(["Current Task", "Old Deleted Task", "Completed Task", "Changed Task"]),
+        _rescheduled_df(
+            ["Current Task", "Old Deleted Task", "Completed Task", "Changed Task"]
+        ),
         active_tasks,
     )
-    assert set(result["title"].tolist()) == {"Current Task", "Old Deleted Task", "Completed Task", "Changed Task"}
+    assert set(result["title"].tolist()) == {
+        "Current Task",
+        "Old Deleted Task",
+        "Completed Task",
+        "Changed Task",
+    }
     assert len(result) == 4
 
 
@@ -57,7 +73,9 @@ def test_all_recurring_tasks_only_historical_tasks_are_kept(task_factory):
         _build_task(task_factory, "task2", "Weekly Task", is_recurring=True),
     ]
     result = process_rescheduled_tasks(
-        _rescheduled_df(["Daily Task", "Weekly Task", "Historical Task 1", "Historical Task 2"]),
+        _rescheduled_df(
+            ["Daily Task", "Weekly Task", "Historical Task 1", "Historical Task 2"]
+        ),
         active_tasks,
     )
 
@@ -66,7 +84,11 @@ def test_all_recurring_tasks_only_historical_tasks_are_kept(task_factory):
 
 
 def test_reschedule_count_aggregation(task_factory):
-    active_tasks = [_build_task(task_factory, "task1", "Frequently Rescheduled", due_date="2024-01-15")]
+    active_tasks = [
+        _build_task(
+            task_factory, "task1", "Frequently Rescheduled", due_date="2024-01-15"
+        )
+    ]
     result = process_rescheduled_tasks(
         _rescheduled_df(["Frequently Rescheduled"] * 5),
         active_tasks,
@@ -79,17 +101,25 @@ def test_reschedule_count_aggregation(task_factory):
 
 def test_empty_activity_dataframe(task_factory):
     active_tasks = [_build_task(task_factory, "task1", "Task A", due_date="2024-01-15")]
-    empty_df = pd.DataFrame({"type": [], "title": [], "parent_project_name": [], "root_project_name": []})
+    empty_df = pd.DataFrame(
+        {"type": [], "title": [], "parent_project_name": [], "root_project_name": []}
+    )
     result = process_rescheduled_tasks(empty_df, active_tasks)
     assert result.empty
 
 
 def test_no_active_tasks_includes_all_historical_rescheduled_titles():
     result = process_rescheduled_tasks(
-        _rescheduled_df(["Historical Task 1", "Historical Task 2", "Historical Task 3"]),
+        _rescheduled_df(
+            ["Historical Task 1", "Historical Task 2", "Historical Task 3"]
+        ),
         [],
     )
-    assert set(result["title"].tolist()) == {"Historical Task 1", "Historical Task 2", "Historical Task 3"}
+    assert set(result["title"].tolist()) == {
+        "Historical Task 1",
+        "Historical Task 2",
+        "Historical Task 3",
+    }
     assert len(result) == 3
 
 
@@ -109,7 +139,9 @@ def test_non_rescheduled_events_are_ignored(task_factory):
 
 
 def test_same_title_in_multiple_projects_is_grouped_separately(task_factory):
-    active_tasks = [_build_task(task_factory, "task1", "Shared title", due_date="2024-01-15")]
+    active_tasks = [
+        _build_task(task_factory, "task1", "Shared title", due_date="2024-01-15")
+    ]
     df_activity = pd.DataFrame(
         {
             "type": ["rescheduled", "rescheduled", "rescheduled"],

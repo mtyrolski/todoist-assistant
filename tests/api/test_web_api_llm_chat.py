@@ -5,7 +5,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 import todoist.web.api as web_api
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 
 # pylint: disable=protected-access
 
@@ -70,6 +70,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
 
+
 def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     monkeypatch, tmp_path
 ) -> None:
@@ -97,9 +98,13 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     assert payload["codex"]["model"] == "gpt-5.5"
     assert payload["reloadedRequired"] is True
     assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_DEVICE='cuda'") >= 0
-    assert env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_CODEX_MODEL='gpt-5.5'") >= 0
+    assert (
+        env_path.read_text(encoding="utf-8").find("TODOIST_AGENT_CODEX_MODEL='gpt-5.5'")
+        >= 0
+    )
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
+
 
 def test_llm_chat_settings_response_exposes_codex_and_triton_options(
     monkeypatch, tmp_path
@@ -131,9 +136,8 @@ def test_llm_chat_settings_response_exposes_codex_and_triton_options(
     ]
     assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
 
-def test_llm_chat_settings_lock_hides_and_rejects_triton(
-    monkeypatch, tmp_path
-) -> None:
+
+def test_llm_chat_settings_lock_hides_and_rejects_triton(monkeypatch, tmp_path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
         "\n".join(
@@ -150,7 +154,9 @@ def test_llm_chat_settings_lock_hides_and_rejects_triton(
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
 
     def _unexpected_triton_probe(_settings):
-        raise AssertionError("Triton should not be probed when the dashboard is locked to Codex")
+        raise AssertionError(
+            "Triton should not be probed when the dashboard is locked to Codex"
+        )
 
     monkeypatch.setattr(web_api, "_triton_ready", _unexpected_triton_probe)
 
@@ -178,6 +184,7 @@ def test_llm_chat_settings_lock_hides_and_rejects_triton(
     assert update.status_code == 400
     assert update.json()["detail"] == "Unsupported LLM backend."
 
+
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
 
@@ -188,6 +195,7 @@ def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> Non
     )
 
     assert res.status_code == 400
+
 
 def test_llm_chat_update_settings_rejects_unsupported_codex_model(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
@@ -204,9 +212,8 @@ def test_llm_chat_update_settings_rejects_unsupported_codex_model(monkeypatch) -
 
     assert res.status_code == 400
 
-def test_llm_chat_update_settings_supports_codex_backend(
-    monkeypatch, tmp_path
-) -> None:
+
+def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
@@ -227,6 +234,7 @@ def test_llm_chat_update_settings_supports_codex_backend(
     assert payload["envPath"] == ".env"
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
+
 
 def test_llm_chat_update_settings_supports_triton_backend(
     monkeypatch, tmp_path
@@ -259,6 +267,7 @@ def test_llm_chat_update_settings_supports_triton_backend(
     assert "TODOIST_AGENT_BACKEND='triton_local'" in saved
     assert "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'" in saved
 
+
 def test_llm_chat_send_requires_message() -> None:
     """Test /api/llm_chat/send validates message is required."""
     client = TestClient(web_api.app)
@@ -266,6 +275,7 @@ def test_llm_chat_send_requires_message() -> None:
     assert res.status_code == 400
     payload = res.json()
     assert "message is required" in payload["detail"]
+
 
 def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
     """Test /api/llm_chat/send requires model to be loaded or loading."""
@@ -282,7 +292,10 @@ def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
     payload = res.json()
     assert "Model not loaded" in payload["detail"]
 
-def test_llm_chat_send_allows_codex_inline_without_model_loaded(monkeypatch, tmp_path) -> None:
+
+def test_llm_chat_send_allows_codex_inline_without_model_loaded(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
     monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
@@ -312,7 +325,9 @@ def test_llm_chat_send_allows_codex_inline_without_model_loaded(monkeypatch, tmp
     monkeypatch.setattr(web_api, "_load_llm_chat_queue", lambda: list(saved_queue))
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
     monkeypatch.setattr(web_api, "_save_llm_chat_queue", _mock_save_queue)
-    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _mock_save_conversations)
+    monkeypatch.setattr(
+        web_api, "_save_llm_chat_conversations", _mock_save_conversations
+    )
     monkeypatch.setattr(web_api, "_run_llm_chat_queue_inline", _mock_run_inline)
 
     client = TestClient(web_api.app)
@@ -323,6 +338,7 @@ def test_llm_chat_send_allows_codex_inline_without_model_loaded(monkeypatch, tmp
     assert res.json()["item"]["status"] == "done"
     assert saved_queue[0]["status"] == "done"
     assert saved_conversations[0]["title"] == "Run inline Codex"
+
 
 def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send creates a new conversation when no conversation_id provided."""
@@ -383,6 +399,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     assert item["conversation_id"] == payload["conversationId"]
     assert item["content"] == "Hello, world!"
     assert item["status"] == "queued"
+
 
 def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send adds to existing conversation when conversation_id provided."""
@@ -447,6 +464,7 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     assert saved_conversations[0]["id"] == existing_conv_id
     assert saved_conversations[0]["title"] == "Existing Chat"  # Title unchanged
 
+
 def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
     """Test /api/llm_chat/send returns 404 for non-existent conversation_id."""
 
@@ -470,6 +488,7 @@ def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
     payload = res.json()
     assert "Conversation not found" in payload["detail"]
 
+
 def test_llm_chat_conversation_validates_uuid_format() -> None:
     """Test /api/llm_chat/conversations/{id} validates UUID format."""
     client = TestClient(web_api.app)
@@ -477,6 +496,7 @@ def test_llm_chat_conversation_validates_uuid_format() -> None:
     assert res.status_code == 400
     payload = res.json()
     assert "Invalid conversation ID format" in payload["detail"]
+
 
 def test_llm_chat_conversation_returns_404_for_missing(monkeypatch) -> None:
     """Test /api/llm_chat/conversations/{id} returns 404 for non-existent conversation."""
@@ -488,6 +508,7 @@ def test_llm_chat_conversation_returns_404_for_missing(monkeypatch) -> None:
     assert res.status_code == 404
     payload = res.json()
     assert "Conversation not found" in payload["detail"]
+
 
 def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
     """Test /api/llm_chat/conversations/{id} returns conversation with messages."""
@@ -538,6 +559,7 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
     assert payload["messages"][1]["content"] == "Hi there!"
     assert payload["messages"][1]["createdAt"] == "2025-01-01T10:00:05"
 
+
 def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     """Test /api/llm_chat/enable returns model status."""
 
@@ -562,6 +584,7 @@ def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     assert "loading" in payload
     assert payload["enabled"] is False
     assert payload["loading"] is True
+
 
 def test_llm_chat_send_starts_worker_when_loading(monkeypatch) -> None:
     """Test /api/llm_chat/send starts worker when model is loading."""
@@ -589,6 +612,7 @@ def test_llm_chat_send_starts_worker_when_loading(monkeypatch) -> None:
 
     # Verify worker was started (fix for review comment about loading=True)
     assert len(worker_started) == 1
+
 
 def test_build_chat_messages_filters_system_messages(monkeypatch) -> None:
     """Test _build_chat_messages filters system messages from conversation history."""
@@ -778,7 +802,9 @@ def test_llm_chat_queue_worker_builds_codex_inline(monkeypatch, tmp_path) -> Non
     assert conversations[0]["messages"][-1]["content"] == "inline-ok"
 
 
-def test_llm_chat_queue_worker_marks_inline_codex_load_failure(monkeypatch, tmp_path) -> None:
+def test_llm_chat_queue_worker_marks_inline_codex_load_failure(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
     monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)

@@ -1,4 +1,4 @@
-from todoist.runtime_env import load_local_dotenv, resolve_llm_backend
+from todoist.core.runtime_env import load_local_dotenv, resolve_llm_backend
 
 
 def main() -> None:

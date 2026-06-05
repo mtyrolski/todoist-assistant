@@ -12,6 +12,7 @@ from todoist.dashboard.plots import (
     plot_weekly_completion_trend,
 )
 
+
 def _weekly_completion_df() -> pd.DataFrame:
     base_date = datetime(2024, 6, 3, 12, 0, 0)  # Monday
     data = {
@@ -406,8 +407,7 @@ def test_plot_completed_tasks_periodically_keeps_archived_points_sparse_without_
         pd.Timestamp("2024-06-09"),
     ]
     assert not any(
-        str(getattr(trace, "name", "")).startswith("Archived (")
-        for trace in traces
+        str(getattr(trace, "name", "")).startswith("Archived (") for trace in traces
     )
 
 
@@ -466,8 +466,7 @@ def test_cumsum_completed_tasks_periodically_dashes_current_month_when_range_ext
     total_trace = next(
         trace
         for trace in traces
-        if str(getattr(trace, "name", "")).lower()
-        == "all projects (total cumulative)"
+        if str(getattr(trace, "name", "")).lower() == "all projects (total cumulative)"
     )
     assert current_month_label not in _normalized_trace_x(total_trace)
 
@@ -732,8 +731,7 @@ def test_cumsum_completed_tasks_periodically_forward_fills_sparse_project_totals
     total_trace = next(
         trace
         for trace in cast(tuple[Any, ...], fig.data)
-        if str(getattr(trace, "name", "")).lower()
-        == "all projects (total cumulative)"
+        if str(getattr(trace, "name", "")).lower() == "all projects (total cumulative)"
     )
     values = [float(value) for value in cast(Any, total_trace).y]
     assert values == sorted(values)
@@ -786,8 +784,7 @@ def test_cumsum_completed_tasks_periodically_keeps_archived_points_sparse_withou
     ]
     assert [float(value) for value in cast(Any, archived_trace).y] == [1.0, 2.0]
     assert not any(
-        str(getattr(trace, "name", "")).startswith("Archived (")
-        for trace in traces
+        str(getattr(trace, "name", "")).startswith("Archived (") for trace in traces
     )
 
 
@@ -860,9 +857,7 @@ def test_cumsum_completed_tasks_periodically_keeps_cumulative_lines_linear():
 
     traces = cast(tuple[Any, ...], fig.data)
     project_lines = [
-        trace
-        for trace in traces
-        if str(getattr(trace, "name", "")) == "Project A"
+        trace for trace in traces if str(getattr(trace, "name", "")) == "Project A"
     ]
     total_lines = [
         trace
@@ -901,6 +896,7 @@ def test_plot_completed_tasks_periodically_can_disable_total_overlay():
         str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)
     ]
     assert not any("all projects" in name.lower() for name in trace_names)
+
 
 def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows():
     """Weekly trend should keep 3w/current fixed and expose 6w/12w/24w as legend toggles."""

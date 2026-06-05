@@ -9,6 +9,7 @@ import pytest
 
 from todoist.dashboard.plots import plot_task_lifespans
 
+
 @pytest.fixture
 def sample_task_events_df():
     """Create a sample DataFrame with task events for testing."""

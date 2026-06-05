@@ -30,12 +30,12 @@ from transformers import (
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from transformers.utils import logging as hf_logging
 
-from .config import DEFAULT_MODEL_ID, DType, Device, LocalChatConfig
-from .prompts import _render_chat_prompt
-from .structured import _schema_instructions, _try_parse_structured_output
-from .tokenizer import _load_tokenizer
-from .types import MessageRole
-from .usage import record_llm_usage
+from todoist.llm.config import DType, LocalChatConfig
+from todoist.llm.prompts import _render_chat_prompt
+from todoist.llm.structured import _schema_instructions, _try_parse_structured_output
+from todoist.llm.tokenizer import _load_tokenizer
+from todoist.llm.types import MessageRole
+from todoist.llm.usage import record_llm_usage
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -71,15 +71,24 @@ class TransformersMistral3ChatModel:
         needs_fp8_scaling = hasattr(hf_config, "quantization_config")
         _strip_quantization_config(hf_config)
 
-        logger.info("Loading model: {} (device={}, dtype={})", config.model_id, config.device, config.dtype)
+        logger.info(
+            "Loading model: {} (device={}, dtype={})",
+            config.model_id,
+            config.device,
+            config.dtype,
+        )
         model_kwargs: dict[str, Any] = {"config": hf_config}
         if torch_dtype is not None:
             model_kwargs["torch_dtype"] = torch_dtype
 
         if getattr(hf_config, "model_type", None) == "mistral3":
-            model = Mistral3ForConditionalGeneration.from_pretrained(config.model_id, **model_kwargs)
+            model = Mistral3ForConditionalGeneration.from_pretrained(
+                config.model_id, **model_kwargs
+            )
         else:
-            model = AutoModelForCausalLM.from_pretrained(config.model_id, **model_kwargs)
+            model = AutoModelForCausalLM.from_pretrained(
+                config.model_id, **model_kwargs
+            )
         self._model = cast(_GenerativeModel, model)
         if config.device != "cpu":
             self._model = self._model.to(torch.device(config.device))
@@ -96,7 +105,10 @@ class TransformersMistral3ChatModel:
         logger.info("Model ready (device={})", self._model.device)
 
     def chat(self, messages: Sequence[dict[str, str]]) -> str:
-        logger.info("LLM chat messages:\n{}", json.dumps(list(messages), ensure_ascii=False, indent=2))
+        logger.info(
+            "LLM chat messages:\n{}",
+            json.dumps(list(messages), ensure_ascii=False, indent=2),
+        )
         prompt = _render_chat_prompt(messages, self._tokenizer)
         logger.debug("Rendered prompt ({} chars)", len(prompt))
         return self._generate_text(prompt, operation="chat")
@@ -116,7 +128,10 @@ class TransformersMistral3ChatModel:
         system_parts.append(schema_instruction)
         system_text = "\n".join(system_parts).strip()
         if system_text:
-            prompt_messages = [{"role": MessageRole.SYSTEM, "content": system_text}, *prompt_messages]
+            prompt_messages = [
+                {"role": MessageRole.SYSTEM, "content": system_text},
+                *prompt_messages,
+            ]
         logger.info(
             "LLM structured_chat schema={} messages:\n{}",
             schema.__name__,
@@ -162,10 +177,16 @@ class TransformersMistral3ChatModel:
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
         input_len = int(inputs["input_ids"].shape[-1])
 
-        resolved_do_sample = (self.config.temperature > 0) if do_sample is None else do_sample
-        resolved_temperature = self.config.temperature if temperature is None else temperature
+        resolved_do_sample = (
+            (self.config.temperature > 0) if do_sample is None else do_sample
+        )
+        resolved_temperature = (
+            self.config.temperature if temperature is None else temperature
+        )
         resolved_top_p = self.config.top_p if top_p is None else top_p
-        resolved_max_new_tokens = self.config.max_new_tokens if max_new_tokens is None else max_new_tokens
+        resolved_max_new_tokens = (
+            self.config.max_new_tokens if max_new_tokens is None else max_new_tokens
+        )
 
         generate_kwargs: dict[str, Any] = {
             **inputs,
@@ -181,9 +202,17 @@ class TransformersMistral3ChatModel:
             generated = self._model.generate(**generate_kwargs)
 
         new_tokens = generated[0][input_len:]
-        output_token_count = int(getattr(new_tokens, "shape", [len(new_tokens)])[-1]) if len(new_tokens) else 0
+        output_token_count = (
+            int(getattr(new_tokens, "shape", [len(new_tokens)])[-1])
+            if len(new_tokens)
+            else 0
+        )
         decoded_text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
-        text = decoded_text.strip() if isinstance(decoded_text, str) else "".join(decoded_text).strip()
+        text = (
+            decoded_text.strip()
+            if isinstance(decoded_text, str)
+            else "".join(decoded_text).strip()
+        )
         record_llm_usage(
             backend="local",
             model_id=self.config.model_id,
@@ -230,7 +259,11 @@ def _maybe_token_id(tokenizer: PreTrainedTokenizerBase, token: str) -> int | Non
         token_id = convert(token)
         if isinstance(token_id, int):
             return token_id
-        if isinstance(token_id, list) and len(token_id) == 1 and isinstance(token_id[0], int):
+        if (
+            isinstance(token_id, list)
+            and len(token_id) == 1
+            and isinstance(token_id[0], int)
+        ):
             return token_id[0]
     return None
 
@@ -242,7 +275,9 @@ def _load_config(model_id: str):
         if "ministral3" not in str(exc):
             raise
 
-    repo_path = Path(snapshot_download(repo_id=model_id, allow_patterns=["config.json"]))
+    repo_path = Path(
+        snapshot_download(repo_id=model_id, allow_patterns=["config.json"])
+    )
     cfg_dict = json.loads((repo_path / "config.json").read_text(encoding="utf-8"))
     text_cfg = cfg_dict.get("text_config")
     if isinstance(text_cfg, dict) and text_cfg.get("model_type") == "ministral3":
@@ -293,7 +328,11 @@ def _apply_fp8_weight_scales_inplace(
 
     weights_root = _resolve_weights_root(model_id)
     weight_map = _maybe_load_safetensors_index(weights_root)
-    available_keys = set(weight_map) if weight_map else _safetensors_keys(weights_root / "model.safetensors")
+    available_keys = (
+        set(weight_map)
+        if weight_map
+        else _safetensors_keys(weights_root / "model.safetensors")
+    )
 
     by_file: dict[Path, list[tuple[str, torch.nn.Parameter, str]]] = defaultdict(list)
     for name, param in candidate_params:
@@ -311,7 +350,9 @@ def _apply_fp8_weight_scales_inplace(
         with safe_open(str(file_path), framework="pt", device="cpu") as f:
             for name, param, scale_key in entries:
                 scale_inv = f.get_tensor(scale_key)
-                scaled = param.data.to(dtype=target_dtype) * scale_inv.to(dtype=target_dtype, device=param.device)
+                scaled = param.data.to(dtype=target_dtype) * scale_inv.to(
+                    dtype=target_dtype, device=param.device
+                )
                 param.data = scaled
                 converted += 1
 
@@ -329,7 +370,8 @@ def _resolve_weights_root(model_id: str) -> Path:
                 "*.safetensors",
                 "*.safetensors.index.json",
             ],
-        ))
+        )
+    )
 
 
 def _maybe_load_safetensors_index(weights_root: Path) -> dict[str, str] | None:
@@ -343,7 +385,9 @@ def _maybe_load_safetensors_index(weights_root: Path) -> dict[str, str] | None:
     return {str(k): str(v) for k, v in weight_map.items()}
 
 
-def _resolve_tensor_file(weights_root: Path, weight_map: dict[str, str] | None, tensor_key: str) -> Path:
+def _resolve_tensor_file(
+    weights_root: Path, weight_map: dict[str, str] | None, tensor_key: str
+) -> Path:
     if weight_map is None:
         file_path = weights_root / "model.safetensors"
         if not file_path.exists():
@@ -379,14 +423,16 @@ def _candidate_scale_keys(param_name: str) -> list[str]:
 
     bases: list[str] = [param_name]
     if param_name.startswith("model."):
-        bases.append(param_name[len("model."):])
+        bases.append(param_name[len("model.") :])
 
     candidates: list[str] = []
     for base in bases:
-        candidates.append(base[:-len(".weight")] + ".weight_scale_inv")
-        if base.startswith("language_model.") and not base.startswith("language_model.model."):
-            expanded = "language_model.model." + base[len("language_model."):]
-            candidates.append(expanded[:-len(".weight")] + ".weight_scale_inv")
+        candidates.append(base[: -len(".weight")] + ".weight_scale_inv")
+        if base.startswith("language_model.") and not base.startswith(
+            "language_model.model."
+        ):
+            expanded = "language_model.model." + base[len("language_model.") :]
+            candidates.append(expanded[: -len(".weight")] + ".weight_scale_inv")
 
     out: list[str] = []
     seen: set[str] = set()
@@ -418,7 +464,12 @@ def _upcast_float8_inplace(model: Any, *, target_dtype: torch.dtype) -> None:
 def _float8_dtypes() -> list[torch.dtype]:
     return [
         getattr(torch, name)
-        for name in ("float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz")
+        for name in (
+            "float8_e4m3fn",
+            "float8_e4m3fnuz",
+            "float8_e5m2",
+            "float8_e5m2fnuz",
+        )
         if hasattr(torch, name)
     ]
 

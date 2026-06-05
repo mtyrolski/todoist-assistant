@@ -9,4 +9,6 @@ class CodexDangerousFlag(StrEnum):
     BYPASS_HOOK_TRUST = "--dangerously-bypass-hook-trust"
 
 
-DANGEROUS_CODEX_FLAGS: Final[frozenset[CodexDangerousFlag]] = frozenset(CodexDangerousFlag)
+DANGEROUS_CODEX_FLAGS: Final[frozenset[CodexDangerousFlag]] = frozenset(
+    CodexDangerousFlag
+)

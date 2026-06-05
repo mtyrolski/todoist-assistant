@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-
 import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -14,6 +13,7 @@ from todoist.web.routes.common import _sync_api_globals
 
 router = APIRouter()
 
+
 @router.get("/api/admin/project_adjustments", tags=["admin"])
 async def admin_project_adjustments(
     file: str | None = None, refresh: bool = False
@@ -22,7 +22,11 @@ async def admin_project_adjustments(
     """Return mapping files, current mapping content, and project lists for building adjustments."""
 
     try:
-        selected = normalize_adjustment_filename(file) if file else _available_mapping_files()[0]
+        selected = (
+            normalize_adjustment_filename(file)
+            if file
+            else _available_mapping_files()[0]
+        )
         mappings, archived_parents = _load_mapping_file(selected)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -48,7 +52,9 @@ async def admin_project_adjustments(
         remappable_active_root = []
         warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
     source_projects = sorted(set(archived_names) | set(remappable_active_root))
-    unmapped_source_projects = [name for name in source_projects if name not in mappings]
+    unmapped_source_projects = [
+        name for name in source_projects if name not in mappings
+    ]
     archived_parents = sorted(
         [name for name in archived_parents if name in archived_names]
     )
@@ -66,6 +72,7 @@ async def admin_project_adjustments(
         "unmappedSourceProjects": unmapped_source_projects,
         "warning": warning,
     }
+
 
 @router.put("/api/admin/project_adjustments", tags=["admin"])
 async def admin_save_project_adjustments(
@@ -147,7 +154,9 @@ async def admin_save_project_adjustments(
                 try:
                     await _ensure_state(refresh=True)
                 except Exception as exc:  # pragma: no cover - network safety
-                    logger.warning(f"Failed refreshing dashboard state after saving adjustments: {exc}")
+                    logger.warning(
+                        f"Failed refreshing dashboard state after saving adjustments: {exc}"
+                    )
                     refresh_warning = (
                         f"Saved, but dashboard refresh failed ({type(exc).__name__})."
                     )
@@ -161,6 +170,7 @@ async def admin_save_project_adjustments(
         "warning": refresh_warning,
     }
 
+
 @router.get("/api/admin/llm_breakdown/settings", tags=["admin"])
 async def admin_llm_breakdown_settings() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -169,6 +179,7 @@ async def admin_llm_breakdown_settings() -> dict[str, Any]:
         "settings": _llm_breakdown_settings_payload(config),
         "basePrompt": BASE_SYSTEM_PROMPT,
     }
+
 
 @router.put("/api/admin/llm_breakdown/settings", tags=["admin"])
 async def admin_update_llm_breakdown_settings(
@@ -275,6 +286,7 @@ async def admin_update_llm_breakdown_settings(
         "basePrompt": BASE_SYSTEM_PROMPT,
     }
 
+
 @router.get("/api/admin/dashboard/settings", tags=["admin"])
 async def admin_dashboard_settings() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -303,6 +315,7 @@ async def admin_dashboard_settings() -> dict[str, Any]:
         ],
     }
 
+
 @router.get("/api/admin/dashboard/labels", tags=["admin"])
 async def admin_dashboard_labels() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -317,7 +330,9 @@ async def admin_dashboard_labels() -> dict[str, Any]:
                 "color": label_colors.get(name),
             }
         )
-    if not any(item["name"] == DEFAULT_URGENCY_SETTINGS["fire_label"] for item in labels):
+    if not any(
+        item["name"] == DEFAULT_URGENCY_SETTINGS["fire_label"] for item in labels
+    ):
         labels.append(
             {
                 "name": DEFAULT_URGENCY_SETTINGS["fire_label"],
@@ -326,6 +341,7 @@ async def admin_dashboard_labels() -> dict[str, Any]:
         )
     labels.sort(key=lambda item: item["name"].lower())
     return {"labels": labels}
+
 
 @router.put("/api/admin/dashboard/settings", tags=["admin"])
 async def admin_update_dashboard_settings(
@@ -345,7 +361,9 @@ async def admin_update_dashboard_settings(
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be an integer"
+            ) from exc
 
     if "enabled" in payload:
         urgency["enabled"] = bool(payload["enabled"])
@@ -363,7 +381,9 @@ async def admin_update_dashboard_settings(
     if "warnPriorityThresholds" in payload:
         thresholds = payload["warnPriorityThresholds"]
         if not isinstance(thresholds, Sequence):
-            raise HTTPException(status_code=400, detail="warnPriorityThresholds must be a list")
+            raise HTTPException(
+                status_code=400, detail="warnPriorityThresholds must be a list"
+            )
         urgency["warn_priority_thresholds"] = [
             _coerce_int(value, "warnPriorityThresholds") for value in thresholds
         ]
@@ -404,9 +424,18 @@ async def admin_update_dashboard_settings(
         if not isinstance(badge_labels, Mapping):
             raise HTTPException(status_code=400, detail="badgeLabels must be an object")
         urgency["badge_labels"] = {
-            "good": str(badge_labels.get("good") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]).strip(),
-            "warn": str(badge_labels.get("warn") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]).strip(),
-            "danger": str(badge_labels.get("danger") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]).strip(),
+            "good": str(
+                badge_labels.get("good")
+                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]
+            ).strip(),
+            "warn": str(
+                badge_labels.get("warn")
+                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]
+            ).strip(),
+            "danger": str(
+                badge_labels.get("danger")
+                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]
+            ).strip(),
         }
     normalized_events: list[dict[str, str]] = []
     if "plotEvents" in payload:
@@ -415,13 +444,17 @@ async def admin_update_dashboard_settings(
             raise HTTPException(status_code=400, detail="plotEvents must be a list")
         for item in plot_events:
             if not isinstance(item, Mapping):
-                raise HTTPException(status_code=400, detail="plotEvents entries must be objects")
+                raise HTTPException(
+                    status_code=400, detail="plotEvents entries must be objects"
+                )
             raw_date = str(item.get("date") or "").strip()
             raw_label = str(item.get("label") or "").strip()
             if not raw_date and not raw_label:
                 continue
             if not raw_date or not raw_label:
-                raise HTTPException(status_code=400, detail="plot event date and label are required")
+                raise HTTPException(
+                    status_code=400, detail="plot event date and label are required"
+                )
             parsed_date = _compute_plot_range(
                 _empty_activity_df(),
                 weeks=1,
@@ -468,11 +501,13 @@ async def admin_update_dashboard_settings(
         ],
     }
 
+
 @router.get("/api/admin/multiplication", tags=["admin"])
 async def admin_multiplication_settings() -> dict[str, Any]:
     _sync_api_globals(globals())
     config = _read_yaml_config(_AUTOMATIONS_PATH)
     return {"settings": _multiplication_settings_payload(config)}
+
 
 @router.put("/api/admin/multiplication", tags=["admin"])
 async def admin_update_multiplication_settings(
@@ -537,11 +572,13 @@ async def admin_update_multiplication_settings(
 
     return {"saved": True, "settings": _multiplication_settings_payload(config)}
 
+
 @router.get("/api/admin/stale_tasks", tags=["admin"])
 async def admin_stale_tasks_settings() -> dict[str, Any]:
     _sync_api_globals(globals())
     config = _read_yaml_config(_AUTOMATIONS_PATH)
     return {"settings": _stale_tasks_settings_payload(config)}
+
 
 @router.put("/api/admin/stale_tasks", tags=["admin"])
 async def admin_update_stale_tasks_settings(
@@ -587,7 +624,9 @@ async def admin_update_stale_tasks_settings(
     existing = OmegaConf.to_container(stale_cfg, resolve=False) if stale_cfg else {}
     if not isinstance(existing, dict):
         existing = {}
-    config_data = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    config_data = (
+        existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    )
     if not isinstance(config_data, Mapping):
         config_data = {}
     config_data = dict(config_data)
@@ -608,6 +647,7 @@ async def admin_update_stale_tasks_settings(
 
     return {"saved": True, "settings": _stale_tasks_settings_payload(config)}
 
+
 @router.get("/api/admin/templates", tags=["admin"])
 async def admin_templates() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -622,6 +662,7 @@ async def admin_templates() -> dict[str, Any]:
         for file in sorted(category_dir.glob("*.yaml")):
             templates.append(_template_summary(file))
     return {"templates": templates, "categories": sorted(categories)}
+
 
 @router.get("/api/admin/templates/{category}/{name}", tags=["admin"])
 async def admin_template_detail(category: str, name: str) -> dict[str, Any]:
@@ -642,6 +683,7 @@ async def admin_template_detail(category: str, name: str) -> dict[str, Any]:
         "label": f"template-{safe_name}",
         "template": _template_to_camel(template_payload),
     }
+
 
 @router.post("/api/admin/templates", tags=["admin"])
 async def admin_create_template(
@@ -690,6 +732,7 @@ async def admin_create_template(
 
     return {"created": True, "category": category, "name": name}
 
+
 @router.put("/api/admin/templates/{category}/{name}", tags=["admin"])
 async def admin_update_template(
     category: str,
@@ -711,6 +754,7 @@ async def admin_update_template(
     async with _ADMIN_LOCK:
         _save_yaml_config(path, OmegaConf.create(normalized))
     return {"saved": True, "category": safe_category, "name": safe_name}
+
 
 @router.delete("/api/admin/templates/{category}/{name}", tags=["admin"])
 async def admin_delete_template(category: str, name: str) -> dict[str, Any]:

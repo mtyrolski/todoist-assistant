@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from omegaconf import DictConfig, OmegaConf
 
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 
 DEFAULT_OBSERVER_SETTINGS: dict[str, Any] = {
     "enabled": True,
@@ -27,7 +27,9 @@ def load_dashboard_config(path: Path | None = None) -> DictConfig:
     loaded = OmegaConf.load(config_path)
     if isinstance(loaded, DictConfig):
         return loaded
-    return cast(DictConfig, OmegaConf.create(loaded if isinstance(loaded, Mapping) else {}))
+    return cast(
+        DictConfig, OmegaConf.create(loaded if isinstance(loaded, Mapping) else {})
+    )
 
 
 def _config_path_label(path: Path) -> str:
@@ -38,7 +40,9 @@ def _config_path_label(path: Path) -> str:
         return str(path)
 
 
-def observer_settings_payload(config: DictConfig, *, path: Path | None = None) -> dict[str, Any]:
+def observer_settings_payload(
+    config: DictConfig, *, path: Path | None = None
+) -> dict[str, Any]:
     raw = config.get("observer") if hasattr(config, "get") else None
     data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
     if not isinstance(data, dict):
@@ -66,7 +70,9 @@ def update_observer_settings(
 ) -> dict[str, Any]:
     current = config.get("observer") if hasattr(config, "get") else None
     if isinstance(current, DictConfig):
-        observer_cfg = cast(dict[str, Any], OmegaConf.to_container(current, resolve=False) or {})
+        observer_cfg = cast(
+            dict[str, Any], OmegaConf.to_container(current, resolve=False) or {}
+        )
     elif isinstance(current, Mapping):
         observer_cfg = dict(current)
     else:

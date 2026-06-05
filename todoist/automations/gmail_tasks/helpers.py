@@ -16,7 +16,9 @@ def format_gmail_date(value: dt.date) -> str:
     return f"{value.year}/{value.month}/{value.day}"
 
 
-def build_gmail_inbox_query(*, lookback_days: int | None, today: dt.date | None = None) -> str:
+def build_gmail_inbox_query(
+    *, lookback_days: int | None, today: dt.date | None = None
+) -> str:
     """Build Gmail query targeting unread inbox messages, optionally time-bounded."""
     query_parts = ["in:inbox", "is:unread"]
     if lookback_days is None:
@@ -35,10 +37,10 @@ def normalize_gmail_headers(headers: list[GmailHeaderRecord] | None) -> GmailHea
     """Normalize Gmail headers into a lowercase name->value map."""
     normalized: GmailHeaderMap = {}
     for header in headers or []:
-        name = str(header.get(C.GmailKey.NAME, '')).strip().lower()
+        name = str(header.get(C.GmailKey.NAME, "")).strip().lower()
         if not name:
             continue
-        normalized[name] = str(header.get(C.GmailKey.VALUE, ''))
+        normalized[name] = str(header.get(C.GmailKey.VALUE, ""))
     return normalized
 
 
@@ -50,29 +52,36 @@ def email_matches_keywords(subject: str, snippet: str, keywords: Sequence[str]) 
 def extract_task_data(subject: str, snippet: str, sender: str) -> ExtractedTaskData:
     """Create Todoist task fields from Gmail subject/snippet/sender."""
     content = subject.strip()
-    content = re.sub(r'^(?:(?:re|fwd?):\s*)+', '', content, flags=re.IGNORECASE).strip()
+    content = re.sub(r"^(?:(?:re|fwd?):\s*)+", "", content, flags=re.IGNORECASE).strip()
 
     if not content:
-        fallback = re.sub(r'\s+', ' ', snippet).strip()
+        fallback = re.sub(r"\s+", " ", snippet).strip()
         content = fallback[:120] if fallback else C.GmailText.EMAIL_FOLLOW_UP
 
     description = f"Email from: {sender}\n\nSnippet: {snippet}"
 
     priority = 1
-    urgent_keywords = ['urgent', 'asap', 'important', 'deadline', 'critical']
+    urgent_keywords = ["urgent", "asap", "important", "deadline", "critical"]
     content_lower = content.lower()
     snippet_lower = snippet.lower()
-    if any(keyword in content_lower or keyword in snippet_lower for keyword in urgent_keywords):
+    if any(
+        keyword in content_lower or keyword in snippet_lower
+        for keyword in urgent_keywords
+    ):
         priority = 3
 
-    return ExtractedTaskData(content=content, description=description, priority=priority)
+    return ExtractedTaskData(
+        content=content, description=description, priority=priority
+    )
 
 
 def gmail_message_id_marker(message_id: GmailMessageId) -> str:
     return f"{C.GmailText.MESSAGE_ID_PREFIX}{message_id}"
 
 
-def extract_gmail_message_id_from_description(description: str) -> GmailMessageId | None:
+def extract_gmail_message_id_from_description(
+    description: str,
+) -> GmailMessageId | None:
     for line in description.splitlines():
         line_stripped = line.strip()
         if line_stripped.startswith(C.GmailText.MESSAGE_ID_PREFIX):
@@ -81,7 +90,9 @@ def extract_gmail_message_id_from_description(description: str) -> GmailMessageI
     return None
 
 
-def append_gmail_message_id_to_description(description: str, message_id: GmailMessageId) -> str:
+def append_gmail_message_id_to_description(
+    description: str, message_id: GmailMessageId
+) -> str:
     marker_line = gmail_message_id_marker(message_id)
     if marker_line in description:
         return description

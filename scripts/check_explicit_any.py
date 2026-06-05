@@ -4,7 +4,6 @@ This keeps us from silencing type issues with throwaway variable annotations whi
 still allowing ``Any`` where it is part of a function signature or a structured type.
 """
 
-
 import ast
 from dataclasses import dataclass
 from pathlib import Path

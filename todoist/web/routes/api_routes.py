@@ -1,6 +1,5 @@
 """FastAPI route aggregator for the web API."""
 
-
 from fastapi import APIRouter
 
 from todoist.web.routes.admin_settings import router as _admin_settings_router

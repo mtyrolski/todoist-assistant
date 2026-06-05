@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,7 +43,9 @@ def generate_breakdowns(
         return [future.result() for future in futures]
 
 
-def _generate_breakdown_result(*, llm: Any, request: PreparedBreakdownRequest) -> BreakdownGenerationResult:
+def _generate_breakdown_result(
+    *, llm: Any, request: PreparedBreakdownRequest
+) -> BreakdownGenerationResult:
     logger.debug(
         "Submitting breakdown task {} (variant={}, depth={}, source={})",
         request.task.id,
@@ -56,10 +57,15 @@ def _generate_breakdown_result(*, llm: Any, request: PreparedBreakdownRequest) -
         breakdown = llm.structured_chat(request.messages, TaskBreakdown)
         if breakdown.children:
             return BreakdownGenerationResult(request=request, breakdown=breakdown)
-        logger.warning("Breakdown request for task {} returned no children; retrying", request.task.id)
+        logger.warning(
+            "Breakdown request for task {} returned no children; retrying",
+            request.task.id,
+        )
         return BreakdownGenerationResult(
             request=request,
-            breakdown=llm.structured_chat(_non_empty_retry_messages(request), TaskBreakdown),
+            breakdown=llm.structured_chat(
+                _non_empty_retry_messages(request), TaskBreakdown
+            ),
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Breakdown request failed for task {}", request.task.id)
@@ -70,7 +76,9 @@ def _generate_breakdown_result(*, llm: Any, request: PreparedBreakdownRequest) -
         )
 
 
-def _non_empty_retry_messages(request: PreparedBreakdownRequest) -> list[dict[str, str]]:
+def _non_empty_retry_messages(
+    request: PreparedBreakdownRequest,
+) -> list[dict[str, str]]:
     messages = [dict(message) for message in request.messages]
     retry_instruction = (
         "The previous rollout had no children. Return strict JSON with a non-empty "
@@ -79,6 +87,8 @@ def _non_empty_retry_messages(request: PreparedBreakdownRequest) -> list[dict[st
     )
     for message in messages:
         if str(message.get("role") or "").strip().lower() == "system":
-            message["content"] = f"{message.get('content', '').strip()} {retry_instruction}".strip()
+            message["content"] = (
+                f"{message.get('content', '').strip()} {retry_instruction}".strip()
+            )
             return messages
     return [{"role": "system", "content": retry_instruction}, *messages]

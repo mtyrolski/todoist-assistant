@@ -7,7 +7,12 @@ from pydantic import BaseModel
 
 from todoist.agent.constants import NodeName, PlannerAction
 from todoist.agent.graph_nodes.naming import GraphNodeName
-from todoist.agent.graph import AgentState, InstructionSelection, PlannerDecision, build_agent_graph
+from todoist.agent.graph import (
+    AgentState,
+    InstructionSelection,
+    PlannerDecision,
+    build_agent_graph,
+)
 from todoist.llm.types import MessageRole
 
 
@@ -31,11 +36,21 @@ class FakeLLM:
             if self.planner_calls == 1:
                 return cast(
                     T,
-                    PlannerDecision(plan=["compute"], action=PlannerAction.TOOL, tool_code="1+1", final_answer=None),
+                    PlannerDecision(
+                        plan=["compute"],
+                        action=PlannerAction.TOOL,
+                        tool_code="1+1",
+                        final_answer=None,
+                    ),
                 )
             return cast(
                 T,
-                PlannerDecision(plan=["answer"], action=PlannerAction.FINAL, tool_code=None, final_answer="done"),
+                PlannerDecision(
+                    plan=["answer"],
+                    action=PlannerAction.FINAL,
+                    tool_code=None,
+                    final_answer="done",
+                ),
             )
         raise AssertionError(f"Unexpected schema: {schema}")
 
@@ -55,8 +70,15 @@ def test_graph_runs_tool_then_outputs(tmp_path: Path):
         encoding="utf-8",
     )
 
-    graph = build_agent_graph(llm=FakeLLM(), python_repl=FakePythonTool(), prefabs_dir=prefabs_dir, max_tool_loops=3)
-    state: AgentState = {"messages": [{"role": MessageRole.USER, "content": "please do analysis"}]}
+    graph = build_agent_graph(
+        llm=FakeLLM(),
+        python_repl=FakePythonTool(),
+        prefabs_dir=prefabs_dir,
+        max_tool_loops=3,
+    )
+    state: AgentState = {
+        "messages": [{"role": MessageRole.USER, "content": "please do analysis"}]
+    }
     out = graph.invoke(state)
 
     assert out["selected_prefab_ids"] == ["analysis"]
@@ -64,8 +86,14 @@ def test_graph_runs_tool_then_outputs(tmp_path: Path):
     assert out["final_answer"] == "done"
     assert out["messages"][-1]["role"] == MessageRole.ASSISTANT
     assert out["messages"][-1]["content"] == "done"
-    assert any(m["role"] == MessageRole.ASSISTANT and "Calling python_repl" in m["content"] for m in out["messages"])
-    assert any(m["role"] == MessageRole.USER and "python_repl output" in m["content"] for m in out["messages"])
+    assert any(
+        m["role"] == MessageRole.ASSISTANT and "Calling python_repl" in m["content"]
+        for m in out["messages"]
+    )
+    assert any(
+        m["role"] == MessageRole.USER and "python_repl output" in m["content"]
+        for m in out["messages"]
+    )
 
 
 def test_default_graph_node_names_are_exposed_from_naming_module() -> None:
@@ -115,12 +143,24 @@ def test_graph_calls_instruction_selection_for_meta_query(tmp_path: Path):
                 self.selection_calls += 1
                 return cast(T, InstructionSelection(selected_ids=[]))
             if schema is PlannerDecision:
-                return cast(T, PlannerDecision(action=PlannerAction.FINAL, final_answer="hello", plan=[]))
+                return cast(
+                    T,
+                    PlannerDecision(
+                        action=PlannerAction.FINAL, final_answer="hello", plan=[]
+                    ),
+                )
             raise AssertionError(f"Unexpected schema: {schema}")
 
     llm = PlannerOnlyLLM()
-    graph = build_agent_graph(llm=llm, python_repl=FakePythonTool(), prefabs_dir=prefabs_dir, max_tool_loops=1)
-    out = graph.invoke(cast(AgentState, {"messages": [{"role": MessageRole.USER, "content": "hi, who are you"}]}))
+    graph = build_agent_graph(
+        llm=llm, python_repl=FakePythonTool(), prefabs_dir=prefabs_dir, max_tool_loops=1
+    )
+    out = graph.invoke(
+        cast(
+            AgentState,
+            {"messages": [{"role": MessageRole.USER, "content": "hi, who are you"}]},
+        )
+    )
     assert llm.selection_calls == 1
     assert out["selected_prefab_ids"] == []
     assert out["final_answer"] == "hello"
@@ -144,9 +184,24 @@ def test_graph_clears_bad_selection_for_meta_query(tmp_path: Path):
             if schema is InstructionSelection:
                 return cast(T, InstructionSelection(selected_ids=["status_update"]))
             if schema is PlannerDecision:
-                return cast(T, PlannerDecision(action=PlannerAction.FINAL, final_answer="hello", plan=[]))
+                return cast(
+                    T,
+                    PlannerDecision(
+                        action=PlannerAction.FINAL, final_answer="hello", plan=[]
+                    ),
+                )
             raise AssertionError(f"Unexpected schema: {schema}")
 
-    graph = build_agent_graph(llm=BadSelectorLLM(), python_repl=FakePythonTool(), prefabs_dir=prefabs_dir, max_tool_loops=1)
-    out = graph.invoke(cast(AgentState, {"messages": [{"role": MessageRole.USER, "content": "hi, who are you"}]}))
+    graph = build_agent_graph(
+        llm=BadSelectorLLM(),
+        python_repl=FakePythonTool(),
+        prefabs_dir=prefabs_dir,
+        max_tool_loops=1,
+    )
+    out = graph.invoke(
+        cast(
+            AgentState,
+            {"messages": [{"role": MessageRole.USER, "content": "hi, who are you"}]},
+        )
+    )
     assert out["selected_prefab_ids"] == []

@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from scripts.clear_local_env import clear_local_env, main
-from todoist.env import EnvVar
-from todoist.utils import RUNTIME_MIGRATABLE_FILENAMES
+from todoist.core.env import EnvVar
+from todoist.core.utils import RUNTIME_MIGRATABLE_FILENAMES
 
 
 def _write_runtime_files(root: Path) -> None:
@@ -28,7 +28,9 @@ def test_clear_local_env_removes_source_of_truth_runtime_files(tmp_path, monkeyp
     (cache_dir / "nested").mkdir(parents=True, exist_ok=True)
     (cache_dir / "nested" / "cache.txt").write_text("cache", encoding="utf-8")
     (cache_dir / "activity.joblib").write_text("activity", encoding="utf-8")
-    (cache_dir / "automation_run_signals.joblib").write_text("signals", encoding="utf-8")
+    (cache_dir / "automation_run_signals.joblib").write_text(
+        "signals", encoding="utf-8"
+    )
     (data_dir / "cache" / "nested").mkdir(parents=True, exist_ok=True)
     (data_dir / "cache" / "nested" / "cache.txt").write_text("cache", encoding="utf-8")
     (tmp_path / "keep.txt").write_text("keep", encoding="utf-8")

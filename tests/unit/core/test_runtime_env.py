@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from todoist.env import EnvVar
-from todoist.runtime_env import (
+from todoist.core.env import EnvVar
+from todoist.core.runtime_env import (
     load_local_dotenv,
     resolve_llm_backend,
     resolve_runtime_env_path,
@@ -23,13 +23,17 @@ def test_resolve_runtime_env_path_prefers_cache_dir(tmp_path: Path) -> None:
     assert env_path == cache_dir / ".env"
 
 
-def test_resolve_runtime_env_path_defaults_to_cwd_without_repo_root(tmp_path: Path) -> None:
+def test_resolve_runtime_env_path_defaults_to_cwd_without_repo_root(
+    tmp_path: Path,
+) -> None:
     env_path = resolve_runtime_env_path(cwd=tmp_path, environ={})
 
     assert env_path == tmp_path / ".env"
 
 
-def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(tmp_path: Path) -> None:
+def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(
+    tmp_path: Path,
+) -> None:
     data_dir = tmp_path / "data"
     cache_dir = tmp_path / "cache"
     data_dir.mkdir()
@@ -91,7 +95,9 @@ def test_resolve_triton_launch_settings_reads_saved_env(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    payload = resolve_triton_launch_settings(repo_root=tmp_path, cwd=tmp_path, environ={})
+    payload = resolve_triton_launch_settings(
+        repo_root=tmp_path, cwd=tmp_path, environ={}
+    )
 
     assert payload["model_id"] == "Qwen/Qwen2.5-3B-Instruct"
     assert payload["model_name"] == "todoist_llm"
@@ -107,7 +113,9 @@ def test_resolve_triton_launch_settings_falls_back_from_unsupported_model(
         encoding="utf-8",
     )
 
-    payload = resolve_triton_launch_settings(repo_root=tmp_path, cwd=tmp_path, environ={})
+    payload = resolve_triton_launch_settings(
+        repo_root=tmp_path, cwd=tmp_path, environ={}
+    )
 
     assert payload["model_id"] == "Qwen/Qwen2.5-3B-Instruct"
 

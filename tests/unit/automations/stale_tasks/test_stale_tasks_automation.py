@@ -5,7 +5,7 @@ from unittest.mock import patch
 from tests.factories import make_project, make_project_entry, make_task
 from todoist.automations.stale_tasks import StaleTasksAutomation
 from todoist.database.base import Database
-from todoist.utils import Cache
+from todoist.core.utils import Cache
 
 
 class _FakeDb:
@@ -85,7 +85,11 @@ def test_stale_tasks_automation_dry_run_reports_changes_without_updating(
 
     with patch(
         "todoist.automations.stale_tasks.automation.datetime",
-        type("_FixedDateTime", (), {"now": staticmethod(lambda: datetime(2025, 3, 20, 12, 0, 0))}),
+        type(
+            "_FixedDateTime",
+            (),
+            {"now": staticmethod(lambda: datetime(2025, 3, 20, 12, 0, 0))},
+        ),
     ):
         result = automation.tick(cast(Database, db))
 
@@ -119,7 +123,11 @@ def test_stale_tasks_automation_updates_labels_and_respects_cap(
 
     with patch(
         "todoist.automations.stale_tasks.automation.datetime",
-        type("_FixedDateTime", (), {"now": staticmethod(lambda: datetime(2025, 3, 20, 12, 0, 0))}),
+        type(
+            "_FixedDateTime",
+            (),
+            {"now": staticmethod(lambda: datetime(2025, 3, 20, 12, 0, 0))},
+        ),
     ):
         result = automation.tick(cast(Database, db))
 
@@ -140,7 +148,9 @@ def test_stale_tasks_automation_is_idempotent_after_updates(
         [
             make_project(
                 project_id="project-1",
-                project_entry=make_project_entry(project_id="project-1", name="Backlog"),
+                project_entry=make_project_entry(
+                    project_id="project-1", name="Backlog"
+                ),
                 tasks=[
                     make_task(
                         "task-old",
@@ -168,7 +178,11 @@ def test_stale_tasks_automation_is_idempotent_after_updates(
 
     with patch(
         "todoist.automations.stale_tasks.automation.datetime",
-        type("_FixedDateTime", (), {"now": staticmethod(lambda: datetime(2025, 3, 20, 12, 0, 0))}),
+        type(
+            "_FixedDateTime",
+            (),
+            {"now": staticmethod(lambda: datetime(2025, 3, 20, 12, 0, 0))},
+        ),
     ):
         result = automation.tick(cast(Database, db))
 
@@ -192,7 +206,9 @@ def test_stale_tasks_automation_removes_task_after_warning_grace_period(
         [
             make_project(
                 project_id="project-1",
-                project_entry=make_project_entry(project_id="project-1", name="Backlog"),
+                project_entry=make_project_entry(
+                    project_id="project-1", name="Backlog"
+                ),
                 tasks=[task],
             )
         ]

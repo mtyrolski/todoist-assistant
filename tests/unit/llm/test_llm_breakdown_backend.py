@@ -1,11 +1,12 @@
 """Tests for AI breakdown backend selection."""
 
+from typing import Any, cast
+
 import pytest
-from typing import cast
 
 from todoist.automations.llm_breakdown.automation import LLMBreakdown
 from todoist.database.base import Database
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 
 
 def test_breakdown_uses_codex_backend_from_env(monkeypatch, tmp_path) -> None:
@@ -14,7 +15,7 @@ def test_breakdown_uses_codex_backend_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
     monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     class _FakeCodex:
         pass
@@ -24,7 +25,10 @@ def test_breakdown_uses_codex_backend_from_env(monkeypatch, tmp_path) -> None:
         captured["cwd"] = cwd
         return _FakeCodex()
 
-    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_codex_chat_model", _fake_codex_builder)
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.build_codex_chat_model",
+        _fake_codex_builder,
+    )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
@@ -51,7 +55,9 @@ def test_breakdown_tick_noops_when_backend_is_disabled(monkeypatch, tmp_path) ->
     monkeypatch.setattr(
         automation,
         "get_llm",
-        lambda: (_ for _ in ()).throw(AssertionError("disabled backend must not load an LLM")),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("disabled backend must not load an LLM")
+        ),
     )
 
     class _FakeDb:
@@ -83,7 +89,7 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     monkeypatch.delenv(str(EnvVar.AGENT_CODEX_MODEL), raising=False)
     monkeypatch.chdir(tmp_path)
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     class _FakeCodex:
         pass
@@ -93,7 +99,10 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
         captured["cwd"] = cwd
         return _FakeCodex()
 
-    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_codex_chat_model", _fake_codex_builder)
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.build_codex_chat_model",
+        _fake_codex_builder,
+    )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
@@ -121,7 +130,7 @@ def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> No
     monkeypatch.setenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK", "codex")
     monkeypatch.chdir(tmp_path)
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     class _FakeCodex:
         pass
@@ -132,10 +141,18 @@ def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> No
         return _FakeCodex()
 
     def _unexpected_triton_builder(**kwargs):
-        raise AssertionError(f"Triton must not be constructed under a Codex launch lock: {kwargs}")
+        raise AssertionError(
+            f"Triton must not be constructed under a Codex launch lock: {kwargs}"
+        )
 
-    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_codex_chat_model", _fake_codex_builder)
-    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_triton_chat_model", _unexpected_triton_builder)
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.build_codex_chat_model",
+        _fake_codex_builder,
+    )
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.build_triton_chat_model",
+        _unexpected_triton_builder,
+    )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
@@ -153,7 +170,7 @@ def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), "todoist_llm")
     monkeypatch.setenv(str(EnvVar.AGENT_MODEL_ID), "Qwen/Qwen2.5-0.5B-Instruct")
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     class _FakeTriton:
         pass
@@ -162,7 +179,10 @@ def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
         captured["config"] = kwargs
         return _FakeTriton()
 
-    monkeypatch.setattr("todoist.automations.llm_breakdown.automation.build_triton_chat_model", _fake_triton_builder)
+    monkeypatch.setattr(
+        "todoist.automations.llm_breakdown.automation.build_triton_chat_model",
+        _fake_triton_builder,
+    )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()

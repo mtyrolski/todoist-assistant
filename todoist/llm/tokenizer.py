@@ -23,7 +23,8 @@ def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
                 "tokenizer_config.json",
                 "special_tokens_map.json",
             ],
-        ))
+        )
+    )
     tokenizer_json = repo_path / "tokenizer.json"
     tokenizer_config_path = repo_path / "tokenizer_config.json"
 
@@ -34,8 +35,12 @@ def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
             value = tokenizer_cfg.get(key)
             if isinstance(value, str) and value:
                 init_kwargs[key] = value
-        additional = tokenizer_cfg.get("additional_special_tokens") or tokenizer_cfg.get("extra_special_tokens")
+        additional = tokenizer_cfg.get(
+            "additional_special_tokens"
+        ) or tokenizer_cfg.get("extra_special_tokens")
         if isinstance(additional, list):
-            init_kwargs["additional_special_tokens"] = [x for x in additional if isinstance(x, str) and x]
+            init_kwargs["additional_special_tokens"] = [
+                x for x in additional if isinstance(x, str) and x
+            ]
 
     return PreTrainedTokenizerFast(tokenizer_file=str(tokenizer_json), **init_kwargs)

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Create nested Todoist task trees from inline JSON."""
 
-
 import argparse
 import json
 import sys
@@ -9,7 +8,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from todoist.task_tree_import import (
+from todoist.features.task_tree_import import (
     create_task_tree_from_json,
     load_task_tree_json,
     normalize_task_tree_payload,
@@ -60,7 +59,9 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--json", help="Inline JSON payload.")
     source.add_argument("--file", type=Path, help="Path to a JSON payload.")
-    parser.add_argument("--project-id", help="Override projectId from the JSON payload.")
+    parser.add_argument(
+        "--project-id", help="Override projectId from the JSON payload."
+    )
     parser.add_argument(
         "--env",
         default=".env",

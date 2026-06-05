@@ -1,5 +1,3 @@
-
-
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha1
@@ -7,7 +5,7 @@ from typing import Any, Sequence, cast
 
 import pandas as pd
 
-from todoist.types import Project
+from todoist.core.types import Project
 
 TRACK_HABIT_LABEL = "track_habit"
 DEFAULT_HABIT_HISTORY_WEEKS = 8
@@ -50,11 +48,15 @@ def extract_tracked_habit_tasks(
                     project_color=str(project.project_entry.color),
                 )
             )
-    tracked.sort(key=lambda item: (item.project_name.lower(), item.content.lower(), item.task_id))
+    tracked.sort(
+        key=lambda item: (item.project_name.lower(), item.content.lower(), item.task_id)
+    )
     return tracked
 
 
-def last_full_week_bounds(anchor: datetime | None = None) -> tuple[datetime, datetime, str]:
+def last_full_week_bounds(
+    anchor: datetime | None = None,
+) -> tuple[datetime, datetime, str]:
     reference = anchor or datetime.now()
     week_start = datetime.combine(
         reference.date() - timedelta(days=reference.weekday()),
@@ -208,7 +210,9 @@ def render_habit_comment(task_summary: dict[str, Any], *, period_label: str) -> 
     )
 
 
-def habit_comment_fingerprint(task_summary: dict[str, Any], *, period_label: str) -> str:
+def habit_comment_fingerprint(
+    task_summary: dict[str, Any], *, period_label: str
+) -> str:
     payload = (
         f"{period_label}|{task_summary.get('taskId')}|"
         f"{task_summary.get('weeklyCompleted')}|{task_summary.get('weeklyRescheduled')}|"

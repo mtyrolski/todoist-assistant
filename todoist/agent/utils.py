@@ -1,6 +1,5 @@
 """Small helpers for the agent graph."""
 
-
 from collections.abc import Sequence
 
 from todoist.agent.constants import PLANNER_PROMPT, SYSTEM_PROMPT, TOOL_PROMPT

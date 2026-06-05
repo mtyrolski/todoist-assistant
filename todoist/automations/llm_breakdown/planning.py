@@ -1,4 +1,3 @@
-
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import json
@@ -12,7 +11,7 @@ from todoist.llm.llm_utils import (
     _render_ancestor_context,
 )
 from todoist.llm.types import MessageRole
-from todoist.types import Task
+from todoist.core.types import Task
 
 
 @dataclass(frozen=True)
@@ -65,9 +64,15 @@ def prepare_breakdown_request(
         variant_key, variant_cfg = automation.resolve_variant(label)
     resolved_variant_cfg = dict(variant_cfg)
     max_depth = int(resolved_variant_cfg.get("max_depth", automation.max_depth))
-    max_children = int(resolved_variant_cfg.get("max_children", automation.max_children))
-    max_total_tasks = int(resolved_variant_cfg.get("max_total_tasks", automation.max_total_tasks))
-    queue_depth_limit = int(resolved_variant_cfg.get("queue_depth", automation.max_queue_depth))
+    max_children = int(
+        resolved_variant_cfg.get("max_children", automation.max_children)
+    )
+    max_total_tasks = int(
+        resolved_variant_cfg.get("max_total_tasks", automation.max_total_tasks)
+    )
+    queue_depth_limit = int(
+        resolved_variant_cfg.get("queue_depth", automation.max_queue_depth)
+    )
     instruction = resolved_variant_cfg.get("instruction")
     if queue_depth_limit > 0:
         max_allowed = max(1, queue_depth_limit - depth + 1)
@@ -142,7 +147,9 @@ def collect_candidates(
     for task in all_tasks:
         if task.id in queued_ids:
             continue
-        llm_label = find_llm_label(task.task_entry.labels, automation.label_prefix_lower)
+        llm_label = find_llm_label(
+            task.task_entry.labels, automation.label_prefix_lower
+        )
         if llm_label is None:
             continue
         failed_label_lower = getattr(automation, "failed_label_lower", "")

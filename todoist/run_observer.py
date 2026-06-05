@@ -6,15 +6,15 @@ from omegaconf import DictConfig
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
-from todoist.dashboard_settings import load_dashboard_config, observer_settings_payload
+from todoist.dashboard.settings import load_dashboard_config, observer_settings_payload
 from todoist.database.base import Database
-from todoist.utils import automation_log_path, configure_runtime_logging
+from todoist.core.utils import automation_log_path, configure_runtime_logging
 
 
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
     configure_runtime_logging(log_path=automation_log_path())
-    db = Database('.env')
+    db = Database(".env")
 
     # Instantiate activity automation explicitly to avoid cross-instantiation.
     activity_automation: Activity = hydra.utils.instantiate(config.activity)
@@ -28,6 +28,7 @@ def main(config: DictConfig) -> None:
         automations=short_automations,
         activity=activity_automation,
     )
+
     def _settings_provider() -> dict[str, object]:
         config = load_dashboard_config()
         payload = observer_settings_payload(config)
@@ -41,4 +42,4 @@ def main(config: DictConfig) -> None:
 
 if __name__ == "__main__":
     # pylint: disable=no-value-for-parameter
-    main() # pyright: ignore[reportCallIssue]
+    main()  # pyright: ignore[reportCallIssue]

@@ -8,7 +8,7 @@ from typing import Callable, cast
 import pandas as pd
 import plotly.graph_objects as go
 
-from todoist.types import Project
+from todoist.core.types import Project
 
 _BACKGROUND_COLOR = "#111318"
 _BORDER_COLOR = "rgba(17,19,24,0.92)"
@@ -324,7 +324,9 @@ def _build_trace(
     sizes = [point.size for point in points]
     colors = [point.node.color for point in points]
     text_values = [_bubble_text(point.node, point.size) for point in points]
-    line_colors = [_mix_color(point.node.color, "#ffffff", border_mix) for point in points]
+    line_colors = [
+        _mix_color(point.node.color, "#ffffff", border_mix) for point in points
+    ]
     customdata = [
         [
             point.node.node_id,
@@ -406,7 +408,9 @@ def _collect_active_descendants(
             collect(child_id, depth=depth + 1)
 
     collect(root_id, depth=1)
-    descendants.sort(key=lambda node: (-node.total_completed, node.depth, node.label.lower()))
+    descendants.sort(
+        key=lambda node: (-node.total_completed, node.depth, node.label.lower())
+    )
     return descendants
 
 
@@ -431,7 +435,9 @@ def plot_active_project_hierarchy(
     df_period = cast(pd.DataFrame, df[(df.index >= beg_date) & (df.index < end_date)])
     df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
     if df_completed.empty:
-        return _empty_project_hierarchy_figure("No completed tasks in the selected range")
+        return _empty_project_hierarchy_figure(
+            "No completed tasks in the selected range"
+        )
 
     projects_by_id = {str(project.id): project for project in active_projects}
     children_by_parent: dict[str, list[str]] = defaultdict(list)
@@ -445,8 +451,12 @@ def plot_active_project_hierarchy(
         children_by_parent[str(parent_id)].append(project_id)
 
     for child_ids in children_by_parent.values():
-        child_ids.sort(key=lambda project_id: projects_by_id[project_id].project_entry.name.lower())
-    root_ids.sort(key=lambda project_id: projects_by_id[project_id].project_entry.name.lower())
+        child_ids.sort(
+            key=lambda project_id: projects_by_id[project_id].project_entry.name.lower()
+        )
+    root_ids.sort(
+        key=lambda project_id: projects_by_id[project_id].project_entry.name.lower()
+    )
 
     direct_counts = {
         project_id: count
@@ -459,12 +469,17 @@ def plot_active_project_hierarchy(
     @lru_cache(maxsize=None)
     def subtree_total(project_id: str) -> int:
         return int(direct_counts.get(project_id, 0)) + sum(
-            subtree_total(child_id) for child_id in children_by_parent.get(project_id, [])
+            subtree_total(child_id)
+            for child_id in children_by_parent.get(project_id, [])
         )
 
-    active_root_ids = [project_id for project_id in root_ids if subtree_total(project_id) > 0]
+    active_root_ids = [
+        project_id for project_id in root_ids if subtree_total(project_id) > 0
+    ]
     if not active_root_ids:
-        return _empty_project_hierarchy_figure("No active project completions in the selected range")
+        return _empty_project_hierarchy_figure(
+            "No active project completions in the selected range"
+        )
 
     root_nodes = [
         _HierarchyNode(

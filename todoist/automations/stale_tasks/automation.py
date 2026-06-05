@@ -5,7 +5,7 @@ from loguru import logger
 
 from todoist.automations.base import Automation
 from todoist.database.base import Database
-from todoist.stale_tasks import (
+from todoist.features.stale_tasks import (
     StaleTaskConfig,
     StaleTaskDecision,
     StaleState,
@@ -14,7 +14,7 @@ from todoist.stale_tasks import (
     managed_stale_label_names,
     stale_label_for_state,
 )
-from todoist.utils import Cache
+from todoist.core.utils import Cache
 
 
 class StaleTasksAutomation(Automation):
@@ -160,9 +160,9 @@ class StaleTasksAutomation(Automation):
             seen_task_ids.add(task.id)
             decision = evaluate_task_staleness(task, now=now, config=self.config)
             if decision.state is StaleState.SKIP:
-                counts[f"skip_{decision.reason}"] = counts.get(
-                    f"skip_{decision.reason}", 0
-                ) + 1
+                counts[f"skip_{decision.reason}"] = (
+                    counts.get(f"skip_{decision.reason}", 0) + 1
+                )
                 continue
 
             counts[decision.state.value] = counts.get(decision.state.value, 0) + 1
@@ -191,7 +191,8 @@ class StaleTasksAutomation(Automation):
 
                 should_remove = (
                     current_warning_label is not None
-                    and now - tracked_at >= timedelta(days=self.config.delete_after_warning_days)
+                    and now - tracked_at
+                    >= timedelta(days=self.config.delete_after_warning_days)
                 )
                 if should_remove:
                     counts["remove"] += 1

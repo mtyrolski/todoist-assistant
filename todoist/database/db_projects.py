@@ -4,8 +4,8 @@ from typing import cast, Optional
 from loguru import logger
 from tqdm import tqdm
 from functools import partial
-from todoist.types import Project, Task, ProjectEntry, TaskEntry
-from todoist.utils import (
+from todoist.core.types import Project, Task, ProjectEntry, TaskEntry
+from todoist.core.utils import (
     TODOIST_COLOR_NAME_TO_RGB,
     safe_instantiate_entry,
     try_n_times,
@@ -22,10 +22,16 @@ class DatabaseProjects:
     def __init__(self):
         super().__init__()
         self._api_client = TodoistAPIClient()
-        self.archived_projects_cache: dict[str, Project] | None = None    # Not initialized yet
-        self.projects_cache: list[Project] | None = None    # Not initialized yet
-        self.mapping_project_id_to_root_cache: dict[str, Project] | None = None    # Not initialized yet
-        self.mapping_project_name_to_color: dict[str, str] | None = None    # Not initialized yet
+        self.archived_projects_cache: dict[str, Project] | None = (
+            None  # Not initialized yet
+        )
+        self.projects_cache: list[Project] | None = None  # Not initialized yet
+        self.mapping_project_id_to_root_cache: dict[str, Project] | None = (
+            None  # Not initialized yet
+        )
+        self.mapping_project_name_to_color: dict[str, str] | None = (
+            None  # Not initialized yet
+        )
 
     def pull(self):
         self.fetch_archived_projects()
@@ -56,13 +62,21 @@ class DatabaseProjects:
             logger.warning(f"Failed fetching archived projects: {exc}")
             self.archived_projects_cache = {}
             return []
-        entries = map(lambda raw_dict: safe_instantiate_entry(ProjectEntry, **raw_dict), data_dicts)
+        entries = map(
+            lambda raw_dict: safe_instantiate_entry(ProjectEntry, **raw_dict),
+            data_dicts,
+        )
         self.archived_projects_cache = {
-            entry.id: Project(id=entry.id, project_entry=entry, tasks=[], is_archived=True) for entry in entries
+            entry.id: Project(
+                id=entry.id, project_entry=entry, tasks=[], is_archived=True
+            )
+            for entry in entries
         }
         return list(self.archived_projects_cache.values())
 
-    def fetch_project_by_id(self, project_id: str, include_archived_in_search: bool = False) -> Project:
+    def fetch_project_by_id(
+        self, project_id: str, include_archived_in_search: bool = False
+    ) -> Project:
         """
         Does not include tasks. Falls back to the archived projects if the project is not found
         """
@@ -80,18 +94,26 @@ class DatabaseProjects:
                 if self.archived_projects_cache is None:
                     logger.info("Fetching archived projects")
                     archived = self.fetch_archived_projects()
-                    self.archived_projects_cache = {project.id: project for project in archived}
+                    self.archived_projects_cache = {
+                        project.id: project for project in archived
+                    }
                 archived_project = self.archived_projects_cache.get(project_id, None)
                 if archived_project is not None:
                     return archived_project
             raise
 
         if not isinstance(result_dict, dict):
-            logger.error(f"Unexpected payload returned when fetching project {project_id}")
-            raise RuntimeError(f"Todoist API returned invalid data for project {project_id}")
+            logger.error(
+                f"Unexpected payload returned when fetching project {project_id}"
+            )
+            raise RuntimeError(
+                f"Todoist API returned invalid data for project {project_id}"
+            )
 
         project = safe_instantiate_entry(ProjectEntry, **result_dict)
-        return Project(id=project.id, project_entry=project, tasks=[], is_archived=False)
+        return Project(
+            id=project.id, project_entry=project, tasks=[], is_archived=False
+        )
 
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
         logger.debug(f"Fetching projects (include_tasks={include_tasks})")
@@ -105,20 +127,32 @@ class DatabaseProjects:
 
         if not include_tasks:
             return list(
-                map(lambda project: Project(id=project.id, project_entry=project, tasks=[], is_archived=False),
-                    projects))
+                map(
+                    lambda project: Project(
+                        id=project.id,
+                        project_entry=project,
+                        tasks=[],
+                        is_archived=False,
+                    ),
+                    projects,
+                )
+            )
 
         def process_project(project: ProjectEntry) -> Project:
             task_entries: list[TaskEntry] = self.fetch_project_tasks(project.id)
-            tasks: list[Task] = [Task(id=task.id, task_entry=task) for task in task_entries]
-            return Project(id=project.id, project_entry=project, tasks=tasks, is_archived=False)
+            tasks: list[Task] = [
+                Task(id=task.id, task_entry=task) for task in task_entries
+            ]
+            return Project(
+                id=project.id, project_entry=project, tasks=tasks, is_archived=False
+            )
 
         def process_project_with_retry(project: ProjectEntry) -> Project:
             """Process project with built-in retry logic."""
             return with_retry(
                 partial(process_project, project),
                 operation_name=f"fetch project {project.id}",
-                max_attempts=RETRY_MAX_ATTEMPTS
+                max_attempts=RETRY_MAX_ATTEMPTS,
             )
 
         if not projects:
@@ -126,18 +160,23 @@ class DatabaseProjects:
             self.projects_cache = []
             return self.projects_cache
 
-        logger.info(f"Fetching {len(projects)} projects (include_tasks={include_tasks}) with thread pool")
+        logger.info(
+            f"Fetching {len(projects)} projects (include_tasks={include_tasks}) with thread pool"
+        )
         max_workers = min(get_max_concurrent_requests(), len(projects))
         ordered_results: list[Optional[Project]] = [None] * len(projects)
         total_projects = len(projects)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {executor.submit(process_project_with_retry, proj): idx for idx, proj in enumerate(projects)}
+            future_to_index = {
+                executor.submit(process_project_with_retry, proj): idx
+                for idx, proj in enumerate(projects)
+            }
             for completed, future in enumerate(
                 tqdm(
                     as_completed(future_to_index),
                     total=total_projects,
-                    desc='Querying project data',
-                    unit='project',
+                    desc="Querying project data",
+                    unit="project",
                     position=0,
                     leave=True,
                 ),
@@ -146,18 +185,35 @@ class DatabaseProjects:
                 idx = future_to_index[future]
                 try:
                     proj_result = future.result(timeout=60)
-                except (RuntimeError, ValueError, OSError) as e:  # pragma: no cover - defensive narrow
-                    logger.error(f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}")
-                    proj_result = Project(id=projects[idx].id, project_entry=projects[idx], tasks=[], is_archived=False)
+                except (
+                    RuntimeError,
+                    ValueError,
+                    OSError,
+                ) as e:  # pragma: no cover - defensive narrow
+                    logger.error(
+                        f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}"
+                    )
+                    proj_result = Project(
+                        id=projects[idx].id,
+                        project_entry=projects[idx],
+                        tasks=[],
+                        is_archived=False,
+                    )
                 ordered_results[idx] = proj_result
-                logger.debug(f"Fetched tasks for project {proj_result.project_entry.name} ({idx+1}/{len(projects)})")
-                report_tqdm_progress("Querying project data", completed, total_projects, "project")
+                logger.debug(
+                    f"Fetched tasks for project {proj_result.project_entry.name} ({idx + 1}/{len(projects)})"
+                )
+                report_tqdm_progress(
+                    "Querying project data", completed, total_projects, "project"
+                )
 
         # Replace any remaining None with empty project shells (should be rare)
         for i, maybe_proj in enumerate(ordered_results):
             if maybe_proj is None:
                 pentry = projects[i]
-                ordered_results[i] = Project(id=pentry.id, project_entry=pentry, tasks=[], is_archived=False)
+                ordered_results[i] = Project(
+                    id=pentry.id, project_entry=pentry, tasks=[], is_archived=False
+                )
 
         result = cast(list[Project], ordered_results)  # ordered list of projects
 
@@ -174,42 +230,64 @@ class DatabaseProjects:
             spec, operation_name=f"get project tasks {project_id}"
         )
         if not isinstance(result_dict, dict):
-            raise RuntimeError(f"Unexpected payload returned when fetching project tasks {project_id}")
+            raise RuntimeError(
+                f"Unexpected payload returned when fetching project tasks {project_id}"
+            )
 
         tasks_data = result_dict.get("tasks")
         if not isinstance(tasks_data, list):
-            raise RuntimeError(f"Unexpected tasks payload returned when fetching project tasks {project_id}")
+            raise RuntimeError(
+                f"Unexpected tasks payload returned when fetching project tasks {project_id}"
+            )
 
         tasks: list[TaskEntry] = []
         for task in tasks_data:
             if not isinstance(task, dict):
-                raise RuntimeError(f"Unexpected task record returned when fetching project tasks {project_id}")
+                raise RuntimeError(
+                    f"Unexpected task record returned when fetching project tasks {project_id}"
+                )
             tasks.append(safe_instantiate_entry(TaskEntry, **task))
 
         return tasks
 
     def fetch_mapping_project_id_to_name(self) -> dict[str, str]:
         mapping: dict[str, str] = {
-            project.id: project.project_entry.name for project in self.fetch_projects(include_tasks=False)
+            project.id: project.project_entry.name
+            for project in self.fetch_projects(include_tasks=False)
         }
 
-        mapping.update({project.id: project.project_entry.name for project in self.fetch_archived_projects()})
+        mapping.update(
+            {
+                project.id: project.project_entry.name
+                for project in self.fetch_archived_projects()
+            }
+        )
         return mapping
 
     def fetch_mapping_project_name_to_id(self) -> dict[str, str]:
         mapping: dict[str, str] = {
-            project.project_entry.name: project.id for project in self.fetch_projects(include_tasks=False)
+            project.project_entry.name: project.id
+            for project in self.fetch_projects(include_tasks=False)
         }
 
-        mapping.update({project.project_entry.name: project.id for project in self.fetch_archived_projects()})
+        mapping.update(
+            {
+                project.project_entry.name: project.id
+                for project in self.fetch_archived_projects()
+            }
+        )
         return mapping
 
     def fetch_mapping_project_id_to_root(self) -> dict[str, "Project"]:
         if self.mapping_project_id_to_root_cache is not None:
             return self.mapping_project_id_to_root_cache
 
-        archived_projects = {project.id: project for project in self.fetch_archived_projects()}
-        projects = {project.id: project for project in self.fetch_projects(include_tasks=False)}
+        archived_projects = {
+            project.id: project for project in self.fetch_archived_projects()
+        }
+        projects = {
+            project.id: project for project in self.fetch_projects(include_tasks=False)
+        }
         all_projects = {**archived_projects, **projects}
         mapping_project_id_to_root: dict[str, Project] = {}
 
@@ -226,7 +304,12 @@ class DatabaseProjects:
         all_project_ids = list(all_projects.keys())
         total_projects = len(all_project_ids)
         for completed, project_id in enumerate(
-            tqdm(all_project_ids, total=total_projects, desc='Building project hierarchy', unit='project'),
+            tqdm(
+                all_project_ids,
+                total=total_projects,
+                desc="Building project hierarchy",
+                unit="project",
+            ),
             start=1,
         ):
             root_id = self._resolve_root_project_id_in_memory(
@@ -236,7 +319,9 @@ class DatabaseProjects:
                 fallback_root_cache=fallback_root_cache,
             )
             if root_id is None:
-                report_tqdm_progress("Building project hierarchy", completed, total_projects, "project")
+                report_tqdm_progress(
+                    "Building project hierarchy", completed, total_projects, "project"
+                )
                 continue
 
             root_project = all_projects.get(root_id)
@@ -245,7 +330,9 @@ class DatabaseProjects:
             if root_project is not None:
                 mapping_project_id_to_root[project_id] = root_project
 
-            report_tqdm_progress("Building project hierarchy", completed, total_projects, "project")
+            report_tqdm_progress(
+                "Building project hierarchy", completed, total_projects, "project"
+            )
 
         self.mapping_project_id_to_root_cache = mapping_project_id_to_root
         return self.mapping_project_id_to_root_cache
@@ -256,18 +343,28 @@ class DatabaseProjects:
         """
 
         mapping: dict[str, str] = {
-            project.id: project.project_entry.color for project in self.fetch_projects(include_tasks=False)
+            project.id: project.project_entry.color
+            for project in self.fetch_projects(include_tasks=False)
         }
 
-        mapping.update({project.id: project.project_entry.color for project in self.fetch_archived_projects()})
-        mapping.update({
-            project.id: TODOIST_COLOR_NAME_TO_RGB[project.project_entry.color]
-            for project in self.fetch_projects(include_tasks=False)
-        })
-        mapping.update({
-            project.id: TODOIST_COLOR_NAME_TO_RGB[project.project_entry.color]
-            for project in self.fetch_archived_projects()
-        })
+        mapping.update(
+            {
+                project.id: project.project_entry.color
+                for project in self.fetch_archived_projects()
+            }
+        )
+        mapping.update(
+            {
+                project.id: TODOIST_COLOR_NAME_TO_RGB[project.project_entry.color]
+                for project in self.fetch_projects(include_tasks=False)
+            }
+        )
+        mapping.update(
+            {
+                project.id: TODOIST_COLOR_NAME_TO_RGB[project.project_entry.color]
+                for project in self.fetch_archived_projects()
+            }
+        )
 
         self.mapping_project_name_to_color = mapping
 
@@ -282,7 +379,9 @@ class DatabaseProjects:
 
         id_to_color = self.fetch_mapping_project_id_to_color()
         id_to_name = self.fetch_mapping_project_id_to_name()
-        name_to_color = {id_to_name[project_id]: color for project_id, color in id_to_color.items()}
+        name_to_color = {
+            id_to_name[project_id]: color for project_id, color in id_to_color.items()
+        }
         self.mapping_project_name_to_color = name_to_color
         return name_to_color
 
@@ -321,7 +420,9 @@ class DatabaseProjects:
                 break
 
             if current_id in traversal_seen:
-                logger.warning(f"Detected project hierarchy cycle while resolving root for {project_id}")
+                logger.warning(
+                    f"Detected project hierarchy cycle while resolving root for {project_id}"
+                )
                 resolved_root_id = current_id
                 break
 
@@ -331,12 +432,16 @@ class DatabaseProjects:
             if current_project is None:
                 fallback_root = fallback_root_cache.get(current_id)
                 if current_id not in fallback_root_cache:
-                    fallback_root = try_n_times(partial(self.fetch_project_by_id, current_id, True), 3)
+                    fallback_root = try_n_times(
+                        partial(self.fetch_project_by_id, current_id, True), 3
+                    )
                     fallback_root_cache[current_id] = fallback_root
                     if fallback_root is not None:
                         fallback_root_cache[fallback_root.id] = fallback_root
 
-                resolved_root_id = fallback_root.id if fallback_root is not None else None
+                resolved_root_id = (
+                    fallback_root.id if fallback_root is not None else None
+                )
                 break
 
             parent_id = current_project.project_entry.parent_id
@@ -381,7 +486,9 @@ class DatabaseProjects:
                 rate_limited=True,
             )
             payload = self._api_client.request_json(spec, operation_name=operation_name)
-            page_results, next_cursor = self._extract_results_page(payload, operation_name=operation_name)
+            page_results, next_cursor = self._extract_results_page(
+                payload, operation_name=operation_name
+            )
             results.extend(page_results)
             if not next_cursor:
                 break
@@ -390,21 +497,33 @@ class DatabaseProjects:
         return results
 
     @staticmethod
-    def _extract_results_page(payload: object, *, operation_name: str) -> tuple[list[dict], str | None]:
+    def _extract_results_page(
+        payload: object, *, operation_name: str
+    ) -> tuple[list[dict], str | None]:
         if not isinstance(payload, dict):
-            raise RuntimeError(f"Unexpected payload type returned from {operation_name}: {type(payload).__name__}")
+            raise RuntimeError(
+                f"Unexpected payload type returned from {operation_name}: {type(payload).__name__}"
+            )
 
         raw_results = payload.get("results")
         if not isinstance(raw_results, list):
-            raise RuntimeError(f"Unexpected results payload returned from {operation_name}")
+            raise RuntimeError(
+                f"Unexpected results payload returned from {operation_name}"
+            )
 
         page_results = [item for item in raw_results if isinstance(item, dict)]
         if len(page_results) != len(raw_results):
-            raise RuntimeError(f"Unexpected non-object project record in {operation_name} response")
+            raise RuntimeError(
+                f"Unexpected non-object project record in {operation_name} response"
+            )
         next_cursor = payload.get("next_cursor")
         return page_results, str(next_cursor) if isinstance(next_cursor, str) else None
 
-    def anonymize_sub_db(self, project_mapping: dict[str, str], label_mapping: dict[str, str] | None = None):
+    def anonymize_sub_db(
+        self,
+        project_mapping: dict[str, str],
+        label_mapping: dict[str, str] | None = None,
+    ):
         logger.debug("Anonymizing projects in DatabaseProjects")
         if label_mapping is None:
             label_mapping = {}
@@ -412,7 +531,9 @@ class DatabaseProjects:
             logger.debug("Projects not fetched yet. Fetching now.")
             self.fetch_projects(include_tasks=True)
 
-        logger.debug(f"Project cache has {len(self.projects_cache) if self.projects_cache else 0} projects")
+        logger.debug(
+            f"Project cache has {len(self.projects_cache) if self.projects_cache else 0} projects"
+        )
         # Ensure the color mapping is initialized
 
         if not self.mapping_project_name_to_color:
@@ -420,14 +541,18 @@ class DatabaseProjects:
 
         mapping_ref = self.mapping_project_name_to_color
         if mapping_ref is None:
-            logger.error("Project name to color mapping not initialized; aborting anonymization.")
+            logger.error(
+                "Project name to color mapping not initialized; aborting anonymization."
+            )
             return
 
         projects_to_rename = list(self.projects_cache or [])
         if self.archived_projects_cache:
             projects_to_rename.extend(self.archived_projects_cache.values())
 
-        for ori_name, anonym_name in tqdm(project_mapping.items(), desc="Anonymizing projects", unit="project"):
+        for ori_name, anonym_name in tqdm(
+            project_mapping.items(), desc="Anonymizing projects", unit="project"
+        ):
             color = mapping_ref.pop(ori_name, None)
             if color is not None:
                 mapping_ref[anonym_name] = color

@@ -316,7 +316,10 @@ def test_plot_active_project_hierarchy_sunburst_folds_small_roots_into_other_roo
         datetime(2025, 3, 1),
         datetime(2025, 3, 22),
         active_projects,
-        {f"Root {idx + 1}": f"#{idx + 1}{idx + 1}{idx + 1}{idx + 1}{idx + 1}{idx + 1}" for idx in range(len(root_totals))},
+        {
+            f"Root {idx + 1}": f"#{idx + 1}{idx + 1}{idx + 1}{idx + 1}{idx + 1}{idx + 1}"
+            for idx in range(len(root_totals))
+        },
     )
 
     nodes = _sunburst_node_map(fig)

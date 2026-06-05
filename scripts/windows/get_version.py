@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 
 try:
-    from todoist.version import get_version as _get_version
+    from todoist.core.version import get_version as _get_version
 except ModuleNotFoundError:
     _get_version = None
 

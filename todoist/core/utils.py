@@ -20,10 +20,23 @@ from joblib import dump, load
 from loguru import logger
 from omegaconf import DictConfig
 
-from todoist.env import EnvVar
-T = TypeVar('T')
-LOCAL_STORAGE_EXCEPTIONS = (UnpicklingError, EOFError, ZlibError, LZMAError, FileNotFoundError, ValueError, TypeError,
-                            OSError, ImportError, AttributeError, ModuleNotFoundError, KeyError)
+from todoist.core.env import EnvVar
+
+T = TypeVar("T")
+LOCAL_STORAGE_EXCEPTIONS = (
+    UnpicklingError,
+    EOFError,
+    ZlibError,
+    LZMAError,
+    FileNotFoundError,
+    ValueError,
+    TypeError,
+    OSError,
+    ImportError,
+    AttributeError,
+    ModuleNotFoundError,
+    KeyError,
+)
 DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
 MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
 MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.3"
@@ -45,10 +58,14 @@ RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
     "llm_usage_stats.joblib",
 )
 RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
-RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
+RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = (
+    RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
+)
 _MIGRATED_CACHE_DIRS: set[str] = set()
 DEFAULT_LOG_LEVEL = "INFO"
-VALID_LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
+VALID_LOG_LEVELS = frozenset(
+    {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
+)
 API_KEY_PLACEHOLDERS = frozenset(
     {
         "put your api here",
@@ -144,7 +161,9 @@ def _should_isolate_runtime_log_path_for_pytest(resolved_log_path: str | None) -
     if getenv(str(EnvVar.CACHE_DIR)):
         return False
 
-    default_runtime_log = str((Path.cwd() / DEFAULT_CACHE_SUBDIR / "automation.log").resolve())
+    default_runtime_log = str(
+        (Path.cwd() / DEFAULT_CACHE_SUBDIR / "automation.log").resolve()
+    )
     return resolved_log_path == default_runtime_log
 
 
@@ -153,11 +172,15 @@ def _resolve_runtime_log_path(log_path: str | None) -> str | None:
     if not _should_isolate_runtime_log_path_for_pytest(resolved_log_path):
         return resolved_log_path
 
-    isolated_root = Path(tempfile.gettempdir()) / "todoist-assistant-pytest" / str(os.getpid())
+    isolated_root = (
+        Path(tempfile.gettempdir()) / "todoist-assistant-pytest" / str(os.getpid())
+    )
     return str((isolated_root / "automation.log").resolve())
 
 
-def configure_runtime_logging(log_path: str | None = None, level: str | None = None) -> None:
+def configure_runtime_logging(
+    log_path: str | None = None, level: str | None = None
+) -> None:
     resolved_level = get_log_level(level or DEFAULT_LOG_LEVEL)
     resolved_log_path = _resolve_runtime_log_path(log_path)
     signature = (resolved_log_path, resolved_level)
@@ -302,11 +325,15 @@ def safe_instantiate_entry(cls: Type[Any], **entry_kwargs):
 
     unexpected_fields = set(normalized_kwargs.keys()) - class_field_set
 
-    assert 'new_api_kwargs' in class_fields, f"kwargs field is not in {cls.__name__} class"
+    assert "new_api_kwargs" in class_fields, (
+        f"kwargs field is not in {cls.__name__} class"
+    )
 
     # write unexpected fields to kwargs
     filtered_kwargs = {k: v for k, v in normalized_kwargs.items() if k in class_fields}
-    unexpected_kwargs = {k: v for k, v in normalized_kwargs.items() if k in unexpected_fields}
+    unexpected_kwargs = {
+        k: v for k, v in normalized_kwargs.items() if k in unexpected_fields
+    }
     return cls(**filtered_kwargs, new_api_kwargs=unexpected_kwargs)
 
 
@@ -315,6 +342,7 @@ class LocalStorageError(Exception):
     Custom exception for LocalStorage-related errors.
     Logs the error message when the exception is instantiated.
     """
+
     def __init__(self, message: str):
         super().__init__(message)
         logger.error(f"LocalStorageError: {message}")
@@ -368,31 +396,61 @@ class Cache:
         if not explicit_path:
             migrate_legacy_runtime_files(self.path)
         Path(self.path).mkdir(parents=True, exist_ok=True)
-        self.activity = LocalStorage(join(self.path, 'activity.joblib'), set)
-        self.observer_state = LocalStorage(join(self.path, 'observer_state.joblib'), dict)
-        self.integration_launches = LocalStorage(join(self.path, 'integration_launches.joblib'), dict)
-        self.automation_launches = LocalStorage(join(self.path, 'automation_launches.joblib'), dict)
-        self.automation_run_signals = LocalStorage(join(self.path, 'automation_run_signals.joblib'), dict)
-        self.stale_task_warnings = LocalStorage(join(self.path, 'stale_task_warnings.joblib'), dict)
-        self.multiplication_label_usage = LocalStorage(join(self.path, 'multiplication_label_usage.joblib'), dict)
-        self.habit_tracker_posts = LocalStorage(join(self.path, 'habit_tracker_posts.joblib'), dict)
-        self.processed_gmail_messages = LocalStorage(join(self.path, 'processed_gmail_messages.joblib'), set)
-        self.dashboard_state = LocalStorage(join(self.path, 'dashboard_state.joblib'), dict)
-        self.llm_breakdown_progress = LocalStorage(join(self.path, 'llm_breakdown_progress.joblib'), dict)
-        self.llm_breakdown_queue = LocalStorage(join(self.path, 'llm_breakdown_queue.joblib'), dict)
-        self.llm_chat_queue = LocalStorage(join(self.path, 'llm_chat_queue.joblib'), list)
-        self.llm_chat_conversations = LocalStorage(join(self.path, 'llm_chat_conversations.joblib'), list)
-        self.llm_usage_stats = LocalStorage(join(self.path, 'llm_usage_stats.joblib'), dict)
+        self.activity = LocalStorage(join(self.path, "activity.joblib"), set)
+        self.observer_state = LocalStorage(
+            join(self.path, "observer_state.joblib"), dict
+        )
+        self.integration_launches = LocalStorage(
+            join(self.path, "integration_launches.joblib"), dict
+        )
+        self.automation_launches = LocalStorage(
+            join(self.path, "automation_launches.joblib"), dict
+        )
+        self.automation_run_signals = LocalStorage(
+            join(self.path, "automation_run_signals.joblib"), dict
+        )
+        self.stale_task_warnings = LocalStorage(
+            join(self.path, "stale_task_warnings.joblib"), dict
+        )
+        self.multiplication_label_usage = LocalStorage(
+            join(self.path, "multiplication_label_usage.joblib"), dict
+        )
+        self.habit_tracker_posts = LocalStorage(
+            join(self.path, "habit_tracker_posts.joblib"), dict
+        )
+        self.processed_gmail_messages = LocalStorage(
+            join(self.path, "processed_gmail_messages.joblib"), set
+        )
+        self.dashboard_state = LocalStorage(
+            join(self.path, "dashboard_state.joblib"), dict
+        )
+        self.llm_breakdown_progress = LocalStorage(
+            join(self.path, "llm_breakdown_progress.joblib"), dict
+        )
+        self.llm_breakdown_queue = LocalStorage(
+            join(self.path, "llm_breakdown_queue.joblib"), dict
+        )
+        self.llm_chat_queue = LocalStorage(
+            join(self.path, "llm_chat_queue.joblib"), list
+        )
+        self.llm_chat_conversations = LocalStorage(
+            join(self.path, "llm_chat_conversations.joblib"), list
+        )
+        self.llm_usage_stats = LocalStorage(
+            join(self.path, "llm_usage_stats.joblib"), dict
+        )
 
 
 class Anonymizable(ABC):
     def __init__(self):
         super().__init__()
-        logger.debug(f'Initializing {self.__class__.__name__}... somehow anonimizable')
+        logger.debug(f"Initializing {self.__class__.__name__}... somehow anonimizable")
         self.is_anonymized = False
 
     @abstractmethod
-    def _anonymize(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
+    def _anonymize(
+        self, project_mapping: dict[str, str], label_mapping: dict[str, str]
+    ):
         pass
 
     def anonymize(self, project_mapping: dict[str, str], label_mapping: dict[str, str]):
@@ -400,7 +458,7 @@ class Anonymizable(ABC):
         Anonymizes project and label names in the database.
         """
         if not self.is_anonymized:
-            logger.warning('Anonymizing data...')
+            logger.warning("Anonymizing data...")
             self._anonymize(project_mapping, label_mapping)
             self.is_anonymized = True
         else:
@@ -426,7 +484,7 @@ def get_api_key() -> str:
     return value
 
 
-U = TypeVar('U')
+U = TypeVar("U")
 
 # Retry configuration constants
 RETRY_MAX_ATTEMPTS = 3
@@ -500,7 +558,9 @@ def get_rate_pacing_jitter_max_seconds() -> float:
     return _get_positive_float_env(EnvVar.RATE_PACING_JITTER_MAX_SECONDS, default=0.0)
 
 
-def _resolve_retry_wait_seconds(exception: Exception, backoff_mean: float, backoff_std: float) -> float:
+def _resolve_retry_wait_seconds(
+    exception: Exception, backoff_mean: float, backoff_std: float
+) -> float:
     retry_after_seconds = getattr(exception, "retry_after_seconds", None)
     if retry_after_seconds is not None:
         try:
@@ -523,15 +583,18 @@ def try_n_times(fn: Callable[[], U], n) -> U | None:
         except Exception as e:  # pragma: no cover - logged and retried
             logger.error(f"Exception {e} occurred on attempt {attempt + 1}")
             if attempt < n - 1:
-                wait_time = 2**(attempt + 3)
+                wait_time = 2 ** (attempt + 3)
                 logger.debug(f"Waiting {wait_time} seconds before retrying...")
                 time.sleep(wait_time)
     return None
 
 
-def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMPTS,
-                       backoff_mean: float = RETRY_BACKOFF_MEAN,
-                       backoff_std: float = RETRY_BACKOFF_STD) -> U | None:
+def retry_with_backoff(
+    fn: Callable[[], U],
+    max_attempts: int = RETRY_MAX_ATTEMPTS,
+    backoff_mean: float = RETRY_BACKOFF_MEAN,
+    backoff_std: float = RETRY_BACKOFF_STD,
+) -> U | None:
     """
     Try to run a function with Gaussian backoff retry logic.
 
@@ -555,7 +618,9 @@ def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMP
                     f"Rate limit on attempt {attempt + 1}/{max_attempts}: {e}"
                 )
             else:
-                logger.error(f"Exception {e} occurred on attempt {attempt + 1}/{max_attempts}")
+                logger.error(
+                    f"Exception {e} occurred on attempt {attempt + 1}/{max_attempts}"
+                )
             if attempt < max_attempts - 1:
                 wait_time = _resolve_retry_wait_seconds(e, backoff_mean, backoff_std)
                 if retry_after_seconds is not None:
@@ -565,14 +630,20 @@ def retry_with_backoff(fn: Callable[[], U], max_attempts: int = RETRY_MAX_ATTEMP
                 time.sleep(wait_time)
     return None
 
+
 class MaxRetriesExceeded(Exception):
     """Custom exception to indicate that maximum retry attempts have been exceeded."""
+
     pass
 
-def with_retry(fn: Callable[[], U], operation_name: str = "operation",
-               max_attempts: int = RETRY_MAX_ATTEMPTS,
-               backoff_mean: float = RETRY_BACKOFF_MEAN,
-               backoff_std: float = RETRY_BACKOFF_STD) -> U:
+
+def with_retry(
+    fn: Callable[[], U],
+    operation_name: str = "operation",
+    max_attempts: int = RETRY_MAX_ATTEMPTS,
+    backoff_mean: float = RETRY_BACKOFF_MEAN,
+    backoff_std: float = RETRY_BACKOFF_STD,
+) -> U:
     """
     Wrapper that executes a function with retry logic and raises exception on failure.
 
@@ -591,7 +662,9 @@ def with_retry(fn: Callable[[], U], operation_name: str = "operation",
     """
     result = retry_with_backoff(fn, max_attempts, backoff_mean, backoff_std)
     if result is None:
-        raise MaxRetriesExceeded(f"Failed to execute {operation_name} after {max_attempts} retry attempts")
+        raise MaxRetriesExceeded(
+            f"Failed to execute {operation_name} after {max_attempts} retry attempts"
+        )
     return result
 
 
@@ -606,24 +679,24 @@ def load_config(config_name: str, config_path: str) -> DictConfig:
 
 
 TODOIST_COLOR_NAME_TO_RGB: dict[str, str] = {
-    'berry_red': '#B8255F',
-    'red': '#DC4C3E',
-    'orange': '#C77100',
-    'yellow': '#B29104',
-    'olive_green': '#949C31',
-    'lime_green': '#65A33A',
-    'green': '#369307',
-    'mint_green': '#42A393',
-    'teal': '#148FAD',
-    'sky_blue': '#319DC0',
-    'light_blue': '#6988A4',
-    'blue': '#4180FF',
-    'grape': '#692EC2',
-    'violet': '#CA3FEE',
-    'lavender': '#A4698C',
-    'magenta': '#E05095',
-    'salmon': '#C9766F',
-    'charcoal': '#808080',
-    'grey': '#999999',
-    'taupe': '#8F7A69'
+    "berry_red": "#B8255F",
+    "red": "#DC4C3E",
+    "orange": "#C77100",
+    "yellow": "#B29104",
+    "olive_green": "#949C31",
+    "lime_green": "#65A33A",
+    "green": "#369307",
+    "mint_green": "#42A393",
+    "teal": "#148FAD",
+    "sky_blue": "#319DC0",
+    "light_blue": "#6988A4",
+    "blue": "#4180FF",
+    "grape": "#692EC2",
+    "violet": "#CA3FEE",
+    "lavender": "#A4698C",
+    "magenta": "#E05095",
+    "salmon": "#C9766F",
+    "charcoal": "#808080",
+    "grey": "#999999",
+    "taupe": "#8F7A69",
 }

@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.request import urlopen
 from xml.etree import ElementTree
 
-from todoist.version import get_version
+from todoist.core.version import get_version
 
 SIGNING_CERT_ENV = "WINDOWS_SIGNING_CERTIFICATE"
 SIGNING_PASSWORD_ENV = "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
@@ -18,7 +18,9 @@ SIGNING_TIMESTAMP_ENV = "WINDOWS_SIGNING_TIMESTAMP_URL"
 SIGNTOOL_ENV = "WINDOWS_SIGNTOOL_PATH"
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+def _run(
+    cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None
+) -> None:
     try:
         result = subprocess.run(cmd, cwd=cwd, env=env, check=False)
     except FileNotFoundError as exc:
@@ -30,7 +32,7 @@ def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None 
 
 def _read_version(repo_root: Path) -> tuple[str, str]:
     _ = repo_root
-    return get_version(), "todoist.version"
+    return get_version(), "todoist.core.version"
 
 
 def _normalize_msi_version(version: str) -> str:
@@ -103,7 +105,9 @@ def _verify_sha256(path: Path, expected: str) -> None:
             digest.update(chunk)
     actual = digest.hexdigest()
     if actual.lower() != expected.lower():
-        raise RuntimeError(f"Checksum mismatch for {path.name}: expected {expected}, got {actual}")
+        raise RuntimeError(
+            f"Checksum mismatch for {path.name}: expected {expected}, got {actual}"
+        )
 
 
 def _stage_node_runtime(app_root: Path, node_version: str) -> None:
@@ -285,7 +289,9 @@ def _stage_dashboard(frontend_dir: Path, target_dir: Path) -> None:
     public_dir = frontend_dir / "public"
 
     if not standalone_dir.exists():
-        raise RuntimeError("Next.js standalone output not found. Ensure next.config.js sets output=standalone.")
+        raise RuntimeError(
+            "Next.js standalone output not found. Ensure next.config.js sets output=standalone."
+        )
 
     target_dir.mkdir(parents=True, exist_ok=True)
     frontend_target = target_dir
@@ -311,7 +317,9 @@ def _stage_dashboard(frontend_dir: Path, target_dir: Path) -> None:
         _copy_tree_merge(public_dir, frontend_target / "public")
 
     if not server_js.exists():
-        raise RuntimeError("Next.js standalone server.js missing from packaged frontend.")
+        raise RuntimeError(
+            "Next.js standalone server.js missing from packaged frontend."
+        )
 
 
 def _zip_frontend(frontend_root: Path, zip_path: Path) -> None:
@@ -372,7 +380,14 @@ def _check_install_path_lengths(app_root: Path, install_root: Path) -> None:
         )
 
 
-def _stage_assets(repo_root: Path, app_root: Path, config_stage: Path, *, include_dashboard: bool, node_version: str) -> None:
+def _stage_assets(
+    repo_root: Path,
+    app_root: Path,
+    config_stage: Path,
+    *,
+    include_dashboard: bool,
+    node_version: str,
+) -> None:
     configs_src = repo_root / "configs"
     if not configs_src.exists():
         raise RuntimeError("configs/ directory not found; required for runtime config")
@@ -408,12 +423,16 @@ def _stage_assets(repo_root: Path, app_root: Path, config_stage: Path, *, includ
         _zip_frontend(frontend_stage, app_root / "frontend.zip")
         shutil.rmtree(frontend_stage)
         if (app_root / "_frontend").exists() or (app_root / "frontend").exists():
-            raise RuntimeError("Frontend staging left an unpacked directory; aborting MSI build.")
+            raise RuntimeError(
+                "Frontend staging left an unpacked directory; aborting MSI build."
+            )
         if not (app_root / "frontend.zip").exists():
             raise RuntimeError("frontend.zip missing after staging dashboard.")
         node_exe = app_root / "node" / ("node.exe" if os.name == "nt" else "node")
         if not node_exe.exists():
-            raise RuntimeError("Bundled Node runtime missing; expected node executable under app_root/node.")
+            raise RuntimeError(
+                "Bundled Node runtime missing; expected node executable under app_root/node."
+            )
 
 
 def _build_msi(
@@ -479,7 +498,9 @@ def _build_msi(
     product_wxs = installer_dir / "product.wxs"
     components_wxs = installer_dir / "components.wxs"
     ui_wxs = installer_dir / "ui.wxs"
-    missing = [path for path in (product_wxs, components_wxs, ui_wxs) if not path.exists()]
+    missing = [
+        path for path in (product_wxs, components_wxs, ui_wxs) if not path.exists()
+    ]
     if missing:
         missing_str = ", ".join(str(path) for path in missing)
         raise RuntimeError(f"WiX installer files missing: {missing_str}")
@@ -512,7 +533,9 @@ def _build_msi(
 
     wixobjs = sorted(str(path) for path in wixobj_dir.glob("*.wixobj"))
     if not wixobjs:
-        raise RuntimeError("No WiX object files generated; candle.exe did not produce outputs")
+        raise RuntimeError(
+            "No WiX object files generated; candle.exe did not produce outputs"
+        )
 
     msi_path = dist_root / f"todoist-assistant-{msi_version}.msi"
     _run(
@@ -545,7 +568,11 @@ def _build_bundle(
     icon_path = bootstrapper_dir / "todoist-assistant.ico"
     license_path = bootstrapper_dir / "license.rtf"
 
-    missing = [path for path in (bundle_wxs, icon_path, license_path, vc_redist_path) if not path.exists()]
+    missing = [
+        path
+        for path in (bundle_wxs, icon_path, license_path, vc_redist_path)
+        if not path.exists()
+    ]
     if missing:
         missing_str = ", ".join(str(path) for path in missing)
         raise RuntimeError(f"Bootstrapper files missing: {missing_str}")
@@ -578,7 +605,9 @@ def _build_bundle(
 
     wixobjs = sorted(str(path) for path in wixobj_dir.glob("*.wixobj"))
     if not wixobjs:
-        raise RuntimeError("No WiX bundle object files generated; candle.exe did not produce outputs")
+        raise RuntimeError(
+            "No WiX bundle object files generated; candle.exe did not produce outputs"
+        )
 
     setup_path = dist_root / "TodoistAssistantSetup.exe"
     _run(
@@ -617,9 +646,19 @@ def _download_vc_redist(dist_root: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build the Todoist Assistant Windows MSI installer.")
-    parser.add_argument("--no-dashboard", action="store_true", help="Skip building/packaging the dashboard frontend.")
-    parser.add_argument("--node-version", default="20.11.1", help="Node.js version to bundle for the dashboard.")
+    parser = argparse.ArgumentParser(
+        description="Build the Todoist Assistant Windows MSI installer."
+    )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Skip building/packaging the dashboard frontend.",
+    )
+    parser.add_argument(
+        "--node-version",
+        default="20.11.1",
+        help="Node.js version to bundle for the dashboard.",
+    )
     args = parser.parse_args()
 
     if os.name != "nt":
@@ -648,8 +687,12 @@ def main() -> int:
     wix_tools = _resolve_wix_tools()
 
     if include_dashboard:
-        _require_command("node", "Install Node.js 20+ (includes npm), or pass --no-dashboard.")
-        npm_path = _require_command("npm", "Install Node.js 20+ (includes npm), or pass --no-dashboard.")
+        _require_command(
+            "node", "Install Node.js 20+ (includes npm), or pass --no-dashboard."
+        )
+        npm_path = _require_command(
+            "npm", "Install Node.js 20+ (includes npm), or pass --no-dashboard."
+        )
         print("Building dashboard...")
         _build_dashboard(repo_root / "frontend", npm_path=npm_path)
     elif not args.no_dashboard:
@@ -684,14 +727,20 @@ def main() -> int:
 
     app_root = pyinstaller_dist / "todoist-assistant"
     if not app_root.exists():
-        raise RuntimeError("PyInstaller output not found; expected onedir build under dist/windows/pyinstaller")
+        raise RuntimeError(
+            "PyInstaller output not found; expected onedir build under dist/windows/pyinstaller"
+        )
 
     if signtool_path and signing_config:
         cert_path, cert_password, timestamp_url = signing_config
         payload_exe = app_root / "todoist-assistant.exe"
         if not payload_exe.exists():
-            raise RuntimeError(f"Expected PyInstaller executable not found for signing: {payload_exe}")
-        _sign_with_signtool(signtool_path, payload_exe, cert_path, cert_password, timestamp_url)
+            raise RuntimeError(
+                f"Expected PyInstaller executable not found for signing: {payload_exe}"
+            )
+        _sign_with_signtool(
+            signtool_path, payload_exe, cert_path, cert_password, timestamp_url
+        )
 
     print("Staging runtime assets...")
     _stage_assets(
@@ -704,18 +753,26 @@ def main() -> int:
     _check_install_path_lengths(app_root, Path(r"C:\Program Files\TodoistAssistant"))
 
     print("Building MSI...")
-    msi_path = _build_msi(repo_root, dist_root, app_root, dist_root / "config", msi_version, wix_tools)
+    msi_path = _build_msi(
+        repo_root, dist_root, app_root, dist_root / "config", msi_version, wix_tools
+    )
     if signtool_path and signing_config:
         cert_path, cert_password, timestamp_url = signing_config
-        _sign_with_signtool(signtool_path, msi_path, cert_path, cert_password, timestamp_url)
+        _sign_with_signtool(
+            signtool_path, msi_path, cert_path, cert_password, timestamp_url
+        )
     print(f"MSI created: {msi_path}")
 
     print("Building setup.exe bootstrapper...")
     vc_redist_path = _download_vc_redist(dist_root)
-    setup_path = _build_bundle(repo_root, dist_root, msi_path, msi_version, vc_redist_path, wix_tools)
+    setup_path = _build_bundle(
+        repo_root, dist_root, msi_path, msi_version, vc_redist_path, wix_tools
+    )
     if signtool_path and signing_config:
         cert_path, cert_password, timestamp_url = signing_config
-        _sign_with_signtool(signtool_path, setup_path, cert_path, cert_password, timestamp_url)
+        _sign_with_signtool(
+            signtool_path, setup_path, cert_path, cert_password, timestamp_url
+        )
     print(f"Bootstrapper created: {setup_path}")
     return 0
 

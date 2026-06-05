@@ -8,7 +8,9 @@ from transformers import PreTrainedTokenizerBase
 from .types import MessageRole, PromptToken
 
 
-def _render_chat_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase) -> str:
+def _render_chat_prompt(
+    messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase
+) -> str:
     apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
     if callable(apply_chat_template):
         template_fn = cast(Callable[..., object], apply_chat_template)
@@ -43,7 +45,9 @@ def _render_chat_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTraine
     return _render_mistral_instruct_prompt(messages, tokenizer)
 
 
-def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase) -> str:
+def _render_mistral_instruct_prompt(
+    messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase
+) -> str:
     system_parts: list[str] = []
     turns: list[tuple[str, str | None]] = []
 
@@ -74,7 +78,9 @@ def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenize
     if not turns:
         raise ValueError("At least one user message is required")
     if turns[-1][1] is not None:
-        raise ValueError("Last user message must be unanswered (append user message before generating)")
+        raise ValueError(
+            "Last user message must be unanswered (append user message before generating)"
+        )
 
     bos = tokenizer.bos_token or PromptToken.BOS_FALLBACK
     eos = tokenizer.eos_token or PromptToken.EOS_FALLBACK
@@ -85,7 +91,9 @@ def _render_mistral_instruct_prompt(messages: Sequence[dict[str, str]], tokenize
     parts: list[str] = []
     for i, (user_text, assistant_text) in enumerate(turns):
         prefix = system_prefix if i == 0 else ""
-        inst = f"{bos}{PromptToken.INST_OPEN} {prefix}{user_text} {PromptToken.INST_CLOSE}"
+        inst = (
+            f"{bos}{PromptToken.INST_OPEN} {prefix}{user_text} {PromptToken.INST_CLOSE}"
+        )
         if assistant_text is None:
             parts.append(inst)
         else:

@@ -6,6 +6,8 @@
 *.pickle
 *.jl
 *.html
+.pytest_cache/
+.ruff_cache/
 scripts/*
 !scripts/windows/
 !scripts/windows/**

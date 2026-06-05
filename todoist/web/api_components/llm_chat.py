@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,line-too-long
 
-
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 import os
@@ -18,11 +17,15 @@ def _sync_api_globals():
         if name.startswith("__"):
             continue
         original = _ORIGINALS.get(name)
-        if original is not None and getattr(value, "_component_wrapper_for", None) == name:
+        if (
+            original is not None
+            and getattr(value, "_component_wrapper_for", None) == name
+        ):
             current[name] = original
         else:
             current[name] = value
     return web_api
+
 
 def _normalize_chat_message(raw: Any) -> dict[str, Any] | None:
     _sync_api_globals()
@@ -36,6 +39,8 @@ def _normalize_chat_message(raw: Any) -> dict[str, Any] | None:
         return None
     created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
     return {"role": role, "content": content, "created_at": created_at}
+
+
 def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
     _sync_api_globals()
     if not isinstance(raw, dict):
@@ -60,6 +65,8 @@ def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
         "updated_at": updated_at,
         "messages": messages,
     }
+
+
 def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
     _sync_api_globals()
     if not isinstance(raw, dict):
@@ -85,6 +92,8 @@ def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
         "finished_at": raw.get("finished_at") or raw.get("finishedAt"),
         "error": raw.get("error"),
     }
+
+
 def _load_llm_chat_conversations() -> list[dict[str, Any]]:
     _sync_api_globals()
     try:
@@ -100,12 +109,16 @@ def _load_llm_chat_conversations() -> list[dict[str, Any]]:
         if normalized:
             conversations.append(normalized)
     return conversations
+
+
 def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
     _sync_api_globals()
     try:
         Cache().llm_chat_conversations.save(conversations)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Failed to save LLM chat conversations: {exc}")
+
+
 def _load_llm_chat_queue() -> list[dict[str, Any]]:
     _sync_api_globals()
     try:
@@ -121,17 +134,23 @@ def _load_llm_chat_queue() -> list[dict[str, Any]]:
         if normalized:
             queue_items.append(normalized)
     return queue_items
+
+
 def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
     _sync_api_globals()
     try:
         Cache().llm_chat_queue.save(items)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Failed to save LLM chat queue: {exc}")
+
+
 def _truncate_text(value: str, limit: int = 120) -> str:
     _sync_api_globals()
     if len(value) <= limit:
         return value
     return value[: max(0, limit - 3)].rstrip() + "..."
+
+
 def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
     messages = conv.get("messages") or []
@@ -150,6 +169,8 @@ def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
         "messageCount": len(messages),
         "lastMessage": last_message,
     }
+
+
 def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
     return {
@@ -162,6 +183,8 @@ def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
         "finishedAt": item.get("finished_at"),
         "error": item.get("error"),
     }
+
+
 def _parse_iso_timestamp(value: Any) -> datetime | None:
     _sync_api_globals()
     if not value:
@@ -170,6 +193,8 @@ def _parse_iso_timestamp(value: Any) -> datetime | None:
         return datetime.fromisoformat(str(value))
     except ValueError:
         return None
+
+
 def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> bool:
     _sync_api_globals()
     changed = False
@@ -188,6 +213,8 @@ def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> boo
             item["error"] = "Timed out after 1h"
             changed = True
     return changed
+
+
 def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
     _sync_api_globals()
     if len(queue) <= _CHAT_QUEUE_LIMIT:
@@ -202,6 +229,8 @@ def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         trimmed.append(item)
     return trimmed
+
+
 def _available_llm_chat_devices() -> list[str]:
     _sync_api_globals()
     devices = ["cpu"]
@@ -213,6 +242,8 @@ def _available_llm_chat_devices() -> list[str]:
     except Exception:  # pragma: no cover - defensive
         pass
     return devices
+
+
 def _llm_model_options_payload(
     options: Sequence[Mapping[str, str]], selected: str
 ) -> list[dict[str, Any]]:
@@ -234,6 +265,8 @@ def _llm_model_options_payload(
     if selected and selected not in seen:
         payload.insert(0, {"id": selected, "label": selected, "selected": True})
     return payload
+
+
 def _model_option_ids(options: Sequence[Mapping[str, str]]) -> set[str]:
     _sync_api_globals()
     return {
@@ -241,6 +274,8 @@ def _model_option_ids(options: Sequence[Mapping[str, str]]) -> set[str]:
         for option in options
         if (option_id := _sanitize_text(option.get("id")))
     }
+
+
 def _coerce_model_option_id(
     raw: Any,
     *,
@@ -252,6 +287,8 @@ def _coerce_model_option_id(
     if model_id and model_id in _model_option_ids(options):
         return model_id
     return default
+
+
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
@@ -262,6 +299,8 @@ def _normalize_llm_chat_backend(raw: Any) -> str:
     if value in _LLM_CHAT_BACKEND_LABELS:
         return value
     return _LLM_CHAT_BACKEND_DEFAULT
+
+
 def _locked_llm_chat_backend() -> str | None:
     _sync_api_globals()
     value = str(os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK") or "").strip().lower()
@@ -272,6 +311,8 @@ def _locked_llm_chat_backend() -> str | None:
     if value in {"raw", "none"}:
         value = "disabled"
     return value if value in _LLM_CHAT_BACKEND_LABELS else None
+
+
 def _available_llm_chat_backends(backend: str) -> set[str]:
     _sync_api_globals()
     locked_backend = _locked_llm_chat_backend()
@@ -281,6 +322,8 @@ def _available_llm_chat_backends(backend: str) -> set[str]:
     if backend in _LLM_CHAT_BACKEND_LABELS:
         available.add(backend)
     return available
+
+
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
@@ -289,6 +332,8 @@ def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) ->
     if value in available_devices:
         return value
     return _LLM_CHAT_DEVICE_DEFAULT
+
+
 def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
     model = _coerce_model_option_id(
@@ -302,15 +347,24 @@ def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         "model": model,
         "modelOptions": _llm_model_options_payload(_CODEX_MODEL_OPTIONS, model),
     }
+
+
 def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
-    base_url = _sanitize_text(
-        os.getenv(str(EnvVar.AGENT_TRITON_URL)) or file_values.get(str(EnvVar.AGENT_TRITON_URL))
-    ) or DEFAULT_TRITON_URL
-    model_name = _sanitize_text(
-        os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-        or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-    ) or DEFAULT_TRITON_MODEL_NAME
+    base_url = (
+        _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_TRITON_URL))
+            or file_values.get(str(EnvVar.AGENT_TRITON_URL))
+        )
+        or DEFAULT_TRITON_URL
+    )
+    model_name = (
+        _sanitize_text(
+            os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
+            or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
+        )
+        or DEFAULT_TRITON_MODEL_NAME
+    )
     model_id = _coerce_model_option_id(
         os.getenv(str(EnvVar.AGENT_MODEL_ID))
         or file_values.get(str(EnvVar.AGENT_MODEL_ID)),
@@ -326,6 +380,8 @@ def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
         "modelId": model_id,
         "modelOptions": _llm_model_options_payload(_TRITON_MODEL_OPTIONS, model_id),
     }
+
+
 def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
     _sync_api_globals()
     base_url = _sanitize_text(triton_settings.get("baseUrl"))
@@ -340,6 +396,8 @@ def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
     except (httpx.HTTPError, ValueError):
         return False
     return True
+
+
 def _resolve_llm_chat_settings() -> dict[str, Any]:
     _sync_api_globals()
     env_path = _resolve_env_path()
@@ -356,7 +414,9 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     if locked_backend:
         backend = locked_backend
     available_backend_ids = _available_llm_chat_backends(backend)
-    triton_available = "triton_local" in available_backend_ids or backend == "triton_local"
+    triton_available = (
+        "triton_local" in available_backend_ids or backend == "triton_local"
+    )
     triton_settings = (
         _resolve_triton_settings(file_values)
         if triton_available
@@ -419,10 +479,14 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
         ),
         "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
     }
+
+
 def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
     public = dict(settings)
     return public
+
+
 def _build_llm_from_settings(
     settings: Mapping[str, Any],
     *,
@@ -436,7 +500,9 @@ def _build_llm_from_settings(
             raise ValueError("Triton settings are unavailable.")
         return build_triton_chat_model(
             base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
-            model_name=str(triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME),
+            model_name=str(
+                triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME
+            ),
             model_id=_coerce_model_option_id(
                 triton_settings.get("modelId"),
                 options=_TRITON_MODEL_OPTIONS,
@@ -451,6 +517,8 @@ def _build_llm_from_settings(
         return build_codex_chat_model(values, cwd=_REPO_ROOT)
 
     raise ValueError(f"Unsupported LLM backend: {backend}")
+
+
 def _build_chat_messages(
     conversation: dict[str, Any], user_content: str
 ) -> list[dict[str, str]]:
@@ -468,6 +536,8 @@ def _build_chat_messages(
             messages.append({"role": role, "content": str(content)})
     messages.append({"role": MessageRole.USER.value, "content": user_content})
     return messages
+
+
 async def _llm_chat_snapshot() -> dict[str, Any]:
     _sync_api_globals()
     enabled, loading = await _llm_chat_model_status()
@@ -543,9 +613,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         "device": {
             "selected": settings["device"],
             "label": settings["deviceLabel"],
-            "active": (
-                None
-            ),
+            "active": (None),
             "options": settings["availableDevices"],
             "envPath": settings["envPath"],
         },
@@ -562,5 +630,32 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         "conversations": summaries,
     }
 
-_COMPONENT_EXPORTS = ('_available_llm_chat_devices', '_build_chat_messages', '_build_llm_from_settings', '_conversation_summary', '_expire_llm_chat_queue', '_llm_chat_snapshot', '_llm_model_options_payload', '_load_llm_chat_conversations', '_load_llm_chat_queue', '_normalize_chat_conversation', '_normalize_chat_message', '_normalize_chat_queue_item', '_normalize_llm_chat_backend', '_normalize_llm_chat_device', '_parse_iso_timestamp', '_prune_queue', '_public_llm_chat_settings', '_queue_item_payload', '_resolve_codex_settings', '_resolve_llm_chat_settings', '_resolve_triton_settings', '_save_llm_chat_conversations', '_save_llm_chat_queue', '_triton_ready', '_truncate_text')
+
+_COMPONENT_EXPORTS = (
+    "_available_llm_chat_devices",
+    "_build_chat_messages",
+    "_build_llm_from_settings",
+    "_conversation_summary",
+    "_expire_llm_chat_queue",
+    "_llm_chat_snapshot",
+    "_llm_model_options_payload",
+    "_load_llm_chat_conversations",
+    "_load_llm_chat_queue",
+    "_normalize_chat_conversation",
+    "_normalize_chat_message",
+    "_normalize_chat_queue_item",
+    "_normalize_llm_chat_backend",
+    "_normalize_llm_chat_device",
+    "_parse_iso_timestamp",
+    "_prune_queue",
+    "_public_llm_chat_settings",
+    "_queue_item_payload",
+    "_resolve_codex_settings",
+    "_resolve_llm_chat_settings",
+    "_resolve_triton_settings",
+    "_save_llm_chat_conversations",
+    "_save_llm_chat_queue",
+    "_triton_ready",
+    "_truncate_text",
+)
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}

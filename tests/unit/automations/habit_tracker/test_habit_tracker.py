@@ -6,7 +6,7 @@ import pandas as pd
 from tests.factories import make_project, make_project_entry, make_task
 from todoist.automations.habit_tracker import HabitTracker
 from todoist.database.base import Database
-from todoist.habit_tracker import TrackedHabitTask, summarize_tracked_habits
+from todoist.features.habit_tracker import TrackedHabitTask, summarize_tracked_habits
 
 
 def _habit_df() -> pd.DataFrame:

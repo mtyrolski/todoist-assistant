@@ -2,7 +2,6 @@
 
 # pylint: disable=global-statement
 
-
 import asyncio
 import contextlib
 import io
@@ -35,14 +34,14 @@ from todoist.automations.gmail_tasks import (
 )
 from todoist.automations.observer import AutomationObserver
 from todoist.database.base import Database
-from todoist.dashboard_settings import (
+from todoist.dashboard.settings import (
     load_dashboard_config,
     observer_settings_payload,
     update_observer_settings,
 )
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 from todoist.llm import DEFAULT_MODEL_ID, DEFAULT_TRITON_MODEL_NAME, DEFAULT_TRITON_URL
-from todoist.utils import Cache, LocalStorageError, get_log_level, load_config
+from todoist.core.utils import Cache, LocalStorageError, get_log_level, load_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -172,7 +171,9 @@ def _allow_insecure_oauth_transport() -> Any:
 def _load_automations(*, config_dir: Path | None = None) -> list[Automation]:
     resolved_dir = config_dir or _CONFIG_DIR
     config = load_config("automations", str(resolved_dir.resolve()))
-    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
+    automations: list[Automation] = hydra.utils.instantiate(
+        cast(DictConfig, config).automations
+    )
     return automations
 
 
@@ -196,7 +197,11 @@ def _automation_requires_auth(key: str) -> bool:
 
 
 def _default_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    return [key for key in _available_automation_keys(config) if not _automation_requires_auth(key)]
+    return [
+        key
+        for key in _available_automation_keys(config)
+        if not _automation_requires_auth(key)
+    ]
 
 
 def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
@@ -268,7 +273,9 @@ def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
     }
 
 
-def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool) -> dict[str, Any]:
+def _automation_metadata_for_key(
+    config: DictConfig, key: str, *, enabled: bool
+) -> dict[str, Any]:
     section = config.get(key)
     if not isinstance(section, Mapping):
         raise ValueError(f"Automation section missing or invalid: {key}")
@@ -286,14 +293,18 @@ def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool)
     return payload
 
 
-def _load_automation_inventory(*, config_dir: Path | None = None) -> list[dict[str, Any]]:
+def _load_automation_inventory(
+    *, config_dir: Path | None = None
+) -> list[dict[str, Any]]:
     resolved_dir = config_dir or _CONFIG_DIR
     config = cast(DictConfig, load_config("automations", str(resolved_dir.resolve())))
     available_keys = _available_automation_keys(config)
     enabled_keys = set(_enabled_automation_keys(config))
     inventory: list[dict[str, Any]] = []
     for key in available_keys:
-        inventory.append(_automation_metadata_for_key(config, key, enabled=key in enabled_keys))
+        inventory.append(
+            _automation_metadata_for_key(config, key, enabled=key in enabled_keys)
+        )
     return inventory
 
 
@@ -344,7 +355,9 @@ def _restart_dashboard_observer_if_managed(
     try:
         observer_pid = int(observer_pid_path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
-        logger.warning("Dashboard observer PID file is unreadable: {}", observer_pid_path)
+        logger.warning(
+            "Dashboard observer PID file is unreadable: {}", observer_pid_path
+        )
         return False
 
     try:
@@ -363,7 +376,9 @@ def _restart_dashboard_observer_if_managed(
     observer_log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["HYDRA_FULL_ERROR"] = "1"
-    env["TODOIST_AGENT_MODEL_ID"] = os.getenv(str(EnvVar.AGENT_MODEL_ID), DEFAULT_MODEL_ID)
+    env["TODOIST_AGENT_MODEL_ID"] = os.getenv(
+        str(EnvVar.AGENT_MODEL_ID), DEFAULT_MODEL_ID
+    )
     env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
         str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
     )
@@ -416,7 +431,9 @@ def _gmail_automation_status(
             if connected:
                 token_detail = "Authorized"
                 _clear_gmail_auth_session()
-            elif getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
+            elif getattr(creds, "expired", False) and getattr(
+                creds, "refresh_token", None
+            ):
                 token_detail = "Token expired but refreshable"
             else:
                 token_detail = "Token present but invalid"
@@ -447,10 +464,16 @@ def _gmail_automation_status(
         "credentialsPresent": credentials_present,
         "tokenPresent": token_present,
         "connected": connected,
-        "credentialsPath": _safe_display_path(resolved_credentials_path, root=_REPO_ROOT),
+        "credentialsPath": _safe_display_path(
+            resolved_credentials_path, root=_REPO_ROOT
+        ),
         "tokenPath": _safe_display_path(resolved_token_path, root=_REPO_ROOT),
-        "detail": token_detail if credentials_present else "Missing Gmail credentials file",
-        "setupDocPath": _safe_display_path(_REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT),
+        "detail": token_detail
+        if credentials_present
+        else "Missing Gmail credentials file",
+        "setupDocPath": _safe_display_path(
+            _REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT
+        ),
     }
     if pending_auth is not None:
         status["pendingAuth"] = pending_auth
@@ -465,7 +488,9 @@ def _start_gmail_manual_auth_session(
 
     resolved_credentials_path = credentials_path or resolve_gmail_credentials_path()
     if not resolved_credentials_path.exists():
-        raise FileNotFoundError("gmail_credentials.json is required before connecting Gmail.")
+        raise FileNotFoundError(
+            "gmail_credentials.json is required before connecting Gmail."
+        )
 
     flow = InstalledAppFlow.from_client_secrets_file(
         str(resolved_credentials_path), GmailTasksAutomation.SCOPES
@@ -494,7 +519,9 @@ def _start_gmail_manual_auth_session(
                     "</body></html>"
                 )
                 self.send_response(200)
-            except Exception as exc:  # pragma: no cover - callback failures are browser driven
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - callback failures are browser driven
                 with _GMAIL_AUTH_LOCK:
                     if _GMAIL_AUTH_SESSION is not None:
                         _GMAIL_AUTH_SESSION.error = f"{type(exc).__name__}: {exc}"
@@ -539,7 +566,9 @@ def _start_gmail_manual_auth_session(
         finally:
             server.server_close()
 
-    threading.Thread(target=_serve_once, name="gmail-oauth-callback", daemon=True).start()
+    threading.Thread(
+        target=_serve_once, name="gmail-oauth-callback", daemon=True
+    ).start()
     return session
 
 
@@ -570,7 +599,9 @@ def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _observer_edit_targets(observer_settings: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _observer_edit_targets(
+    observer_settings: Mapping[str, Any],
+) -> list[dict[str, Any]]:
     return [
         {
             "key": "observer",
@@ -582,11 +613,17 @@ def _observer_edit_targets(observer_settings: Mapping[str, Any]) -> list[dict[st
     ]
 
 
-def _build_observer(db: Database, *, config_dir: Path | None = None) -> AutomationObserver:
+def _build_observer(
+    db: Database, *, config_dir: Path | None = None
+) -> AutomationObserver:
     resolved_dir = config_dir or _CONFIG_DIR
     config = load_config("automations", str(resolved_dir.resolve()))
-    activity_automation: Activity = hydra.utils.instantiate(cast(DictConfig, config).activity)
-    automations: list[Automation] = hydra.utils.instantiate(cast(DictConfig, config).automations)
+    activity_automation: Activity = hydra.utils.instantiate(
+        cast(DictConfig, config).activity
+    )
+    automations: list[Automation] = hydra.utils.instantiate(
+        cast(DictConfig, config).automations
+    )
     short_automations = [auto for auto in automations if not isinstance(auto, Activity)]
     return AutomationObserver(
         db=db,
@@ -631,7 +668,9 @@ def _run_automation_sync(
         contextlib.redirect_stdout(output_stream),
         contextlib.redirect_stderr(output_stream),
     ):
-        loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
+        loguru_handler_id = logger.add(
+            output_stream, format="{message}", level=get_log_level()
+        )
         try:
             task_delegations = automation.tick(dbio)
         except Exception as exc:
@@ -692,11 +731,15 @@ async def _run_automation_job(*, job_id: str, name: str) -> None:
         async with ADMIN_AUTOMATIONS_LOCK:
             automations = {a.name: a for a in _load_automations()}
             if name not in automations:
-                raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
+                raise HTTPException(
+                    status_code=404, detail=f"Unknown automation: {name}"
+                )
 
             dbio = Database(".env")
             dbio.pull()
-            result = await asyncio.to_thread(_run_automation_sync, automations[name], dbio=dbio)
+            result = await asyncio.to_thread(
+                _run_automation_sync, automations[name], dbio=dbio
+            )
             dbio.reset()
 
         await _update_job(job_id, status="done", finished_at=_now_iso(), result=result)
@@ -740,7 +783,9 @@ def _serialize_job(job: _AdminJob) -> dict[str, Any]:
     }
 
 
-def _admin_observer_payload(state: Mapping[str, Any], observer_settings: Mapping[str, Any]) -> dict[str, Any]:
+def _admin_observer_payload(
+    state: Mapping[str, Any], observer_settings: Mapping[str, Any]
+) -> dict[str, Any]:
     return {
         "state": _serialize_observer_state(state),
         "settings": observer_settings,
@@ -796,7 +841,9 @@ async def admin_observer_state() -> dict[str, Any]:
     observer_settings = observer_settings_payload(config, path=DASHBOARD_CONFIG_PATH)
     state["enabled"] = bool(observer_settings["enabled"])
     state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-    state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+    state["refreshIntervalSeconds"] = (
+        float(observer_settings["refreshIntervalMinutes"]) * 60.0
+    )
     return _admin_observer_payload(state, observer_settings)
 
 
@@ -806,15 +853,21 @@ async def admin_set_observer(payload: Any) -> dict[str, Any]:
     elif isinstance(payload, dict):
         update_payload = payload
     else:
-        raise HTTPException(status_code=400, detail="Body must be a JSON object or boolean")
+        raise HTTPException(
+            status_code=400, detail="Body must be a JSON object or boolean"
+        )
 
     async with ADMIN_AUTOMATIONS_LOCK:
         config = load_dashboard_config(DASHBOARD_CONFIG_PATH)
         observer_settings = update_observer_settings(config, update_payload)
         cache_state = _load_observer_state()
         cache_state["enabled"] = bool(observer_settings["enabled"])
-        cache_state["refreshIntervalMinutes"] = observer_settings["refreshIntervalMinutes"]
-        cache_state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        cache_state["refreshIntervalMinutes"] = observer_settings[
+            "refreshIntervalMinutes"
+        ]
+        cache_state["refreshIntervalSeconds"] = (
+            float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        )
         cache_state["updatedAt"] = _now_iso()
         Cache().observer_state.save(cache_state)
         _save_yaml_config(DASHBOARD_CONFIG_PATH, config)
@@ -830,8 +883,12 @@ async def admin_run_observer(*, force: bool = False) -> dict[str, Any]:
         )
         enabled = bool(observer_settings["enabled"])
         state["enabled"] = enabled
-        state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-        state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        state["refreshIntervalMinutes"] = float(
+            observer_settings["refreshIntervalMinutes"]
+        )
+        state["refreshIntervalSeconds"] = (
+            float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        )
         if not enabled and not force:
             raise HTTPException(status_code=409, detail="Observer is disabled")
 
@@ -867,7 +924,9 @@ async def admin_run_observer(*, force: bool = False) -> dict[str, Any]:
             dbio.reset()
             finished_at = datetime.now()
             state["lastRunAt"] = finished_at.isoformat(timespec="seconds")
-            state["lastDurationSeconds"] = round((finished_at - started_at).total_seconds(), 3)
+            state["lastDurationSeconds"] = round(
+                (finished_at - started_at).total_seconds(), 3
+            )
             state["updatedAt"] = _now_iso()
             Cache().observer_state.save(state)
 
@@ -882,7 +941,9 @@ async def admin_run_automation(name: str, *, refresh: bool = False) -> dict[str,
 
         dbio = Database(".env")
         dbio.pull()
-        result = await asyncio.to_thread(_run_automation_sync, automations[name], dbio=dbio)
+        result = await asyncio.to_thread(
+            _run_automation_sync, automations[name], dbio=dbio
+        )
         dbio.reset()
 
         if refresh:

@@ -28,29 +28,33 @@ mkdir -p "${PID_DIR}" "${STATE_DIR}"
 resolve_triton_runtime_settings() {
     local repo_root="${1}"
     local settings=()
-    mapfile -t settings < <(python3 - "${repo_root}" <<'PY'
+    local python_cmd=(python3)
+    if command -v uv >/dev/null 2>&1; then
+        python_cmd=(uv run python3)
+    fi
+    mapfile -t settings < <(
+        cd "${repo_root}"
+        "${python_cmd[@]}" - "${repo_root}" <<'PY'
 from pathlib import Path
 import sys
 
 repo_root = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(repo_root))
 
-from todoist.runtime_env import resolve_triton_launch_settings
+from todoist.core.runtime_env import resolve_triton_launch_settings
 
 payload = resolve_triton_launch_settings(repo_root=repo_root, cwd=repo_root)
 print(payload["model_id"])
 print(payload["model_name"])
 print(payload["url"])
 PY
-)
+    )
     if [[ "${#settings[@]}" -ge 3 ]]; then
         MODEL_ID="${settings[0]}"
         TRITON_MODEL_NAME="${settings[1]}"
         TRITON_URL="${settings[2]}"
     fi
 }
-
-resolve_triton_runtime_settings "${REPO_ROOT}"
 
 timestamp() {
     date +"%H:%M:%S"
@@ -318,6 +322,7 @@ require_gpu_runtime() {
 
 start_triton() {
     local mode="${1}"
+    resolve_triton_runtime_settings "${REPO_ROOT}"
     log_note "Starting Triton (${mode}) for model ${TRITON_MODEL_NAME} <- ${MODEL_ID}..."
     require_docker
     if [[ "${mode}" == "gpu" ]]; then

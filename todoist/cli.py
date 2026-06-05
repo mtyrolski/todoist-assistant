@@ -10,17 +10,19 @@ import tempfile
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-import typer # pyright: ignore[reportMissingImports]
+import typer  # pyright: ignore[reportMissingImports]
 
-from todoist import telemetry
-from todoist.env import EnvVar
-from todoist.version import get_version
+from todoist.core import telemetry
+from todoist.core.env import EnvVar
+from todoist.core.version import get_version
 
 GITHUB_REPO = "mtyrolski/todoist-assistant"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
-app = typer.Typer(add_completion=False, no_args_is_help=True, help="Todoist Assistant CLI")
+app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Todoist Assistant CLI"
+)
 
 
 def _fetch_latest_release() -> dict:
@@ -103,7 +105,9 @@ def main(
         telemetry.set_enabled(config_dir, True)
         typer.echo("Telemetry enabled.")
         if not os.getenv(str(EnvVar.TELEMETRY_ENDPOINT)):
-            typer.echo(f"NOTE: {EnvVar.TELEMETRY_ENDPOINT} is not set, so no telemetry will be sent.")
+            typer.echo(
+                f"NOTE: {EnvVar.TELEMETRY_ENDPOINT} is not set, so no telemetry will be sent."
+            )
         raise typer.Exit()
     if disable_telemetry:
         config_dir = telemetry.resolve_config_dir()
@@ -149,12 +153,16 @@ def version(
     if sys.platform == "darwin":
         typer.echo("If installed via Homebrew, run: brew upgrade todoist-assistant")
     elif os.name == "nt":
-        typer.echo("For MSI installs, download the latest installer from the releases page.")
+        typer.echo(
+            "For MSI installs, download the latest installer from the releases page."
+        )
 
 
 @app.command("install-windows")
 def install_windows(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print steps without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print steps without executing"
+    ),
 ) -> None:
     """Download and run the latest Windows installer."""
     if os.name != "nt":
@@ -193,7 +201,9 @@ def install_windows(
 
 @app.command("install-macos")
 def install_macos(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print steps without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print steps without executing"
+    ),
 ) -> None:
     """Download and run the latest macOS pkg installer."""
     if sys.platform != "darwin":

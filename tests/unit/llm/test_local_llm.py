@@ -7,9 +7,14 @@ import torch
 from pydantic import BaseModel
 from transformers import PreTrainedTokenizerBase
 
-from todoist.env import EnvVar
-from todoist.llm import LocalChatConfig, MessageRole, PromptToken, TransformersMistral3ChatModel
-from todoist.llm.local_llm import _render_chat_prompt
+from todoist.core.env import EnvVar
+from todoist.llm import (
+    LocalChatConfig,
+    MessageRole,
+    PromptToken,
+    TransformersMistral3ChatModel,
+)
+from todoist.llm.backends.transformers import _render_chat_prompt
 from todoist.llm.usage import load_llm_usage_summary
 
 
@@ -24,7 +29,7 @@ class FakeTokenizer:
 
     @classmethod
     def from_pretrained(cls, *_args, **_kwargs):
-        return cls(outputs=["OK", '```json\n{\"value\": \"ok\"}\n```'])
+        return cls(outputs=["OK", '```json\n{"value": "ok"}\n```'])
 
     def __call__(self, _prompt: str, *, return_tensors: str):
         assert return_tensors == "pt"
@@ -47,11 +52,15 @@ class FakeChatTemplateTokenizer:
     bos_token = PromptToken.BOS_FALLBACK
     eos_token = PromptToken.EOS_FALLBACK
 
-    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt, enable_thinking):
+    def apply_chat_template(
+        self, messages, *, tokenize, add_generation_prompt, enable_thinking
+    ):
         assert tokenize is False
         assert add_generation_prompt is True
         assert enable_thinking is False
-        return "PROMPT:" + " | ".join(f"{item['role']}={item['content']}" for item in messages)
+        return "PROMPT:" + " | ".join(
+            f"{item['role']}={item['content']}" for item in messages
+        )
 
 
 class FakeModel:
@@ -86,14 +95,26 @@ class DummySchema(BaseModel):
 def test_local_llm_initializes_and_generates(monkeypatch, tmp_path):
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     cfg = LocalChatConfig(model_id="fake/model", max_new_tokens=4)
-    with patch("todoist.llm.tokenizer.AutoTokenizer", new=FakeTokenizer), \
-         patch("todoist.llm.local_llm.AutoConfig.from_pretrained", new=lambda *_a, **_k: FakeConfig()), \
-         patch("todoist.llm.local_llm.AutoModelForCausalLM.from_pretrained", new=FakeModel.from_pretrained):
+    with (
+        patch("todoist.llm.tokenizer.AutoTokenizer", new=FakeTokenizer),
+        patch(
+            "todoist.llm.backends.transformers.AutoConfig.from_pretrained",
+            new=lambda *_a, **_k: FakeConfig(),
+        ),
+        patch(
+            "todoist.llm.backends.transformers.AutoModelForCausalLM.from_pretrained",
+            new=FakeModel.from_pretrained,
+        ),
+    ):
         llm = TransformersMistral3ChatModel(cfg)
         assert llm.chat([{"role": MessageRole.USER, "content": "hi"}]) == "OK"
-        parsed = llm.structured_chat([{"role": MessageRole.USER, "content": "hi"}], DummySchema)
+        parsed = llm.structured_chat(
+            [{"role": MessageRole.USER, "content": "hi"}], DummySchema
+        )
         assert parsed.value == "ok"
-    usage = load_llm_usage_summary(selected_backend="local", selected_model_id="fake/model")
+    usage = load_llm_usage_summary(
+        selected_backend="local", selected_model_id="fake/model"
+    )
     assert usage["totals"]["inferenceCount"] == 2
     assert usage["totals"]["chatCount"] == 1
     assert usage["totals"]["structuredCount"] == 1

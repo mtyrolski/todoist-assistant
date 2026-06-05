@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -18,8 +17,8 @@ from todoist.dashboard.plots import (
     plot_weekly_completion_trend,
 )
 from todoist.database.dataframe import get_adjusting_archived_parent_projects
-from todoist.habit_tracker import extract_tracked_habit_tasks
-from todoist.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
+from todoist.features.habit_tracker import extract_tracked_habit_tasks
+from todoist.features.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.web.dashboard_payload import (
     add_plot_event_markers as _add_plot_event_markers,
     apply_date_axis_viewport as _apply_date_axis_viewport,
@@ -39,6 +38,7 @@ from todoist.web.routes.common import _sync_api_globals
 Granularity = Literal["W", "ME", "3ME"]
 router = APIRouter()
 
+
 @router.get("/api/dashboard/status", tags=["dashboard"])
 async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -48,7 +48,9 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     # Intentionally ignore refresh: this endpoint must stay non-blocking and avoid Todoist API calls.
     _ = refresh
     dashboard_config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
-    observer_settings = observer_settings_payload(dashboard_config, path=_DASHBOARD_CONFIG_PATH)
+    observer_settings = observer_settings_payload(
+        dashboard_config, path=_DASHBOARD_CONFIG_PATH
+    )
     return {
         "services": _service_statuses(),
         "configurableItems": [
@@ -71,12 +73,14 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
         "now": datetime.now().isoformat(timespec="seconds"),
     }
 
+
 @router.get("/api/dashboard/progress", tags=["dashboard"])
 async def dashboard_progress() -> dict[str, Any]:
     _sync_api_globals(globals())
     """Return current data refresh progress for the dashboard."""
 
     return await _progress_snapshot()
+
 
 @router.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
 async def dashboard_llm_breakdown() -> dict[str, Any]:
@@ -133,7 +137,9 @@ async def dashboard_home(
     urgency_status = _evaluate_urgency_status(
         active_projects,
         today=today,
-        settings=dashboard_settings_cfg.get("urgency") if hasattr(dashboard_settings_cfg, "get") else None,
+        settings=dashboard_settings_cfg.get("urgency")
+        if hasattr(dashboard_settings_cfg, "get")
+        else None,
     )
     plot_events = _normalize_plot_events(dashboard_settings_cfg)
     always_visible_projects = get_adjusting_archived_parent_projects()
@@ -214,7 +220,9 @@ async def dashboard_home(
             end=end_range,
         )
         events_over_time_fig = _apply_date_axis_viewport(
-            plot_events_over_time(df_activity, history_beg_range, end_range, granularity),
+            plot_events_over_time(
+                df_activity, history_beg_range, end_range, granularity
+            ),
             beg=beg_range,
             end=end_range,
         )

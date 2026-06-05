@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from tests.factories import make_project, make_project_entry, make_task, make_task_entry
-from todoist.types import Project, ProjectEntry, Task, TaskEntry
+from todoist.core.types import Project, ProjectEntry, Task, TaskEntry
 
 
 @pytest.fixture
@@ -38,7 +38,9 @@ def task_factory(task_entry_factory: Callable[..., TaskEntry]) -> Callable[..., 
 
 
 @pytest.fixture
-def project_factory(project_entry_factory: Callable[..., ProjectEntry]) -> Callable[..., Project]:
+def project_factory(
+    project_entry_factory: Callable[..., ProjectEntry],
+) -> Callable[..., Project]:
     def _build(
         *,
         project_id: str = "project123",
@@ -47,7 +49,9 @@ def project_factory(project_entry_factory: Callable[..., ProjectEntry]) -> Calla
         is_archived: bool = False,
         **project_entry_overrides: Any,
     ) -> Project:
-        entry = project_entry or project_entry_factory(project_id=project_id, **project_entry_overrides)
+        entry = project_entry or project_entry_factory(
+            project_id=project_id, **project_entry_overrides
+        )
         return make_project(
             project_id=project_id,
             project_entry=entry,

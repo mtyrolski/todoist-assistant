@@ -34,9 +34,11 @@ def model_backend(model: object) -> str | None:
 
 
 def build_codex_chat_model(values: Mapping[str, object], *, cwd: Path) -> ChatModel:
-    from .codex_llm import CodexCliChatModel, codex_config_from_values
+    from .backends.codex import CodexCliChatModel, codex_config_from_values
 
-    return mark_backend(CodexCliChatModel(codex_config_from_values(values, cwd=cwd)), "codex")
+    return mark_backend(
+        CodexCliChatModel(codex_config_from_values(values, cwd=cwd)), "codex"
+    )
 
 
 def build_triton_chat_model(
@@ -48,7 +50,7 @@ def build_triton_chat_model(
     top_p: float = 0.95,
     max_output_tokens: int = 384,
 ) -> ChatModel:
-    from .triton_llm import TritonChatConfig, TritonGenerateChatModel
+    from .backends.triton import TritonChatConfig, TritonGenerateChatModel
 
     return mark_backend(
         TritonGenerateChatModel(

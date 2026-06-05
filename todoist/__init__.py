@@ -1,6 +1,6 @@
 """Public package exports for Todoist Assistant."""
 
-from todoist.version import get_version
+from todoist.core.version import get_version
 
 __version__ = get_version()
 

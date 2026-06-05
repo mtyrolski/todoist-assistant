@@ -1,10 +1,12 @@
 """Tests for persistent LLM usage accounting."""
 
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 from todoist.llm.usage import load_llm_usage_summary, record_llm_usage
 
 
-def test_record_llm_usage_aggregates_totals_and_selected_model(monkeypatch, tmp_path) -> None:
+def test_record_llm_usage_aggregates_totals_and_selected_model(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
 
     record_llm_usage(

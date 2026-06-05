@@ -25,7 +25,8 @@ def test_initialization():
     automation = GmailTasksAutomation()
     assert automation.name == "Gmail Tasks"
     assert automation.frequency == 60
-    assert automation.SCOPES == ['https://www.googleapis.com/auth/gmail.readonly']
+    assert automation.SCOPES == ["https://www.googleapis.com/auth/gmail.readonly"]
+    assert automation.allow_interactive_auth is False
     assert len(automation.TASK_KEYWORDS) > 0
 
 
@@ -63,8 +64,9 @@ def test_is_actionable_email_positive():
     ]
 
     for subject, snippet in test_cases:
-        assert automation._is_actionable_email(subject, snippet), \
+        assert automation._is_actionable_email(subject, snippet), (
             f"Failed for subject='{subject}', snippet='{snippet}'"
+        )
 
 
 def test_is_actionable_email_negative():
@@ -80,8 +82,9 @@ def test_is_actionable_email_negative():
     ]
 
     for subject, snippet in test_cases:
-        assert not automation._is_actionable_email(subject, snippet), \
+        assert not automation._is_actionable_email(subject, snippet), (
             f"False positive for subject='{subject}', snippet='{snippet}'"
+        )
 
 
 def test_extract_task_content_basic():
@@ -134,10 +137,14 @@ def test_extract_task_content_repeated_prefixes_and_empty_subject_fallback():
     """Repeated prefixes are stripped and empty subjects fall back to snippet text."""
     automation = GmailTasksAutomation()
 
-    repeated = automation._extract_task_content("Re: Fwd: Action required", "", "test@example.com")
+    repeated = automation._extract_task_content(
+        "Re: Fwd: Action required", "", "test@example.com"
+    )
     assert repeated.content == "Action required"
 
-    fallback = automation._extract_task_content("Re: ", "   Follow up with vendor tomorrow   ", "test@example.com")
+    fallback = automation._extract_task_content(
+        "Re: ", "   Follow up with vendor tomorrow   ", "test@example.com"
+    )
     assert fallback.content == "Follow up with vendor tomorrow"
 
 
@@ -170,9 +177,7 @@ def test_get_existing_task_dedup_index_extracts_gmail_message_ids():
 
     mock_task = Mock()
     mock_task.task_entry.content = "Review invoice"
-    mock_task.task_entry.description = (
-        "Email from: billing@example.com\n\nSnippet: Invoice attached\n\nGmail Message ID: gmail-123"
-    )
+    mock_task.task_entry.description = "Email from: billing@example.com\n\nSnippet: Invoice attached\n\nGmail Message ID: gmail-123"
     mock_project = Mock()
     mock_project.tasks = [mock_task]
     mock_db.fetch_projects.return_value = [mock_project]
@@ -183,9 +188,11 @@ def test_get_existing_task_dedup_index_extracts_gmail_message_ids():
     assert "gmail-123" in index.gmail_message_ids
 
 
-@patch('todoist.automations.gmail_tasks.automation.build')
-@patch('todoist.automations.gmail_tasks.automation.Credentials')
-def test_authenticate_gmail_existing_token(mock_credentials, mock_build, tmp_path, monkeypatch):
+@patch("todoist.automations.gmail_tasks.automation.build")
+@patch("todoist.automations.gmail_tasks.automation.Credentials")
+def test_authenticate_gmail_existing_token(
+    mock_credentials, mock_build, tmp_path, monkeypatch
+):
     """Test Gmail authentication with existing valid token."""
     monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
     automation = GmailTasksAutomation()
@@ -201,8 +208,10 @@ def test_authenticate_gmail_existing_token(mock_credentials, mock_build, tmp_pat
     result = automation._authenticate_gmail()
 
     assert result == mock_service
-    mock_credentials.from_authorized_user_file.assert_called_once_with(str(token_path), automation.SCOPES)
-    mock_build.assert_called_once_with('gmail', 'v1', credentials=mock_creds)
+    mock_credentials.from_authorized_user_file.assert_called_once_with(
+        str(token_path), automation.SCOPES
+    )
+    mock_build.assert_called_once_with("gmail", "v1", credentials=mock_creds)
 
 
 def test_authenticate_gmail_no_credentials(tmp_path, monkeypatch):
@@ -227,7 +236,9 @@ def test_resolve_gmail_credentials_path_prefers_repo_root(monkeypatch, tmp_path)
     assert resolve_gmail_credentials_path() == root_credentials
 
 
-def test_resolve_gmail_credentials_path_falls_back_to_legacy_configs_dir(monkeypatch, tmp_path):
+def test_resolve_gmail_credentials_path_falls_back_to_legacy_configs_dir(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("TODOIST_CONFIG_DIR", raising=False)
     legacy_dir = tmp_path / "configs"
@@ -246,9 +257,9 @@ def test_resolve_gmail_token_path_defaults_next_to_credentials(monkeypatch, tmp_
     assert resolve_gmail_token_path() == tmp_path / "gmail_token.json"
 
 
-@patch('todoist.automations.gmail_tasks.automation.build')
-@patch('todoist.automations.gmail_tasks.automation.InstalledAppFlow')
-@patch('todoist.automations.gmail_tasks.automation.Credentials')
+@patch("todoist.automations.gmail_tasks.automation.build")
+@patch("todoist.automations.gmail_tasks.automation.InstalledAppFlow")
+@patch("todoist.automations.gmail_tasks.automation.Credentials")
 def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
     mock_credentials,
     mock_flow_cls,
@@ -258,7 +269,7 @@ def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
 ):
     """Invalid refresh token should trigger a fresh OAuth flow when allowed."""
     monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
-    automation = GmailTasksAutomation()
+    automation = GmailTasksAutomation(allow_interactive_auth=True)
     token_path = tmp_path / "gmail_token.json"
     token_path.write_text('{"token": "stale"}', encoding="utf-8")
     credentials_path = tmp_path / "gmail_credentials.json"
@@ -284,14 +295,41 @@ def test_authenticate_gmail_refresh_error_falls_back_to_oauth(
     result = automation._authenticate_gmail()
 
     assert result == mock_service
-    mock_flow_cls.from_client_secrets_file.assert_called_once_with(str(credentials_path), automation.SCOPES)
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with(
+        str(credentials_path), automation.SCOPES
+    )
     flow.run_local_server.assert_called_once_with(port=0)
-    mock_build.assert_called_once_with('gmail', 'v1', credentials=fresh_creds)
+    mock_build.assert_called_once_with("gmail", "v1", credentials=fresh_creds)
 
 
-@patch('todoist.automations.gmail_tasks.automation.build')
-@patch('todoist.automations.gmail_tasks.automation.InstalledAppFlow')
-@patch('todoist.automations.gmail_tasks.automation.Credentials')
+@patch("todoist.automations.gmail_tasks.automation.build")
+@patch("todoist.automations.gmail_tasks.automation.InstalledAppFlow")
+@patch("todoist.automations.gmail_tasks.automation.Credentials")
+def test_authenticate_gmail_refresh_error_skips_oauth_by_default(
+    mock_credentials,
+    mock_flow_cls,
+    mock_build,
+    tmp_path,
+    monkeypatch,
+):
+    """Invalid refresh token should not block observer runs with OAuth prompts."""
+    monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
+    automation = GmailTasksAutomation()
+    (tmp_path / "gmail_token.json").write_text('{"token": "stale"}', encoding="utf-8")
+    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
+
+    stale_creds = Mock(valid=False, expired=True, refresh_token="refresh-token")
+    stale_creds.refresh.side_effect = RefreshError("invalid_grant")
+    mock_credentials.from_authorized_user_file.return_value = stale_creds
+
+    assert automation._authenticate_gmail() is None
+    mock_flow_cls.from_client_secrets_file.assert_not_called()
+    mock_build.assert_not_called()
+
+
+@patch("todoist.automations.gmail_tasks.automation.build")
+@patch("todoist.automations.gmail_tasks.automation.InstalledAppFlow")
+@patch("todoist.automations.gmail_tasks.automation.Credentials")
 def test_authenticate_gmail_interactive_oauth_enables_insecure_transport_temporarily(
     mock_credentials,
     mock_flow_cls,
@@ -301,7 +339,7 @@ def test_authenticate_gmail_interactive_oauth_enables_insecure_transport_tempora
 ):
     monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
     monkeypatch.setenv("TODOIST_CONFIG_DIR", str(tmp_path))
-    automation = GmailTasksAutomation()
+    automation = GmailTasksAutomation(allow_interactive_auth=True)
     credentials_path = tmp_path / "gmail_credentials.json"
     credentials_path.write_text("{}", encoding="utf-8")
     mock_credentials.from_authorized_user_file.return_value = None
@@ -326,7 +364,9 @@ def test_authenticate_gmail_interactive_oauth_enables_insecure_transport_tempora
 
     assert result == mock_service
     assert "OAUTHLIB_INSECURE_TRANSPORT" not in os.environ
-    mock_flow_cls.from_client_secrets_file.assert_called_once_with(str(credentials_path), automation.SCOPES)
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with(
+        str(credentials_path), automation.SCOPES
+    )
 
 
 def test_task_keywords_coverage():
@@ -334,10 +374,12 @@ def test_task_keywords_coverage():
     automation = GmailTasksAutomation()
 
     # Check that important keywords are included
-    important_keywords = ['todo', 'urgent', 'deadline', 'follow up', 'action required']
+    important_keywords = ["todo", "urgent", "deadline", "follow up", "action required"]
 
     for keyword in important_keywords:
-        assert keyword in automation.TASK_KEYWORDS, f"Missing important keyword: {keyword}"
+        assert keyword in automation.TASK_KEYWORDS, (
+            f"Missing important keyword: {keyword}"
+        )
 
 
 def test_automation_inheritance():
@@ -345,10 +387,10 @@ def test_automation_inheritance():
     automation = GmailTasksAutomation()
 
     # Check that it has the required methods from base class
-    assert hasattr(automation, 'tick')
-    assert hasattr(automation, '_tick')
-    assert hasattr(automation, 'name')
-    assert hasattr(automation, 'frequency')
+    assert hasattr(automation, "tick")
+    assert hasattr(automation, "_tick")
+    assert hasattr(automation, "name")
+    assert hasattr(automation, "frequency")
 
 
 def test_list_matching_messages_paginates_and_respects_cap():
@@ -404,11 +446,15 @@ def test_tick_creates_todoist_task_for_non_actionable_inbox_email_and_marks_proc
 
     with (
         patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-1"}]),
+        patch.object(
+            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-1"}]
+        ),
         patch.object(
             automation,
             "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(contents=set(), gmail_message_ids=set()),
+            return_value=ExistingTaskDedupIndex(
+                contents=set(), gmail_message_ids=set()
+            ),
         ),
     ):
         automation._tick(db)
@@ -420,7 +466,9 @@ def test_tick_creates_todoist_task_for_non_actionable_inbox_email_and_marks_proc
     assert "alice@example.com" in insert_kwargs["description"].lower()
     assert "Gmail Message ID: gmail-msg-1" in insert_kwargs["description"]
     assert "gmail-msg-1" in automation._processed_message_ids
-    automation._cache.processed_gmail_messages.save.assert_called_once_with(automation._processed_message_ids)
+    automation._cache.processed_gmail_messages.save.assert_called_once_with(
+        automation._processed_message_ids
+    )
     assert automation.last_sync_stats["created"] == 1
     assert automation.last_sync_stats["would_create"] == 0
 
@@ -449,11 +497,15 @@ def test_tick_dry_run_does_not_create_or_persist_processed_ids():
 
     with (
         patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-2"}]),
+        patch.object(
+            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-2"}]
+        ),
         patch.object(
             automation,
             "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(contents=set(), gmail_message_ids=set()),
+            return_value=ExistingTaskDedupIndex(
+                contents=set(), gmail_message_ids=set()
+            ),
         ),
     ):
         automation._tick(db)
@@ -478,11 +530,15 @@ def test_tick_skips_email_already_added_via_gmail_message_id_marker():
 
     with (
         patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-9"}]),
+        patch.object(
+            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-9"}]
+        ),
         patch.object(
             automation,
             "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(contents=set(), gmail_message_ids={"gmail-msg-9"}),
+            return_value=ExistingTaskDedupIndex(
+                contents=set(), gmail_message_ids={"gmail-msg-9"}
+            ),
         ),
     ):
         automation._tick(db)
@@ -490,7 +546,9 @@ def test_tick_skips_email_already_added_via_gmail_message_id_marker():
     service.users.return_value.messages.return_value.get.assert_not_called()
     db.insert_task.assert_not_called()
     assert "gmail-msg-9" in automation._processed_message_ids
-    automation._cache.processed_gmail_messages.save.assert_called_once_with(automation._processed_message_ids)
+    automation._cache.processed_gmail_messages.save.assert_called_once_with(
+        automation._processed_message_ids
+    )
     assert automation.last_sync_stats["duplicates"] == 1
 
 
@@ -518,11 +576,15 @@ def test_tick_creates_email_even_if_same_content_exists_without_gmail_marker():
 
     with (
         patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-10"}]),
+        patch.object(
+            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-10"}]
+        ),
         patch.object(
             automation,
             "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(contents={"status update"}, gmail_message_ids=set()),
+            return_value=ExistingTaskDedupIndex(
+                contents={"status update"}, gmail_message_ids=set()
+            ),
         ),
     ):
         automation._tick(db)

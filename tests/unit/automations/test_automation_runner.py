@@ -3,8 +3,8 @@ from typing import cast
 
 from todoist.automations.base import Automation, run_automations_resiliently
 from todoist.database.base import Database
-from todoist.env import EnvVar
-from todoist.utils import Cache
+from todoist.core.env import EnvVar
+from todoist.core.utils import Cache
 
 
 class _StubAutomation(Automation):
@@ -96,7 +96,9 @@ def test_automation_tick_records_failed_signal(monkeypatch, tmp_path) -> None:
     assert signal["lastSuccessAt"] is None
 
 
-def test_run_automations_resiliently_records_skipped_signal(monkeypatch, tmp_path) -> None:
+def test_run_automations_resiliently_records_skipped_signal(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     db = object()
     automation = _StubAutomation("long", is_long=True)

@@ -2,7 +2,7 @@
 
 from concurrent.futures import Future
 
-from todoist.constants import TaskField
+from todoist.core.constants import TaskField
 from todoist.database.db_activity import DatabaseActivity
 from todoist.database.db_projects import DatabaseProjects
 from todoist.database.db_tasks import DatabaseTasks, TaskTemplateInsertRequest
@@ -26,8 +26,12 @@ def test_fetch_projects_short_circuits_for_empty_project_list(monkeypatch):
 
 def test_insert_tasks_returns_empty_dict_for_insert_errors(monkeypatch):
     db_tasks = DatabaseTasks()
-    monkeypatch.setattr(db_tasks, "insert_task", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr("todoist.utils.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        db_tasks,
+        "insert_task",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr("todoist.core.utils.time.sleep", lambda _seconds: None)
 
     result = db_tasks.insert_tasks([{"content": "Task 1"}])
     assert result == [{}]
@@ -53,8 +57,12 @@ def test_insert_tasks_limits_max_workers_to_task_count(monkeypatch):
             return fut
 
     monkeypatch.setattr("todoist.database.db_tasks.ThreadPoolExecutor", InlineExecutor)
-    monkeypatch.setattr("todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable)
-    monkeypatch.setattr("todoist.database.db_tasks.get_max_concurrent_requests", lambda: 99)
+    monkeypatch.setattr(
+        "todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable
+    )
+    monkeypatch.setattr(
+        "todoist.database.db_tasks.get_max_concurrent_requests", lambda: 99
+    )
     monkeypatch.setattr(db_tasks, "insert_task", lambda **task: {"id": task["content"]})
 
     result = db_tasks.insert_tasks([{"content": "Task 1"}, {"content": "Task 2"}])
@@ -85,7 +93,9 @@ def test_insert_tasks_replaces_timed_out_futures_with_empty_dict(monkeypatch):
             return fut
 
     monkeypatch.setattr("todoist.database.db_tasks.ThreadPoolExecutor", InlineExecutor)
-    monkeypatch.setattr("todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable)
+    monkeypatch.setattr(
+        "todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable
+    )
     monkeypatch.setattr(db_tasks, "insert_task", lambda **task: {"id": task["content"]})
 
     result = db_tasks.insert_tasks([{"content": "Task 1"}, {"content": "Task 2"}])
@@ -112,7 +122,9 @@ def test_insert_tasks_from_templates_preserves_order(monkeypatch):
             return fut
 
     monkeypatch.setattr("todoist.database.db_tasks.ThreadPoolExecutor", InlineExecutor)
-    monkeypatch.setattr("todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable)
+    monkeypatch.setattr(
+        "todoist.database.db_tasks.tqdm", lambda iterable, **_kwargs: iterable
+    )
     monkeypatch.setattr(
         db_tasks,
         "insert_task_from_template",

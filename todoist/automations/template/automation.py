@@ -1,15 +1,15 @@
 from inspect import signature
 from typing import Any, Final, Iterable, Mapping, cast
 from todoist.automations.base import Automation
-from todoist.constants import TaskField
+from todoist.core.constants import TaskField
 from todoist.database.base import Database
-from todoist.types import Task, TaskEntry
+from todoist.core.types import Task, TaskEntry
 from loguru import logger
 from datetime import datetime, timedelta
 import hydra
 from omegaconf import DictConfig
 
-FROM_TEMPLATE_LABEL_PREFIX: Final[str] = 'template-'
+FROM_TEMPLATE_LABEL_PREFIX: Final[str] = "template-"
 
 
 class TaskTemplate:
@@ -23,20 +23,23 @@ class TaskTemplate:
         priority (int): The priority level of the task, where a higher value indicates higher priority. Defaults to 1.
         children (list[TaskTemplate]): A list of child TaskTemplate objects representing subtasks.
     """
-    def __init__(self,
-                 content: str,
-                 description: str | None = None,
-                 due_date_days_difference: int | None = 0,
-                 priority: int = 1,
-                 children: list['TaskTemplate'] | None = None):
+
+    def __init__(
+        self,
+        content: str,
+        description: str | None = None,
+        due_date_days_difference: int | None = 0,
+        priority: int = 1,
+        children: list["TaskTemplate"] | None = None,
+    ):
         self.due_date_days_difference = due_date_days_difference
         self.content = content
         self.description = description
         self.priority = priority
-        self.children: list['TaskTemplate'] = children or []
+        self.children: list["TaskTemplate"] = children or []
 
     @classmethod
-    def from_config(cls, config: Mapping[str, Any] | 'TaskTemplate') -> 'TaskTemplate':
+    def from_config(cls, config: Mapping[str, Any] | "TaskTemplate") -> "TaskTemplate":
         """Create a :class:`TaskTemplate` from a plain mapping.
 
         The YAML config files used to rely on Hydra targets for every task and
@@ -54,15 +57,17 @@ class TaskTemplate:
                 f"Missing required field '{TaskField.CONTENT.value}' in TaskTemplate config: {config}"
             )
         description = config.get(TaskField.DESCRIPTION.value)
-        due_date_days_difference = config.get('due_date_days_difference', 0)
+        due_date_days_difference = config.get("due_date_days_difference", 0)
         priority = config.get(TaskField.PRIORITY.value, 1)
-        children = [cls.from_config(child) for child in config.get('children', [])]
+        children = [cls.from_config(child) for child in config.get("children", [])]
 
-        return cls(content=content,
-                   description=description,
-                   due_date_days_difference=due_date_days_difference,
-                   priority=priority,
-                   children=children)
+        return cls(
+            content=content,
+            description=description,
+            due_date_days_difference=due_date_days_difference,
+            priority=priority,
+            children=children,
+        )
 
     @classmethod
     def priority_on_todoist(cls, priority: int) -> int:
@@ -75,7 +80,7 @@ class TaskTemplate:
         """
         return 4 - priority
 
-    def walk(self, skip_root=False) -> Iterable['TaskTemplate']:
+    def walk(self, skip_root=False) -> Iterable["TaskTemplate"]:
         """
         Recursively iterates over the current node and its descendants in a depth-first manner.
 
@@ -102,25 +107,45 @@ class Template(Automation):
     def _tick(self, db: Database) -> None:
         logger.info("Running Template automation")
         projects = db.fetch_projects(include_tasks=True)
-        all_tasks: Iterable[Task] = [task for project in projects for task in project.tasks]
+        all_tasks: Iterable[Task] = [
+            task for project in projects for task in project.tasks
+        ]
         logger.debug(f"Found {len(list(all_tasks))} tasks in total")
-        all_unique_labels = set(tag for task in all_tasks for tag in task.task_entry.labels)
+        all_unique_labels = set(
+            tag for task in all_tasks for tag in task.task_entry.labels
+        )
         logger.debug(f"Found {len(all_unique_labels)} unique labels")
 
         task_to_initialize_from_template = list(
-            filter(lambda task: any(tag.startswith(FROM_TEMPLATE_LABEL_PREFIX) for tag in task.task_entry.labels),
-                   all_tasks))
+            filter(
+                lambda task: any(
+                    tag.startswith(FROM_TEMPLATE_LABEL_PREFIX)
+                    for tag in task.task_entry.labels
+                ),
+                all_tasks,
+            )
+        )
 
-        logger.info(f"Found {len(task_to_initialize_from_template)} tasks to initialize from template")
+        logger.info(
+            f"Found {len(task_to_initialize_from_template)} tasks to initialize from template"
+        )
 
-        def insert_subtasks(root_task: Task, parent_id: str, task_template: TaskTemplate,
-                            parent_due_date: datetime | None):
+        def insert_subtasks(
+            root_task: Task,
+            parent_id: str,
+            task_template: TaskTemplate,
+            parent_due_date: datetime | None,
+        ):
             child_payloads: list[dict[str, object]] = []
             child_due_dates: list[datetime | None] = []
             for child in task_template.children:
-                if child.due_date_days_difference is not None and parent_due_date is not None:
-                    subtask_due_date = (parent_due_date +
-                                        timedelta(days=child.due_date_days_difference)).strftime('%Y-%m-%d')
+                if (
+                    child.due_date_days_difference is not None
+                    and parent_due_date is not None
+                ):
+                    subtask_due_date = (
+                        parent_due_date + timedelta(days=child.due_date_days_difference)
+                    ).strftime("%Y-%m-%d")
                 else:
                     subtask_due_date = None
 
@@ -143,10 +168,10 @@ class Template(Automation):
                 child_due_dates,
                 strict=False,
             ):
-                if 'id' in child_insertion_result:
+                if "id" in child_insertion_result:
                     insert_subtasks(
                         root_task,
-                        cast(str, child_insertion_result['id']),
+                        cast(str, child_insertion_result["id"]),
                         child,
                         child_parent_due_date,
                     )
@@ -154,9 +179,13 @@ class Template(Automation):
                     logger.error(f"Failed to insert subtask {child.content}")
 
         for task in task_to_initialize_from_template:
-            template_label = next(filter(lambda tag: tag.startswith(FROM_TEMPLATE_LABEL_PREFIX),
-                                         task.task_entry.labels))
-            template_name = template_label[len(FROM_TEMPLATE_LABEL_PREFIX):]
+            template_label = next(
+                filter(
+                    lambda tag: tag.startswith(FROM_TEMPLATE_LABEL_PREFIX),
+                    task.task_entry.labels,
+                )
+            )
+            template_name = template_label[len(FROM_TEMPLATE_LABEL_PREFIX) :]
             if template_name not in self.task_templates:
                 logger.error(f"Template {template_name} not found")
                 continue
@@ -168,44 +197,69 @@ class Template(Automation):
                 due_datetime_child_str = None
             else:
                 due_datetime_parent = task.task_entry.due_datetime
-                due_datetime_child = due_datetime_parent + timedelta(days=template_.due_date_days_difference or 0)
-                due_datetime_child_str = due_datetime_child.strftime('%Y-%m-%dT%H:%M:%S')
+                due_datetime_child = due_datetime_parent + timedelta(
+                    days=template_.due_date_days_difference or 0
+                )
+                due_datetime_child_str = due_datetime_child.strftime(
+                    "%Y-%m-%dT%H:%M:%S"
+                )
             labels_root = list(
-                filter(lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX), task.task_entry.labels))
+                filter(
+                    lambda tag: not tag.startswith(FROM_TEMPLATE_LABEL_PREFIX),
+                    task.task_entry.labels,
+                )
+            )
             root_insertion_result: dict = db.insert_task_from_template(
                 task,
-                content=f'{template_.content}: {task.task_entry.content}',
+                content=f"{template_.content}: {task.task_entry.content}",
                 description=template_.description,
                 priority=task.task_entry.priority,
                 due_datetime=due_datetime_child_str,
-                labels=labels_root)
+                labels=labels_root,
+            )
 
-            if root_insertion_result is None or 'id' not in root_insertion_result:
+            if root_insertion_result is None or "id" not in root_insertion_result:
                 logger.error(f"Failed to initialize task from template {template_name}")
                 continue
 
-            root_task_payload = db.fetch_task_by_id(root_insertion_result['id'])
+            root_task_payload = db.fetch_task_by_id(root_insertion_result["id"])
             if not isinstance(root_task_payload, dict):
-                logger.error("Failed to fetch task payload for initialized template task %s", root_insertion_result['id'])
+                logger.error(
+                    "Failed to fetch task payload for initialized template task %s",
+                    root_insertion_result["id"],
+                )
                 continue
-            fix_mapping = {'creator_id': 'user_id'}
+            fix_mapping = {"creator_id": "user_id"}
 
-            drop_mapping = {'self'}
+            drop_mapping = {"self"}
             root_task_entry: dict[str, Any] = dict(root_task_payload)
             for old_key, new_key in fix_mapping.items():
                 if old_key in root_task_entry and new_key not in root_task_entry:
                     root_task_entry[new_key] = root_task_entry.pop(old_key)
 
-            root_task_entry = {k: v for k, v in root_task_entry.items() if k in signature(TaskEntry.__init__).parameters}
-            lacking_params = set(signature(TaskEntry.__init__).parameters) - set(root_task_entry.keys())
+            root_task_entry = {
+                k: v
+                for k, v in root_task_entry.items()
+                if k in signature(TaskEntry.__init__).parameters
+            }
+            lacking_params = set(signature(TaskEntry.__init__).parameters) - set(
+                root_task_entry.keys()
+            )
             for param in lacking_params:
                 root_task_entry[param] = None
 
             for drop in drop_mapping:
                 root_task_entry.pop(drop, None)
 
-            root_task = Task(id=root_insertion_result['id'], task_entry=TaskEntry(**root_task_entry))
-            insert_subtasks(root_task, cast(str, root_insertion_result['id']), template_, due_datetime_child)
+            root_task = Task(
+                id=root_insertion_result["id"], task_entry=TaskEntry(**root_task_entry)
+            )
+            insert_subtasks(
+                root_task,
+                cast(str, root_insertion_result["id"]),
+                template_,
+                due_datetime_child,
+            )
 
             db.remove_task(task.id)
             logger.info(f"Initialized task {task.id} from template {template_name}")
@@ -214,12 +268,12 @@ class Template(Automation):
 # pylint: disable=missing-function-docstring
 @hydra.main(version_base=None, config_path=None)
 def main(config: DictConfig) -> None:
-    db = Database('.env')
+    db = Database(".env")
     single_templates = hydra.utils.instantiate(config.automations)
     template = Template(single_templates)
     template.tick(db)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # pylint: disable=no-value-for-parameter
     main()

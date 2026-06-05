@@ -1,11 +1,11 @@
-"""Tests for statistics and date helper functions in ``todoist.stats``."""
+"""Tests for statistics and date helper functions in ``todoist.features.stats``."""
 
 from datetime import datetime
 from functools import partial
 
 import pytest
 
-from todoist.stats import (
+from todoist.features.stats import (
     all_tasks,
     any_labels,
     extract_task_due_date,
@@ -63,7 +63,9 @@ def test_priority_tasks_no_match(project_factory, task_factory):
     ("counter", "expected_count"),
     [(p1_tasks, 2), (p2_tasks, 1), (p3_tasks, 1), (p4_tasks, 1)],
 )
-def test_priority_partial_helpers(project_with_tasks, counter: partial, expected_count: int):
+def test_priority_partial_helpers(
+    project_with_tasks, counter: partial, expected_count: int
+):
     assert counter(project_with_tasks) == expected_count
 
 
@@ -84,8 +86,13 @@ def test_priority_partials_on_empty_project(project_factory):
         ([["a", "b", "c"], [], ["d"]], 2),
     ],
 )
-def test_any_labels_counts(project_factory, task_factory, task_labels: list[list[str]], expected_count: int):
-    tasks = [task_factory(f"task{i}", labels=labels) for i, labels in enumerate(task_labels, start=1)]
+def test_any_labels_counts(
+    project_factory, task_factory, task_labels: list[list[str]], expected_count: int
+):
+    tasks = [
+        task_factory(f"task{i}", labels=labels)
+        for i, labels in enumerate(task_labels, start=1)
+    ]
     project = project_factory(project_id="labels", tasks=tasks)
     assert any_labels(project) == expected_count
 
@@ -115,7 +122,10 @@ def test_try_parse_date_supported_formats(raw_date: str, expected: datetime | No
         ("2024-01-15T14:30:00Z", datetime(2024, 1, 15, 14, 30, 0)),
         ("2024-01-15T14:30:45.123456Z", datetime(2024, 1, 15, 14, 30, 45, 123456)),
         ({"date": "2024-01-15"}, datetime(2024, 1, 15)),
-        ({"date": "2024-01-15T14:30:00Z", "is_recurring": False}, datetime(2024, 1, 15, 14, 30, 0)),
+        (
+            {"date": "2024-01-15T14:30:00Z", "is_recurring": False},
+            datetime(2024, 1, 15, 14, 30, 0),
+        ),
         (
             {"date": "2024-01-15T10:00:00Z", "is_recurring": True, "timezone": "UTC"},
             datetime(2024, 1, 15, 10, 0, 0),

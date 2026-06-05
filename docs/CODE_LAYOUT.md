@@ -45,6 +45,25 @@ Important subpackages include:
 - `template`
 - `update_env`
 
+### `todoist.core`
+
+Shared, non-UI primitives: environment names, constants, data types, runtime environment resolution, telemetry, utilities, and version helpers.
+
+New code should import these modules directly from `todoist.core`; the package root is kept for entry points, not implementation modules.
+
+### `todoist.features`
+
+Domain-level feature helpers that are shared across automations and the dashboard:
+
+- `activity`
+- `habit_tracker`
+- `stale_tasks`
+- `stats`
+- `status_update`
+- `task_tree_import`
+
+New code should import these modules directly from `todoist.features`.
+
 ### `todoist.dashboard`
 
 Dashboard-facing utilities and subpages used by the web experience.
@@ -61,9 +80,10 @@ The package is split so backend-neutral configuration, constants, model catalog,
 and structured-output parsing can be imported without loading a backend. Backend
 modules are loaded lazily from the selected environment value:
 - `config.py`, `constants.py`, `model_catalog.py`, `structured.py`: safe shared surface
-- `codex_llm.py`: Codex CLI adapter
-- `triton_llm.py`: Triton inference adapter
-- `local_llm.py`: direct Transformers adapter used by the CLI agent
+- `backends/raw.py`: explicit no-AI backend marker used by launch/runtime selection
+- `backends/codex.py`: Codex CLI adapter
+- `backends/triton.py`: Triton inference adapter
+- `backends/transformers.py`: direct Transformers adapter used by the CLI agent
 - `factory.py`: facade for constructing only the selected backend
 
 ### `todoist.agent`
@@ -74,7 +94,8 @@ Local agent and chat helpers built on top of cached Todoist data.
 
 - `frontend/` is the user interface
 - `todoist.web` is the local backend API
-- `make run_dashboard` starts both together for local development or usage
+- `make dashboard` starts both together for local development or usage
+- `make dashboard_codex` and `make dashboard_triton` opt into AI backends
 
 ## Core package
 
@@ -103,9 +124,9 @@ See [../core/README.md](../core/README.md) for packaging details.
 
 ## Common entry points
 
-- `make init_local_env`: first sync and setup
+- `make setup`: first sync and setup
 - `make update_env`: refresh cache and run short automations
-- `make run_dashboard`: start API + frontend
+- `make dashboard`: start API + frontend without AI
 - `make run_observer`: run background refresh loop
 - `make chat_agent`: start local read-only chat flow
 

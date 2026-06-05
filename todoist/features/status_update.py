@@ -1,4 +1,3 @@
-
 from collections import defaultdict
 from datetime import datetime
 import re
@@ -9,7 +8,7 @@ from loguru import logger
 
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
-from todoist.types import Project
+from todoist.core.types import Project
 
 
 class StatusUpdateDatabase(Protocol):
@@ -100,11 +99,15 @@ def status_update_project_payload(projects: Sequence[Project]) -> list[dict[str,
 
 
 def load_status_update_projects(dbio: StatusUpdateDatabase) -> list[dict[str, Any]]:
-    projects = list(dbio.fetch_projects(include_tasks=False)) + list(dbio.fetch_archived_projects())
+    projects = list(dbio.fetch_projects(include_tasks=False)) + list(
+        dbio.fetch_archived_projects()
+    )
     return status_update_project_payload(projects)
 
 
-def _build_project_index(projects: Sequence[Project]) -> tuple[dict[str, Project], dict[str, list[str]]]:
+def _build_project_index(
+    projects: Sequence[Project],
+) -> tuple[dict[str, Project], dict[str, list[str]]]:
     project_index = {project.id: project for project in projects}
     children_by_parent: dict[str, list[str]] = defaultdict(list)
     for project in projects:
@@ -115,7 +118,9 @@ def _build_project_index(projects: Sequence[Project]) -> tuple[dict[str, Project
         if parent_key in project_index:
             children_by_parent[parent_key].append(project.id)
     for child_ids in children_by_parent.values():
-        child_ids.sort(key=lambda project_id: project_index[project_id].project_entry.name.lower())
+        child_ids.sort(
+            key=lambda project_id: project_index[project_id].project_entry.name.lower()
+        )
     return project_index, children_by_parent
 
 
@@ -176,7 +181,10 @@ def _filter_completed_tasks(
         return df_activity.iloc[0:0].copy()
 
     normalized = _normalize_dataframe(df_activity)
-    if "type" not in normalized.columns or "parent_project_id" not in normalized.columns:
+    if (
+        "type" not in normalized.columns
+        or "parent_project_id" not in normalized.columns
+    ):
         raise RuntimeError("Activity dataframe is missing required columns")
 
     project_scope = {str(project_id) for project_id in project_scope_ids}
@@ -184,7 +192,11 @@ def _filter_completed_tasks(
         (normalized.index >= pd.Timestamp(beg))
         & (normalized.index < pd.Timestamp(end))
         & (cast(pd.Series, normalized["type"]).astype(str) == "completed")
-        & (cast(pd.Series, normalized["parent_project_id"]).astype(str).isin(project_scope))
+        & (
+            cast(pd.Series, normalized["parent_project_id"])
+            .astype(str)
+            .isin(project_scope)
+        )
     )
     return cast(pd.DataFrame, normalized[mask].copy())
 
@@ -210,7 +222,9 @@ def _build_comment_summary(
     for comment in comments:
         if len(summary) >= limit:
             break
-        content = _clean_text(comment.get("content") or comment.get("text") or comment.get("body"))
+        content = _clean_text(
+            comment.get("content") or comment.get("text") or comment.get("body")
+        )
         if not content:
             continue
         summary.append(
@@ -218,7 +232,11 @@ def _build_comment_summary(
                 "id": str(comment.get("id") or ""),
                 "content": content,
                 "snippet": _truncate(content),
-                "createdAt": _clean_text(comment.get("posted_at") or comment.get("created_at") or comment.get("createdAt"))
+                "createdAt": _clean_text(
+                    comment.get("posted_at")
+                    or comment.get("created_at")
+                    or comment.get("createdAt")
+                )
                 or None,
             }
         )
@@ -249,7 +267,9 @@ def build_status_update_report(
     if beg >= end:
         raise ValueError("beg must be before end")
 
-    projects = list(dbio.fetch_projects(include_tasks=False)) + list(dbio.fetch_archived_projects())
+    projects = list(dbio.fetch_projects(include_tasks=False)) + list(
+        dbio.fetch_archived_projects()
+    )
     project_index, children_by_parent = _build_project_index(projects)
     expanded_ids, missing_project_ids = _expand_project_scope(
         project_ids,
@@ -259,7 +279,9 @@ def build_status_update_report(
     if not expanded_ids:
         raise ValueError("project_ids must include at least one known project")
 
-    activity_df = load_activity_data(cast(Database, dbio)) if df_activity is None else df_activity
+    activity_df = (
+        load_activity_data(cast(Database, dbio)) if df_activity is None else df_activity
+    )
     completed_df = _filter_completed_tasks(
         activity_df,
         beg=beg,
@@ -285,7 +307,9 @@ def build_status_update_report(
             if not task_id:
                 continue
             project_id = _clean_text(row.get("parent_project_id"))
-            project_name = _clean_text(row.get("parent_project_name")) or _get_project_name(project_id, project_index)
+            project_name = _clean_text(
+                row.get("parent_project_name")
+            ) or _get_project_name(project_id, project_index)
             completed_at = _format_iso_date(row.name)
             content = _clean_text(row.get("title")) or "(untitled task)"
             story_points = _extract_story_points(content)
@@ -296,11 +320,14 @@ def build_status_update_report(
                     "content": content,
                     "projectId": project_id or None,
                     "projectName": project_name or "(unknown)",
-                    "projectLabel": _get_project_title(project_index[project_id], project_index)
+                    "projectLabel": _get_project_title(
+                        project_index[project_id], project_index
+                    )
                     if project_id in project_index
                     else project_name or "(unknown)",
                     "rootProjectId": _clean_text(row.get("root_project_id")) or None,
-                    "rootProjectName": _clean_text(row.get("root_project_name")) or None,
+                    "rootProjectName": _clean_text(row.get("root_project_name"))
+                    or None,
                     "completedAt": None,
                     "completionHistory": [],
                     "completionCount": 0,
@@ -333,7 +360,9 @@ def build_status_update_report(
             raw_comments = list(comment_fetcher(task_id))
         except Exception as exc:  # pragma: no cover - network and API safety
             logger.warning("Failed to load comments for task {}: {}", task_id, exc)
-            warnings.append(f"Comments unavailable for task {task_id}: {type(exc).__name__}")
+            warnings.append(
+                f"Comments unavailable for task {task_id}: {type(exc).__name__}"
+            )
             raw_comments = []
         comments = _build_comment_summary(raw_comments, limit=comment_limit_per_task)
         task_record["comments"] = comments
@@ -368,7 +397,9 @@ def build_status_update_report(
     total_commented_tasks = sum(1 for item in tasks if int(item["commentCount"]) > 0)
     total_comments_loaded = sum(int(item["commentCount"]) for item in tasks)
     total_story_points = sum(_task_story_point_count(item) for item in tasks)
-    total_estimated_tasks = sum(1 for item in tasks if int(item.get("storyPoints") or 0) > 0)
+    total_estimated_tasks = sum(
+        1 for item in tasks if int(item.get("storyPoints") or 0) > 0
+    )
 
     report_label = sync_label or "Status update"
     period_beg = beg.isoformat(timespec="seconds")
@@ -377,9 +408,13 @@ def build_status_update_report(
     project_rollup: list[dict[str, Any]] = []
     for project in expanded_projects:
         project_tasks = grouped_tasks.get(project.id, [])
-        completion_count = sum(int(task.get("completionCount") or 0) for task in project_tasks)
+        completion_count = sum(
+            int(task.get("completionCount") or 0) for task in project_tasks
+        )
         story_point_count = sum(_task_story_point_count(task) for task in project_tasks)
-        comment_count = sum(int(task.get("commentCount") or 0) for task in project_tasks)
+        comment_count = sum(
+            int(task.get("commentCount") or 0) for task in project_tasks
+        )
         if not project_tasks and not comment_count:
             continue
         project_rollup.append(
@@ -390,7 +425,9 @@ def build_status_update_report(
                 "completedTaskCount": len(project_tasks),
                 "completionEventCount": completion_count,
                 "storyPointCount": story_point_count,
-                "estimatedTaskCount": sum(1 for task in project_tasks if int(task.get("storyPoints") or 0) > 0),
+                "estimatedTaskCount": sum(
+                    1 for task in project_tasks if int(task.get("storyPoints") or 0) > 0
+                ),
                 "commentCount": comment_count,
             }
         )
@@ -416,14 +453,18 @@ def build_status_update_report(
             f"{_plural(total_estimated_tasks, 'estimated task')}."
         )
     else:
-        executive_summary.append("No story-point estimates were detected in completed task names.")
+        executive_summary.append(
+            "No story-point estimates were detected in completed task names."
+        )
     if total_comments_loaded:
         executive_summary.append(
             f"Evidence includes {_plural(total_comments_loaded, 'comment')} on "
             f"{_plural(total_commented_tasks, 'completed task')}."
         )
     else:
-        executive_summary.append("No task comments were returned for the completed work.")
+        executive_summary.append(
+            "No task comments were returned for the completed work."
+        )
     if project_rollup:
         top_projects = project_rollup[:3]
         focus = "; ".join(
@@ -448,7 +489,9 @@ def build_status_update_report(
         ]
     )
     if missing_project_ids:
-        markdown_lines.append(f"- Missing project ids ignored: {', '.join(sorted(missing_project_ids))}")
+        markdown_lines.append(
+            f"- Missing project ids ignored: {', '.join(sorted(missing_project_ids))}"
+        )
 
     markdown_lines.extend(["", "## Project rollup"])
     if project_rollup:
@@ -464,11 +507,15 @@ def build_status_update_report(
                 f"{project['completionEventCount']} | {project['storyPointCount']} | {project['commentCount']} |"
             )
     else:
-        markdown_lines.append("No completed tasks were found for the selected projects and range.")
+        markdown_lines.append(
+            "No completed tasks were found for the selected projects and range."
+        )
 
     markdown_lines.extend(["", "## Key completed work"])
     if not tasks:
-        markdown_lines.append("No completed tasks were found for the selected projects and range.")
+        markdown_lines.append(
+            "No completed tasks were found for the selected projects and range."
+        )
     else:
         key_tasks = sorted(
             tasks,
@@ -500,9 +547,13 @@ def build_status_update_report(
             project_tasks = grouped_tasks.get(project.id)
             if not project_tasks:
                 continue
-            markdown_lines.extend(["", f"### {_get_project_title(project, project_index)}"])
+            markdown_lines.extend(
+                ["", f"### {_get_project_title(project, project_index)}"]
+            )
             for task in project_tasks:
-                completion_dates = ", ".join(str(value) for value in task["completionHistory"])
+                completion_dates = ", ".join(
+                    str(value) for value in task["completionHistory"]
+                )
                 point_suffix = ""
                 story_point_count = _task_story_point_count(task)
                 if story_point_count:
@@ -547,7 +598,9 @@ def build_status_update_report(
             "end": period_end,
         },
         "selection": {
-            "requestedProjectIds": list(dict.fromkeys(str(project_id) for project_id in project_ids)),
+            "requestedProjectIds": list(
+                dict.fromkeys(str(project_id) for project_id in project_ids)
+            ),
             "requestedProjects": requested_project_payload,
             "expandedProjectIds": expanded_ids,
             "expandedProjects": expanded_project_payload,

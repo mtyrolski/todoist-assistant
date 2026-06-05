@@ -10,7 +10,9 @@ from todoist import cli
 runner = CliRunner()
 
 
-def test_enable_telemetry_shows_missing_endpoint_note(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_enable_telemetry_shows_missing_endpoint_note(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     calls: list[tuple[Path, bool]] = []
 
     monkeypatch.setattr(cli.telemetry, "resolve_config_dir", lambda: tmp_path)

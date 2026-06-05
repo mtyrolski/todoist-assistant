@@ -5,8 +5,8 @@ import sys
 from typing import Any
 from urllib.request import Request, urlopen
 
-from todoist.version import get_version
-from todoist.env import EnvVar
+from todoist.core.version import get_version
+from todoist.core.env import EnvVar
 
 CONFIG_FILENAME = "telemetry.json"
 SENTINEL_FILENAME = ".telemetry_sent"

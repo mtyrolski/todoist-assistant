@@ -7,7 +7,8 @@ import zipfile
 
 import pytest
 
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
+
 _ALLOWED_MSIEXEC_CODES = {0, 3010, 1641}
 
 
@@ -16,17 +17,21 @@ def test_windows_msi_contents() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     msi_path = _resolve_msi_path(repo_root)
 
-    expected_dashboard = os.getenv(str(EnvVar.EXPECT_DASHBOARD), "").strip().lower() in {"1", "true", "yes"}
+    expected_dashboard = os.getenv(
+        str(EnvVar.EXPECT_DASHBOARD), ""
+    ).strip().lower() in {"1", "true", "yes"}
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _run_msiexec([
-            "msiexec",
-            "/a",
-            str(msi_path),
-            "/qn",
-            "/norestart",
-            f"TARGETDIR={temp_dir}",
-        ])
+        _run_msiexec(
+            [
+                "msiexec",
+                "/a",
+                str(msi_path),
+                "/qn",
+                "/norestart",
+                f"TARGETDIR={temp_dir}",
+            ]
+        )
 
         extracted_root = Path(temp_dir)
         exe_path = _find_required(extracted_root, "todoist-assistant.exe")
@@ -36,7 +41,9 @@ def test_windows_msi_contents() -> None:
         _find_required(extracted_root, "automations.yaml")
 
         has_python = _has_python_runtime(app_root)
-        assert has_python, "Expected bundled Python runtime artifacts in installer payload"
+        assert has_python, (
+            "Expected bundled Python runtime artifacts in installer payload"
+        )
 
         if expected_dashboard:
             frontend_zip = app_root / "frontend.zip"
@@ -49,14 +56,20 @@ def test_windows_msi_contents() -> None:
                     for name in names
                 )
                 assert has_server, "Dashboard server.js missing from frontend.zip"
-                assert has_assets, "Dashboard assets missing from frontend.zip (.next/static or public)"
+                assert has_assets, (
+                    "Dashboard assets missing from frontend.zip (.next/static or public)"
+                )
             else:
                 server_candidates = [
                     app_root / "server.js",
                     app_root / "frontend" / "server.js",
                 ]
-                server_js = next((path for path in server_candidates if path.exists()), None)
-                assert server_js is not None, "Dashboard server.js missing from packaged frontend"
+                server_js = next(
+                    (path for path in server_candidates if path.exists()), None
+                )
+                assert server_js is not None, (
+                    "Dashboard server.js missing from packaged frontend"
+                )
                 static_candidates = [
                     app_root / ".next" / "static",
                     app_root / "frontend" / ".next" / "static",
@@ -65,7 +78,9 @@ def test_windows_msi_contents() -> None:
                     app_root / "public",
                     app_root / "frontend" / "public",
                 ]
-                has_assets = any(path.exists() for path in static_candidates + public_candidates)
+                has_assets = any(
+                    path.exists() for path in static_candidates + public_candidates
+                )
                 assert has_assets, "Dashboard assets missing (.next/static or public)"
 
 
@@ -77,9 +92,13 @@ def _resolve_msi_path(repo_root: Path) -> Path:
             return path
         raise AssertionError(f"MSI not found at {EnvVar.MSI_PATH}={env_path}")
 
-    candidates = sorted((repo_root / "dist" / "windows").glob("todoist-assistant-*.msi"))
+    candidates = sorted(
+        (repo_root / "dist" / "windows").glob("todoist-assistant-*.msi")
+    )
     if not candidates:
-        pytest.skip("MSI not found. Build with: uv run python3 -m scripts.build_windows")
+        pytest.skip(
+            "MSI not found. Build with: uv run python3 -m scripts.build_windows"
+        )
     return candidates[-1]
 
 

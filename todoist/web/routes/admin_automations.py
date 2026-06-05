@@ -2,12 +2,11 @@
 
 # pylint: disable=protected-access,cyclic-import
 
-
 import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Body
-from todoist.dashboard_settings import update_observer_settings
+from todoist.dashboard.settings import update_observer_settings
 
 from todoist.web.services.admin_automations import (
     admin_job,
@@ -48,7 +47,9 @@ async def set_admin_automation_enabled(
         if key not in available_keys:
             from fastapi import HTTPException
 
-            raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
+            raise HTTPException(
+                status_code=404, detail=f"Unknown automation key: {key}"
+            )
         web_api._set_automation_enabled(key, enabled=enabled)
         web_api._restart_dashboard_observer_if_managed()
     return await get_admin_automations()
@@ -111,7 +112,9 @@ async def run_admin_automation(name: str, refresh: bool = False) -> dict[str, An
 
         dbio = web_api.Database(".env")
         dbio.pull()
-        result = await asyncio.to_thread(web_api._run_automation_sync, automations[name], dbio=dbio)
+        result = await asyncio.to_thread(
+            web_api._run_automation_sync, automations[name], dbio=dbio
+        )
         dbio.reset()
 
     if refresh:
@@ -147,10 +150,14 @@ async def get_admin_observer_state() -> dict[str, Any]:
     web_api = _web_api()
     config = web_api.load_dashboard_config(web_api._DASHBOARD_CONFIG_PATH)
     state = web_api._load_observer_state()
-    observer_settings = web_api.observer_settings_payload(config, path=web_api._DASHBOARD_CONFIG_PATH)
+    observer_settings = web_api.observer_settings_payload(
+        config, path=web_api._DASHBOARD_CONFIG_PATH
+    )
     state["enabled"] = bool(observer_settings["enabled"])
     state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-    state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+    state["refreshIntervalSeconds"] = (
+        float(observer_settings["refreshIntervalMinutes"]) * 60.0
+    )
     return {
         "state": web_api._serialize_observer_state(state),
         "settings": observer_settings,
@@ -176,7 +183,9 @@ async def set_admin_observer(payload: Any = Body(...)) -> dict[str, Any]:
     else:
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=400, detail="Body must be a JSON object or boolean")
+        raise HTTPException(
+            status_code=400, detail="Body must be a JSON object or boolean"
+        )
 
     async with web_api._ADMIN_LOCK:
         config = web_api.load_dashboard_config(web_api._DASHBOARD_CONFIG_PATH)
@@ -188,8 +197,12 @@ async def set_admin_observer(payload: Any = Body(...)) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         cache_state = web_api._load_observer_state()
         cache_state["enabled"] = bool(observer_settings["enabled"])
-        cache_state["refreshIntervalMinutes"] = observer_settings["refreshIntervalMinutes"]
-        cache_state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        cache_state["refreshIntervalMinutes"] = observer_settings[
+            "refreshIntervalMinutes"
+        ]
+        cache_state["refreshIntervalSeconds"] = (
+            float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        )
         cache_state["updatedAt"] = web_api._now_iso()
         web_api.Cache().observer_state.save(cache_state)
         web_api._save_yaml_config(web_api._DASHBOARD_CONFIG_PATH, config)
@@ -219,8 +232,12 @@ async def run_admin_observer(force: bool = False) -> dict[str, Any]:
         )
         enabled = bool(observer_settings["enabled"])
         state["enabled"] = enabled
-        state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-        state["refreshIntervalSeconds"] = float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        state["refreshIntervalMinutes"] = float(
+            observer_settings["refreshIntervalMinutes"]
+        )
+        state["refreshIntervalSeconds"] = (
+            float(observer_settings["refreshIntervalMinutes"]) * 60.0
+        )
         if not enabled and not force:
             from fastapi import HTTPException
 
@@ -257,7 +274,9 @@ async def run_admin_observer(force: bool = False) -> dict[str, Any]:
             dbio.reset()
             finished_at = web_api.datetime.now()
             state["lastRunAt"] = finished_at.isoformat(timespec="seconds")
-            state["lastDurationSeconds"] = round((finished_at - started_at).total_seconds(), 3)
+            state["lastDurationSeconds"] = round(
+                (finished_at - started_at).total_seconds(), 3
+            )
             state["updatedAt"] = web_api._now_iso()
             web_api.Cache().observer_state.save(state)
 

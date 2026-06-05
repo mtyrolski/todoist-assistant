@@ -53,7 +53,9 @@ _BANNED_SUBSTRINGS = (
 
 def _is_code_safe(code: str) -> tuple[bool, str]:
     lowered = code.lower()
-    blocked_token = next((token for token in _BANNED_SUBSTRINGS if token in lowered), None)
+    blocked_token = next(
+        (token for token in _BANNED_SUBSTRINGS if token in lowered), None
+    )
     if blocked_token is not None:
         return False, f"Blocked token detected: {blocked_token!r}"
 
@@ -62,7 +64,16 @@ def _is_code_safe(code: str) -> tuple[bool, str]:
     except SyntaxError as exc:
         return False, f"SyntaxError: {exc}"
 
-    banned_nodes = (ast.Import, ast.ImportFrom, ast.With, ast.Try, ast.Raise, ast.Lambda, ast.ClassDef, ast.FunctionDef)
+    banned_nodes = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.With,
+        ast.Try,
+        ast.Raise,
+        ast.Lambda,
+        ast.ClassDef,
+        ast.FunctionDef,
+    )
     reason: str | None = None
     for node in ast.walk(tree):
         if isinstance(node, banned_nodes):
@@ -121,7 +132,10 @@ class SafePythonReplTool:
     """A tiny REPL-like executor with persistent locals."""
 
     def __init__(self, context: dict[str, Any]):
-        self._globals: dict[str, Any] = {"__builtins__": _SAFE_BUILTINS_MODULE, **context}
+        self._globals: dict[str, Any] = {
+            "__builtins__": _SAFE_BUILTINS_MODULE,
+            **context,
+        }
         self._locals: dict[str, Any] = {}
 
     def run(self, code: str) -> str:

@@ -11,7 +11,7 @@ import sys
 import types
 
 from todoist.agent.constants import TOOL_PROMPT
-from todoist.constants import EventType  # noqa: E402
+from todoist.core.constants import EventType  # noqa: E402
 
 try:  # noqa: E402
     from joblib import load as _joblib_load  # type: ignore
@@ -43,6 +43,7 @@ def _load_activity(cache_root: Path) -> set:
         activity = _joblib_load(cache_path)
     else:
         import pickle
+
         with cache_path.open("rb") as handle:
             activity = pickle.load(handle)
     if not isinstance(activity, set):
@@ -132,10 +133,12 @@ def _check(label: str, condition: bool, detail: str | None = None) -> tuple[str,
 def _ensure_stub_dependencies() -> None:
     if "loguru" not in sys.modules:
         if importlib.util.find_spec("loguru") is None:
+
             class _StubLogger:
                 def __getattr__(self, name: str):
                     def _noop(*_args, **_kwargs):
                         return None
+
                     return _noop
 
             stub = types.ModuleType("loguru")
@@ -143,6 +146,7 @@ def _ensure_stub_dependencies() -> None:
             sys.modules["loguru"] = stub
     if "pandas" not in sys.modules:
         if importlib.util.find_spec("pandas") is None:
+
             class _StubDataFrame:  # minimal placeholder
                 pass
 
@@ -152,13 +156,20 @@ def _ensure_stub_dependencies() -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check LLM prompt + activity completion counts.")
+    parser = argparse.ArgumentParser(
+        description="Check LLM prompt + activity completion counts."
+    )
     parser.add_argument(
         "--cache-path",
         default=str((Path.cwd() / ".cache" / "todoist-assistant").resolve()),
         help="Cache root containing activity.joblib (default: ./.cache/todoist-assistant)",
     )
-    parser.add_argument("--year", type=int, default=2025, help="Year to count completed tasks (default: 2025)")
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=2025,
+        help="Year to count completed tasks (default: 2025)",
+    )
     args = parser.parse_args()
 
     cache_root = Path(args.cache_path).resolve()
@@ -284,7 +295,9 @@ counts = count_by(e.event_entry.object_type for e in completed)
     for name, count in top_types:
         print(f"  {name}: {count}")
     checks = []
-    checks.append(_check("sum_matches_total", sum(by_type.values()) == len(completed_year)))
+    checks.append(
+        _check("sum_matches_total", sum(by_type.values()) == len(completed_year))
+    )
     summary.append(
         {
             "run": 4,

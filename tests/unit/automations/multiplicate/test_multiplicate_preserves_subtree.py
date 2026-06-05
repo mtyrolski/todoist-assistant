@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from todoist.automations.multiplicate import Multiply
-from todoist.types import Task, TaskEntry
+from todoist.core.types import Task, TaskEntry
 
 
 def _task_entry(
@@ -78,10 +78,14 @@ class _TestMultiply(Multiply):
 
 def test_flat_label_is_removed_without_inline_rollout():
     # Flat Xn rollout is no longer supported; the automation only removes the label.
-    parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
+    parent = Task(
+        id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"])
+    )
     child = Task(
         id="2",
-        task_entry=_task_entry(task_id="2", content="Child", labels=["work"], parent_id="1"),
+        task_entry=_task_entry(
+            task_id="2", content="Child", labels=["work"], parent_id="1"
+        ),
     )
 
     db = _FakeDb(tasks=[parent, child])

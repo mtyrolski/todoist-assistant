@@ -8,14 +8,19 @@ from typing import cast
 import pandas as pd
 from loguru import logger
 
-from todoist.constants import EventExtraField
+from todoist.core.constants import EventExtraField
 from todoist.database.base import Database
-from todoist.env import EnvVar
-from todoist.types import SUPPORTED_EVENT_TYPES, Event, Project, events_to_dataframe
-from todoist.utils import Cache, LocalStorageError
+from todoist.core.env import EnvVar
+from todoist.core.types import (
+    SUPPORTED_EVENT_TYPES,
+    Event,
+    Project,
+    events_to_dataframe,
+)
+from todoist.core.utils import Cache, LocalStorageError
 
-ADJUSTMENTS_VARIABLE_NAME = 'link_adjustements'
-DEFAULT_ADJUSTMENTS_FILENAME = 'archived_root_projects.py'
+ADJUSTMENTS_VARIABLE_NAME = "link_adjustements"
+DEFAULT_ADJUSTMENTS_FILENAME = "archived_root_projects.py"
 
 
 def resolve_personal_dir() -> Path:
@@ -70,7 +75,11 @@ def _load_adjustments_literal_file(path: Path) -> tuple[dict[str, str], list[str
     mapping: dict[str, str] | None = None
     archived_parents: list[str] | None = None
     for node in module.body:
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
             continue
         if not isinstance(node, ast.Assign):
             raise ValueError(
@@ -82,17 +91,22 @@ def _load_adjustments_literal_file(path: Path) -> tuple[dict[str, str], list[str
         try:
             value = ast.literal_eval(node.value)
         except (ValueError, SyntaxError) as exc:
-            raise ValueError(f"Adjustment file contains non-literal values: {path.name}") from exc
+            raise ValueError(
+                f"Adjustment file contains non-literal values: {path.name}"
+            ) from exc
         if target_name == ADJUSTMENTS_VARIABLE_NAME:
             if not isinstance(value, dict) or not all(
-                isinstance(key, str) and isinstance(val, str) for key, val in value.items()
+                isinstance(key, str) and isinstance(val, str)
+                for key, val in value.items()
             ):
                 raise TypeError(
                     f'"{ADJUSTMENTS_VARIABLE_NAME}" in {path.name} must be a string-to-string dict'
                 )
             mapping = dict(value)
         elif target_name == "archived_parent_projects":
-            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
                 raise TypeError(
                     f'"archived_parent_projects" in {path.name} must be a list of strings'
                 )
@@ -131,38 +145,44 @@ def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
     personal_dir = resolve_personal_dir()
 
     if not personal_dir.exists():
-        logger.warning(f'Personal directory {personal_dir} does not exist. No adjustments will be made.')
+        logger.warning(
+            f"Personal directory {personal_dir} does not exist. No adjustments will be made."
+        )
         personal_dir.mkdir(parents=True, exist_ok=True)
         (personal_dir / DEFAULT_ADJUSTMENTS_FILENAME).write_text(
             render_adjustments_file_content({}, []),
             encoding="utf-8",
         )
-        logger.info(f'Created empty adjustments file in {personal_dir}')
+        logger.info(f"Created empty adjustments file in {personal_dir}")
         return {}
 
     # Determine which files to load.
     if specific_file:
         safe_specific = normalize_adjustment_filename(specific_file)
         scripts = [safe_specific] if (personal_dir / safe_specific).exists() else []
-        logger.info(f'Loading specific mapping file: {safe_specific}')
+        logger.info(f"Loading specific mapping file: {safe_specific}")
     else:
         scripts = [
             path.name
             for path in sorted(personal_dir.iterdir())
             if path.is_file() and path.suffix == ".py"
         ]
-        logger.info(f'Found {len(scripts)} scripts in personal directory')
+        logger.info(f"Found {len(scripts)} scripts in personal directory")
 
     final_mapping: dict[str, str] = {}
     for script in scripts:
         script_path = personal_dir / normalize_adjustment_filename(script)
-        link_adjustements, _archived_parent_projects = load_adjustments_file(script_path)
+        link_adjustements, _archived_parent_projects = load_adjustments_file(
+            script_path
+        )
         final_mapping.update(link_adjustements)
 
     return final_mapping
 
 
-def get_adjusting_archived_parent_projects(specific_file: str | None = None) -> set[str]:
+def get_adjusting_archived_parent_projects(
+    specific_file: str | None = None,
+) -> set[str]:
     """Load archived project names promoted to parent/root buckets by adjustments."""
 
     personal_dir = resolve_personal_dir()
@@ -188,7 +208,7 @@ def get_adjusting_archived_parent_projects(specific_file: str | None = None) -> 
 
 
 def _find_duplicate_project_names(
-    mapping_project_id_to_name: dict[str, str]
+    mapping_project_id_to_name: dict[str, str],
 ) -> dict[str, list[str]]:
     grouped_ids: dict[str, list[str]] = defaultdict(list)
     for project_id, project_name in mapping_project_id_to_name.items():
@@ -252,13 +272,11 @@ def _resolve_root_project_name_to_id(
 
 def _load_projects_by_id(_dbio: Database) -> dict[str, Project]:
     projects_by_id = {
-        project.id: project
-        for project in _dbio.fetch_projects(include_tasks=False)
+        project.id: project for project in _dbio.fetch_projects(include_tasks=False)
     }
-    projects_by_id.update({
-        project.id: project
-        for project in _dbio.fetch_archived_projects()
-    })
+    projects_by_id.update(
+        {project.id: project for project in _dbio.fetch_archived_projects()}
+    )
     return projects_by_id
 
 
@@ -276,7 +294,11 @@ def _project_ancestor_names(
     while current_id and current_id not in seen_ids:
         seen_ids.add(current_id)
         project = projects_by_id.get(current_id)
-        name = project.project_entry.name if project else project_id_to_name.get(current_id)
+        name = (
+            project.project_entry.name
+            if project
+            else project_id_to_name.get(current_id)
+        )
         if name and name not in seen_names:
             names.append((name, bool(project.is_archived) if project else False))
             seen_names.add(name)
@@ -320,18 +342,18 @@ def _first_adjustment_source(
 
 def _summarize_counter(counter: Counter[str], *, limit: int = 10) -> str:
     if not counter:
-        return '(none)'
-    parts = [f'{name}={count}' for name, count in counter.most_common(limit)]
+        return "(none)"
+    parts = [f"{name}={count}" for name, count in counter.most_common(limit)]
     if len(counter) > limit:
-        parts.append(f'... (+{len(counter) - limit} more)')
-    return ', '.join(parts)
+        parts.append(f"... (+{len(counter) - limit} more)")
+    return ", ".join(parts)
 
 
 def load_activity_data(_dbio: Database) -> pd.DataFrame:
     """
     Loads and processes the activity data from joblib file and database mappings.
     """
-    activity_filename = 'activity.joblib'
+    activity_filename = "activity.joblib"
     # activity_db: set[Event] = load(activity_filename) if exists(activity_filename) else set()
     try:
         activity_db: set[Event] = Cache().activity.load()
@@ -340,17 +362,27 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
         activity_db = set()
 
     # Filter supported events and check for events with missing titles
-    supported_events = list(filter(lambda ev: ev.event_entry.event_type in SUPPORTED_EVENT_TYPES, activity_db))
-    no_title_events = sorted(filter(lambda ev: extract_name(ev) is None, supported_events),
-                             key=lambda ev: ev.event_entry.event_date)
+    supported_events = list(
+        filter(
+            lambda ev: ev.event_entry.event_type in SUPPORTED_EVENT_TYPES, activity_db
+        )
+    )
+    no_title_events = sorted(
+        filter(lambda ev: extract_name(ev) is None, supported_events),
+        key=lambda ev: ev.event_entry.event_date,
+    )
     if no_title_events:
-        logger.warning(f'Found {len(no_title_events)} events without title.')
+        logger.warning(f"Found {len(no_title_events)} events without title.")
 
-    logger.info(f'Loaded {len(activity_db)} events from {activity_filename}.')
+    logger.info(f"Loaded {len(activity_db)} events from {activity_filename}.")
     mapping_project_id_to_root = _dbio.fetch_mapping_project_id_to_root()
-    logger.success(f'Loaded project id to root mapping ({len(mapping_project_id_to_root)} entries)')
+    logger.success(
+        f"Loaded project id to root mapping ({len(mapping_project_id_to_root)} entries)"
+    )
     mapping_project_id_to_name = _dbio.fetch_mapping_project_id_to_name()
-    logger.success(f'Loaded project id to name mapping ({len(mapping_project_id_to_name)} entries)')
+    logger.success(
+        f"Loaded project id to name mapping ({len(mapping_project_id_to_name)} entries)"
+    )
     projects_by_id = _load_projects_by_id(_dbio)
     ancestor_names_by_project_id = {
         project_id: _project_ancestor_names(
@@ -359,17 +391,22 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
             project_id_to_name=mapping_project_id_to_name,
             project_id_to_root=mapping_project_id_to_root,
         )
-        for project_id in set(mapping_project_id_to_name) | set(mapping_project_id_to_root)
+        for project_id in set(mapping_project_id_to_name)
+        | set(mapping_project_id_to_root)
     }
     duplicate_project_names = _find_duplicate_project_names(mapping_project_id_to_name)
     if duplicate_project_names:
         logger.warning(
-            'Detected {} duplicate project names in id->name mapping: {}',
+            "Detected {} duplicate project names in id->name mapping: {}",
             len(duplicate_project_names),
-            _summarize_counter(Counter({
-                project_name: len(project_ids)
-                for project_name, project_ids in duplicate_project_names.items()
-            })),
+            _summarize_counter(
+                Counter(
+                    {
+                        project_name: len(project_ids)
+                        for project_name, project_ids in duplicate_project_names.items()
+                    }
+                )
+            ),
         )
     link_mapping = get_adjusting_mapping()
     archived_parent_projects = get_adjusting_archived_parent_projects()
@@ -380,7 +417,7 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
         )
     )
     logger.success(
-        'Resolved root name to id mapping (resolved={}, active_roots={}, archived_roots={}, ambiguous_roots={})',
+        "Resolved root name to id mapping (resolved={}, active_roots={}, archived_roots={}, ambiguous_roots={})",
         len(root_name_to_id),
         len(active_root_names),
         len(archived_root_names),
@@ -388,129 +425,151 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     )
     if ambiguous_root_names:
         logger.warning(
-            'Ambiguous root project names detected: {}',
-            _summarize_counter(Counter({
-                project_name: len(project_ids)
-                for project_name, project_ids in ambiguous_root_names.items()
-            })),
+            "Ambiguous root project names detected: {}",
+            _summarize_counter(
+                Counter(
+                    {
+                        project_name: len(project_ids)
+                        for project_name, project_ids in ambiguous_root_names.items()
+                    }
+                )
+            ),
         )
-    logger.info('Creating dataframe from events...')
+    logger.info("Creating dataframe from events...")
 
-    df = events_to_dataframe(activity_db,
-                             project_id_to_name=mapping_project_id_to_name,
-                             project_id_to_root=mapping_project_id_to_root)
+    df = events_to_dataframe(
+        activity_db,
+        project_id_to_name=mapping_project_id_to_name,
+        project_id_to_root=mapping_project_id_to_root,
+    )
 
-    parent_project_id = cast(pd.Series, df['parent_project_id'].astype(str).copy())
+    parent_project_id = cast(pd.Series, df["parent_project_id"].astype(str).copy())
     promoted_parent_mask = cast(
         pd.Series,
         parent_project_id.map(
-            lambda project_id: _first_matching_project_name(
-                str(project_id),
-                ancestor_names_by_project_id=ancestor_names_by_project_id,
-                candidates=archived_parent_projects,
-                require_archived=True,
+            lambda project_id: (
+                _first_matching_project_name(
+                    str(project_id),
+                    ancestor_names_by_project_id=ancestor_names_by_project_id,
+                    candidates=archived_parent_projects,
+                    require_archived=True,
+                )
+                is not None
             )
-            is not None
         ),
     )
     if bool(promoted_parent_mask.any()):
         promoted_parent_names = cast(
             pd.Series,
             cast(pd.Series, parent_project_id[promoted_parent_mask]).map(
-                lambda project_id: _first_matching_project_name(
-                    str(project_id),
-                    ancestor_names_by_project_id=ancestor_names_by_project_id,
-                    candidates=archived_parent_projects,
-                    require_archived=True,
+                lambda project_id: (
+                    _first_matching_project_name(
+                        str(project_id),
+                        ancestor_names_by_project_id=ancestor_names_by_project_id,
+                        candidates=archived_parent_projects,
+                        require_archived=True,
+                    )
+                    or ""
                 )
-                or ""
             ),
         )
-        df.loc[promoted_parent_mask, 'root_project_name'] = promoted_parent_names
-        promoted_parent_ids = cast(pd.Series, promoted_parent_names.map(
-            lambda name: root_name_to_id.get(str(name))
-        ))
-        df.loc[promoted_parent_mask, 'root_project_id'] = promoted_parent_ids.fillna(
+        df.loc[promoted_parent_mask, "root_project_name"] = promoted_parent_names
+        promoted_parent_ids = cast(
+            pd.Series,
+            promoted_parent_names.map(lambda name: root_name_to_id.get(str(name))),
+        )
+        df.loc[promoted_parent_mask, "root_project_id"] = promoted_parent_ids.fillna(
             cast(pd.Series, parent_project_id[promoted_parent_mask])
         )
 
-    original_root_id = cast(pd.Series, df['root_project_id'].copy())
-    original_root_name = cast(pd.Series, df['root_project_name'].astype(str).copy())
+    original_root_id = cast(pd.Series, df["root_project_id"].copy())
+    original_root_name = cast(pd.Series, df["root_project_name"].astype(str).copy())
     effective_link_mapping = {
         source_name: target_name
         for source_name, target_name in link_mapping.items()
         if source_name != target_name and source_name not in archived_parent_projects
     }
     logger.info(
-        'Loaded {} link adjustments ({} effective renames, {} self-maps)',
+        "Loaded {} link adjustments ({} effective renames, {} self-maps)",
         len(link_mapping),
         len(effective_link_mapping),
         len(link_mapping) - len(effective_link_mapping),
     )
-    logger.info('Adjusting root project names...')
+    logger.info("Adjusting root project names...")
     adjustment_sources = cast(
         pd.Series,
-        pd.Series([
-            source
-            for source in (
-                _first_adjustment_source(
-                    str(project_id),
-                    str(root_name),
-                    ancestor_names_by_project_id=ancestor_names_by_project_id,
-                    link_mapping=link_mapping,
+        pd.Series(
+            [
+                source
+                for source in (
+                    _first_adjustment_source(
+                        str(project_id),
+                        str(root_name),
+                        ancestor_names_by_project_id=ancestor_names_by_project_id,
+                        link_mapping=link_mapping,
+                    )
+                    for project_id, root_name in zip(
+                        parent_project_id, original_root_name
+                    )
                 )
-                for project_id, root_name in zip(parent_project_id, original_root_name)
-            )
-            if source is not None
-        ]),
+                if source is not None
+            ]
+        ),
     )
     effective_adjustment_sources = cast(
         pd.Series,
-        pd.Series([
-            source
-            for source in (
-                _first_adjustment_source(
-                    str(project_id),
-                    str(root_name),
-                    ancestor_names_by_project_id=ancestor_names_by_project_id,
-                    link_mapping=effective_link_mapping,
+        pd.Series(
+            [
+                source
+                for source in (
+                    _first_adjustment_source(
+                        str(project_id),
+                        str(root_name),
+                        ancestor_names_by_project_id=ancestor_names_by_project_id,
+                        link_mapping=effective_link_mapping,
+                    )
+                    for project_id, root_name in zip(
+                        parent_project_id, original_root_name
+                    )
                 )
-                for project_id, root_name in zip(parent_project_id, original_root_name)
-            )
-            if source is not None
-        ]),
+                if source is not None
+            ]
+        ),
     )
     logger.info(
-        'Adjustment rules matched {} rows across {} source root names',
+        "Adjustment rules matched {} rows across {} source root names",
         len(adjustment_sources),
         adjustment_sources.nunique(),
     )
     if len(adjustment_sources):
         logger.debug(
-            'Adjustment source row counts: {}',
+            "Adjustment source row counts: {}",
             _summarize_counter(Counter(adjustment_sources.to_list())),
         )
     logger.info(
-        'Effective rename rules matched {} rows across {} source root names',
+        "Effective rename rules matched {} rows across {} source root names",
         len(effective_adjustment_sources),
         effective_adjustment_sources.nunique(),
     )
     if len(effective_adjustment_sources):
         logger.debug(
-            'Effective rename source row counts: {}',
+            "Effective rename source row counts: {}",
             _summarize_counter(Counter(effective_adjustment_sources.to_list())),
         )
     unused_effective_sources = sorted(
-        set(effective_link_mapping) - set(effective_adjustment_sources.astype(str).unique())
+        set(effective_link_mapping)
+        - set(effective_adjustment_sources.astype(str).unique())
     )
     if unused_effective_sources:
         logger.debug(
-            'Configured effective rename sources not present in current activity data: {}',
-            _summarize_counter(Counter({source_name: 1 for source_name in unused_effective_sources})),
+            "Configured effective rename sources not present in current activity data: {}",
+            _summarize_counter(
+                Counter({source_name: 1 for source_name in unused_effective_sources})
+            ),
         )
 
     # Adjust project names and map back to root ids.
-    df['root_project_name'] = [
+    df["root_project_name"] = [
         root_name
         if root_name in archived_parent_projects
         else link_mapping.get(source, root_name)
@@ -531,39 +590,50 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     ]
     mapped_ids = cast(
         pd.Series,
-        df['root_project_name'].map(lambda name: root_name_to_id.get(str(name))),
+        df["root_project_name"].map(lambda name: root_name_to_id.get(str(name))),
     )
-    df['root_project_id'] = mapped_ids.fillna(original_root_id)
-    changed_name_mask = original_root_name != df['root_project_name']
-    changed_id_mask = original_root_id != df['root_project_id']
+    df["root_project_id"] = mapped_ids.fillna(original_root_id)
+    changed_name_mask = original_root_name != df["root_project_name"]
+    changed_id_mask = original_root_id != df["root_project_id"]
 
     if changed_name_mask.any():
         logger.debug(
-            'Adjustment target row counts: {}',
-            _summarize_counter(Counter(df.loc[changed_name_mask, 'root_project_name'].astype(str).to_list())),
+            "Adjustment target row counts: {}",
+            _summarize_counter(
+                Counter(
+                    df.loc[changed_name_mask, "root_project_name"].astype(str).to_list()
+                )
+            ),
         )
 
     ambiguous_targets = sorted(
-        set(df.loc[changed_name_mask, 'root_project_name'].astype(str)) & set(ambiguous_root_names)
+        set(df.loc[changed_name_mask, "root_project_name"].astype(str))
+        & set(ambiguous_root_names)
     )
     if ambiguous_targets:
         logger.warning(
-            'Adjustment targets with ambiguous root ids kept their original ids: {}',
-            ', '.join(ambiguous_targets[:10]),
+            "Adjustment targets with ambiguous root ids kept their original ids: {}",
+            ", ".join(ambiguous_targets[:10]),
         )
 
-    missing_names = sorted(set(df.loc[changed_name_mask & mapped_ids.isna(), 'root_project_name'].astype(str)))
+    missing_names = sorted(
+        set(
+            df.loc[changed_name_mask & mapped_ids.isna(), "root_project_name"].astype(
+                str
+            )
+        )
+    )
     if missing_names:
         logger.warning(
-            'Missing root project ids for {} adjusted target names: {}',
+            "Missing root project ids for {} adjusted target names: {}",
             len(missing_names),
-            ', '.join(missing_names[:10]),
+            ", ".join(missing_names[:10]),
         )
 
     diff_count = int(changed_id_mask.sum())
     total = len(df)
     ratio = (diff_count / total * 100) if total else 0.0
-    logger.info(f'Changed {diff_count} root project ids out of {total} ({ratio:.2f}%)')
+    logger.info(f"Changed {diff_count} root project ids out of {total} ({ratio:.2f}%)")
 
     known_root_names = set(root_name_to_id) | set(ambiguous_root_names)
     unresolved_original_roots = sorted(
@@ -575,17 +645,19 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     )
     if unresolved_original_roots:
         logger.warning(
-            'Observed {} root names that are neither current roots nor adjustment sources: {}',
+            "Observed {} root names that are neither current roots nor adjustment sources: {}",
             len(unresolved_original_roots),
-            ', '.join(unresolved_original_roots[:10]),
+            ", ".join(unresolved_original_roots[:10]),
         )
     else:
-        logger.debug('All observed root names are current roots or explicitly adjusted.')
+        logger.debug(
+            "All observed root names are current roots or explicitly adjusted."
+        )
 
-    df['date'] = pd.to_datetime(df['date'])
-    df.sort_values('date', inplace=True)
+    df["date"] = pd.to_datetime(df["date"])
+    df.sort_values("date", inplace=True)
     # df.set_index('date', inplace=True)
-    df['id'] = df['id'].astype(str)
-    df['root_project_id'] = df['root_project_id'].astype(str)
+    df["id"] = df["id"].astype(str)
+    df["root_project_id"] = df["root_project_id"].astype(str)
 
     return df

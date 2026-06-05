@@ -1,6 +1,5 @@
 """Create nested Todoist task trees from JSON payloads."""
 
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import json
@@ -84,7 +83,9 @@ def load_task_tree_json(source: str) -> object:
     return json.loads(raw)
 
 
-def normalize_task_tree_payload(raw: object, *, project_id: str | None = None) -> TaskTreePayload:
+def normalize_task_tree_payload(
+    raw: object, *, project_id: str | None = None
+) -> TaskTreePayload:
     """Validate and normalize a JSON task tree payload."""
 
     if isinstance(raw, list):
@@ -98,11 +99,16 @@ def normalize_task_tree_payload(raw: object, *, project_id: str | None = None) -
     if not isinstance(raw_tasks, list):
         raise ValueError("Payload must contain a 'tasks' array.")
 
-    payload_project_id = _optional_text(payload.get("projectId") or payload.get("project_id"))
+    payload_project_id = _optional_text(
+        payload.get("projectId") or payload.get("project_id")
+    )
     effective_project_id = project_id or payload_project_id
     parent_id = _optional_text(payload.get("parentId") or payload.get("parent_id"))
     labels = _normalize_labels(payload.get("labels"))
-    tasks = [_normalize_node(item, path=f"tasks[{index}]") for index, item in enumerate(raw_tasks)]
+    tasks = [
+        _normalize_node(item, path=f"tasks[{index}]")
+        for index, item in enumerate(raw_tasks)
+    ]
     if not tasks:
         raise ValueError("Payload must contain at least one task.")
 
@@ -119,7 +125,9 @@ def render_task_tree_plan(payload: TaskTreePayload) -> str:
 
     lines: list[str] = []
     for index, task in enumerate(payload.tasks, start=1):
-        _append_plan_lines(lines, task, prefix=f"{index}.", inherited_labels=payload.labels)
+        _append_plan_lines(
+            lines, task, prefix=f"{index}.", inherited_labels=payload.labels
+        )
     return "\n".join(lines)
 
 
@@ -178,7 +186,9 @@ def _create_node(
     elif payload.project_id:
         insert_payload["project_id"] = payload.project_id
     else:
-        raise ValueError("projectId is required for top-level tasks unless parentId is provided.")
+        raise ValueError(
+            "projectId is required for top-level tasks unless parentId is provided."
+        )
 
     logger.info(
         "Creating Todoist task '{}' under {}.",
@@ -254,7 +264,9 @@ def _normalize_node(raw: object, *, path: str) -> TaskTreeNode:
     )
 
 
-def _node_insert_payload(node: TaskTreeNode, *, labels: Sequence[str]) -> dict[str, Any]:
+def _node_insert_payload(
+    node: TaskTreeNode, *, labels: Sequence[str]
+) -> dict[str, Any]:
     payload = {
         field_name: getattr(node, field_name)
         for field_name in TASK_INSERT_FIELDS

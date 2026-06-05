@@ -3,11 +3,11 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from todoist.stats import extract_task_due_date
-from todoist.types import Event, EventEntry
+from todoist.features.stats import extract_task_due_date
+from todoist.core.types import Event, EventEntry
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.utils import report_tqdm_progress, safe_instantiate_entry
+from todoist.core.utils import report_tqdm_progress, safe_instantiate_entry
 
 ACTIVITY_PAGE_LIMIT = 100
 
@@ -97,7 +97,9 @@ class DatabaseActivity:
                 progress_desc=progress_desc,
             )
             iterated_weeks += nweeks_window_size
-            events_not_already_fetched = [e for e in window_events if e not in events_already_fetched]
+            events_not_already_fetched = [
+                e for e in window_events if e not in events_already_fetched
+            ]
             if len(events_not_already_fetched) == 0:
                 n_empty_weeks += 1
             else:
@@ -119,12 +121,16 @@ class DatabaseActivity:
                     f"total cached events={len(events_already_fetched)}"
                 ),
             )
-        logger.debug(f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}")
+        logger.debug(
+            f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}"
+        )
 
         # Extend with already fetched events to avoid losing them.
         total_events.extend(events_already_fetched)
         total_events = list(set(total_events))  # deduplication
-        logger.debug(f"Total events after merging with already fetched and deduplication: {len(total_events)}")
+        logger.debug(
+            f"Total events after merging with already fetched and deduplication: {len(total_events)}"
+        )
 
         # Final sorting from newest to oldest.
         total_events.sort(key=lambda x: x.event_entry.event_date, reverse=True)
@@ -142,7 +148,9 @@ class DatabaseActivity:
             return []
 
         if starting_page < 0:
-            logger.warning(f"Negative starting_page={starting_page} provided; treating as 0.")
+            logger.warning(
+                f"Negative starting_page={starting_page} provided; treating as 0."
+            )
             starting_page = 0
 
         result: list[Event] = []
@@ -163,7 +171,9 @@ class DatabaseActivity:
             current_page_idx += 1
             _ = page_entries
             if not next_cursor:
-                logger.debug(f"No further activity cursor while skipping page {current_page_idx - 1}")
+                logger.debug(
+                    f"No further activity cursor while skipping page {current_page_idx - 1}"
+                )
                 return []
             cursor = next_cursor
 
@@ -190,11 +200,15 @@ class DatabaseActivity:
                 "page",
             )
             if not next_cursor:
-                logger.debug(f"No further activity cursor available at page {page_index}")
+                logger.debug(
+                    f"No further activity cursor available at page {page_index}"
+                )
                 break
             cursor = next_cursor
 
-        logger.info(f"Finished fetching activity pages. Total events collected: {len(result)}")
+        logger.info(
+            f"Finished fetching activity pages. Total events collected: {len(result)}"
+        )
         return result
 
     def _fetch_activity_range(
@@ -212,7 +226,9 @@ class DatabaseActivity:
 
         cursor: str | None = None
         events: list[Event] = []
-        logger.info(f"Starting activity fetch over range [{date_from.isoformat()} .. {date_to.isoformat()})")
+        logger.info(
+            f"Starting activity fetch over range [{date_from.isoformat()} .. {date_to.isoformat()})"
+        )
         fetched_pages = 0
 
         while True:
@@ -243,7 +259,9 @@ class DatabaseActivity:
                 params["cursor"] = cursor
 
             next_page_number = fetched_pages + 1
-            estimated_total_pages = max_pages if max_pages is not None else next_page_number + 1
+            estimated_total_pages = (
+                max_pages if max_pages is not None else next_page_number + 1
+            )
             report_tqdm_progress(
                 progress_desc,
                 next_page_number,
@@ -256,9 +274,7 @@ class DatabaseActivity:
                 rate_limited=True,
             )
             project_suffix = (
-                f" parent_project_id={parent_project_id}"
-                if parent_project_id
-                else ""
+                f" parent_project_id={parent_project_id}" if parent_project_id else ""
             )
             decoded_result = self._api_client.request_json(
                 spec,
@@ -268,14 +284,22 @@ class DatabaseActivity:
                 ),
             )
             if not isinstance(decoded_result, dict):
-                raise RuntimeError("Unexpected response payload when fetching activity range")
+                raise RuntimeError(
+                    "Unexpected response payload when fetching activity range"
+                )
 
             raw_events = decoded_result.get("results")
             if not isinstance(raw_events, list):
-                raise RuntimeError("Unexpected results payload when fetching activity range")
+                raise RuntimeError(
+                    "Unexpected results payload when fetching activity range"
+                )
             if not all(isinstance(event, dict) for event in raw_events):
-                raise RuntimeError("Unexpected non-object event record in activity range payload")
-            page_entries = [safe_instantiate_entry(EventEntry, **event) for event in raw_events]
+                raise RuntimeError(
+                    "Unexpected non-object event record in activity range payload"
+                )
+            page_entries = [
+                safe_instantiate_entry(EventEntry, **event) for event in raw_events
+            ]
             page_events = self._events_from_entries(page_entries)
             fetched_pages += 1
             report_tqdm_progress(
@@ -285,7 +309,11 @@ class DatabaseActivity:
                 "page",
             )
             if events_already_fetched:
-                page_new_events = [event for event in page_events if event not in events_already_fetched]
+                page_new_events = [
+                    event
+                    for event in page_events
+                    if event not in events_already_fetched
+                ]
                 skipped_events = len(page_events) - len(page_new_events)
                 if skipped_events:
                     logger.debug(
@@ -311,7 +339,9 @@ class DatabaseActivity:
                 break
             cursor = next_cursor
 
-        logger.info(f"Finished activity range fetch. Total events collected: {len(events)}")
+        logger.info(
+            f"Finished activity range fetch. Total events collected: {len(events)}"
+        )
         return events
 
     def fetch_activity_for_parent_projects(
@@ -326,7 +356,9 @@ class DatabaseActivity:
     ) -> list[Event]:
         """Fetch activity scoped to specific Todoist parent project ids."""
 
-        project_ids = sorted({project_id for project_id in parent_project_ids if project_id})
+        project_ids = sorted(
+            {project_id for project_id in parent_project_ids if project_id}
+        )
         if not project_ids:
             return []
         if date_from >= date_to:
@@ -339,7 +371,14 @@ class DatabaseActivity:
         window_delta = timedelta(weeks=window_weeks)
         estimated_windows_per_project = max(
             1,
-            int(((date_to - date_from).total_seconds() + window_delta.total_seconds() - 1) // window_delta.total_seconds()),
+            int(
+                (
+                    (date_to - date_from).total_seconds()
+                    + window_delta.total_seconds()
+                    - 1
+                )
+                // window_delta.total_seconds()
+            ),
         )
         total_windows = len(project_ids) * estimated_windows_per_project
         completed_windows = 0
@@ -368,7 +407,9 @@ class DatabaseActivity:
                     progress_desc=progress_desc,
                     parent_project_id=parent_project_id,
                 )
-                new_events = [event for event in window_events if event not in seen_events]
+                new_events = [
+                    event for event in window_events if event not in seen_events
+                ]
                 fetched_events.extend(new_events)
                 seen_events.update(new_events)
                 report_tqdm_progress(
@@ -384,7 +425,9 @@ class DatabaseActivity:
                 window_end = window_start
 
         fetched_events = list(set(fetched_events))
-        fetched_events.sort(key=lambda event: event.event_entry.event_date, reverse=True)
+        fetched_events.sort(
+            key=lambda event: event.event_entry.event_date, reverse=True
+        )
         logger.info(
             "Finished scoped parent-project activity fetch. Projects={}, new_events={}",
             len(project_ids),
@@ -398,7 +441,9 @@ class DatabaseActivity:
         for entry in entries:
             event_date = extract_task_due_date(entry.event_date)
             if event_date is None:
-                logger.debug(f"Skipping event {entry.id} due to unparseable date {entry.event_date}")
+                logger.debug(
+                    f"Skipping event {entry.id} due to unparseable date {entry.event_date}"
+                )
                 continue
             events.append(Event(event_entry=entry, id=entry.id, date=event_date))
         return events
@@ -422,13 +467,17 @@ class DatabaseActivity:
             spec, operation_name=f"fetch activity page {page_index}"
         )
         if not isinstance(decoded_result, dict):
-            raise RuntimeError("Unexpected response payload when fetching activity page")
+            raise RuntimeError(
+                "Unexpected response payload when fetching activity page"
+            )
 
         raw_events = decoded_result.get("results")
         if not isinstance(raw_events, list):
             raise RuntimeError("Unexpected results payload when fetching activity page")
         if not all(isinstance(event, dict) for event in raw_events):
-            raise RuntimeError("Unexpected non-object event record in activity page payload")
+            raise RuntimeError(
+                "Unexpected non-object event record in activity page payload"
+            )
 
         events = [safe_instantiate_entry(EventEntry, **event) for event in raw_events]
         next_cursor = decoded_result.get("next_cursor")

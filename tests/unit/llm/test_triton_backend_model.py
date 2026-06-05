@@ -29,7 +29,9 @@ def _load_triton_backend_module() -> Any:
     setattr(stub, "InferenceResponse", object)
     setattr(stub, "Tensor", object)
     sys.modules.setdefault("triton_python_backend_utils", stub)
-    spec = importlib.util.spec_from_file_location("todoist_triton_backend_model", module_path)
+    spec = importlib.util.spec_from_file_location(
+        "todoist_triton_backend_model", module_path
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -45,7 +47,9 @@ def test_triton_backend_load_tokenizer_falls_back_for_tokenizers_backend(
     monkeypatch.setattr(
         module.AutoTokenizer,
         "from_pretrained",
-        Mock(side_effect=ValueError("Tokenizer class TokenizersBackend does not exist")),
+        Mock(
+            side_effect=ValueError("Tokenizer class TokenizersBackend does not exist")
+        ),
     )
     monkeypatch.setattr(module, "snapshot_download", lambda **_kwargs: str(tmp_path))
     tokenizer_ctor = Mock(return_value=object())
@@ -64,7 +68,9 @@ def test_triton_backend_load_tokenizer_falls_back_for_tokenizers_backend(
         encoding="utf-8",
     )
 
-    result = module._load_tokenizer("mistralai/Ministral-3-3B-Instruct-2512", trust_remote_code=False)
+    result = module._load_tokenizer(
+        "mistralai/Ministral-3-3B-Instruct-2512", trust_remote_code=False
+    )
 
     assert result is tokenizer_ctor.return_value
     tokenizer_ctor.assert_called_once_with(
@@ -144,7 +150,9 @@ def test_triton_backend_initialize_uses_mistral3_loader(
             self.moved_dtype = None
             self.eval_called = False
 
-        def to(self, device: Any = None, dtype: Any = None, **_kwargs: Any) -> "FakeModel":
+        def to(
+            self, device: Any = None, dtype: Any = None, **_kwargs: Any
+        ) -> "FakeModel":
             self.moved_to = device
             self.moved_dtype = dtype
             return self
@@ -158,10 +166,16 @@ def test_triton_backend_initialize_uses_mistral3_loader(
     mistral_loader = Mock(return_value=fake_model)
     auto_loader = Mock()
 
-    monkeypatch.setattr(module, "_load_tokenizer", lambda *_args, **_kwargs: fake_tokenizer)
+    monkeypatch.setattr(
+        module, "_load_tokenizer", lambda *_args, **_kwargs: fake_tokenizer
+    )
     monkeypatch.setattr(module, "_load_config", lambda *_args, **_kwargs: fake_config)
-    monkeypatch.setattr(module, "_strip_quantization_config", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(module.Mistral3ForConditionalGeneration, "from_pretrained", mistral_loader)
+    monkeypatch.setattr(
+        module, "_strip_quantization_config", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module.Mistral3ForConditionalGeneration, "from_pretrained", mistral_loader
+    )
     monkeypatch.setattr(module.AutoModelForCausalLM, "from_pretrained", auto_loader)
 
     backend = module.TritonPythonModel()
@@ -179,7 +193,9 @@ def test_triton_backend_initialize_uses_mistral3_loader(
 def test_resolve_torch_dtype_auto_does_not_force_cpu_float32() -> None:
     module = _load_triton_backend_module()
 
-    assert module._resolve_torch_dtype("auto", device=module.torch.device("cpu")) is None
+    assert (
+        module._resolve_torch_dtype("auto", device=module.torch.device("cpu")) is None
+    )
 
 
 def test_move_model_to_runtime_passes_dtype_when_requested() -> None:
@@ -203,7 +219,10 @@ def test_move_model_to_runtime_passes_dtype_when_requested() -> None:
     assert calls == [
         {
             "args": (),
-            "kwargs": {"device": module.torch.device("cpu"), "dtype": module.torch.float16},
+            "kwargs": {
+                "device": module.torch.device("cpu"),
+                "dtype": module.torch.float16,
+            },
         }
     ]
 

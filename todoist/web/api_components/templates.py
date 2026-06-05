@@ -1,4 +1,3 @@
-
 from collections.abc import Callable, Mapping
 from pathlib import Path
 import re
@@ -103,9 +102,7 @@ def template_to_camel(raw: Mapping[str, Any]) -> dict[str, Any]:
     children = raw.get("children") or []
     if isinstance(children, list) and children:
         payload["children"] = [
-            template_to_camel(child)
-            for child in children
-            if isinstance(child, Mapping)
+            template_to_camel(child) for child in children if isinstance(child, Mapping)
         ]
     return payload
 

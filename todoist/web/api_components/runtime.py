@@ -1,4 +1,3 @@
-
 from datetime import datetime
 import os
 from pathlib import Path
@@ -10,8 +9,8 @@ from dotenv import dotenv_values
 
 from todoist.api.client import RequestSpec, TimeoutSettings, TodoistAPIClient
 from todoist.api.endpoints import TodoistEndpoints
-from todoist.env import EnvVar
-from todoist.runtime_env import resolve_runtime_env_path
+from todoist.core.env import EnvVar
+from todoist.core.runtime_env import resolve_runtime_env_path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

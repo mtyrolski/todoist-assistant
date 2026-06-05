@@ -1,12 +1,13 @@
-
 from typing import Any
 
-from todoist.types import Task
+from todoist.core.types import Task
 
 from .models import ProgressKey, ProgressStatus
 
 
-def build_idle_progress(*, now: str, processed_ids: set[str], track_processed: bool) -> dict[str, Any]:
+def build_idle_progress(
+    *, now: str, processed_ids: set[str], track_processed: bool
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         ProgressKey.ACTIVE.value: False,
         ProgressKey.STATUS.value: ProgressStatus.IDLE.value,

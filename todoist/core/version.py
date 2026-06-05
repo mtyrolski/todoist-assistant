@@ -1,4 +1,3 @@
-
 from contextlib import suppress
 from importlib import metadata
 from pathlib import Path

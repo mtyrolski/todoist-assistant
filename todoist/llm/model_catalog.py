@@ -38,10 +38,7 @@ def model_options_for_backend(backend: ModelBackend) -> tuple[ModelOption, ...]:
 
 
 def coerce_model_id_for_backend(model_id: str | None, backend: ModelBackend) -> str:
-    option_ids = {
-        option["id"]
-        for option in model_options_for_backend(backend)
-    }
+    option_ids = {option["id"] for option in model_options_for_backend(backend)}
     if model_id in option_ids:
         return str(model_id)
     return DEFAULT_MODEL_ID

@@ -1,13 +1,19 @@
 """
-Tests for data structure creation and modification in todoist.types module.
+Tests for data structure creation and modification in todoist.core.types module.
 """
+
 import datetime as dt
 
-from todoist.types import (
-    ProjectEntry, TaskEntry, EventEntry,
-    Project, Task, Event,
-    is_recurring_task, is_non_recurring_task,
-    is_event_rescheduled
+from todoist.core.types import (
+    ProjectEntry,
+    TaskEntry,
+    EventEntry,
+    Project,
+    Task,
+    Event,
+    is_recurring_task,
+    is_non_recurring_task,
+    is_event_rescheduled,
 )
 
 
@@ -31,7 +37,7 @@ def test_project_entry_creation():
         v2_id="v2_12345",
         v2_parent_id=None,
         sync_id=None,
-        collapsed=False
+        collapsed=False,
     )
 
     assert project_entry.id == "12345"
@@ -66,12 +72,12 @@ def test_project_entry_with_defaults():
         v2_id="v2_12345",
         v2_parent_id=None,
         sync_id=None,
-        collapsed=False
+        collapsed=False,
     )
 
     # Test default values
     assert project_entry.inbox_project is False
-    assert project_entry.description == ''
+    assert project_entry.description == ""
     assert project_entry.default_order is None
     assert project_entry.public_access is False
     assert project_entry.access is None
@@ -109,7 +115,7 @@ def test_task_entry_creation():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     assert task_entry.id == "task123"
@@ -155,16 +161,16 @@ def test_task_entry_kwargs_property():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     kwargs = task_entry.kwargs
-    assert 'content' in kwargs
-    assert 'duration_unit' in kwargs
-    assert 'duration' in kwargs
-    assert kwargs['content'] == "Test Task"
-    assert kwargs['duration_unit'] is None
-    assert kwargs['duration'] is None
+    assert "content" in kwargs
+    assert "duration_unit" in kwargs
+    assert "duration" in kwargs
+    assert kwargs["content"] == "Test Task"
+    assert kwargs["duration_unit"] is None
+    assert kwargs["duration"] is None
 
 
 def test_task_entry_with_duration():
@@ -198,17 +204,17 @@ def test_task_entry_with_duration():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     kwargs = task_entry.kwargs
-    assert kwargs['duration_unit'] == "minute"
-    assert kwargs['duration'] == 30
+    assert kwargs["duration_unit"] == "minute"
+    assert kwargs["duration"] == 30
 
     duration_kwargs = task_entry.duration_kwargs
     assert duration_kwargs is not None
-    assert duration_kwargs['duration'] == 30
-    assert duration_kwargs['unit'] == "minute"
+    assert duration_kwargs["duration"] == 30
+    assert duration_kwargs["unit"] == "minute"
 
 
 def test_task_entry_due_datetime_property():
@@ -243,7 +249,7 @@ def test_task_entry_due_datetime_property():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     due_dt = task_entry.due_datetime
@@ -270,7 +276,7 @@ def test_event_entry_creation():
         extra_data_id="extra123",
         v2_object_id="v2_task123",
         v2_parent_item_id=None,
-        v2_parent_project_id="v2_project123"
+        v2_parent_project_id="v2_project123",
     )
 
     assert event_entry.id == "event123"
@@ -303,7 +309,7 @@ def test_project_creation():
         v2_id="v2_12345",
         v2_parent_id=None,
         sync_id=None,
-        collapsed=False
+        collapsed=False,
     )
 
     task_entry = TaskEntry(
@@ -335,11 +341,13 @@ def test_project_creation():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     task = Task(id="task123", task_entry=task_entry)
-    project = Project(id="12345", project_entry=project_entry, tasks=[task], is_archived=False)
+    project = Project(
+        id="12345", project_entry=project_entry, tasks=[task], is_archived=False
+    )
 
     assert project.id == "12345"
     assert len(project.tasks) == 1
@@ -347,7 +355,9 @@ def test_project_creation():
     assert project.is_archived is False
 
     # Test equality
-    project2 = Project(id="12345", project_entry=project_entry, tasks=[], is_archived=False)
+    project2 = Project(
+        id="12345", project_entry=project_entry, tasks=[], is_archived=False
+    )
     assert project == project2
 
 
@@ -383,7 +393,7 @@ def test_task_creation_and_properties():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     task = Task(id="task123", task_entry=task_entry)
@@ -420,7 +430,7 @@ def test_task_creation_and_properties():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     recurring_task = Task(id="task456", task_entry=recurring_task_entry)
@@ -460,7 +470,7 @@ def test_is_recurring_task_function():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     recurring_task = Task(id="task456", task_entry=recurring_task_entry)
@@ -484,18 +494,18 @@ def test_is_event_rescheduled_function():
             "content": "Test Task",
             "due_date": "2025-04-06T21:59:59.000000Z",
             "last_due_date": "2025-04-05T21:59:59.000000Z",
-            "note_count": 0
+            "note_count": 0,
         },
         extra_data_id="extra123",
         v2_object_id="v2_task123",
         v2_parent_item_id=None,
-        v2_parent_project_id="v2_project123"
+        v2_parent_project_id="v2_project123",
     )
 
     event = Event(
         event_entry=rescheduled_event_entry,
         id="event123",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        date=dt.datetime(2024, 1, 1, 12, 0, 0),
     )
 
     assert is_event_rescheduled(event) is True
@@ -517,13 +527,11 @@ def test_event_properties():
         extra_data_id="extra123",
         v2_object_id="v2_task123",
         v2_parent_item_id=None,
-        v2_parent_project_id="v2_project123"
+        v2_parent_project_id="v2_project123",
     )
 
     event = Event(
-        event_entry=event_entry,
-        id="event123",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        event_entry=event_entry, id="event123", date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
     assert event.name == "Test Task Content"

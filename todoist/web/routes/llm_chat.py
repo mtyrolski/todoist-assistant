@@ -3,7 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -13,6 +12,7 @@ from todoist.web.routes.common import _sync_api_globals
 
 router = APIRouter()
 
+
 @router.get("/api/dashboard/llm_chat", tags=["dashboard"])
 async def dashboard_llm_chat() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -20,10 +20,12 @@ async def dashboard_llm_chat() -> dict[str, Any]:
 
     return await _llm_chat_snapshot()
 
+
 @router.get("/api/llm_chat/settings", tags=["llm"])
 async def llm_chat_settings() -> dict[str, Any]:
     _sync_api_globals(globals())
     return _public_llm_chat_settings(_resolve_llm_chat_settings())
+
 
 @router.put("/api/llm_chat/settings", tags=["llm"])
 async def llm_chat_update_settings(
@@ -51,9 +53,15 @@ async def llm_chat_update_settings(
             status_code=400,
             detail="Requested device is not available on this machine.",
         )
-    device = _normalize_llm_chat_device(requested_device, available_devices=available_devices)
-    codex_model = _sanitize_text(payload.get("codexModel")) or settings["codex"]["model"]
-    triton_model_id = _sanitize_text(payload.get("tritonModelId")) or settings["triton"]["modelId"]
+    device = _normalize_llm_chat_device(
+        requested_device, available_devices=available_devices
+    )
+    codex_model = (
+        _sanitize_text(payload.get("codexModel")) or settings["codex"]["model"]
+    )
+    triton_model_id = (
+        _sanitize_text(payload.get("tritonModelId")) or settings["triton"]["modelId"]
+    )
     codex_model_ids = {str(item["id"]) for item in settings["codex"]["modelOptions"]}
     triton_model_ids = {str(item["id"]) for item in settings["triton"]["modelOptions"]}
     if codex_model not in codex_model_ids:
@@ -94,6 +102,7 @@ async def llm_chat_update_settings(
     updated["reloadedRequired"] = enabled
     return _public_llm_chat_settings(updated)
 
+
 @router.post("/api/llm_chat/enable", tags=["llm"])
 async def llm_chat_enable() -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -110,6 +119,7 @@ async def llm_chat_enable() -> dict[str, Any]:
         "backend": settings["backend"],
         "device": settings["device"],
     }
+
 
 @router.post("/api/llm_chat/send", tags=["llm"])
 async def llm_chat_send(
@@ -192,6 +202,7 @@ async def llm_chat_send(
         "item": _queue_item_payload(response_item),
         "conversationId": conversation_id,
     }
+
 
 @router.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
 async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:

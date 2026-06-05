@@ -1,7 +1,6 @@
-
 import pytest
 
-from todoist.task_tree_import import (
+from todoist.features.task_tree_import import (
     create_task_tree,
     normalize_task_tree_payload,
     render_task_tree_plan,
@@ -78,8 +77,18 @@ def test_create_task_tree_creates_children_under_created_parent() -> None:
     created = create_task_tree(payload, db=db, dry_run=False)  # type: ignore[arg-type]
 
     assert created == [
-        {"id": "task-1", "content": "Plan release", "parentId": None, "projectId": "project-1"},
-        {"id": "task-2", "content": "Draft notes", "parentId": "task-1", "projectId": "project-1"},
+        {
+            "id": "task-1",
+            "content": "Plan release",
+            "parentId": None,
+            "projectId": "project-1",
+        },
+        {
+            "id": "task-2",
+            "content": "Draft notes",
+            "parentId": "task-1",
+            "projectId": "project-1",
+        },
     ]
     assert db.calls == [
         {

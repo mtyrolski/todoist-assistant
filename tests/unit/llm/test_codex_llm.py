@@ -1,14 +1,13 @@
 """Tests for the Codex CLI LLM adapter."""
 
-
 from pathlib import Path
 import subprocess
 
 import pytest
 from pydantic import BaseModel
 
-from todoist.env import EnvVar
-from todoist.llm.codex_llm import (
+from todoist.core.env import EnvVar
+from todoist.llm.backends.codex import (
     DEFAULT_CODEX_MODEL,
     CodexChatConfig,
     CodexCliChatModel,
@@ -42,7 +41,7 @@ def test_codex_chat_invokes_cli_and_reads_last_message(monkeypatch, tmp_path) ->
         output_path.write_text("adapter-ok\n", encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, stdout="ignored", stderr="")
 
-    monkeypatch.setattr("todoist.llm.codex_llm.subprocess.run", _fake_run)
+    monkeypatch.setattr("todoist.llm.backends.codex.subprocess.run", _fake_run)
 
     model = CodexCliChatModel(
         CodexChatConfig(
@@ -58,7 +57,14 @@ def test_codex_chat_invokes_cli_and_reads_last_message(monkeypatch, tmp_path) ->
 
     cmd = captured["cmd"]
     assert isinstance(cmd, list)
-    assert cmd[:6] == ["codex", "--ask-for-approval", "never", "--model", "gpt-5.5", "-c"]
+    assert cmd[:6] == [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "--model",
+        "gpt-5.5",
+        "-c",
+    ]
     assert 'model_reasoning_effort="low"' in cmd
     assert "exec" in cmd
     assert "--sandbox" in cmd
@@ -69,7 +75,9 @@ def test_codex_chat_invokes_cli_and_reads_last_message(monkeypatch, tmp_path) ->
 def test_codex_structured_chat_parses_json_payload(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
 
-    def _fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run(
+        cmd: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         output_path = Path(cmd[cmd.index("--output-last-message") + 1])
         output_path.write_text(
             '{"children":[{"content":"Draft update","description":"",'
@@ -78,7 +86,7 @@ def test_codex_structured_chat_parses_json_payload(monkeypatch, tmp_path) -> Non
         )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("todoist.llm.codex_llm.subprocess.run", _fake_run)
+    monkeypatch.setattr("todoist.llm.backends.codex.subprocess.run", _fake_run)
 
     result = CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).structured_chat(
         [{"role": "user", "content": "Break down status update"}],
@@ -100,13 +108,15 @@ def test_codex_structured_chat_repairs_invalid_json(monkeypatch, tmp_path) -> No
     )
     prompts: list[str] = []
 
-    def _fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run(
+        cmd: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         prompts.append(cmd[-1])
         output_path = Path(cmd[cmd.index("--output-last-message") + 1])
         output_path.write_text(next(outputs), encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("todoist.llm.codex_llm.subprocess.run", _fake_run)
+    monkeypatch.setattr("todoist.llm.backends.codex.subprocess.run", _fake_run)
 
     result = CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).structured_chat(
         [{"role": "user", "content": "Break down status update"}],
@@ -118,18 +128,24 @@ def test_codex_structured_chat_repairs_invalid_json(monkeypatch, tmp_path) -> No
     assert "Convert this draft into strict JSON only." in prompts[1]
 
 
-def test_codex_structured_chat_raises_when_repair_is_still_invalid(monkeypatch, tmp_path) -> None:
+def test_codex_structured_chat_raises_when_repair_is_still_invalid(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     outputs = iter(["not json", '{"value": "still wrong"}'])
 
-    def _fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run(
+        cmd: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         output_path = Path(cmd[cmd.index("--output-last-message") + 1])
         output_path.write_text(next(outputs), encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("todoist.llm.codex_llm.subprocess.run", _fake_run)
+    monkeypatch.setattr("todoist.llm.backends.codex.subprocess.run", _fake_run)
 
-    with pytest.raises(ValueError, match="Invalid structured output for _StrictPayload"):
+    with pytest.raises(
+        ValueError, match="Invalid structured output for _StrictPayload"
+    ):
         CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).structured_chat(
             [{"role": "user", "content": "Return a number"}],
             _StrictPayload,
@@ -139,10 +155,12 @@ def test_codex_structured_chat_raises_when_repair_is_still_invalid(monkeypatch, 
 def test_codex_cli_failure_raises_clear_error(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
 
-    def _fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run(
+        cmd: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(cmd, 2, stdout="", stderr="bad model")
 
-    monkeypatch.setattr("todoist.llm.codex_llm.subprocess.run", _fake_run)
+    monkeypatch.setattr("todoist.llm.backends.codex.subprocess.run", _fake_run)
 
     with pytest.raises(ValueError, match="Codex CLI request failed: bad model"):
         CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).chat(
@@ -153,10 +171,12 @@ def test_codex_cli_failure_raises_clear_error(monkeypatch, tmp_path) -> None:
 def test_codex_empty_output_raises_clear_error(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
 
-    def _fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run(
+        cmd: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("todoist.llm.codex_llm.subprocess.run", _fake_run)
+    monkeypatch.setattr("todoist.llm.backends.codex.subprocess.run", _fake_run)
 
     with pytest.raises(ValueError, match="did not produce output"):
         CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).chat(
@@ -164,7 +184,9 @@ def test_codex_empty_output_raises_clear_error(monkeypatch, tmp_path) -> None:
         )
 
 
-def test_codex_config_prefers_environment_over_file_values(monkeypatch, tmp_path) -> None:
+def test_codex_config_prefers_environment_over_file_values(
+    monkeypatch, tmp_path
+) -> None:
     values = {
         str(EnvVar.AGENT_CODEX_MODEL): "'gpt-5'",
         str(EnvVar.AGENT_CODEX_SANDBOX): "workspace-write",
@@ -186,7 +208,9 @@ def test_codex_config_prefers_environment_over_file_values(monkeypatch, tmp_path
     assert config.cwd == tmp_path
 
 
-def test_codex_config_falls_back_to_defaults_for_blank_or_invalid_values(monkeypatch, tmp_path) -> None:
+def test_codex_config_falls_back_to_defaults_for_blank_or_invalid_values(
+    monkeypatch, tmp_path
+) -> None:
     for env_var in (
         EnvVar.AGENT_CODEX_MODEL,
         EnvVar.AGENT_CODEX_SANDBOX,

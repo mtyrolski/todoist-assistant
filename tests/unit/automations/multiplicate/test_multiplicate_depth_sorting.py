@@ -5,7 +5,7 @@ from typing import cast
 
 from todoist.automations.multiplicate import Multiply
 from todoist.database.base import Database
-from todoist.types import Task, TaskEntry
+from todoist.core.types import Task, TaskEntry
 
 
 def _task_entry(
@@ -74,8 +74,13 @@ class _FakeDb:
 
 
 def test_tasks_sorted_by_depth_child_before_parent():
-    parent = Task(id="1", task_entry=_task_entry(task_id="1", content="P", labels=["X2"]))
-    child = Task(id="2", task_entry=_task_entry(task_id="2", content="C", labels=["X2"], parent_id="1"))
+    parent = Task(
+        id="1", task_entry=_task_entry(task_id="1", content="P", labels=["X2"])
+    )
+    child = Task(
+        id="2",
+        task_entry=_task_entry(task_id="2", content="C", labels=["X2"], parent_id="1"),
+    )
 
     # Deliberately provide child first; Multiply should process child before parent (DFS post-order).
     db = _FakeDb(tasks=[child, parent])

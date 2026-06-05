@@ -1,6 +1,5 @@
 """Definitions for Todoist API endpoints."""
 
-
 from dataclasses import dataclass
 
 
@@ -15,7 +14,9 @@ class Endpoint:
     def format(self, **kwargs) -> "Endpoint":
         """Return a new endpoint with ``url`` formatted using ``kwargs``."""
 
-        return Endpoint(name=self.name, method=self.method, url=self.url.format(**kwargs))
+        return Endpoint(
+            name=self.name, method=self.method, url=self.url.format(**kwargs)
+        )
 
 
 class TodoistEndpoints:
@@ -40,9 +41,13 @@ class TodoistEndpoints:
 
     # Projects
     LIST_PROJECTS = Endpoint("list_projects", "GET", f"{API_BASE}/projects")
-    LIST_ARCHIVED_PROJECTS = Endpoint("list_archived_projects", "GET", f"{API_BASE}/projects/archived")
+    LIST_ARCHIVED_PROJECTS = Endpoint(
+        "list_archived_projects", "GET", f"{API_BASE}/projects/archived"
+    )
     GET_PROJECT = Endpoint("get_project", "GET", f"{API_BASE}/projects/{{project_id}}")
-    GET_PROJECT_FULL = Endpoint("get_project_full", "GET", f"{API_BASE}/projects/{{project_id}}/full")
+    GET_PROJECT_FULL = Endpoint(
+        "get_project_full", "GET", f"{API_BASE}/projects/{{project_id}}/full"
+    )
 
     # Sync
     SYNC = Endpoint("sync", "POST", f"{API_BASE}/sync")

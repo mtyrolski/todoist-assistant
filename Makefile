@@ -1,4 +1,4 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex dashboard_triton dashboard_triton_gpu run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -12,6 +12,8 @@ TRITON_MODEL_NAME ?=
 TRITON_URL ?=
 BACKEND ?= raw
 BACKEND_AI ?=
+
+setup: init_local_env ## First-time source setup: sync Todoist data, then use make dashboard
 
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
@@ -50,7 +52,41 @@ run_api:
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-run_dashboard: ensure_frontend_deps
+dashboard: run_dashboard ## Start dashboard without AI by default; BACKEND/BACKEND_AI may override
+
+dashboard_raw: ensure_frontend_deps ## Start dashboard with AI disabled
+	MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start raw cpu
+
+dashboard_codex: ensure_frontend_deps ## Start dashboard using the local Codex CLI backend
+	MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start codex cpu
+
+dashboard_triton: ensure_frontend_deps ## Start dashboard using Triton on CPU
+	@MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start triton cpu
+
+dashboard_triton_gpu: ensure_frontend_deps ## Start dashboard using Triton on GPU
+	@MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start triton gpu
+
+run_dashboard: ensure_frontend_deps ## Start dashboard; supports BACKEND/BACKEND_AI=raw|codex|triton
 	@backend="$(BACKEND)"; \
 	if [ -n "$(BACKEND_AI)" ]; then backend="$(BACKEND_AI)"; fi; \
 	case "$$backend" in \
@@ -66,21 +102,9 @@ run_dashboard: ensure_frontend_deps
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start "$$stack_backend" cpu
 
-run_dashboard_cpu: ensure_frontend_deps
-	@MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start triton cpu
+run_dashboard_cpu: dashboard_triton ## Backward-compatible alias; use make dashboard_triton
 
-run_dashboard_gpu: ensure_frontend_deps
-	@MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start triton gpu
+run_dashboard_gpu: dashboard_triton_gpu ## Backward-compatible alias; use make dashboard_triton_gpu
 
 stop_dashboard:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -88,7 +112,7 @@ stop_dashboard:
 	bash ./scripts/dashboard_stack.sh stop
 
 status: ## Show local dashboard/API/frontend runtime status
-	@python3 scripts/status.py
+	@PYTHONPATH=. uv run python3 -m scripts.status
 
 triton_shell:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -141,7 +165,10 @@ clear_local_env:
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
-	make run_dashboard
+	make dashboard
+
+chat_agent: ## Start the local read-only Transformers chat agent
+	uv run python3 -m todoist.agent.chat chat
 
 test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/

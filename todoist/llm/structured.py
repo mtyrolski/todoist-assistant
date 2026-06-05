@@ -14,11 +14,11 @@ T = TypeVar("T", bound=BaseModel)
 def _schema_instructions(schema: type[BaseModel]) -> str:
     name = schema.__name__
     if name == "InstructionSelection":
-        return "JSON only: {\"selected_ids\": [\"...\"]}. Use [] if none."
+        return 'JSON only: {"selected_ids": ["..."]}. Use [] if none.'
     if name == "PlannerDecision":
         return (
             "JSON only with keys: plan, action, tool_code, final_answer.\n"
-            "action: \"tool\" or \"final\".\n"
+            'action: "tool" or "final".\n'
             "If action=tool -> tool_code required, final_answer null.\n"
             "If action=final -> final_answer required, tool_code null.\n"
             "plan can be empty."
@@ -33,7 +33,11 @@ def _schema_instructions(schema: type[BaseModel]) -> str:
     field_names = list(schema.model_fields)
     if len(field_names) == 1:
         field_name = field_names[0]
-        extra = " tool_code should be Python only (no markdown)." if field_name == "tool_code" else ""
+        extra = (
+            " tool_code should be Python only (no markdown)."
+            if field_name == "tool_code"
+            else ""
+        )
         return f"JSON only with key: {field_name}. Use null if unknown.{extra}"
 
     schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
@@ -68,7 +72,7 @@ def _extract_json_payload(text: str) -> str | None:
             _, end = decoder.raw_decode(stripped[idx:])
         except json.JSONDecodeError:
             continue
-        return stripped[idx: idx + end].strip()
+        return stripped[idx : idx + end].strip()
     return None
 
 
@@ -115,24 +119,32 @@ def _try_parse_schema_fallback(raw: str, schema: type[T]) -> T | None:
     content_lines = _extract_breakdown_content_lines(raw)
     if content_lines:
         with suppress(ValidationError):
-            return schema.model_validate({"children": [{"content": line} for line in content_lines]})
+            return schema.model_validate(
+                {"children": [{"content": line} for line in content_lines]}
+            )
 
     prefixed_lines = _extract_prefixed_breakdown_lines(raw)
     if prefixed_lines:
         with suppress(ValidationError):
-            return schema.model_validate({"children": [{"content": line} for line in prefixed_lines]})
+            return schema.model_validate(
+                {"children": [{"content": line} for line in prefixed_lines]}
+            )
 
     numbered_lines = _extract_numbered_breakdown_lines(raw)
     if numbered_lines:
         with suppress(ValidationError):
-            return schema.model_validate({"children": [{"content": line} for line in numbered_lines]})
+            return schema.model_validate(
+                {"children": [{"content": line} for line in numbered_lines]}
+            )
     return None
 
 
 def _extract_breakdown_content_lines(raw: str) -> list[str]:
     items: list[str] = []
     for stripped in _iter_breakdown_candidate_lines(raw):
-        match = re.match(r"^(?:[-*]\s*)?content\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+        match = re.match(
+            r"^(?:[-*]\s*)?content\s*:\s*(.+)$", stripped, flags=re.IGNORECASE
+        )
         if match is None:
             continue
         candidate = _normalize_breakdown_line(match.group(1))
@@ -142,7 +154,13 @@ def _extract_breakdown_content_lines(raw: str) -> list[str]:
 
 
 def _extract_numbered_breakdown_lines(raw: str) -> list[str]:
-    ignored_prefixes = ("task:", "ancestors:", "children:", "expand:", "break down tasks:")
+    ignored_prefixes = (
+        "task:",
+        "ancestors:",
+        "children:",
+        "expand:",
+        "break down tasks:",
+    )
     items: list[str] = []
     for stripped in _iter_breakdown_candidate_lines(raw):
         lowered = stripped.lower()

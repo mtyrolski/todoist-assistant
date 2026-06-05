@@ -189,12 +189,17 @@ def test_anonymize_project_names_uses_stable_hierarchy_themes():
     assert result["Alpha Child Two"].startswith(result["Alpha"])
     assert result["Alpha Grandchild"].startswith(result["Alpha Child One"])
     assert result["Alpha Child One"] != result["Alpha Child Two"]
-    original_names = {"Alpha", "Alpha Child One", "Alpha Grandchild", "Alpha Child Two", "Beta", "Legacy Project"}
+    original_names = {
+        "Alpha",
+        "Alpha Child One",
+        "Alpha Grandchild",
+        "Alpha Child Two",
+        "Beta",
+        "Legacy Project",
+    }
     assert set(anonymized_df["parent_project_name"]).isdisjoint(original_names)
     assert set(anonymized_df["root_project_name"]).isdisjoint(original_names)
-    assert set(result.values()).isdisjoint(
-        original_names
-    )
+    assert set(result.values()).isdisjoint(original_names)
 
 
 def test_anonymize_project_names_uses_theme_specific_subprojects(monkeypatch):
@@ -276,7 +281,9 @@ def test_anonymize_label_names_handles_partial_catalog_without_error():
     label_mapping = anonymize_label_names(active_projects)
 
     assert set(label_mapping) == {"alpha", "beta", "gamma"}
-    remapped_labels = {label for task in active_projects[0].tasks for label in task.task_entry.labels}
+    remapped_labels = {
+        label for task in active_projects[0].tasks for label in task.task_entry.labels
+    }
     assert remapped_labels == set(label_mapping.values())
 
 

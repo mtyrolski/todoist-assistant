@@ -1,6 +1,7 @@
 """
 Tests for database operations that create and modify data structures.
 """
+
 import inspect
 from typing import Any, cast
 import pytest
@@ -12,7 +13,7 @@ from todoist.api.client import RequestSpec
 from todoist.database.db_tasks import DatabaseTasks
 from todoist.database.db_projects import DatabaseProjects
 from todoist.database.db_activity import DatabaseActivity
-from todoist.types import Task, TaskEntry, Project
+from todoist.core.types import Task, TaskEntry, Project
 
 
 @pytest.fixture
@@ -45,50 +46,65 @@ def sample_project_entry():
     return make_project_entry(project_id="12345", name="Test Project")
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_task_basic(mock_request_json, db_tasks):
     """Test basic task insertion using the API client abstraction."""
     mock_request_json.return_value = {
-        'id': '3501',
-        'content': 'Buy milk',
-        'description': '',
-        'project_id': '226095',
-        'is_completed': False,
-        'priority': 1
+        "id": "3501",
+        "content": "Buy milk",
+        "description": "",
+        "project_id": "226095",
+        "is_completed": False,
+        "priority": 1,
     }
 
     result = db_tasks.insert_task(content="Buy milk", project_id="226095")
 
-    assert result['id'] == '3501'
-    assert result['content'] == 'Buy milk'
-    assert result['project_id'] == '226095'
+    assert result["id"] == "3501"
+    assert result["content"] == "Buy milk"
+    assert result["project_id"] == "226095"
 
     mock_request_json.assert_called_once()
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.endpoint == TodoistEndpoints.CREATE_TASK
     assert spec_arg.json_body is not None
-    assert spec_arg.json_body['content'] == 'Buy milk'
-    assert spec_arg.json_body['project_id'] == '226095'
-    assert mock_request_json.call_args.kwargs['operation_name'] == 'create task'
+    assert spec_arg.json_body["content"] == "Buy milk"
+    assert spec_arg.json_body["project_id"] == "226095"
+    assert mock_request_json.call_args.kwargs["operation_name"] == "create task"
 
 
 def test_insert_task_signature_parameters(db_tasks):
     """Test that insert_task has all expected parameters."""
     signature = inspect.signature(db_tasks.insert_task)
     expected_params = [
-        'content', 'description', 'project_id', 'section_id', 'parent_id',
-        'order', 'labels', 'priority', 'due_string', 'due_date', 'due_datetime',
-        'due_lang', 'assignee_id', 'duration', 'duration_unit', 'deadline_date',
-        'deadline_lang'
+        "content",
+        "description",
+        "project_id",
+        "section_id",
+        "parent_id",
+        "order",
+        "labels",
+        "priority",
+        "due_string",
+        "due_date",
+        "due_datetime",
+        "due_lang",
+        "assignee_id",
+        "duration",
+        "duration_unit",
+        "deadline_date",
+        "deadline_lang",
     ]
 
     actual_params = list(signature.parameters.keys())
     for param in expected_params:
-        assert param in actual_params, f"Parameter '{param}' should be in insert_task signature"
+        assert param in actual_params, (
+            f"Parameter '{param}' should be in insert_task signature"
+        )
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request")
 def test_remove_task(mock_request, db_tasks):
     """Test task removal via the API client abstraction."""
     mock_request.return_value = EndpointCallResult(
@@ -108,10 +124,10 @@ def test_remove_task(mock_request, db_tasks):
     spec_arg = mock_request.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.endpoint.url.endswith("/task123")
-    assert mock_request.call_args.kwargs['operation_name'] == 'delete task task123'
+    assert mock_request.call_args.kwargs["operation_name"] == "delete task task123"
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_fetch_task_by_id(mock_request_json, db_tasks):
     """Test fetching task by ID via the API client abstraction."""
     mock_request_json.return_value = {
@@ -120,41 +136,43 @@ def test_fetch_task_by_id(mock_request_json, db_tasks):
         "description": "",
         "project_id": "2203306141",
         "is_completed": False,
-        "priority": 1
+        "priority": 1,
     }
 
     result = db_tasks.fetch_task_by_id("2995104339")
 
-    assert result['id'] == "2995104339"
-    assert result['content'] == "Buy Milk"
+    assert result["id"] == "2995104339"
+    assert result["content"] == "Buy Milk"
 
     mock_request_json.assert_called_once()
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.endpoint.url.endswith("/2995104339")
-    assert mock_request_json.call_args.kwargs['operation_name'] == 'fetch task 2995104339'
+    assert (
+        mock_request_json.call_args.kwargs["operation_name"] == "fetch task 2995104339"
+    )
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
-def test_insert_task_from_template_valid_overrides(mock_request_json, db_tasks, sample_task_entry):
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
+def test_insert_task_from_template_valid_overrides(
+    mock_request_json, db_tasks, sample_task_entry
+):
     """Test insert_task_from_template with valid overrides via API client."""
-    mock_request_json.return_value = {'id': 'new_task_id'}
+    mock_request_json.return_value = {"id": "new_task_id"}
 
     template_task = Task(id="template_task", task_entry=sample_task_entry)
 
     result = db_tasks.insert_task_from_template(
-        template_task,
-        content="New Task Content",
-        priority=3
+        template_task, content="New Task Content", priority=3
     )
 
-    assert result['id'] == 'new_task_id'
+    assert result["id"] == "new_task_id"
     mock_request_json.assert_called_once()
     spec_arg = mock_request_json.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.json_body is not None
-    assert spec_arg.json_body['content'] == 'New Task Content'
-    assert spec_arg.json_body['priority'] == 3
+    assert spec_arg.json_body["content"] == "New Task Content"
+    assert spec_arg.json_body["priority"] == 3
 
 
 def test_insert_task_from_template_invalid_overrides(db_tasks, sample_task_entry):
@@ -163,13 +181,12 @@ def test_insert_task_from_template_invalid_overrides(db_tasks, sample_task_entry
 
     # Test with invalid overrides
     result = db_tasks.insert_task_from_template(
-        template_task,
-        invalid_param="should_not_work"
+        template_task, invalid_param="should_not_work"
     )
 
     # Verify error response
-    assert 'error' in result
-    assert result['error'] == 'Invalid overrides'
+    assert "error" in result
+    assert result["error"] == "Invalid overrides"
 
 
 def test_database_projects_initialization(db_projects):
@@ -214,33 +231,38 @@ def test_anonymize_sub_db_rewrites_project_cache_and_colors(db_projects):
     assert "Alpha" not in db_projects.mapping_project_name_to_color
     assert "Alpha Child" not in db_projects.mapping_project_name_to_color
     assert db_projects.mapping_project_name_to_color["North Star Studio"] == "red"
-    assert db_projects.mapping_project_name_to_color["North Star Studio / Planning"] == "blue"
+    assert (
+        db_projects.mapping_project_name_to_color["North Star Studio / Planning"]
+        == "blue"
+    )
 
 
-@patch('todoist.database.db_projects.TodoistAPIClient.request_json')
+@patch("todoist.database.db_projects.TodoistAPIClient.request_json")
 def test_fetch_archived_projects_caching(mock_request_json, db_projects):
     """Test fetch_archived_projects with caching behavior."""
     mock_request_json.return_value = {
-        "results": [{
-            "id": "12345",
-            "name": "Archived Project",
-            "color": "blue",
-            "parent_id": None,
-            "child_order": 1,
-            "view_style": "list",
-            "is_favorite": False,
-            "is_archived": True,
-            "is_deleted": False,
-            "is_frozen": False,
-            "can_assign_tasks": True,
-            "shared": False,
-            "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z",
-            "v2_id": "v2_12345",
-            "v2_parent_id": None,
-            "sync_id": None,
-            "collapsed": False
-        }],
+        "results": [
+            {
+                "id": "12345",
+                "name": "Archived Project",
+                "color": "blue",
+                "parent_id": None,
+                "child_order": 1,
+                "view_style": "list",
+                "is_favorite": False,
+                "is_archived": True,
+                "is_deleted": False,
+                "is_frozen": False,
+                "can_assign_tasks": True,
+                "shared": False,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "v2_id": "v2_12345",
+                "v2_parent_id": None,
+                "sync_id": None,
+                "collapsed": False,
+            }
+        ],
         "next_cursor": None,
     }
 
@@ -268,7 +290,7 @@ def test_reset_clears_caches(db_projects):
     db_projects.projects_cache = ["test"]
 
     # Mock the pull method to avoid actual API calls
-    with patch.object(db_projects, 'pull'):
+    with patch.object(db_projects, "pull"):
         db_projects.reset()
 
     # Verify caches are cleared
@@ -276,8 +298,8 @@ def test_reset_clears_caches(db_projects):
     assert db_projects.projects_cache is None
 
 
-@patch('todoist.database.db_projects.safe_instantiate_entry')
-@patch('todoist.database.db_projects.TodoistAPIClient.request_json')
+@patch("todoist.database.db_projects.safe_instantiate_entry")
+@patch("todoist.database.db_projects.TodoistAPIClient.request_json")
 def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projects):
     """Test fetching a single project by ID."""
     mock_request_json.return_value = {
@@ -298,7 +320,7 @@ def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projec
         "v2_id": "v2_12345",
         "v2_parent_id": None,
         "sync_id": None,
-        "collapsed": False
+        "collapsed": False,
     }
 
     mock_project_entry = MagicMock()
@@ -319,26 +341,42 @@ def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projec
 
 
 def test_fetch_mapping_project_id_to_root_uses_in_memory_parent_links(db_projects):
-    root = make_project(project_id="root", project_entry=make_project_entry(project_id="root", parent_id=None))
-    child = make_project(project_id="child", project_entry=make_project_entry(project_id="child", parent_id="root"))
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(project_id="root", parent_id=None),
+    )
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(project_id="child", parent_id="root"),
+    )
     grandchild = make_project(
         project_id="grandchild",
         project_entry=make_project_entry(project_id="grandchild", parent_id="child"),
     )
     archived_root = make_project(
         project_id="archived_root",
-        project_entry=make_project_entry(project_id="archived_root", parent_id=None, is_archived=True),
+        project_entry=make_project_entry(
+            project_id="archived_root", parent_id=None, is_archived=True
+        ),
         is_archived=True,
     )
     archived_child = make_project(
         project_id="archived_child",
-        project_entry=make_project_entry(project_id="archived_child", parent_id="archived_root", is_archived=True),
+        project_entry=make_project_entry(
+            project_id="archived_child", parent_id="archived_root", is_archived=True
+        ),
         is_archived=True,
     )
 
     with (
-        patch.object(db_projects, "fetch_projects", return_value=[root, child, grandchild]) as mock_fetch_projects,
-        patch.object(db_projects, "fetch_archived_projects", return_value=[archived_root, archived_child]) as mock_fetch_archived,
+        patch.object(
+            db_projects, "fetch_projects", return_value=[root, child, grandchild]
+        ) as mock_fetch_projects,
+        patch.object(
+            db_projects,
+            "fetch_archived_projects",
+            return_value=[archived_root, archived_child],
+        ) as mock_fetch_archived,
         patch.object(db_projects, "fetch_project_by_id") as mock_fetch_project_by_id,
     ):
         mapping = db_projects.fetch_mapping_project_id_to_root()
@@ -354,12 +392,22 @@ def test_fetch_mapping_project_id_to_root_uses_in_memory_parent_links(db_project
 
 
 def test_fetch_mapping_project_id_to_root_uses_cache_after_first_call(db_projects):
-    root = make_project(project_id="root", project_entry=make_project_entry(project_id="root", parent_id=None))
-    child = make_project(project_id="child", project_entry=make_project_entry(project_id="child", parent_id="root"))
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(project_id="root", parent_id=None),
+    )
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(project_id="child", parent_id="root"),
+    )
 
     with (
-        patch.object(db_projects, "fetch_projects", return_value=[root, child]) as mock_fetch_projects,
-        patch.object(db_projects, "fetch_archived_projects", return_value=[]) as mock_fetch_archived,
+        patch.object(
+            db_projects, "fetch_projects", return_value=[root, child]
+        ) as mock_fetch_projects,
+        patch.object(
+            db_projects, "fetch_archived_projects", return_value=[]
+        ) as mock_fetch_archived,
     ):
         mapping_first = db_projects.fetch_mapping_project_id_to_root()
         mapping_second = db_projects.fetch_mapping_project_id_to_root()
@@ -370,10 +418,14 @@ def test_fetch_mapping_project_id_to_root_uses_cache_after_first_call(db_project
     mock_fetch_archived.assert_called_once()
 
 
-def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(db_projects):
+def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(
+    db_projects,
+):
     orphan = make_project(
         project_id="orphan",
-        project_entry=make_project_entry(project_id="orphan", parent_id="missing_parent"),
+        project_entry=make_project_entry(
+            project_id="orphan", parent_id="missing_parent"
+        ),
     )
     fetched_root = make_project(
         project_id="remote_root",
@@ -383,7 +435,9 @@ def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(db_
     with (
         patch.object(db_projects, "fetch_projects", return_value=[orphan]),
         patch.object(db_projects, "fetch_archived_projects", return_value=[]),
-        patch.object(db_projects, "fetch_project_by_id", return_value=fetched_root) as mock_fetch_project_by_id,
+        patch.object(
+            db_projects, "fetch_project_by_id", return_value=fetched_root
+        ) as mock_fetch_project_by_id,
     ):
         mapping = db_projects.fetch_mapping_project_id_to_root()
 
@@ -391,17 +445,16 @@ def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(db_
     mock_fetch_project_by_id.assert_called_once_with("missing_parent", True)
 
 
-@patch('todoist.database.db_activity.logger')
+@patch("todoist.database.db_activity.logger")
 def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
     """Test adaptive fetching stops after empty windows."""
-    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+    with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
         # Simulate empty responses
         mock_fetch_window.side_effect = [[], []]
 
         # Test with early stop after 2 empty windows
         result = db_activity.fetch_activity_adaptively(
-            nweeks_window_size=1,
-            early_stop_after_n_windows=2
+            nweeks_window_size=1, early_stop_after_n_windows=2
         )
 
         # Should stop after 2 empty windows
@@ -409,10 +462,12 @@ def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
         assert mock_fetch_window.call_count == 2
 
 
-@patch('todoist.database.db_activity.logger')
-def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(_mock_logger, db_activity):
+@patch("todoist.database.db_activity.logger")
+def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(
+    _mock_logger, db_activity
+):
     """Adaptive windows should not be implicitly capped to nweeks_window_size pages."""
-    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+    with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
         mock_fetch_window.side_effect = [[], []]
 
         db_activity.fetch_activity_adaptively(
@@ -424,34 +479,38 @@ def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(_mock_logge
         assert first_call_kwargs["max_pages"] is None
 
 
-@patch('todoist.database.db_activity.logger')
+@patch("todoist.database.db_activity.logger")
 def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
     """Test adaptive fetching with events."""
-    from todoist.types import Event, EventEntry
+    from todoist.core.types import Event, EventEntry
     import datetime as dt
 
     # Create mock events
     event_entry1 = EventEntry(
-        id="event1", object_type="item", object_id="task1",
-        event_type="completed", event_date="2024-01-01T12:00:00Z",
-        parent_project_id="proj1", parent_item_id=None,
-        initiator_id="user1", extra_data={"content": "Task 1"},
-        extra_data_id="extra1", v2_object_id="v2_task1",
-        v2_parent_item_id=None, v2_parent_project_id="v2_proj1"
+        id="event1",
+        object_type="item",
+        object_id="task1",
+        event_type="completed",
+        event_date="2024-01-01T12:00:00Z",
+        parent_project_id="proj1",
+        parent_item_id=None,
+        initiator_id="user1",
+        extra_data={"content": "Task 1"},
+        extra_data_id="extra1",
+        v2_object_id="v2_task1",
+        v2_parent_item_id=None,
+        v2_parent_project_id="v2_proj1",
     )
     event1 = Event(
-        event_entry=event_entry1,
-        id="event1",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        event_entry=event_entry1, id="event1", date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
-    with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+    with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
         # First call returns events, second returns empty
         mock_fetch_window.side_effect = [[event1], []]
 
         result = db_activity.fetch_activity_adaptively(
-            nweeks_window_size=1,
-            early_stop_after_n_windows=1
+            nweeks_window_size=1, early_stop_after_n_windows=1
         )
 
         # Should get the event from first call, then stop after 1 empty window
@@ -460,39 +519,48 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
         assert mock_fetch_window.call_count == 2
 
 
-@patch('todoist.database.db_activity.logger')
-def test_fetch_activity_adaptively_passes_cached_events_to_range(_mock_logger, db_activity):
-    from todoist.types import Event, EventEntry
+@patch("todoist.database.db_activity.logger")
+def test_fetch_activity_adaptively_passes_cached_events_to_range(
+    _mock_logger, db_activity
+):
+    from todoist.core.types import Event, EventEntry
     import datetime as dt
 
     cached_entry = EventEntry(
-        id="cached1", object_type="item", object_id="task1",
-        event_type="completed", event_date="2024-01-01T12:00:00Z",
-        parent_project_id="proj1", parent_item_id=None,
-        initiator_id="user1", extra_data={"content": "Task 1"},
-        extra_data_id="extra1", v2_object_id="v2_task1",
-        v2_parent_item_id=None, v2_parent_project_id="v2_proj1"
+        id="cached1",
+        object_type="item",
+        object_id="task1",
+        event_type="completed",
+        event_date="2024-01-01T12:00:00Z",
+        parent_project_id="proj1",
+        parent_item_id=None,
+        initiator_id="user1",
+        extra_data={"content": "Task 1"},
+        extra_data_id="extra1",
+        v2_object_id="v2_task1",
+        v2_parent_item_id=None,
+        v2_parent_project_id="v2_proj1",
     )
     cached_event = Event(
-        event_entry=cached_entry,
-        id="cached1",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        event_entry=cached_entry, id="cached1", date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
-    with patch.object(db_activity, '_fetch_activity_range', return_value=[]) as mock_fetch_window:
+    with patch.object(
+        db_activity, "_fetch_activity_range", return_value=[]
+    ) as mock_fetch_window:
         db_activity.fetch_activity_adaptively(
             nweeks_window_size=1,
             early_stop_after_n_windows=1,
-            events_already_fetched={cached_event}
+            events_already_fetched={cached_event},
         )
 
     first_call_kwargs = mock_fetch_window.call_args_list[0].kwargs
     assert first_call_kwargs["events_already_fetched"] == {cached_event}
 
 
-@patch('todoist.database.db_activity.logger')
+@patch("todoist.database.db_activity.logger")
 def test_fetch_activity_adaptively_reports_window_progress(_mock_logger, db_activity):
-    from todoist.utils import set_tqdm_progress_callback
+    from todoist.core.utils import set_tqdm_progress_callback
 
     progress_calls: list[tuple[str, int, int, str | None]] = []
     set_tqdm_progress_callback(
@@ -501,7 +569,7 @@ def test_fetch_activity_adaptively_reports_window_progress(_mock_logger, db_acti
         )
     )
     try:
-        with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+        with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
             mock_fetch_window.side_effect = [[], []]
 
             db_activity.fetch_activity_adaptively(
@@ -517,16 +585,16 @@ def test_fetch_activity_adaptively_reports_window_progress(_mock_logger, db_acti
         for call in progress_calls
     )
     assert any(
-        desc == "Backfilling activity history"
-        and current >= 1
-        and unit == "window"
+        desc == "Backfilling activity history" and current >= 1 and unit == "window"
         for desc, current, _total, unit in progress_calls
     )
 
 
-@patch('todoist.database.db_activity.logger')
-def test_fetch_activity_adaptively_reports_verbose_window_detail(_mock_logger, db_activity):
-    from todoist.utils import set_tqdm_progress_callback
+@patch("todoist.database.db_activity.logger")
+def test_fetch_activity_adaptively_reports_verbose_window_detail(
+    _mock_logger, db_activity
+):
+    from todoist.core.utils import set_tqdm_progress_callback
 
     progress_calls: list[tuple[str, int, int, str | None, str | None]] = []
 
@@ -541,7 +609,7 @@ def test_fetch_activity_adaptively_reports_verbose_window_detail(_mock_logger, d
 
     set_tqdm_progress_callback(_capture)
     try:
-        with patch.object(db_activity, '_fetch_activity_range') as mock_fetch_window:
+        with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
             mock_fetch_window.side_effect = [[], []]
 
             db_activity.fetch_activity_adaptively(
@@ -558,10 +626,10 @@ def test_fetch_activity_adaptively_reports_verbose_window_detail(_mock_logger, d
     assert any("empty windows=" in detail for detail in details)
 
 
-@patch('todoist.database.db_activity.TodoistAPIClient.request_json')
+@patch("todoist.database.db_activity.TodoistAPIClient.request_json")
 def test_fetch_activity_range_reports_page_progress(mock_request_json, db_activity):
     from datetime import datetime, timezone
-    from todoist.utils import set_tqdm_progress_callback
+    from todoist.core.utils import set_tqdm_progress_callback
 
     mock_request_json.return_value = {"results": [], "next_cursor": None}
     progress_calls: list[tuple[str, int, int, str | None]] = []
@@ -585,10 +653,12 @@ def test_fetch_activity_range_reports_page_progress(mock_request_json, db_activi
     )
 
 
-@patch('todoist.database.db_activity.TodoistAPIClient.request_json')
-def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_request_json, db_activity):
+@patch("todoist.database.db_activity.TodoistAPIClient.request_json")
+def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(
+    mock_request_json, db_activity
+):
     from datetime import datetime, timezone
-    from todoist.types import Event, EventEntry
+    from todoist.core.types import Event, EventEntry
     import datetime as dt
 
     new_event_payload = {
@@ -640,7 +710,7 @@ def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_r
     cached_event = Event(
         event_entry=cached_entry,
         id="event-cached",
-        date=dt.datetime(2024, 1, 2, 12, 0, 0)
+        date=dt.datetime(2024, 1, 2, 12, 0, 0),
     )
     mock_request_json.side_effect = [
         {"results": [new_event_payload], "next_cursor": "cursor-1"},
@@ -658,8 +728,10 @@ def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(mock_r
     assert mock_request_json.call_count == 3
 
 
-@patch('todoist.database.db_activity.TodoistAPIClient.request_json')
-def test_fetch_activity_range_filters_by_parent_project_id(mock_request_json, db_activity):
+@patch("todoist.database.db_activity.TodoistAPIClient.request_json")
+def test_fetch_activity_range_filters_by_parent_project_id(
+    mock_request_json, db_activity
+):
     from datetime import datetime, timezone
 
     mock_request_json.return_value = {"results": [], "next_cursor": None}
@@ -676,7 +748,7 @@ def test_fetch_activity_range_filters_by_parent_project_id(mock_request_json, db
 
 def test_fetch_activity_for_parent_projects_scans_each_parent_window(db_activity):
     from datetime import datetime, timezone
-    from todoist.types import Event, EventEntry
+    from todoist.core.types import Event, EventEntry
     import datetime as dt
 
     entry = EventEntry(
@@ -724,12 +796,12 @@ def test_fetch_activity_signature(db_activity):
     params = list(signature.parameters.keys())
 
     # Should have parameters for pagination
-    assert 'max_pages' in params
-    assert 'starting_page' in params
+    assert "max_pages" in params
+    assert "starting_page" in params
 
     # Check default values
-    assert signature.parameters['max_pages'].default == 4
-    assert signature.parameters['starting_page'].default == 0
+    assert signature.parameters["max_pages"].default == 4
+    assert signature.parameters["starting_page"].default == 0
 
 
 def test_task_equality(sample_task_entry):
@@ -744,9 +816,15 @@ def test_task_equality(sample_task_entry):
 
 def test_project_equality(sample_project_entry):
     """Test Project equality comparison."""
-    project1 = Project(id="12345", project_entry=sample_project_entry, tasks=[], is_archived=False)
-    project2 = Project(id="12345", project_entry=sample_project_entry, tasks=[], is_archived=False)
-    project3 = Project(id="67890", project_entry=sample_project_entry, tasks=[], is_archived=False)
+    project1 = Project(
+        id="12345", project_entry=sample_project_entry, tasks=[], is_archived=False
+    )
+    project2 = Project(
+        id="12345", project_entry=sample_project_entry, tasks=[], is_archived=False
+    )
+    project3 = Project(
+        id="67890", project_entry=sample_project_entry, tasks=[], is_archived=False
+    )
 
     assert project1 == project2
     assert project1 != project3
@@ -754,34 +832,35 @@ def test_project_equality(sample_project_entry):
 
 def test_event_equality_and_hashing():
     """Test Event equality and hashing for set operations."""
-    from todoist.types import Event, EventEntry
+    from todoist.core.types import Event, EventEntry
     import datetime as dt
 
     event_entry1 = EventEntry(
-        id="event1", object_type="item", object_id="task1",
-        event_type="completed", event_date="2024-01-01T12:00:00Z",
-        parent_project_id="proj1", parent_item_id=None,
-        initiator_id="user1", extra_data={"content": "Task 1"},
-        extra_data_id="extra1", v2_object_id="v2_task1",
-        v2_parent_item_id=None, v2_parent_project_id="v2_proj1"
+        id="event1",
+        object_type="item",
+        object_id="task1",
+        event_type="completed",
+        event_date="2024-01-01T12:00:00Z",
+        parent_project_id="proj1",
+        parent_item_id=None,
+        initiator_id="user1",
+        extra_data={"content": "Task 1"},
+        extra_data_id="extra1",
+        v2_object_id="v2_task1",
+        v2_parent_item_id=None,
+        v2_parent_project_id="v2_proj1",
     )
 
     event1a = Event(
-        event_entry=event_entry1,
-        id="event1",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        event_entry=event_entry1, id="event1", date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
     event1b = Event(
-        event_entry=event_entry1,
-        id="event1",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        event_entry=event_entry1, id="event1", date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
     event2 = Event(
-        event_entry=event_entry1,
-        id="event2",
-        date=dt.datetime(2024, 1, 1, 12, 0, 0)
+        event_entry=event_entry1, id="event2", date=dt.datetime(2024, 1, 1, 12, 0, 0)
     )
 
     # Test equality
@@ -825,7 +904,7 @@ def test_task_entry_duration_edge_cases():
         v2_parent_id=None,
         v2_project_id="v2_project123",
         v2_section_id="v2_section123",
-        day_order=None
+        day_order=None,
     )
 
     assert task_entry.duration_kwargs is None
@@ -839,7 +918,7 @@ def test_task_entry_duration_edge_cases():
     assert task_entry.duration_kwargs is None
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_tasks_empty_list(mock_request_json, db_tasks):
     """Test insert_tasks with empty list."""
     result = db_tasks.insert_tasks([])
@@ -847,41 +926,40 @@ def test_insert_tasks_empty_list(mock_request_json, db_tasks):
     mock_request_json.assert_not_called()
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_tasks_single_task(mock_request_json, db_tasks):
     """Test insert_tasks with a single task."""
     mock_request_json.return_value = {
-        'id': 'task1',
-        'content': 'Test Task 1',
-        'project_id': 'project123',
-        'priority': 1
+        "id": "task1",
+        "content": "Test Task 1",
+        "project_id": "project123",
+        "priority": 1,
     }
 
-    tasks_data = [
-        {"content": "Test Task 1", "project_id": "project123"}
-    ]
+    tasks_data = [{"content": "Test Task 1", "project_id": "project123"}]
 
     results = db_tasks.insert_tasks(tasks_data)
 
     assert len(results) == 1
-    assert results[0]['id'] == 'task1'
-    assert results[0]['content'] == 'Test Task 1'
+    assert results[0]["id"] == "task1"
+    assert results[0]["content"] == "Test Task 1"
     mock_request_json.assert_called_once()
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
     """Test insert_tasks with multiple tasks in parallel."""
+
     # Mock different responses for different tasks
     def mock_response_side_effect(spec, **_kwargs):
-        content = spec.json_body.get('content', '')
-        if 'Task 1' in content:
-            return {'id': 'task1', 'content': content, 'priority': 1}
-        elif 'Task 2' in content:
-            return {'id': 'task2', 'content': content, 'priority': 2}
-        elif 'Task 3' in content:
-            return {'id': 'task3', 'content': content, 'priority': 3}
-        return {'id': 'unknown', 'content': content}
+        content = spec.json_body.get("content", "")
+        if "Task 1" in content:
+            return {"id": "task1", "content": content, "priority": 1}
+        elif "Task 2" in content:
+            return {"id": "task2", "content": content, "priority": 2}
+        elif "Task 3" in content:
+            return {"id": "task3", "content": content, "priority": 3}
+        return {"id": "unknown", "content": content}
 
     mock_request_json.side_effect = mock_response_side_effect
 
@@ -894,24 +972,24 @@ def test_insert_tasks_multiple_tasks(mock_request_json, db_tasks):
     results = db_tasks.insert_tasks(tasks_data)
 
     assert len(results) == 3
-    assert results[0]['id'] == 'task1'
-    assert results[1]['id'] == 'task2'
-    assert results[2]['id'] == 'task3'
+    assert results[0]["id"] == "task1"
+    assert results[1]["id"] == "task2"
+    assert results[2]["id"] == "task3"
     assert mock_request_json.call_count == 3
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_tasks_with_failure(mock_request_json, db_tasks):
     """Test insert_tasks when one task fails."""
-    call_count = {'count': 0}
+    call_count = {"count": 0}
 
     def mock_response_with_failure(spec, **_kwargs):
-        call_count['count'] += 1
-        content = spec.json_body.get('content', '')
-        if 'Task 2' in content:
+        call_count["count"] += 1
+        content = spec.json_body.get("content", "")
+        if "Task 2" in content:
             # Simulate failure for Task 2
             raise Exception("API Error")
-        return {'id': f'task{call_count["count"]}', 'content': content}
+        return {"id": f"task{call_count['count']}", "content": content}
 
     mock_request_json.side_effect = mock_response_with_failure
 
@@ -925,30 +1003,30 @@ def test_insert_tasks_with_failure(mock_request_json, db_tasks):
 
     assert len(results) == 3
     # Task 1 and 3 should succeed
-    assert 'id' in results[0]
-    assert 'id' in results[2]
+    assert "id" in results[0]
+    assert "id" in results[2]
     # Task 2 should fail and return empty dict (after retries)
     assert results[1] == {}
 
 
-@patch('todoist.database.db_tasks.TodoistAPIClient.request_json')
+@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_tasks_preserves_order(mock_request_json, db_tasks):
     """Test that insert_tasks preserves the order of results despite parallel execution."""
     import time
 
     def mock_response_with_delay(spec, **_kwargs):
-        content = spec.json_body.get('content', '')
+        content = spec.json_body.get("content", "")
         # Add variable delays to simulate real network conditions
-        if 'Task 1' in content:
+        if "Task 1" in content:
             time.sleep(0.03)
-            return {'id': 'task1', 'content': content}
-        elif 'Task 2' in content:
+            return {"id": "task1", "content": content}
+        elif "Task 2" in content:
             time.sleep(0.01)
-            return {'id': 'task2', 'content': content}
-        elif 'Task 3' in content:
+            return {"id": "task2", "content": content}
+        elif "Task 3" in content:
             time.sleep(0.02)
-            return {'id': 'task3', 'content': content}
-        return {'id': 'unknown', 'content': content}
+            return {"id": "task3", "content": content}
+        return {"id": "unknown", "content": content}
 
     mock_request_json.side_effect = mock_response_with_delay
 
@@ -962,6 +1040,6 @@ def test_insert_tasks_preserves_order(mock_request_json, db_tasks):
 
     # Despite Task 2 completing first, results should be in original order
     assert len(results) == 3
-    assert results[0]['id'] == 'task1'
-    assert results[1]['id'] == 'task2'
-    assert results[2]['id'] == 'task3'
+    assert results[0]["id"] == "task1"
+    assert results[1]["id"] == "task2"
+    assert results[2]["id"] == "task3"

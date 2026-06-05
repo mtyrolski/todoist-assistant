@@ -1,6 +1,5 @@
 """Reusable HTTP client helpers for the Todoist API."""
 
-
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -11,7 +10,7 @@ from typing import Any, Mapping, MutableMapping, Optional
 import requests
 from loguru import logger
 
-from todoist.utils import (
+from todoist.core.utils import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     RATE_LIMIT_WINDOW_SECONDS,
     RETRY_BACKOFF_MEAN,
@@ -173,9 +172,9 @@ class TodoistAPIClient:
                 response.raise_for_status()
             except requests.HTTPError as exc:
                 logger.error(
-                    "Todoist endpoint returned error\n" \
-                    f"endpoint={spec.endpoint.name}, " \
-                    f"status={response.status_code}, " \
+                    "Todoist endpoint returned error\n"
+                    f"endpoint={spec.endpoint.name}, "
+                    f"status={response.status_code}, "
                     f"body={response.text}"
                 )
                 raise RuntimeError(
@@ -236,9 +235,7 @@ class TodoistAPIClient:
         return merged
 
     @staticmethod
-    def _build_params(
-        params: Optional[Mapping[str, Any]]
-    ) -> MutableMapping[str, Any]:
+    def _build_params(params: Optional[Mapping[str, Any]]) -> MutableMapping[str, Any]:
         if not params:
             return {}
         return {k: v for k, v in params.items() if v is not None}

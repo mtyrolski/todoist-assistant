@@ -5,7 +5,7 @@ import pytest
 
 import todoist.database.dataframe as dataframe_module
 from todoist.database.base import Database
-from todoist.types import Event, EventEntry, Project, ProjectEntry
+from todoist.core.types import Event, EventEntry, Project, ProjectEntry
 
 
 def _project(
@@ -39,9 +39,13 @@ def _project(
     )
 
 
-def test_load_activity_data_prefers_active_root_id_for_adjusted_target(monkeypatch) -> None:
+def test_load_activity_data_prefers_active_root_id_for_adjusted_target(
+    monkeypatch,
+) -> None:
     active_health = _project(project_id="active-health", name="Health", archived=False)
-    archived_health = _project(project_id="archived-health", name="Health", archived=True)
+    archived_health = _project(
+        project_id="archived-health", name="Health", archived=True
+    )
     archived_old = _project(project_id="old-health", name="OldHealth", archived=True)
 
     event_entry = EventEntry(
@@ -597,14 +601,12 @@ def test_get_adjusting_mapping_uses_env_personal_dir_and_safe_literals(
     }
 
 
-def test_get_adjusting_mapping_rejects_non_literal_code(
-    monkeypatch, tmp_path
-) -> None:
+def test_get_adjusting_mapping_rejects_non_literal_code(monkeypatch, tmp_path) -> None:
     personal_dir = tmp_path / "personal"
     personal_dir.mkdir()
     evil_file = personal_dir / "evil.py"
     evil_file.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'link_adjustements = {"Safe": "Target"}',
                 'raise RuntimeError("boom")',

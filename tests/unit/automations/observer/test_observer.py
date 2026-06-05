@@ -8,7 +8,7 @@ from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.automations.observer import AutomationObserver
 from todoist.database.base import Database
-from todoist.types import Event, EventEntry
+from todoist.core.types import Event, EventEntry
 
 
 def _event(event_id: str, event_type: str = "added") -> Event:
@@ -77,7 +77,9 @@ def test_observer_runs_automations_on_new_events(tmp_path: Path, monkeypatch):
     activity = _StubActivity(events, {"total": 1, "added": 1})
     automation = _StubAutomation("Auto")
 
-    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
+    observer = AutomationObserver(
+        db=cast(Database, db), automations=[automation], activity=activity
+    )
     result = observer.run_once()
 
     assert db.reset_calls == 1
@@ -85,7 +87,8 @@ def test_observer_runs_automations_on_new_events(tmp_path: Path, monkeypatch):
     assert result.new_events == 1
     assert result.automations_ran == 1
     # Cache should contain the event now
-    from todoist.utils import Cache
+    from todoist.core.utils import Cache
+
     cached = Cache().activity.load()
     assert len(cached) == 1
 
@@ -103,7 +106,9 @@ def test_observer_no_new_events_noop(tmp_path: Path, monkeypatch):
     activity = _StubActivity([], {"total": 0})
     automation = _StubAutomation("Auto")
 
-    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
+    observer = AutomationObserver(
+        db=cast(Database, db), automations=[automation], activity=activity
+    )
     result = observer.run_once()
 
     assert db.reset_calls == 0
@@ -125,7 +130,9 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
     activity = _StubActivity(events, {"total": 1, "added": 1})
     automation = _StubAutomation("Auto")
 
-    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
+    observer = AutomationObserver(
+        db=cast(Database, db), automations=[automation], activity=activity
+    )
     result = observer.run_once()
 
     # Should still process despite corrupted cache
@@ -135,13 +142,17 @@ def test_observer_recovers_from_corrupted_cache(tmp_path: Path, monkeypatch):
     assert result.automations_ran == 1
 
 
-def test_observer_runs_polling_automation_without_new_events(tmp_path: Path, monkeypatch):
+def test_observer_runs_polling_automation_without_new_events(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     db = _StubDb()
     activity = _StubActivity([], {"total": 100})
     automation = _StubAutomation("Poller", poll_without_activity=True)
 
-    observer = AutomationObserver(db=cast(Database, db), automations=[automation], activity=activity)
+    observer = AutomationObserver(
+        db=cast(Database, db), automations=[automation], activity=activity
+    )
     result = observer.run_once()
 
     assert db.reset_calls == 1

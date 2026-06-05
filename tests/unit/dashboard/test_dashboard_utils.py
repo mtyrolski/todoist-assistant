@@ -3,7 +3,10 @@
 import pandas as pd
 import pytest
 
-from todoist.automations.multiplicate import extract_multiplication_factor, is_multiplication_label
+from todoist.automations.multiplicate import (
+    extract_multiplication_factor,
+    is_multiplication_label,
+)
 from todoist.dashboard.utils import extract_metrics, get_badges
 
 
@@ -34,8 +37,12 @@ def activity_df_two_weeks() -> pd.DataFrame:
 
 
 def test_extract_metrics_reports_counts_and_deltas(activity_df_two_weeks: pd.DataFrame):
-    metrics, current_period, previous_period = extract_metrics(activity_df_two_weeks, "W")
-    metrics_by_name = {name: (value, delta, inverse) for name, value, delta, inverse in metrics}
+    metrics, current_period, previous_period = extract_metrics(
+        activity_df_two_weeks, "W"
+    )
+    metrics_by_name = {
+        name: (value, delta, inverse) for name, value, delta, inverse in metrics
+    }
 
     # The boundary day (2024-03-07) is included in both windows by design.
     assert metrics_by_name == {
@@ -50,7 +57,9 @@ def test_extract_metrics_reports_counts_and_deltas(activity_df_two_weeks: pd.Dat
     assert previous_period.endswith("2024-03-07")
 
 
-def test_extract_metrics_rejects_unknown_granularity(activity_df_two_weeks: pd.DataFrame):
+def test_extract_metrics_rejects_unknown_granularity(
+    activity_df_two_weeks: pd.DataFrame,
+):
     with pytest.raises(ValueError):
         extract_metrics(activity_df_two_weeks, "quarterly")
 
@@ -71,11 +80,15 @@ def test_extract_metrics_uses_inf_delta_when_previous_period_has_zero_events():
     assert metrics_by_name["Completed Tasks"] == "inf%"
 
 
-def test_get_badges_aggregates_priorities(project_factory, project_entry_factory, task_factory):
+def test_get_badges_aggregates_priorities(
+    project_factory, project_entry_factory, task_factory
+):
     projects = [
         project_factory(
             project_id="proj1",
-            project_entry=project_entry_factory(project_id="project123", name="Project 1"),
+            project_entry=project_entry_factory(
+                project_id="project123", name="Project 1"
+            ),
             tasks=[
                 task_factory("t1", priority=4),
                 task_factory("t2", priority=3),
@@ -83,7 +96,9 @@ def test_get_badges_aggregates_priorities(project_factory, project_entry_factory
         ),
         project_factory(
             project_id="proj2",
-            project_entry=project_entry_factory(project_id="project456", name="Project 2", color="red"),
+            project_entry=project_entry_factory(
+                project_id="project456", name="Project 2", color="red"
+            ),
             tasks=[
                 task_factory("t3", priority=4),
                 task_factory("t4", priority=2),
@@ -118,5 +133,9 @@ def test_multiplication_labels_are_uppercase_only():
 
 def test_multiplication_label_pipeline_filters_and_extracts():
     labels = ["X2", "ship", "X10", "X07"]
-    factors = [extract_multiplication_factor(label) for label in labels if is_multiplication_label(label)]
+    factors = [
+        extract_multiplication_factor(label)
+        for label in labels
+        if is_multiplication_label(label)
+    ]
     assert factors == [2, 10, 7]

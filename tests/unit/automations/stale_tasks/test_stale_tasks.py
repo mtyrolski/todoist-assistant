@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from tests.factories import make_task
-from todoist.stale_tasks import StaleTaskConfig, evaluate_task_staleness
+from todoist.features.stale_tasks import StaleTaskConfig, evaluate_task_staleness
 
 
 def test_evaluate_task_staleness_marks_old_task() -> None:

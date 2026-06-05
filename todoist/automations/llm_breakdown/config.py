@@ -38,7 +38,9 @@ BASE_SYSTEM_PROMPT = (
 )
 
 
-def merge_variants(variants: Mapping[str, Mapping[str, Any]] | None) -> dict[str, dict[str, Any]]:
+def merge_variants(
+    variants: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
     merged = {key: dict(value) for key, value in DEFAULT_VARIANTS.items()}
     if variants is None:
         return merged
@@ -47,7 +49,9 @@ def merge_variants(variants: Mapping[str, Mapping[str, Any]] | None) -> dict[str
     return merged
 
 
-def coerce_model_config(model_config: LocalChatConfig | Mapping[str, Any] | None) -> LocalChatConfig:
+def coerce_model_config(
+    model_config: LocalChatConfig | Mapping[str, Any] | None,
+) -> LocalChatConfig:
     if model_config is None:
         return LocalChatConfig()
     if isinstance(model_config, LocalChatConfig):
@@ -69,19 +73,29 @@ def resolve_variant(
     if label_lower == label_prefix_lower:
         variant_key = default_variant
     elif label_lower.startswith(f"{label_prefix_lower}-"):
-        suffix = label_lower[len(label_prefix_lower) + 1:].strip()
-        variant_key = suffix if suffix.startswith(f"{default_variant}-") else f"{default_variant}-{suffix}"
+        suffix = label_lower[len(label_prefix_lower) + 1 :].strip()
+        variant_key = (
+            suffix
+            if suffix.startswith(f"{default_variant}-")
+            else f"{default_variant}-{suffix}"
+        )
     if not variant_key:
         variant_key = default_variant
     variant_cfg = variants.get(variant_key)
     if variant_cfg is None:
-        logger.warning("Unknown AI breakdown variant '{}'; falling back to '{}'", variant_key, default_variant)
+        logger.warning(
+            "Unknown AI breakdown variant '{}'; falling back to '{}'",
+            variant_key,
+            default_variant,
+        )
         variant_key = default_variant
         variant_cfg = variants.get(variant_key, {})
     return variant_key, dict(variant_cfg)
 
 
-def build_system_prompt(*, max_depth: int, max_children: int, instruction: str | None) -> str:
+def build_system_prompt(
+    *, max_depth: int, max_children: int, instruction: str | None
+) -> str:
     prompt = BASE_SYSTEM_PROMPT.format(max_depth=max_depth, max_children=max_children)
     if instruction:
         prompt = f"{prompt} {instruction}"

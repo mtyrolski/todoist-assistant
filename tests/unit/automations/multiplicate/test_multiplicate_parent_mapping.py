@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from todoist.automations.multiplicate import Multiply
-from todoist.types import Task, TaskEntry
+from todoist.core.types import Task, TaskEntry
 
 
 def _task_entry(
@@ -68,7 +68,9 @@ class _FakeDb:
         parent_id = overrides.get("parent_id", _task.task_entry.parent_id)
         created_task = Task(
             id=new_id,
-            task_entry=_task_entry(task_id=new_id, content=content, labels=labels, parent_id=parent_id),
+            task_entry=_task_entry(
+                task_id=new_id, content=content, labels=labels, parent_id=parent_id
+            ),
         )
         self._tasks[new_id] = created_task
         return {"id": new_id}
@@ -92,10 +94,14 @@ class _TestMultiply(Multiply):
 
 
 def test_flat_child_and_parent_labels_are_removed_children_first():
-    parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
+    parent = Task(
+        id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"])
+    )
     child = Task(
         id="2",
-        task_entry=_task_entry(task_id="2", content="Child", labels=["X2"], parent_id="1"),
+        task_entry=_task_entry(
+            task_id="2", content="Child", labels=["X2"], parent_id="1"
+        ),
     )
 
     db = _FakeDb(tasks=[parent, child])
@@ -105,6 +111,8 @@ def test_flat_child_and_parent_labels_are_removed_children_first():
     assert db.inserts == []
     assert db.removed_ids == []
     assert db.updated == [("2", {"labels": []}), ("1", {"labels": []})]
+
+
 def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
     """Deep child (_X2) under parent (X2) with DFS children-first expansion.
 
@@ -114,7 +122,9 @@ def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
 
     Result: 2 initial subtasks + 2×2 cloned subtasks = 6 total leaf inserts in one tick.
     """
-    parent = Task(id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"]))
+    parent = Task(
+        id="1", task_entry=_task_entry(task_id="1", content="Parent", labels=["X2"])
+    )
     deep_child = Task(
         id="2",
         task_entry=_task_entry(
@@ -129,7 +139,9 @@ def test_deep_child_under_expanded_parent_is_cloned_then_expanded_next_tick():
     m = _TestMultiply()
     m.run_once(db)  # Single tick handles both expansions with DFS order
 
-    leaf_inserts = [i for i in db.inserts if i.get("content", "").startswith("Do thing - ")]
+    leaf_inserts = [
+        i for i in db.inserts if i.get("content", "").startswith("Do thing - ")
+    ]
     assert len(leaf_inserts) == 2
     assert all(item.get("labels") == ["work", "effort-point"] for item in leaf_inserts)
 

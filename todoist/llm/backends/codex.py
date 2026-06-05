@@ -1,6 +1,5 @@
 """Codex CLI chat adapter."""
 
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
@@ -12,10 +11,10 @@ from typing import TypeVar
 from loguru import logger
 from pydantic import BaseModel
 
-from .constants import DEFAULT_CODEX_MODEL
-from .structured import _schema_instructions, _try_parse_structured_output
-from .types import MessageRole
-from .usage import record_llm_usage
+from todoist.llm.constants import DEFAULT_CODEX_MODEL
+from todoist.llm.structured import _schema_instructions, _try_parse_structured_output
+from todoist.llm.types import MessageRole
+from todoist.llm.usage import record_llm_usage
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -95,7 +94,11 @@ class CodexCliChatModel:
                 str(output_path),
                 prompt,
             ]
-            logger.debug("Running Codex CLI request (operation={}, prompt_chars={})", operation, len(prompt))
+            logger.debug(
+                "Running Codex CLI request (operation={}, prompt_chars={})",
+                operation,
+                len(prompt),
+            )
             result = subprocess.run(
                 cmd,
                 cwd=self.config.cwd,
@@ -106,9 +109,15 @@ class CodexCliChatModel:
                 check=False,
             )
             if result.returncode != 0:
-                detail = (result.stderr or result.stdout).strip() or f"exit code {result.returncode}"
+                detail = (
+                    result.stderr or result.stdout
+                ).strip() or f"exit code {result.returncode}"
                 raise ValueError(f"Codex CLI request failed: {detail}")
-            text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else result.stdout.strip()
+            text = (
+                output_path.read_text(encoding="utf-8").strip()
+                if output_path.exists()
+                else result.stdout.strip()
+            )
             if not text:
                 raise ValueError("Codex CLI did not produce output.")
             record_llm_usage(
@@ -126,14 +135,23 @@ def codex_config_from_values(
     *,
     cwd: Path,
 ) -> CodexChatConfig:
-    from todoist.env import EnvVar
+    from todoist.core.env import EnvVar
 
     return CodexChatConfig(
-        model=_text(os.getenv(str(EnvVar.AGENT_CODEX_MODEL)) or values.get(str(EnvVar.AGENT_CODEX_MODEL)))
+        model=_text(
+            os.getenv(str(EnvVar.AGENT_CODEX_MODEL))
+            or values.get(str(EnvVar.AGENT_CODEX_MODEL))
+        )
         or DEFAULT_CODEX_MODEL,
-        sandbox=_text(os.getenv(str(EnvVar.AGENT_CODEX_SANDBOX)) or values.get(str(EnvVar.AGENT_CODEX_SANDBOX)))
+        sandbox=_text(
+            os.getenv(str(EnvVar.AGENT_CODEX_SANDBOX))
+            or values.get(str(EnvVar.AGENT_CODEX_SANDBOX))
+        )
         or "read-only",
-        approval=_text(os.getenv(str(EnvVar.AGENT_CODEX_APPROVAL)) or values.get(str(EnvVar.AGENT_CODEX_APPROVAL)))
+        approval=_text(
+            os.getenv(str(EnvVar.AGENT_CODEX_APPROVAL))
+            or values.get(str(EnvVar.AGENT_CODEX_APPROVAL))
+        )
         or "never",
         reasoning_effort=_text(
             os.getenv(str(EnvVar.AGENT_CODEX_REASONING_EFFORT))
@@ -156,7 +174,11 @@ def _render_messages(messages: Sequence[dict[str, str]]) -> str:
         content = str(message.get("content") or "").strip()
         if not content:
             continue
-        if role not in {MessageRole.SYSTEM.value, MessageRole.USER.value, MessageRole.ASSISTANT.value}:
+        if role not in {
+            MessageRole.SYSTEM.value,
+            MessageRole.USER.value,
+            MessageRole.ASSISTANT.value,
+        }:
             role = MessageRole.USER.value
         parts.append(f"{role.upper()}:\n{content}")
     if not parts:

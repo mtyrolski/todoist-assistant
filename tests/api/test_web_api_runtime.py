@@ -40,11 +40,16 @@ def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> N
     assert "rogue" not in ids
     assert all(item["inspectOnly"] is True for item in payload["sources"])
 
-def test_runtime_log_read_accepts_allowlisted_source_only(monkeypatch, tmp_path) -> None:
+
+def test_runtime_log_read_accepts_allowlisted_source_only(
+    monkeypatch, tmp_path
+) -> None:
     cache_dir = tmp_path / "cache"
     dashboard_dir = cache_dir / "dashboard"
     dashboard_dir.mkdir(parents=True)
-    (dashboard_dir / "observer.log").write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
+    (dashboard_dir / "observer.log").write_text(
+        "line-1\nline-2\nline-3\n", encoding="utf-8"
+    )
 
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
@@ -61,6 +66,7 @@ def test_runtime_log_read_accepts_allowlisted_source_only(monkeypatch, tmp_path)
     missing = client.get("/api/runtime/logs/read?source=rogue")
     assert missing.status_code == 404
 
+
 def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -69,7 +75,9 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> Non
     dashboard_dir.mkdir(parents=True)
     (dashboard_dir / "api.log").write_text("api ready\n", encoding="utf-8")
     (tmp_path / "automation.log").write_text("automation ready\n", encoding="utf-8")
-    (tmp_path / "dashboard" / "unexpected.log").write_text("should not be listed\n", encoding="utf-8")
+    (tmp_path / "dashboard" / "unexpected.log").write_text(
+        "should not be listed\n", encoding="utf-8"
+    )
 
     client = TestClient(web_api.app)
     res = client.get("/api/admin/logs")
@@ -90,6 +98,7 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> Non
     assert payload["logs"][-1]["path"] == "automation.log"
     assert all(item["path"] != "dashboard/unexpected.log" for item in payload["logs"])
 
+
 def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -99,7 +108,10 @@ def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path) -> None
     (dashboard_dir / "observer.log").write_text("line-a\nline-b\n", encoding="utf-8")
 
     client = TestClient(web_api.app)
-    res = client.get("/api/admin/logs/read", params={"source": "observer", "tail_lines": 20, "page": 1})
+    res = client.get(
+        "/api/admin/logs/read",
+        params={"source": "observer", "tail_lines": 20, "page": 1},
+    )
     assert res.status_code == 200
     payload = res.json()
 
@@ -112,6 +124,7 @@ def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path) -> None
     missing = client.get("/api/admin/logs/read", params={"source": "frontend"})
     assert missing.status_code == 404
     assert "not available yet" in missing.json()["detail"]
+
 
 def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
@@ -135,6 +148,7 @@ def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None
     assert by_id["frontend"]["available"] is False
     assert by_id["automation"]["available"] is True
 
+
 def test_runtime_read_log_reads_curated_source(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -142,16 +156,22 @@ def test_runtime_read_log_reads_curated_source(monkeypatch, tmp_path: Path) -> N
 
     dashboard_dir = tmp_path / "dashboard"
     dashboard_dir.mkdir(parents=True)
-    (dashboard_dir / "triton.log").write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+    (dashboard_dir / "triton.log").write_text(
+        "line 1\nline 2\nline 3\n", encoding="utf-8"
+    )
 
     client = TestClient(web_api.app)
-    res = client.get("/api/runtime/logs/read", params={"source": "triton", "tail_lines": 2, "page": 1})
+    res = client.get(
+        "/api/runtime/logs/read",
+        params={"source": "triton", "tail_lines": 2, "page": 1},
+    )
     assert res.status_code == 200
     payload = res.json()
     assert payload["id"] == "triton"
     assert payload["inspectOnly"] is True
     assert payload["content"] == "line 2\nline 3\n"
     assert payload["totalLines"] == 3
+
 
 def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     monkeypatch, tmp_path
@@ -172,6 +192,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     assert payload["override"] is None
     assert payload["envPath"] == ".env"
     assert payload["overrideValid"] is True
+
 
 def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
@@ -214,6 +235,7 @@ def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
     env_text_after_clear = env_path.read_text(encoding="utf-8")
     assert "TODOIST_TIMEZONE" not in env_text_after_clear
 
+
 def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -229,6 +251,7 @@ def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
     payload = response.json()
     assert "Invalid timezone" in payload["detail"]
 
+
 def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
@@ -242,6 +265,7 @@ def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path) -> No
     assert payload["configured"] is True
     assert payload["masked"] == "••••2345"
     assert payload["envPath"] == ".env"
+
 
 def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path) -> None:
     env_path = tmp_path / ".env"
@@ -276,12 +300,14 @@ def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path) -> N
     assert status_after_clear.json()["masked"] == ""
     assert "API_KEY" not in env_path.read_text(encoding="utf-8")
 
+
 def test_openapi_includes_app_version() -> None:
     client = TestClient(web_api.app)
     res = client.get("/openapi.json")
     assert res.status_code == 200
     payload = res.json()
     assert payload["info"]["version"] == web_api.app.version == todoist.__version__
+
 
 def test_dashboard_progress_inactive_state() -> None:
     """Test progress endpoint returns correct structure when inactive."""
@@ -318,6 +344,7 @@ def test_dashboard_progress_inactive_state() -> None:
     assert payload["startedAt"] is None
     assert payload["error"] is None
 
+
 def test_dashboard_progress_active_state() -> None:
     """Test progress endpoint returns correct structure when active."""
     # Set progress state to active
@@ -345,6 +372,7 @@ def test_dashboard_progress_active_state() -> None:
     assert payload["detail"] == "Fetching projects"
     assert payload["error"] is None
 
+
 def test_dashboard_progress_with_error() -> None:
     """Test progress endpoint returns error state correctly."""
     # Set progress state with error
@@ -367,6 +395,7 @@ def test_dashboard_progress_with_error() -> None:
     assert payload["error"] == "Failed to connect to API"
     assert payload["updatedAt"] == "2025-01-01T10:05:00"
 
+
 def test_dashboard_progress_without_error() -> None:
     """Test progress endpoint handles state without error correctly."""
     # Set progress state without error
@@ -388,6 +417,7 @@ def test_dashboard_progress_without_error() -> None:
     assert payload["active"] is True
     assert payload["error"] is None
     assert payload["stage"] == "Processing"
+
 
 def test_dashboard_progress_ignores_adaptive_activity_page_counts() -> None:
     web_api._progress_state.active = False
@@ -418,6 +448,7 @@ def test_dashboard_progress_ignores_adaptive_activity_page_counts() -> None:
     assert payload["subCurrent"] == 1
     assert payload["subTotal"] == 3
 
+
 def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
     web_api._progress_state.active = False
     web_api._progress_state.stage = None
@@ -446,6 +477,7 @@ def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
     )
     assert payload["subCurrent"] == 1
     assert payload["subTotal"] == 3
+
 
 def test_dashboard_status_includes_triton_service(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)

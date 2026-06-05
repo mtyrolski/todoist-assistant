@@ -46,6 +46,7 @@ def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> N
     assert web_api._state.project_colors == {"A": "#123456"}
     assert web_api._state.active_projects == []
 
+
 def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     monkeypatch, tmp_path
 ) -> None:
@@ -138,6 +139,7 @@ def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
     loaded = web_api._load_state_from_disk_cache(demo_mode=True)
     assert loaded is False
 
+
 def test_load_state_from_disk_cache_restores_current_demo_snapshot(
     monkeypatch, tmp_path
 ) -> None:
@@ -171,6 +173,7 @@ def test_load_state_from_disk_cache_restores_current_demo_snapshot(
     assert web_api._state.active_projects == []
     assert web_api._state.demo_mode is True
 
+
 def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) -> None:
     _stub_all_figures(monkeypatch)
     _clear_dashboard_state()
@@ -183,15 +186,20 @@ def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) 
 
     def _unexpected_refresh(*, demo_mode: bool) -> None:
         _ = demo_mode
-        raise AssertionError("_refresh_state_sync should not run when disk cache is ready")
+        raise AssertionError(
+            "_refresh_state_sync should not run when disk cache is ready"
+        )
 
-    monkeypatch.setattr(web_api, "_load_state_from_disk_cache", _fake_load_state_from_disk_cache)
+    monkeypatch.setattr(
+        web_api, "_load_state_from_disk_cache", _fake_load_state_from_disk_cache
+    )
     monkeypatch.setattr(web_api, "_refresh_state_sync", _unexpected_refresh)
     monkeypatch.setattr(web_api, "_env_demo_mode", lambda: False)
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?weeks=12&granularity=W")
     assert res.status_code == 200
+
 
 def test_dashboard_home_validates_weeks(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
@@ -222,6 +230,7 @@ def test_dashboard_home_validates_weeks(monkeypatch) -> None:
     res = client.get("/api/dashboard/home?weeks=10000")
     assert res.status_code == 400
 
+
 def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
         _ = refresh
@@ -250,6 +259,7 @@ def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?beg=2025-01-01")
     assert res.status_code == 400
+
 
 def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
@@ -335,6 +345,7 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     assert abs(by_name["Parent A"]["percentOfCompleted"] - 66.67) < 0.02
     assert abs(by_name["Parent B"]["percentOfCompleted"] - 33.33) < 0.02
 
+
 def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
         _ = refresh
@@ -367,6 +378,7 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     assert payload["range"]["weeks"] == 12
     assert payload["leaderboards"]["lastCompletedWeek"]["label"]
     assert payload.get("noData") is True
+
 
 def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
@@ -444,6 +456,7 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
     assert habit_tracker["items"][0]["name"] == "Morning walk"
     assert habit_tracker["figure"]["data"]
 
+
 def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
         _ = refresh
@@ -487,6 +500,7 @@ def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
     payload = res.json()
     assert payload["metrics"]["items"]
 
+
 def test_dashboard_status_returns_services() -> None:
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/status")
@@ -496,13 +510,18 @@ def test_dashboard_status_returns_services() -> None:
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
     assert payload["configurableItems"][0]["icon"] == "wrench"
 
+
 def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
     async def _noop_ensure_state(*, refresh: bool) -> None:
         _ = refresh
         return None
 
     monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", web_api._REPO_ROOT / "configs" / "dashboard.yaml")
+    monkeypatch.setattr(
+        web_api,
+        "_DASHBOARD_CONFIG_PATH",
+        web_api._REPO_ROOT / "configs" / "dashboard.yaml",
+    )
     _stub_all_figures(monkeypatch)
 
     df = _single_event_df()

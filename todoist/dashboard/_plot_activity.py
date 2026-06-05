@@ -165,7 +165,9 @@ def plot_heatmap_of_events_by_day_and_hour(
 
     nonzero_counts = heatmap_data.stack()
     nonzero_counts = nonzero_counts[nonzero_counts > 0]
-    zmax = 1.0 if nonzero_counts.empty else max(1.0, float(nonzero_counts.quantile(0.95)))
+    zmax = (
+        1.0 if nonzero_counts.empty else max(1.0, float(nonzero_counts.quantile(0.95)))
+    )
 
     total_events = heatmap_data.sum().sum()
     hover_text = []

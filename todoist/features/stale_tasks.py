@@ -3,8 +3,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Sequence
 
-from todoist.stats import extract_task_due_date, try_parse_date
-from todoist.types import Project, Task
+from todoist.features.stats import extract_task_due_date, try_parse_date
+from todoist.core.types import Project, Task
+
 
 class StaleState(StrEnum):
     SKIP = "skip"
@@ -141,7 +142,9 @@ def evaluate_task_staleness(
     elif stale_days >= config.old_after_days:
         state = StaleState.OLD
 
-    desired_labels = _desired_labels_for_state(current_labels, state=state, config=config)
+    desired_labels = _desired_labels_for_state(
+        current_labels, state=state, config=config
+    )
     should_update = desired_labels != current_labels
     return StaleTaskDecision(
         state=state,
@@ -155,8 +158,4 @@ def evaluate_task_staleness(
 
 
 def flatten_project_tasks(projects: Sequence[Project]) -> list[tuple[Project, Task]]:
-    return [
-        (project, task)
-        for project in projects
-        for task in project.tasks
-    ]
+    return [(project, task) for project in projects for task in project.tasks]

@@ -2,7 +2,6 @@
 
 """Pretty-print local app and service status for the dashboard stack."""
 
-
 import json
 import os
 import re
@@ -96,7 +95,9 @@ def _triton_model_repository_path() -> Path:
     return _TRITON_MODEL_REPOSITORY
 
 
-def _extract_model_id_from_triton_entrypoint(model_dir: Path, versions: list[str]) -> str | None:
+def _extract_model_id_from_triton_entrypoint(
+    model_dir: Path, versions: list[str]
+) -> str | None:
     for version in versions:
         model_path = model_dir / version / "model.py"
         if not model_path.exists():
@@ -130,15 +131,22 @@ def discover_triton_models() -> list[dict[str, Any]]:
         except OSError:
             continue
 
-        versions = sorted(child.name for child in model_dir.iterdir() if child.is_dir() and child.name.isdigit())
+        versions = sorted(
+            child.name
+            for child in model_dir.iterdir()
+            if child.is_dir() and child.name.isdigit()
+        )
         discovered.append(
             {
-                "name": _extract_triton_config_field(config_text, "name") or model_dir.name,
+                "name": _extract_triton_config_field(config_text, "name")
+                or model_dir.name,
                 "backend": _extract_triton_config_field(config_text, "backend"),
                 "platform": _extract_triton_config_field(config_text, "platform"),
                 "directory": model_dir.name,
                 "versions": versions,
-                "model_id": _extract_model_id_from_triton_entrypoint(model_dir, versions),
+                "model_id": _extract_model_id_from_triton_entrypoint(
+                    model_dir, versions
+                ),
             }
         )
     return discovered
@@ -199,7 +207,9 @@ def _fetch_json(url: str) -> EndpointResult:
             error=detail or f"HTTP {exc.code}",
         )
     except URLError as exc:
-        return EndpointResult(ok=False, status_code=None, payload=None, error=str(exc.reason))
+        return EndpointResult(
+            ok=False, status_code=None, payload=None, error=str(exc.reason)
+        )
 
 
 def _fetch_http_code(url: str) -> tuple[bool, int | None, str | None]:
@@ -235,7 +245,9 @@ def _triton_required(llm_payload: dict[str, Any] | None) -> bool:
     return selected in {"triton", "triton_local"} or "triton" in selected
 
 
-def _print_services(payload: dict[str, Any], llm_payload: dict[str, Any] | None = None) -> None:
+def _print_services(
+    payload: dict[str, Any], llm_payload: dict[str, Any] | None = None
+) -> None:
     services = payload.get("services")
     if not isinstance(services, list) or not services:
         _print_line("Dashboard", "warn", "no service entries returned")
@@ -275,7 +287,12 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
 
     backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
     backend_selected = str(backend.get("selected") or backend_label).strip().lower()
-    backend_status = "ok" if payload.get("enabled") or backend_selected in {"codex", "triton_local", "triton"} else "warn"
+    backend_status = (
+        "ok"
+        if payload.get("enabled")
+        or backend_selected in {"codex", "triton_local", "triton"}
+        else "warn"
+    )
     _print_line("Backend", backend_status, backend_label)
 
     model_active = str(model.get("active") or model.get("selected") or "unknown")
@@ -311,7 +328,9 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
     triton = triton_payload if isinstance(triton_payload, dict) else {}
     triton_base_url = str(triton.get("baseUrl") or "").strip()
     configured_model_id = str(triton.get("modelId") or "").strip()
-    served_models = discover_served_triton_models(triton_base_url) if triton_base_url else []
+    served_models = (
+        discover_served_triton_models(triton_base_url) if triton_base_url else []
+    )
     repo_path = _triton_model_repository_path()
     models = discover_triton_models()
 
@@ -335,7 +354,9 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
             detail = f"version={version} | state={state}"
             if reason:
                 detail = f"{detail} | {reason}"
-            _print_line(str(model.get("name") or "unknown"), status, detail, indent="  ")
+            _print_line(
+                str(model.get("name") or "unknown"), status, detail, indent="  "
+            )
 
     if not models and not served_models:
         _print_line("Repository", "warn", f"no model configs found under {repo_path}")
@@ -343,10 +364,17 @@ def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
 
     _print_line("Repository", "ok" if models else "warn", str(repo_path))
     for model in models:
-        version_text = _format_list([str(version) for version in model.get("versions", [])])
+        version_text = _format_list(
+            [str(version) for version in model.get("versions", [])]
+        )
         backend = model.get("backend") or model.get("platform") or "unknown backend"
         detail = f"{backend} | dir={model.get('directory')} | versions={version_text}"
-        _print_line(str(model.get("name") or model.get("directory")), "neutral", detail, indent="  ")
+        _print_line(
+            str(model.get("name") or model.get("directory")),
+            "neutral",
+            detail,
+            indent="  ",
+        )
 
 
 def main() -> int:
@@ -362,7 +390,9 @@ def main() -> int:
 
     frontend_ok, frontend_status, frontend_error = _fetch_http_code(FRONTEND_URL)
     if frontend_ok:
-        _print_line("Frontend", "ok", f"reachable at {FRONTEND_URL} (HTTP {frontend_status})")
+        _print_line(
+            "Frontend", "ok", f"reachable at {FRONTEND_URL} (HTTP {frontend_status})"
+        )
     else:
         _print_line("Frontend", "down", f"offline at {FRONTEND_URL} ({frontend_error})")
 
@@ -384,7 +414,9 @@ def main() -> int:
         _print_line("Dashboard", "down", f"status endpoint unavailable ({error})")
         return 0
 
-    _print_services(dashboard_status.payload, llm_snapshot.payload if llm_snapshot.ok else None)
+    _print_services(
+        dashboard_status.payload, llm_snapshot.payload if llm_snapshot.ok else None
+    )
     print()
     _print_triton_models(llm_snapshot.payload if llm_snapshot.ok else None)
     return 0

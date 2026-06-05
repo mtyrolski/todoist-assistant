@@ -5,7 +5,9 @@ from unittest.mock import Mock
 from todoist import launcher
 
 
-def test_maybe_start_dashboard_observer_skips_without_api_key(monkeypatch, capsys) -> None:
+def test_maybe_start_dashboard_observer_skips_without_api_key(
+    monkeypatch, capsys
+) -> None:
     monkeypatch.delenv("API_KEY", raising=False)
     start_observer = Mock()
     monkeypatch.setattr(launcher, "_start_dashboard_observer", start_observer)
@@ -15,7 +17,10 @@ def test_maybe_start_dashboard_observer_skips_without_api_key(monkeypatch, capsy
     assert result is None
     start_observer.assert_not_called()
     captured = capsys.readouterr()
-    assert "Dashboard observer disabled until a Todoist API token is configured." in captured.out
+    assert (
+        "Dashboard observer disabled until a Todoist API token is configured."
+        in captured.out
+    )
 
 
 def test_maybe_start_dashboard_observer_skips_placeholder_api_key(monkeypatch) -> None:

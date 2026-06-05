@@ -5,7 +5,7 @@ from typing import Any
 from loguru import logger
 from pandas import DataFrame
 
-from todoist.constants import EventExtraField, EventType
+from todoist.core.constants import EventExtraField, EventType
 
 
 def _normalize_access(value: Any) -> dict[str, Any] | None:
@@ -65,11 +65,13 @@ class _ProjectEntry_V1:
     sync_id: str | None = None
     collapsed: bool | None = None
     inbox_project: bool = False
-    description: str = ''
+    description: str = ""
     default_order: int | None = None
     public_access: bool = False
     access: dict[str, Any] | None = None
-    new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
+    new_api_kwargs: dict[str, Any] | None = (
+        None  # For new (in todoist API) incoming fields
+    )
 
     def __post_init__(self):
         self.access = _normalize_access(self.access)
@@ -99,7 +101,9 @@ class _Event_V1:
     v2_object_id: str | None = None
     v2_parent_item_id: str | None = None
     v2_parent_project_id: str | None = None
-    new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
+    new_api_kwargs: dict[str, Any] | None = (
+        None  # For new (in todoist API) incoming fields
+    )
 
     def __repr__(self):
         return f"Event {self.object_type} {self.event_type}"
@@ -144,7 +148,9 @@ class _Task_V1:
     v2_project_id: str | None = None
     v2_section_id: str | None = None
     day_order: str | int | None = None
-    new_api_kwargs: dict[str, Any] | None = None    # For new (in todoist API) incoming fields
+    new_api_kwargs: dict[str, Any] | None = (
+        None  # For new (in todoist API) incoming fields
+    )
 
     def __post_init__(self):
         self.day_order = _normalize_day_order(self.day_order)
@@ -158,8 +164,12 @@ class _Task_V1:
     @property
     def kwargs(self) -> dict[str, Any]:
         basic_kwargs = self.__dict__.copy()
-        basic_kwargs['duration_unit'] = None if self.duration is None else self.duration.get('unit')
-        basic_kwargs['duration'] = None if self.duration is None else self.duration.get('amount')
+        basic_kwargs["duration_unit"] = (
+            None if self.duration is None else self.duration.get("unit")
+        )
+        basic_kwargs["duration"] = (
+            None if self.duration is None else self.duration.get("amount")
+        )
         return basic_kwargs
 
     @property
@@ -167,22 +177,28 @@ class _Task_V1:
         if self.duration is None:
             return None
 
-        if any([not isinstance(self.duration, dict), 'duration' not in self.duration, 'unit' not in self.duration]):
+        if any(
+            [
+                not isinstance(self.duration, dict),
+                "duration" not in self.duration,
+                "unit" not in self.duration,
+            ]
+        ):
             return None
 
-        return {'duration': self.duration['duration'], 'unit': self.duration['unit']}
+        return {"duration": self.duration["duration"], "unit": self.duration["unit"]}
 
     @property
     def due_datetime(self) -> dt.datetime | None:
         if self.due is None:
             return None
-        date_str = self.due['date'] if isinstance(self.due, dict) else self.due
+        date_str = self.due["date"] if isinstance(self.due, dict) else self.due
 
         try:
-            return dt.datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S')
+            return dt.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
         except ValueError:
             try:
-                return dt.datetime.strptime(date_str, '%Y-%m-%d')
+                return dt.datetime.strptime(date_str, "%Y-%m-%d")
             except ValueError:
                 return None
 
@@ -192,13 +208,15 @@ TaskEntry = _Task_V1
 EventEntry = _Event_V1
 
 
-def is_recurring_task(task: 'Task'):
-    return task.task_entry.due is not None and \
-        isinstance(task.task_entry.due, dict) and \
-        task.task_entry.due.get('is_recurring') is True
+def is_recurring_task(task: "Task"):
+    return (
+        task.task_entry.due is not None
+        and isinstance(task.task_entry.due, dict)
+        and task.task_entry.due.get("is_recurring") is True
+    )
 
 
-def is_non_recurring_task(task: 'Task'):
+def is_non_recurring_task(task: "Task"):
     return not is_recurring_task(task)
 
 
@@ -218,6 +236,7 @@ class Task:
     def is_non_recurring(self) -> bool:
         return is_non_recurring_task(self)
 
+
 @dataclass
 class Project:
     id: str
@@ -229,7 +248,7 @@ class Project:
         return self.id == other.id
 
 
-def is_event_rescheduled(event: 'Event') -> bool:
+def is_event_rescheduled(event: "Event") -> bool:
     """
     Check if the event is a reschedule event.
 
@@ -243,11 +262,13 @@ def is_event_rescheduled(event: 'Event') -> bool:
     'extra_data_id': xxxxxx,
 
     """
-    return all([
-        event.event_entry.event_type == EventType.UPDATED.value,
-        EventExtraField.DUE_DATE in event.event_entry.extra_data,
-        EventExtraField.LAST_DUE_DATE in event.event_entry.extra_data,
-    ])
+    return all(
+        [
+            event.event_entry.event_type == EventType.UPDATED.value,
+            EventExtraField.DUE_DATE in event.event_entry.extra_data,
+            EventExtraField.LAST_DUE_DATE in event.event_entry.extra_data,
+        ]
+    )
 
 
 _EVENT_SUBTYPES_MAPPING = {
@@ -262,7 +283,7 @@ class Event:
     date: dt.datetime
 
     def __repr__(self):
-        return f'Event {self.id} ({self.date}) {self.name}'
+        return f"Event {self.id} ({self.date}) {self.name}"
 
     def __eq__(self, other):
         return self.id == other.id
@@ -288,9 +309,13 @@ class Event:
         For example, 'updated' is a basic type,
         but it is extended with 1 subtype 'rescheduled' (of 'updated').
         """
-        matched_types = [event_type.value for event_type, is_match in _EVENT_SUBTYPES_MAPPING.items() if is_match(self)]
+        matched_types = [
+            event_type.value
+            for event_type, is_match in _EVENT_SUBTYPES_MAPPING.items()
+            if is_match(self)
+        ]
         if len(matched_types) > 0:
-            assert len(matched_types) == 1, 'More than one event type matched'
+            assert len(matched_types) == 1, "More than one event type matched"
             return matched_types[0]
         return self.event_entry.event_type
 
@@ -322,54 +347,70 @@ def events_to_dataframe(
 
     # Creating dataframes
     mapping_data: dict[str, list] = {
-        'id': [],
-        'title': [],
-        'date': [],
-        'type': [],
-        'parent_project_id': [],
-        'parent_project_name': [],
-        'root_project_id': [],
-        'root_project_name': [],
-        'parent_item_id': [],
-        'task_id': [],
+        "id": [],
+        "title": [],
+        "date": [],
+        "type": [],
+        "parent_project_id": [],
+        "parent_project_name": [],
+        "root_project_id": [],
+        "root_project_name": [],
+        "parent_item_id": [],
+        "task_id": [],
     }
     old_count = len(events)
-    event = list(filter(lambda x: x.event_entry.event_type in SUPPORTED_EVENT_TYPES, events))
+    event = list(
+        filter(lambda x: x.event_entry.event_type in SUPPORTED_EVENT_TYPES, events)
+    )
     new_count = len(event)
-    logger.info(f'Filtered out {old_count - new_count} events (Reason: unsupported event type)')
+    logger.info(
+        f"Filtered out {old_count - new_count} events (Reason: unsupported event type)"
+    )
 
     not_found_in_project_id_to_root = set()
 
     for event in event:
         parent_project_id = event.event_entry.parent_project_id or ""
-        if parent_project_id and parent_project_id not in project_id_to_root and parent_project_id not in project_id_to_name:
+        if (
+            parent_project_id
+            and parent_project_id not in project_id_to_root
+            and parent_project_id not in project_id_to_name
+        ):
             not_found_in_project_id_to_root.add(parent_project_id)
             continue
 
-        root_project = project_id_to_root.get(parent_project_id) if parent_project_id else None
+        root_project = (
+            project_id_to_root.get(parent_project_id) if parent_project_id else None
+        )
         root_project_id = root_project.id if root_project else parent_project_id
         root_project_name = (
             root_project.project_entry.name
             if root_project
-            else project_id_to_name.get(parent_project_id, "(unknown)") if parent_project_id else "(unknown)"
+            else project_id_to_name.get(parent_project_id, "(unknown)")
+            if parent_project_id
+            else "(unknown)"
         )
 
-        mapping_data['root_project_id'].append(root_project_id)
-        mapping_data['root_project_name'].append(root_project_name)
-        mapping_data['id'].append(event.id)
-        mapping_data['title'].append(event.name)
-        mapping_data['date'].append(event.date)
-        mapping_data['type'].append(event.event_type)
-        mapping_data['parent_project_id'].append(parent_project_id)
-        mapping_data['parent_project_name'].append(project_id_to_name.get(parent_project_id, ''))
-        mapping_data['parent_item_id'].append(event.event_entry.parent_item_id)
+        mapping_data["root_project_id"].append(root_project_id)
+        mapping_data["root_project_name"].append(root_project_name)
+        mapping_data["id"].append(event.id)
+        mapping_data["title"].append(event.name)
+        mapping_data["date"].append(event.date)
+        mapping_data["type"].append(event.event_type)
+        mapping_data["parent_project_id"].append(parent_project_id)
+        mapping_data["parent_project_name"].append(
+            project_id_to_name.get(parent_project_id, "")
+        )
+        mapping_data["parent_item_id"].append(event.event_entry.parent_item_id)
         ee = event.event_entry
         task_id = ee.parent_item_id or ee.object_id
-        mapping_data['task_id'].append(task_id)
+        mapping_data["task_id"].append(task_id)
 
-    logger.info(f'Processed {len(mapping_data["id"])} events')
+    logger.info(f"Processed {len(mapping_data['id'])} events")
 
     if len(not_found_in_project_id_to_root) > 0:
-        logger.warning(f'Not found {len(not_found_in_project_id_to_root)} projects in project mappings.')
+        logger.warning(
+            f"Not found {len(not_found_in_project_id_to_root)} projects in project mappings."
+        )
 
     return DataFrame(mapping_data)

@@ -1,5 +1,3 @@
-
-
 from datetime import datetime
 from typing import Any
 
@@ -8,7 +6,7 @@ from loguru import logger
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.database.dataframe import load_activity_data
-from todoist.habit_tracker import (
+from todoist.features.habit_tracker import (
     TRACK_HABIT_LABEL,
     DEFAULT_HABIT_HISTORY_WEEKS,
     extract_tracked_habit_tasks,
@@ -16,7 +14,7 @@ from todoist.habit_tracker import (
     render_habit_comment,
     summarize_tracked_habits,
 )
-from todoist.utils import Cache
+from todoist.core.utils import Cache
 
 
 class HabitTracker(Automation):

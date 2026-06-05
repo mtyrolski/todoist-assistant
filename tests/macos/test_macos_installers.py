@@ -9,13 +9,16 @@ from pathlib import Path
 import pytest
 import requests
 
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
+
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(cmd, text=True, capture_output=True)
     if check and result.returncode != 0:
         joined = " ".join(cmd)
-        raise RuntimeError(f"Command failed ({result.returncode}): {joined}\n{result.stdout}\n{result.stderr}")
+        raise RuntimeError(
+            f"Command failed ({result.returncode}): {joined}\n{result.stdout}\n{result.stderr}"
+        )
     return result
 
 
@@ -112,7 +115,7 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
 
     with open(stdout_path, "w") as out_f, open(stderr_path, "w") as err_f:
         proc = subprocess.Popen(cmd, env=env, stdout=out_f, stderr=err_f)
-    
+
         try:
             frontend_url = f"http://127.0.0.1:{frontend_port}"
             # Increased timeout for CI runners which can be slow
@@ -138,6 +141,7 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/etc/todoist-assistant"])
 
     assert not Path("/usr/local/bin/todoist-assistant").exists()
+
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only test")
 def test_brew_install_smoke() -> None:

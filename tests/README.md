@@ -42,5 +42,3 @@ Coverage:
 ```bash
 make coverage
 ```
-
-Latest full-suite coverage snapshot: [COVERAGE_REPORT.md](COVERAGE_REPORT.md)

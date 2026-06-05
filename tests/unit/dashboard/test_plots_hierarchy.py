@@ -8,6 +8,7 @@ import pandas as pd
 from todoist.dashboard._plot_project_hierarchy import plot_active_project_hierarchy
 from tests.factories import make_project, make_project_entry
 
+
 def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
     df = pd.DataFrame(
         [
@@ -158,10 +159,22 @@ def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
     assert by_id["child-a1"]["root_name"] == "Root A"
     assert by_id["grand-a"]["total"] == 1
     assert by_id["root-b"]["total"] == 1
-    child_a1_to_root_a = ((by_id["child-a1"]["x"] - by_id["root-a"]["x"]) ** 2 + (by_id["child-a1"]["y"] - by_id["root-a"]["y"]) ** 2) ** 0.5
-    child_a1_to_root_b = ((by_id["child-a1"]["x"] - by_id["root-b"]["x"]) ** 2 + (by_id["child-a1"]["y"] - by_id["root-b"]["y"]) ** 2) ** 0.5
-    grand_a_to_root_a = ((by_id["grand-a"]["x"] - by_id["root-a"]["x"]) ** 2 + (by_id["grand-a"]["y"] - by_id["root-a"]["y"]) ** 2) ** 0.5
-    grand_a_to_root_b = ((by_id["grand-a"]["x"] - by_id["root-b"]["x"]) ** 2 + (by_id["grand-a"]["y"] - by_id["root-b"]["y"]) ** 2) ** 0.5
+    child_a1_to_root_a = (
+        (by_id["child-a1"]["x"] - by_id["root-a"]["x"]) ** 2
+        + (by_id["child-a1"]["y"] - by_id["root-a"]["y"]) ** 2
+    ) ** 0.5
+    child_a1_to_root_b = (
+        (by_id["child-a1"]["x"] - by_id["root-b"]["x"]) ** 2
+        + (by_id["child-a1"]["y"] - by_id["root-b"]["y"]) ** 2
+    ) ** 0.5
+    grand_a_to_root_a = (
+        (by_id["grand-a"]["x"] - by_id["root-a"]["x"]) ** 2
+        + (by_id["grand-a"]["y"] - by_id["root-a"]["y"]) ** 2
+    ) ** 0.5
+    grand_a_to_root_b = (
+        (by_id["grand-a"]["x"] - by_id["root-b"]["x"]) ** 2
+        + (by_id["grand-a"]["y"] - by_id["root-b"]["y"]) ** 2
+    ) ** 0.5
     assert child_a1_to_root_a < child_a1_to_root_b
     assert grand_a_to_root_a < grand_a_to_root_b
     assert by_id["child-a1"]["y"] < by_id["root-a"]["y"]

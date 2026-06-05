@@ -71,7 +71,9 @@ def _log_dir(title: str, log_root: str | None) -> Path:
     root = (
         Path(log_root)
         if log_root
-        else Path(os.environ.get("DASHBOARD_STATE_DIR", ".cache/todoist-assistant/dashboard"))
+        else Path(
+            os.environ.get("DASHBOARD_STATE_DIR", ".cache/todoist-assistant/dashboard")
+        )
         / "checks"
     )
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -137,7 +139,9 @@ def main() -> int:
     args = _parse_args()
     specs = _check_specs(args.targets)
     log_dir = _log_dir(str(args.title), args.log_root)
-    print(f"Running {args.title}: {', '.join(spec.label for spec in specs)}", flush=True)
+    print(
+        f"Running {args.title}: {', '.join(spec.label for spec in specs)}", flush=True
+    )
     print(f"Logs: {log_dir}", flush=True)
 
     checks = [_start_check(spec, log_dir) for spec in specs]

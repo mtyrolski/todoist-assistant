@@ -5,8 +5,8 @@ from typing import cast
 
 from todoist.automations.activity import Activity
 from todoist.database.base import Database
-from todoist.types import Event, EventEntry
-from todoist.utils import Cache
+from todoist.core.types import Event, EventEntry
+from todoist.core.utils import Cache
 
 
 def _build_event(event_id: str, event_type: str, date_str: str) -> Event:
@@ -26,7 +26,11 @@ def _build_event(event_id: str, event_type: str, date_str: str) -> Event:
         v2_parent_project_id=None,
         new_api_kwargs=None,
     )
-    return Event(event_entry=entry, id=event_id, date=datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ"))
+    return Event(
+        event_entry=entry,
+        id=event_id,
+        date=datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ"),
+    )
 
 
 class _FakeDb:
@@ -45,7 +49,11 @@ def test_activity_fetch_recent_events_returns_stats():
         _build_event("2", "updated", "2024-01-01T01:00:00Z"),
         _build_event("3", "completed", "2024-01-01T02:00:00Z"),
     ]
-    activity = Activity(name="Activity Fetching Automation", nweeks_window_size=1, early_stop_after_n_windows=1)
+    activity = Activity(
+        name="Activity Fetching Automation",
+        nweeks_window_size=1,
+        early_stop_after_n_windows=1,
+    )
     db = _FakeDb(events)
 
     result_events, stats = activity.fetch_recent_events(cast(Database, db), max_pages=2)
@@ -72,20 +80,32 @@ def test_activity_tick_persists_cache_and_summarizes(tmp_path, monkeypatch):
     def _fake_summary(*, events: set[Event], new_events: set[Event]):
         summary_calls.append((events, new_events))
 
-    monkeypatch.setattr("todoist.automations.activity.automation.quick_summarize", _fake_summary)
+    monkeypatch.setattr(
+        "todoist.automations.activity.automation.quick_summarize", _fake_summary
+    )
 
     class _FakeDb:
         def __init__(self, events_to_return: list[Event]):
             self.events_to_return = events_to_return
             self.calls: list[tuple[int, int]] = []
 
-        def fetch_activity_adaptively(self, *, nweeks_window_size, early_stop_after_n_windows, events_already_fetched):
+        def fetch_activity_adaptively(
+            self,
+            *,
+            nweeks_window_size,
+            early_stop_after_n_windows,
+            events_already_fetched,
+        ):
             _ = events_already_fetched
             self.calls.append((nweeks_window_size, early_stop_after_n_windows))
             return list(self.events_to_return)
 
     db = _FakeDb(events)
-    activity = Activity(name="Activity Fetching Automation", nweeks_window_size=2, early_stop_after_n_windows=1)
+    activity = Activity(
+        name="Activity Fetching Automation",
+        nweeks_window_size=2,
+        early_stop_after_n_windows=1,
+    )
 
     activity._tick(cast(Database, db))
     cached_after_first = Cache().activity.load()

@@ -5,7 +5,7 @@ from typing import Any
 
 from loguru import logger
 
-from todoist.types import Project
+from todoist.core.types import Project
 
 
 def all_tasks(project: Project):
@@ -19,7 +19,9 @@ def priority_tasks(project: Project, prio: int) -> int:
     :param prio: The priority to check for.
     :return: The number of tasks with the given priority.
     """
-    return len(list(filter(lambda task: task.task_entry.priority == prio, project.tasks)))
+    return len(
+        list(filter(lambda task: task.task_entry.priority == prio, project.tasks))
+    )
 
 
 p1_tasks = partial(priority_tasks, prio=4)
@@ -33,12 +35,19 @@ def any_labels(project: Project):
 
 
 def try_parse_date(date: str) -> datetime | None:
-    parsing_formats = ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%fZ']
+    parsing_formats = [
+        "%Y-%m-%d",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%fZ",
+    ]
 
     for fmt in parsing_formats:
         with suppress(ValueError):
             return datetime.strptime(date, fmt)
-    logger.error(f"Could not parse date {date} with any of the formats {parsing_formats}")
+    logger.error(
+        f"Could not parse date {date} with any of the formats {parsing_formats}"
+    )
     return None
 
 
@@ -46,5 +55,5 @@ def extract_task_due_date(due: str | None | dict[str, Any]) -> datetime | None:
     if due is None:
         return None
 
-    due_raw = due if isinstance(due, str) else due['date']
+    due_raw = due if isinstance(due, str) else due["date"]
     return try_parse_date(due_raw)

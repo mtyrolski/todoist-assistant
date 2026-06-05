@@ -5,7 +5,7 @@ import os
 import plistlib
 
 from PyInstaller.utils.hooks import collect_all
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 
 
 def _collect(module_name):
@@ -13,7 +13,11 @@ def _collect(module_name):
     if isinstance(collected, tuple):
         datas, binaries, hiddenimports = collected
     else:
-        datas, binaries, hiddenimports = collected.datas, collected.binaries, collected.hiddenimports
+        datas, binaries, hiddenimports = (
+            collected.datas,
+            collected.binaries,
+            collected.hiddenimports,
+        )
     return datas, binaries, hiddenimports
 
 
@@ -59,7 +63,9 @@ else:
 info_plist.update(
     {
         "CFBundleName": info_plist.get("CFBundleName", "TodoistAssistant"),
-        "CFBundleDisplayName": info_plist.get("CFBundleDisplayName", "Todoist Assistant"),
+        "CFBundleDisplayName": info_plist.get(
+            "CFBundleDisplayName", "Todoist Assistant"
+        ),
         "CFBundleIdentifier": "com.todoist.assistant",
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,

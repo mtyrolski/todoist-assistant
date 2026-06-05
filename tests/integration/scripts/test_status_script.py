@@ -8,7 +8,7 @@ def test_discover_triton_models_reads_repository(monkeypatch, tmp_path) -> None:
     model_dir = repo_root / "todoist_llm"
     model_dir.mkdir(parents=True)
     (model_dir / "config.pbtxt").write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'name: "todoist_llm"',
                 'backend: "python"',
@@ -20,7 +20,7 @@ def test_discover_triton_models_reads_repository(monkeypatch, tmp_path) -> None:
     (model_dir / "1").mkdir()
     (model_dir / "2").mkdir()
     (model_dir / "1" / "model.py").write_text(
-        '\n'.join(
+        "\n".join(
             [
                 "def initialize() -> None:",
                 '    model_id = _env("TODOIST_AGENT_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
@@ -49,7 +49,7 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     model_dir = repo_root / "todoist_llm"
     model_dir.mkdir(parents=True)
     (model_dir / "config.pbtxt").write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'name: "todoist_llm"',
                 'backend: "python"',
@@ -59,7 +59,7 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     )
     (model_dir / "1").mkdir()
     (model_dir / "1" / "model.py").write_text(
-        '\n'.join(
+        "\n".join(
             [
                 "def initialize() -> None:",
                 '    model_id = _env("TODOIST_AGENT_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")',
@@ -72,21 +72,25 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
     monkeypatch.setattr(
         status,
         "discover_served_triton_models",
-        lambda base_url: [
-            {
-                "name": "todoist_llm",
-                "version": "1",
-                "state": "READY",
-                "reason": None,
-            }
-        ]
-        if base_url == "http://127.0.0.1:8003"
-        else [],
+        lambda base_url: (
+            [
+                {
+                    "name": "todoist_llm",
+                    "version": "1",
+                    "state": "READY",
+                    "reason": None,
+                }
+            ]
+            if base_url == "http://127.0.0.1:8003"
+            else []
+        ),
     )
 
     def _fake_fetch_json(url: str):
         if url.endswith("/api/health"):
-            return status.EndpointResult(ok=True, status_code=200, payload={"version": "1.2.3"})
+            return status.EndpointResult(
+                ok=True, status_code=200, payload={"version": "1.2.3"}
+            )
         if url.endswith("/api/dashboard/llm_chat"):
             return status.EndpointResult(
                 ok=True,
@@ -116,7 +120,11 @@ def test_main_renders_colored_status_sections(monkeypatch, tmp_path, capsys) -> 
                 status_code=200,
                 payload={
                     "services": [
-                        {"name": "Todoist token", "status": "ok", "detail": "API_KEY set"},
+                        {
+                            "name": "Todoist token",
+                            "status": "ok",
+                            "detail": "API_KEY set",
+                        },
                         {"name": "Triton", "status": "ok", "detail": "ready"},
                     ]
                 },
