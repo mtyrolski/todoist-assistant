@@ -36,8 +36,8 @@ git clone https://github.com/mtyrolski/todoist-assistant.git
 cd todoist-assistant
 cp .env.example .env
 # edit .env and set API_KEY
-make init_local_env
-make run_dashboard
+make setup
+make dashboard
 ```
 
 Open:

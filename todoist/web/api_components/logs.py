@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -92,7 +90,9 @@ def runtime_log_sources(*, data_dir: Path, cache_dir: Path) -> list[dict[str, An
                 available = False
             else:
                 size = stat.st_size
-                mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+                mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(
+                    timespec="seconds"
+                )
         sources.append(
             {
                 "id": spec.key,

@@ -15,10 +15,10 @@ import zipfile
 
 from loguru import logger
 
-from todoist import telemetry
-from todoist.env import EnvVar
-from todoist.dashboard_settings import load_dashboard_config, observer_settings_payload
-from todoist.utils import configure_runtime_logging, get_api_key
+from todoist.core import telemetry
+from todoist.core.env import EnvVar
+from todoist.dashboard.settings import load_dashboard_config, observer_settings_payload
+from todoist.core.utils import configure_runtime_logging, get_api_key
 
 
 def _default_data_dir() -> Path:
@@ -42,7 +42,9 @@ def _log_startup_paths(install_dir: Path, data_dir: Path, config_dir: Path) -> N
     print(f"Config dir: {config_dir}")
 
 
-def _resolve_config_dir(data_dir: Path, install_dir: Path, override: str | None) -> Path:
+def _resolve_config_dir(
+    data_dir: Path, install_dir: Path, override: str | None
+) -> Path:
     if override:
         return Path(override).expanduser().resolve()
     candidate = data_dir / "config"
@@ -74,7 +76,9 @@ def _seed_config_dir(config_dir: Path, install_dir: Path) -> None:
             shutil.copyfile(template_src, dest)
 
 
-def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | None = None) -> None:
+def _ensure_env_and_files(
+    data_dir: Path, config_dir: Path, install_dir: Path | None = None
+) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = data_dir / "cache"
@@ -99,7 +103,9 @@ def _ensure_env_and_files(data_dir: Path, config_dir: Path, install_dir: Path | 
     os.environ.setdefault(str(EnvVar.LOGS_DIR), str(logs_dir))
     os.environ.setdefault(str(EnvVar.PERSONAL_DIR), str(data_dir / "personal"))
     os.environ[str(EnvVar.AGENT_CACHE_PATH)] = str(cache_dir)
-    os.environ[str(EnvVar.AGENT_INSTRUCTIONS_DIR)] = str(config_dir / "agent_instructions")
+    os.environ[str(EnvVar.AGENT_INSTRUCTIONS_DIR)] = str(
+        config_dir / "agent_instructions"
+    )
 
 
 def _launcher_log_path() -> str | None:
@@ -110,15 +116,31 @@ def _launcher_log_path() -> str | None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Launch the Todoist Assistant dashboard.")
-    parser.add_argument("--api-host", default=os.getenv(str(EnvVar.API_HOST), "127.0.0.1"))
-    parser.add_argument("--api-port", type=int, default=int(os.getenv(str(EnvVar.API_PORT), "8000")))
-    parser.add_argument("--frontend-host", default=os.getenv(str(EnvVar.FRONTEND_HOST), "127.0.0.1"))
-    parser.add_argument("--frontend-port", type=int, default=int(os.getenv(str(EnvVar.FRONTEND_PORT), "3000")))
+    parser = argparse.ArgumentParser(
+        description="Launch the Todoist Assistant dashboard."
+    )
+    parser.add_argument(
+        "--api-host", default=os.getenv(str(EnvVar.API_HOST), "127.0.0.1")
+    )
+    parser.add_argument(
+        "--api-port", type=int, default=int(os.getenv(str(EnvVar.API_PORT), "8000"))
+    )
+    parser.add_argument(
+        "--frontend-host", default=os.getenv(str(EnvVar.FRONTEND_HOST), "127.0.0.1")
+    )
+    parser.add_argument(
+        "--frontend-port",
+        type=int,
+        default=int(os.getenv(str(EnvVar.FRONTEND_PORT), "3000")),
+    )
     parser.add_argument("--data-dir", default=os.getenv(str(EnvVar.DATA_DIR)))
     parser.add_argument("--config-dir", default=os.getenv(str(EnvVar.CONFIG_DIR)))
-    parser.add_argument("--no-frontend", action="store_true", help="Start only the API server.")
-    parser.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
+    parser.add_argument(
+        "--no-frontend", action="store_true", help="Start only the API server."
+    )
+    parser.add_argument(
+        "--no-browser", action="store_true", help="Do not open a browser window."
+    )
     return parser.parse_args()
 
 
@@ -171,7 +193,9 @@ def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
         cached = _load_frontend_manifest(manifest_path)
         needs_extract = (cached != current) or (not _frontend_ready(extracted_dir))
         if needs_extract:
-            logger.info("Extracting frontend bundle {} to {}", frontend_zip, extracted_dir)
+            logger.info(
+                "Extracting frontend bundle {} to {}", frontend_zip, extracted_dir
+            )
             print(f"Extracting frontend from {frontend_zip} to {extracted_dir}")
             temp_dir = data_dir / f"frontend.tmp-{os.getpid()}"
             if temp_dir.exists():
@@ -180,7 +204,9 @@ def _prepare_frontend_dir(install_dir: Path, data_dir: Path) -> Path:
             try:
                 _extract_zip(frontend_zip, temp_dir)
                 if not _frontend_ready(temp_dir):
-                    raise RuntimeError("Extracted frontend is missing server.js or assets")
+                    raise RuntimeError(
+                        "Extracted frontend is missing server.js or assets"
+                    )
                 if extracted_dir.exists():
                     shutil.rmtree(extracted_dir)
                 shutil.move(str(temp_dir), str(extracted_dir))
@@ -210,14 +236,20 @@ def _load_api_app():
     return api_app
 
 
-def _start_frontend(install_dir: Path, data_dir: Path, host: str, port: int) -> subprocess.Popen[bytes]:
+def _start_frontend(
+    install_dir: Path, data_dir: Path, host: str, port: int
+) -> subprocess.Popen[bytes]:
     frontend_dir = _prepare_frontend_dir(install_dir, data_dir)
     node_exe = install_dir / "node" / ("node.exe" if os.name == "nt" else "node")
     if os.name != "nt" and not node_exe.exists():
         fallback = install_dir / "node" / "bin" / "node"
         if fallback.exists():
             node_exe = fallback
-    node_cmd = str(node_exe) if node_exe.exists() else ("node.exe" if os.name == "nt" else "node")
+    node_cmd = (
+        str(node_exe)
+        if node_exe.exists()
+        else ("node.exe" if os.name == "nt" else "node")
+    )
     server_js = frontend_dir / "server.js"
     if not server_js.exists():
         raise FileNotFoundError(f"Next.js server not found at {server_js}")
@@ -259,7 +291,9 @@ def _start_dashboard_observer() -> threading.Thread:
 
 def _maybe_start_dashboard_observer() -> threading.Thread | None:
     if not get_api_key():
-        logger.warning("Dashboard observer disabled until a Todoist API token is configured.")
+        logger.warning(
+            "Dashboard observer disabled until a Todoist API token is configured."
+        )
         print("Dashboard observer disabled until a Todoist API token is configured.")
         return None
     return _start_dashboard_observer()
@@ -284,15 +318,22 @@ def _extract_zip(zip_path: Path, dest: Path) -> None:
             normalized = member.filename.replace("\\", "/")
             member_path = PurePosixPath(normalized)
             if member_path.is_absolute() or ".." in member_path.parts:
-                raise RuntimeError(f"Refusing to extract unsafe path: {member.filename}")
+                raise RuntimeError(
+                    f"Refusing to extract unsafe path: {member.filename}"
+                )
             if member_path.parts and ":" in member_path.parts[0]:
-                raise RuntimeError(f"Refusing to extract unsafe path: {member.filename}")
+                raise RuntimeError(
+                    f"Refusing to extract unsafe path: {member.filename}"
+                )
             target = dest / Path(*member_path.parts)
             if member.is_dir():
                 os.makedirs(_win_long_path(target), exist_ok=True)
                 continue
             os.makedirs(_win_long_path(target.parent), exist_ok=True)
-            with archive.open(member, "r") as src, open(_win_long_path(target), "wb") as dst:
+            with (
+                archive.open(member, "r") as src,
+                open(_win_long_path(target), "wb") as dst,
+            ):
                 shutil.copyfileobj(src, dst)
 
 
@@ -307,7 +348,11 @@ def main() -> int:
                 install_dir = resources_dir
     else:
         install_dir = Path(__file__).resolve().parents[1]
-    data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else _default_data_dir()
+    data_dir = (
+        Path(args.data_dir).expanduser().resolve()
+        if args.data_dir
+        else _default_data_dir()
+    )
     config_dir = _resolve_config_dir(data_dir, install_dir, args.config_dir)
     _log_startup_paths(install_dir, data_dir, config_dir)
     _ensure_env_and_files(data_dir, config_dir, install_dir=install_dir)
@@ -333,7 +378,9 @@ def main() -> int:
         _maybe_start_dashboard_observer()
         if not args.no_frontend:
             try:
-                frontend_proc = _start_frontend(install_dir, data_dir, args.frontend_host, args.frontend_port)
+                frontend_proc = _start_frontend(
+                    install_dir, data_dir, args.frontend_host, args.frontend_port
+                )
                 frontend_running = True
                 time.sleep(1.0)
                 if frontend_proc.poll() is not None:
@@ -350,7 +397,11 @@ def main() -> int:
                     file=sys.stderr,
                 )
         if not args.no_browser:
-            target = f"http://{args.frontend_host}:{args.frontend_port}" if frontend_running else None
+            target = (
+                f"http://{args.frontend_host}:{args.frontend_port}"
+                if frontend_running
+                else None
+            )
             if target:
                 logger.info("Opening browser at {}", target)
                 webbrowser.open(target)

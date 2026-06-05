@@ -3,9 +3,12 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,global-variable-undefined,used-before-assignment
 
-from __future__ import annotations
-
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+from todoist.database.base import Database
+from todoist.core.types import Event, Project
 
 
 def _sync_api_globals() -> None:
@@ -15,10 +18,14 @@ def _sync_api_globals() -> None:
         if name.startswith("__"):
             continue
         original = _ORIGINALS.get(name)
-        if original is not None and getattr(value, "_component_wrapper_for", None) == name:
+        if (
+            original is not None
+            and getattr(value, "_component_wrapper_for", None) == name
+        ):
             globals()[name] = original
         else:
             globals()[name] = value
+
 
 def _env_demo_mode() -> bool:
     value = os.getenv(str(EnvVar.DASHBOARD_DEMO), "").strip().lower()
@@ -266,11 +273,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
     df_activity = _state.df_activity
     active_projects = _state.active_projects
     project_colors = _state.project_colors
-    if (
-        df_activity is None
-        or active_projects is None
-        or project_colors is None
-    ):
+    if df_activity is None or active_projects is None or project_colors is None:
         return
 
     payload: dict[str, Any] = {
@@ -303,7 +306,11 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     if isinstance(payload, dict):
         if payload.get("version") == _DASHBOARD_STATE_SCHEMA_VERSION:
             if bool(payload.get("demo_mode", False)) == demo_mode:
-                if demo_mode and payload.get("demo_state_version") != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION:
+                if (
+                    demo_mode
+                    and payload.get("demo_state_version")
+                    != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION
+                ):
                     return False
                 payload_signature = payload.get("activity_cache_signature")
                 current_signature = _activity_cache_signature()
@@ -322,9 +329,7 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
                         if isinstance(active_projects, list):
                             if isinstance(project_colors, dict):
                                 _state.db = None
-                                _state.df_activity = _normalize_activity_df(
-                                    df_activity
-                                )
+                                _state.df_activity = _normalize_activity_df(df_activity)
                                 _state.active_projects = active_projects
                                 _state.project_colors = {
                                     str(k): str(v) for k, v in project_colors.items()
@@ -608,7 +613,9 @@ def _stat_file(path: str | Path) -> dict[str, Any] | None:
         stat = path_obj.stat()
         return {
             "path": str(path_obj),
-            "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(
+                timespec="seconds"
+            ),
             "size": stat.st_size,
         }
     except OSError:
@@ -699,6 +706,7 @@ def _llm_breakdown_snapshot() -> dict[str, Any]:
         "error": payload.get("error"),
         "recent": recent,
     }
+
 
 _COMPONENT_EXPORTS = (
     "_env_demo_mode",

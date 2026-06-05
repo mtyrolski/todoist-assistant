@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from todoist.types import Project, ProjectEntry, Task, TaskEntry
+from todoist.core.types import Project, ProjectEntry, Task, TaskEntry
 
 _DEFAULT_TIMESTAMP = "2024-01-01T00:00:00Z"
 
@@ -102,7 +102,9 @@ def make_project(
     is_archived: bool = False,
     **project_entry_overrides: Any,
 ) -> Project:
-    entry = project_entry or make_project_entry(project_id=project_id, **project_entry_overrides)
+    entry = project_entry or make_project_entry(
+        project_id=project_id, **project_entry_overrides
+    )
     return Project(
         id=project_id,
         project_entry=entry,

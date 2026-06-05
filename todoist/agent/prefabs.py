@@ -29,7 +29,11 @@ def load_instruction_prefabs(prefabs_dir: str | Path) -> list[InstructionPrefab]
 
         description = raw.get("describtion") or raw.get("description") or ""
         content = raw.get("content") or ""
-        if not isinstance(description, str) or not isinstance(content, str) or not content.strip():
+        if (
+            not isinstance(description, str)
+            or not isinstance(content, str)
+            or not content.strip()
+        ):
             logger.warning("Skipping prefab (invalid fields): {}", str(path))
             continue
 
@@ -39,5 +43,6 @@ def load_instruction_prefabs(prefabs_dir: str | Path) -> list[InstructionPrefab]
                 description=description.strip(),
                 content=content.strip(),
                 path=path,
-            ))
+            )
+        )
     return prefabs

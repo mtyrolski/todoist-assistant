@@ -1,7 +1,5 @@
 """Download configured Hugging Face models into the local cache."""
 
-from __future__ import annotations
-
 from argparse import ArgumentParser, Namespace
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -58,7 +56,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> Namespace:
 
 
 def _selected_model_ids(args: Namespace) -> list[str]:
-    explicit_ids = [str(model_id).strip() for model_id in args.model_id if str(model_id).strip()]
+    explicit_ids = [
+        str(model_id).strip() for model_id in args.model_id if str(model_id).strip()
+    ]
     if explicit_ids:
         return list(dict.fromkeys(explicit_ids))
 
@@ -100,7 +100,9 @@ def _download_one_model(
     revision: str | None = None,
 ) -> tuple[str, str | None, str | None]:
     try:
-        local_path = snapshot_download(repo_id=model_id, cache_dir=cache_dir, revision=revision)
+        local_path = snapshot_download(
+            repo_id=model_id, cache_dir=cache_dir, revision=revision
+        )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return model_id, None, str(exc)
     return model_id, local_path, None
@@ -119,8 +121,15 @@ def download_models(
         return 0
     enable_progress_bars()
     worker_count = _resolve_worker_count(workers, len(model_ids))
-    print(f"Downloading {len(model_ids)} Hugging Face model(s) with {worker_count} worker(s).")
-    cache_hint = cache_dir or os.getenv("HF_HOME") or os.getenv("HUGGINGFACE_HUB_CACHE") or "default HF cache"
+    print(
+        f"Downloading {len(model_ids)} Hugging Face model(s) with {worker_count} worker(s)."
+    )
+    cache_hint = (
+        cache_dir
+        or os.getenv("HF_HOME")
+        or os.getenv("HUGGINGFACE_HUB_CACHE")
+        or "default HF cache"
+    )
     print(f"Cache: {cache_hint}")
     if revision:
         print(f"Revision: {revision}")
@@ -129,14 +138,24 @@ def download_models(
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
-            executor.submit(_download_one_model, model_id, cache_dir=cache_dir, revision=revision): model_id
+            executor.submit(
+                _download_one_model, model_id, cache_dir=cache_dir, revision=revision
+            ): model_id
             for model_id in model_ids
         }
-        for index, future in enumerate(tqdm(as_completed(futures), total=len(futures), desc="Models", unit="model"), start=1):
+        for index, future in enumerate(
+            tqdm(
+                as_completed(futures), total=len(futures), desc="Models", unit="model"
+            ),
+            start=1,
+        ):
             model_id, local_path, error = future.result()
             if error:
                 failures.append((model_id, error))
-                tqdm.write(f"[{index}/{len(model_ids)}] Failed: {model_id}: {error}", file=sys.stderr)
+                tqdm.write(
+                    f"[{index}/{len(model_ids)}] Failed: {model_id}: {error}",
+                    file=sys.stderr,
+                )
                 continue
             tqdm.write(f"[{index}/{len(model_ids)}] Cached: {model_id} -> {local_path}")
 

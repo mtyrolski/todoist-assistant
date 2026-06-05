@@ -114,7 +114,7 @@ cd todoist-assistant
 cp .env.example .env
 # set API_KEY in .env
 make init_local_env
-make run_dashboard
+make dashboard
 ```
 
 Open:
@@ -126,7 +126,10 @@ Open:
 ### Main commands
 
 ```bash
-make run_dashboard     # start the local dashboard stack (in most cases only this one needed)
+make setup             # first sync and local setup
+make dashboard         # start the dashboard without AI
+make dashboard_codex   # start the dashboard with Codex CLI AI
+make dashboard_triton  # start the dashboard with Triton CPU AI
 make update_env        # refresh local cache and run short automations
 make run_observer      # keep syncing in the background
 make run_demo          # run the dashboard with demo/anonymized data
@@ -169,7 +172,17 @@ Automation setup lives in [`configs/automations.yaml`](configs/automations.yaml)
 
 - Local summaries over cached Todoist history
 - Read-only dashboard chat
-- Triton-backed local model support for the AI stack
+- AI task breakdown for labeled Todoist tasks
+
+AI is opt-in. The user-facing commands are explicit:
+
+- `make dashboard`: default raw dashboard; no AI backend module is loaded
+- `make dashboard_codex`: uses the local Codex CLI backend for chat and task breakdown
+- `make dashboard_triton`: uses the local Triton inference endpoint and the configured catalog model
+
+Advanced users can still set `TODOIST_AGENT_BACKEND` in `.env`; supported values are `disabled`, `codex`, and `triton_local`.
+
+Currently supported models are the catalog entries in `todoist/llm/model_catalog.py`. The project does not currently support arbitrary OpenAI-compatible HTTP endpoints, Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard, or write-capable AI agents.
 
 Usage details: [docs/USAGE.md](docs/USAGE.md)
 
@@ -179,7 +192,7 @@ Usage details: [docs/USAGE.md](docs/USAGE.md)
 - [`frontend/`](frontend) contains the Next.js dashboard
 - [`configs/`](configs) contains automation and dashboard configuration
 - [`docs/`](docs) contains longer-form documentation
-- [`tests/`](tests) contains the test suite and coverage notes
+- [`tests/`](tests) contains API, integration, platform, and nested unit test segments
 - [`core/`](core) contains the core-only package variant
 
 Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
@@ -197,12 +210,10 @@ Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
 
 ## Checks
 
-Run these before opening or closing documentation-adjacent code changes:
+Run this before closing code changes:
 
 ```bash
-make typecheck
-make lint
-make test
+make test_all
 make coverage
 ```
 

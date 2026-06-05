@@ -9,11 +9,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
-from todoist.habit_tracker import summarize_tracked_habits
-from todoist.types import Project
-from todoist.stats import extract_task_due_date
+from todoist.features.habit_tracker import summarize_tracked_habits
+from todoist.core.types import Project
+from todoist.features.stats import extract_task_due_date
 
-FIRE_TASK_LABEL = "fire \U0001F9EF\U0001F692"
+FIRE_TASK_LABEL = "fire \U0001f9ef\U0001f692"
 DEFAULT_URGENCY_SETTINGS = {
     "enabled": True,
     "fire_label": FIRE_TASK_LABEL,
@@ -65,23 +65,19 @@ def count_labeled_tasks(
 
 def _task_matches_label(task: Any, label_name: str) -> bool:
     task_labels = {
-        _normalize_label_name(str(label))
-        for label in (task.task_entry.labels or [])
+        _normalize_label_name(str(label)) for label in (task.task_entry.labels or [])
     }
     return _normalize_label_name(label_name) in task_labels
 
 
 def _task_matches_any_label(task: Any, label_names: Sequence[str]) -> bool:
     normalized_labels = {
-        _normalize_label_name(str(label))
-        for label in label_names
-        if str(label).strip()
+        _normalize_label_name(str(label)) for label in label_names if str(label).strip()
     }
     if not normalized_labels:
         return False
     task_labels = {
-        _normalize_label_name(str(label))
-        for label in (task.task_entry.labels or [])
+        _normalize_label_name(str(label)) for label in (task.task_entry.labels or [])
     }
     return bool(task_labels & normalized_labels)
 
@@ -115,9 +111,18 @@ def _normalize_urgency_settings(
     badge_labels = settings.get("badge_labels")
     if isinstance(badge_labels, dict):
         normalized["badge_labels"] = {
-            "good": str(badge_labels.get("good") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]),
-            "warn": str(badge_labels.get("warn") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]),
-            "danger": str(badge_labels.get("danger") or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]),
+            "good": str(
+                badge_labels.get("good")
+                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]
+            ),
+            "warn": str(
+                badge_labels.get("warn")
+                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]
+            ),
+            "danger": str(
+                badge_labels.get("danger")
+                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]
+            ),
         }
     thresholds = settings.get("warn_priority_thresholds")
     if isinstance(thresholds, list):
@@ -140,7 +145,9 @@ def _normalize_urgency_settings(
         "warn_deadline_min_count",
     ):
         try:
-            normalized[field_name] = max(1, int(settings.get(field_name, normalized[field_name])))
+            normalized[field_name] = max(
+                1, int(settings.get(field_name, normalized[field_name]))
+            )
         except (TypeError, ValueError):
             normalized[field_name] = DEFAULT_URGENCY_SETTINGS[field_name]
     return normalized
@@ -199,10 +206,14 @@ def evaluate_urgency_status(
         "dueTasks": 0,
         "deadlineTasks": 0,
     }
-    warn_priority_thresholds = set(int(value) for value in urgency_settings["warn_priority_thresholds"])
+    warn_priority_thresholds = set(
+        int(value) for value in urgency_settings["warn_priority_thresholds"]
+    )
     warn_due_within_days = int(urgency_settings["warn_due_within_days"])
     warn_deadline_within_days = int(urgency_settings["warn_deadline_within_days"])
-    fire_labels = tuple(str(value) for value in urgency_settings["fire_labels"] if str(value).strip())
+    fire_labels = tuple(
+        str(value) for value in urgency_settings["fire_labels"] if str(value).strip()
+    )
     task_matches: list[dict[str, bool]] = []
 
     if bool(urgency_settings["danger_on_fire_label"]) and fire_labels:
@@ -230,19 +241,37 @@ def evaluate_urgency_status(
     for project in active_projects or []:
         for task in project.tasks or []:
             task_entry = task.task_entry
-            fire = bool(urgency_settings["danger_on_fire_label"]) and _task_matches_any_label(
-                task, fire_labels
+            fire = bool(
+                urgency_settings["danger_on_fire_label"]
+            ) and _task_matches_any_label(task, fire_labels)
+            p1 = (
+                bool(urgency_settings["warn_on_priority"])
+                and 4 in warn_priority_thresholds
+                and task_entry.priority == 4
             )
-            p1 = bool(urgency_settings["warn_on_priority"]) and 4 in warn_priority_thresholds and task_entry.priority == 4
-            p2 = bool(urgency_settings["warn_on_priority"]) and 3 in warn_priority_thresholds and task_entry.priority == 3
-            p3 = bool(urgency_settings["warn_on_priority"]) and 2 in warn_priority_thresholds and task_entry.priority == 2
-            p4 = bool(urgency_settings["warn_on_priority"]) and 1 in warn_priority_thresholds and task_entry.priority == 1
+            p2 = (
+                bool(urgency_settings["warn_on_priority"])
+                and 3 in warn_priority_thresholds
+                and task_entry.priority == 3
+            )
+            p3 = (
+                bool(urgency_settings["warn_on_priority"])
+                and 2 in warn_priority_thresholds
+                and task_entry.priority == 2
+            )
+            p4 = (
+                bool(urgency_settings["warn_on_priority"])
+                and 1 in warn_priority_thresholds
+                and task_entry.priority == 1
+            )
             due = bool(urgency_settings["warn_on_due"]) and _task_due_within_days(
                 task_entry.due,
                 reference_day,
                 warn_due_within_days,
             )
-            deadline = bool(urgency_settings["warn_on_deadline"]) and _task_due_within_days(
+            deadline = bool(
+                urgency_settings["warn_on_deadline"]
+            ) and _task_due_within_days(
                 task_entry.deadline,
                 reference_day,
                 warn_deadline_within_days,
@@ -278,9 +307,13 @@ def evaluate_urgency_status(
     due_count = counts["dueTasks"]
     deadline_count = counts["deadlineTasks"]
     fire_triggered = fire_count > 0
-    priority_triggered = priority_count >= int(urgency_settings["warn_priority_min_count"])
+    priority_triggered = priority_count >= int(
+        urgency_settings["warn_priority_min_count"]
+    )
     due_triggered = due_count >= int(urgency_settings["warn_due_min_count"])
-    deadline_triggered = deadline_count >= int(urgency_settings["warn_deadline_min_count"])
+    deadline_triggered = deadline_count >= int(
+        urgency_settings["warn_deadline_min_count"]
+    )
     active_match_count = sum(
         1
         for item in task_matches
@@ -843,9 +876,7 @@ def compute_insights(
     df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
     if not df_completed.empty and project_col in df_completed.columns:
         project_series = cast(pd.Series, df_completed[project_col])
-        counts = (
-            project_series.fillna("").replace("", "(unknown)").value_counts()
-        )
+        counts = project_series.fillna("").replace("", "(unknown)").value_counts()
         if not counts.empty:
             name = str(counts.index[0])
             completed_i = int(counts.iloc[0])
@@ -858,9 +889,7 @@ def compute_insights(
                 }
             )
 
-    df_rescheduled = cast(
-        pd.DataFrame, df_period[df_period["type"] == "rescheduled"]
-    )
+    df_rescheduled = cast(pd.DataFrame, df_period[df_period["type"] == "rescheduled"])
     if not df_rescheduled.empty and project_col in df_rescheduled.columns:
         counts = (
             cast(pd.Series, df_rescheduled[project_col])
@@ -882,10 +911,9 @@ def compute_insights(
 
     try:
         if not df_period.empty:
-            day_names = (
-                pd.Series(pd.to_datetime(df_period.index), index=df_period.index)
-                .dt.day_name()
-            )
+            day_names = pd.Series(
+                pd.to_datetime(df_period.index), index=df_period.index
+            ).dt.day_name()
             day_counts = day_names.value_counts()
             if not day_counts.empty:
                 day = str(day_counts.index[0])

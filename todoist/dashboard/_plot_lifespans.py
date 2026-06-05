@@ -200,8 +200,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             if not np.isfinite(value) or value <= 0:
                 continue
             if any(
-                abs(math.log10(value) - math.log10(existing))
-                < 0.03
+                abs(math.log10(value) - math.log10(existing)) < 0.03
                 for existing in tickvals
                 if existing > 0
             ):

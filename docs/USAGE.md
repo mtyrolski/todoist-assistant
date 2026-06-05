@@ -11,11 +11,18 @@
 
 ## Dashboard
 ```bash
-make run_dashboard
+make dashboard
 ```
 - Frontend: http://127.0.0.1:3000
 - API: http://127.0.0.1:8000
-- This is the stable default surface for day-to-day use.
+- This is the stable default surface for day-to-day use and starts without AI.
+
+Optional AI dashboard modes:
+```bash
+make dashboard_codex   # Codex CLI backend
+make dashboard_triton  # Triton CPU backend
+make dashboard_triton_gpu
+```
 
 Demo (anonymized):
 ```bash

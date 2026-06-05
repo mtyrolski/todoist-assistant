@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -7,8 +5,11 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 from todoist.automations.multiplicate.automation import MultiplyConfig
-from todoist.stale_tasks import StaleTaskConfig
-from todoist.web.dashboard_payload import DEFAULT_URGENCY_SETTINGS, normalize_plot_events
+from todoist.features.stale_tasks import StaleTaskConfig
+from todoist.web.dashboard_payload import (
+    DEFAULT_URGENCY_SETTINGS,
+    normalize_plot_events,
+)
 
 
 def llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
@@ -116,7 +117,11 @@ def dashboard_settings_payload(
     if not isinstance(data, dict):
         data = {}
     defaults = DEFAULT_URGENCY_SETTINGS
-    badge_labels = data.get("badge_labels") if isinstance(data.get("badge_labels"), Mapping) else {}
+    badge_labels = (
+        data.get("badge_labels")
+        if isinstance(data.get("badge_labels"), Mapping)
+        else {}
+    )
     badge_labels = badge_labels if isinstance(badge_labels, Mapping) else {}
     thresholds = data.get("warn_priority_thresholds")
     if not isinstance(thresholds, list):
@@ -124,7 +129,9 @@ def dashboard_settings_payload(
     fire_labels = data.get("fire_labels")
     if not isinstance(fire_labels, list):
         fire_label_value = str(data.get("fire_label", defaults["fire_label"])).strip()
-        fire_labels = [fire_label_value] if fire_label_value else list(defaults["fire_labels"])
+        fire_labels = (
+            [fire_label_value] if fire_label_value else list(defaults["fire_labels"])
+        )
     try:
         config_path = str(dashboard_config_path.relative_to(repo_root))
     except ValueError:

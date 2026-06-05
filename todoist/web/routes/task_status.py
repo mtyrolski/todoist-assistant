@@ -3,8 +3,6 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -16,6 +14,7 @@ from todoist.web.routes.common import _sync_api_globals
 
 router = APIRouter()
 
+
 @router.get("/api/admin/task_ingest/projects", tags=["admin"])
 async def admin_task_ingest_projects(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -26,6 +25,7 @@ async def admin_task_ingest_projects(refresh: bool = False) -> dict[str, Any]:
             status_code=500, detail=f"Failed to load projects: {type(exc).__name__}"
         ) from exc
     return {"projects": projects}
+
 
 @router.post("/api/admin/task_ingest/preview", tags=["admin"])
 async def admin_task_ingest_preview(
@@ -45,7 +45,10 @@ async def admin_task_ingest_preview(
         include_descriptions=bool(options["includeDescriptions"]),
     )
     if not tasks:
-        raise HTTPException(status_code=400, detail="Could not derive any tasks from the pasted content.")
+        raise HTTPException(
+            status_code=400,
+            detail="Could not derive any tasks from the pasted content.",
+        )
     return {
         "source": source,
         "tasks": tasks,
@@ -56,6 +59,7 @@ async def admin_task_ingest_preview(
         "preference": options["preference"],
         "includeDescriptions": options["includeDescriptions"],
     }
+
 
 @router.post("/api/admin/task_ingest/create", tags=["admin"])
 async def admin_task_ingest_create(
@@ -99,6 +103,7 @@ async def admin_task_ingest_create(
         "topLevelCount": len(tasks),
     }
 
+
 @router.get("/api/admin/status_update/projects", tags=["admin"])
 async def admin_status_update_projects(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -110,6 +115,7 @@ async def admin_status_update_projects(refresh: bool = False) -> dict[str, Any]:
         ) from exc
     return {"projects": projects}
 
+
 @router.post("/api/admin/status_update/generate", tags=["admin"])
 async def admin_status_update_generate(
     payload: dict[str, Any] = Body(default_factory=dict),
@@ -120,10 +126,16 @@ async def admin_status_update_generate(
 
     raw_project_ids = payload.get("projectIds")
     if not isinstance(raw_project_ids, Sequence) or isinstance(raw_project_ids, str):
-        raise HTTPException(status_code=400, detail="projectIds must be a list of strings")
-    project_ids = [str(value).strip() for value in raw_project_ids if str(value).strip()]
+        raise HTTPException(
+            status_code=400, detail="projectIds must be a list of strings"
+        )
+    project_ids = [
+        str(value).strip() for value in raw_project_ids if str(value).strip()
+    ]
     if not project_ids:
-        raise HTTPException(status_code=400, detail="projectIds must contain at least one project id")
+        raise HTTPException(
+            status_code=400, detail="projectIds must contain at least one project id"
+        )
 
     beg = _status_update_parse_date(payload.get("beg"), field="beg")
     end = _status_update_parse_date(payload.get("end"), field="end")
@@ -150,7 +162,8 @@ async def admin_status_update_generate(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - network safety
         raise HTTPException(
-            status_code=500, detail=f"Failed to generate status update: {type(exc).__name__}"
+            status_code=500,
+            detail=f"Failed to generate status update: {type(exc).__name__}",
         ) from exc
     selection = dict(report.get("selection") or {})
     requested_projects = list(selection.get("requestedProjects") or [])
@@ -160,16 +173,26 @@ async def admin_status_update_generate(
     project_payloads: list[dict[str, Any]] = []
     for project in expanded_projects:
         project_id = str(project.get("id") or "")
-        project_tasks = [task for task in tasks if str(task.get("projectId") or "") == project_id]
+        project_tasks = [
+            task for task in tasks if str(task.get("projectId") or "") == project_id
+        ]
         project_payloads.append(
             {
                 "id": project_id,
                 "name": project.get("name"),
                 "label": project.get("label"),
-                "completedCount": sum(int(task.get("completionCount") or 0) for task in project_tasks),
-                "commentCount": sum(int(task.get("commentCount") or 0) for task in project_tasks),
-                "storyPointCount": sum(int(task.get("storyPointCount") or 0) for task in project_tasks),
-                "estimatedTaskCount": sum(1 for task in project_tasks if int(task.get("storyPoints") or 0) > 0),
+                "completedCount": sum(
+                    int(task.get("completionCount") or 0) for task in project_tasks
+                ),
+                "commentCount": sum(
+                    int(task.get("commentCount") or 0) for task in project_tasks
+                ),
+                "storyPointCount": sum(
+                    int(task.get("storyPointCount") or 0) for task in project_tasks
+                ),
+                "estimatedTaskCount": sum(
+                    1 for task in project_tasks if int(task.get("storyPoints") or 0) > 0
+                ),
                 "tasks": project_tasks,
             }
         )
@@ -186,7 +209,9 @@ async def admin_status_update_generate(
 
     comment_count = sum(int(task.get("commentCount") or 0) for task in tasks)
     story_point_count = sum(int(task.get("storyPointCount") or 0) for task in tasks)
-    estimated_task_count = sum(1 for task in tasks if int(task.get("storyPoints") or 0) > 0)
+    estimated_task_count = sum(
+        1 for task in tasks if int(task.get("storyPoints") or 0) > 0
+    )
     report_summary = dict(report.get("summary") or {})
     report_stats = dict(report.get("stats") or {})
     response = {
@@ -198,29 +223,49 @@ async def admin_status_update_generate(
         },
         "selection": selection,
         "summary": {
-            "selectedProjectCount": int(report_summary.get("selectedProjectCount") or len(requested_projects)),
-            "expandedProjectCount": int(report_summary.get("expandedProjectCount") or len(expanded_projects)),
-            "completedEventCount": int(
-                report_summary.get("completedEventCount") or len(report.get("completedTaskEvents") or [])
+            "selectedProjectCount": int(
+                report_summary.get("selectedProjectCount") or len(requested_projects)
             ),
-            "completedTaskCount": int(report_summary.get("completedTaskCount") or len(tasks)),
+            "expandedProjectCount": int(
+                report_summary.get("expandedProjectCount") or len(expanded_projects)
+            ),
+            "completedEventCount": int(
+                report_summary.get("completedEventCount")
+                or len(report.get("completedTaskEvents") or [])
+            ),
+            "completedTaskCount": int(
+                report_summary.get("completedTaskCount") or len(tasks)
+            ),
             "commentedTaskCount": int(
                 report_summary.get("commentedTaskCount")
                 or sum(1 for task in tasks if int(task.get("commentCount") or 0) > 0)
             ),
             "commentCount": int(report_summary.get("commentCount") or comment_count),
-            "storyPointCount": int(report_summary.get("storyPointCount") or story_point_count),
-            "estimatedTaskCount": int(report_summary.get("estimatedTaskCount") or estimated_task_count),
+            "storyPointCount": int(
+                report_summary.get("storyPointCount") or story_point_count
+            ),
+            "estimatedTaskCount": int(
+                report_summary.get("estimatedTaskCount") or estimated_task_count
+            ),
         },
         "summaryText": report.get("summaryText")
         or f"Completed {len(tasks)} tasks across {len(project_payloads)} projects, grounded by {comment_count} comments.",
         "stats": {
             "completedCount": int(report_stats.get("completedCount") or len(tasks)),
             "commentCount": int(report_stats.get("commentCount") or comment_count),
-            "projectCount": int(report_stats.get("projectCount") or len(project_payloads)),
-            "activityCount": int(report_stats.get("activityCount") or len(report.get("completedTaskEvents") or [])),
-            "storyPointCount": int(report_stats.get("storyPointCount") or story_point_count),
-            "estimatedTaskCount": int(report_stats.get("estimatedTaskCount") or estimated_task_count),
+            "projectCount": int(
+                report_stats.get("projectCount") or len(project_payloads)
+            ),
+            "activityCount": int(
+                report_stats.get("activityCount")
+                or len(report.get("completedTaskEvents") or [])
+            ),
+            "storyPointCount": int(
+                report_stats.get("storyPointCount") or story_point_count
+            ),
+            "estimatedTaskCount": int(
+                report_stats.get("estimatedTaskCount") or estimated_task_count
+            ),
         },
         "projects": project_payloads,
         "tasks": tasks,

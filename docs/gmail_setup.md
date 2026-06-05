@@ -171,7 +171,7 @@ To manually trigger the Gmail Tasks automation without waiting for the scheduled
 make update_env
 
 # Or run specific automation through the dashboard
-make run_dashboard
+make dashboard
 # Navigate to Control Panel and run "Gmail Tasks" automation
 ```
 

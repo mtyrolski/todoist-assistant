@@ -6,7 +6,7 @@ from typing import Any
 from loguru import logger
 
 from todoist.database.base import Database
-from todoist.utils import Cache
+from todoist.core.utils import Cache
 
 
 def _coerce_count(value: Any) -> int:
@@ -37,8 +37,10 @@ def record_automation_run_signal(
 
     signals[automation_name] = {
         "attemptCount": _coerce_count(current.get("attemptCount")) + 1,
-        "successCount": _coerce_count(current.get("successCount")) + int(status == "completed"),
-        "failureCount": _coerce_count(current.get("failureCount")) + int(status == "failed"),
+        "successCount": _coerce_count(current.get("successCount"))
+        + int(status == "completed"),
+        "failureCount": _coerce_count(current.get("failureCount"))
+        + int(status == "failed"),
         "skipCount": _coerce_count(current.get("skipCount")) + int(status == "skipped"),
         "lastStatus": status,
         "lastStartedAt": started_at.isoformat(timespec="seconds"),
@@ -74,7 +76,9 @@ class Automation(ABC):
         return f"Automation(name={self.name}, frequency={self.frequency}, is_long={self.is_long})"
 
     def tick(self, db: Database):
-        launch_data = Cache().automation_launches.load()    # expects a dict: {automation_name: [launch_times]}
+        launch_data = (
+            Cache().automation_launches.load()
+        )  # expects a dict: {automation_name: [launch_times]}
         launches = launch_data.get(self.name, [])
         last_launch = launches[-1] if launches else dt.datetime.min
 

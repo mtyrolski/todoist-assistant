@@ -10,14 +10,21 @@ import typer
 from loguru import logger
 
 from todoist.agent.context import load_local_agent_context
-from todoist.env import EnvVar
+from todoist.core.env import EnvVar
 from todoist.agent.graph import AgentState, build_agent_graph
-from todoist.llm import DType, Device, LocalChatConfig, MessageRole, TransformersMistral3ChatModel
+from todoist.llm import (
+    DType,
+    Device,
+    LocalChatConfig,
+    MessageRole,
+    TransformersMistral3ChatModel,
+)
 from todoist.agent.repl_tool import SafePythonReplTool
-from todoist.utils import resolve_cache_dir
+from todoist.core.utils import resolve_cache_dir
 
 
 app = typer.Typer(add_completion=False)
+
 
 def _parse_device(value: str) -> Device:
     normalized = value.strip().lower()
@@ -61,7 +68,9 @@ def chat(
         help="Directory with YAML instruction prefabs",
     ),
     device: str = typer.Option("cpu", envvar=EnvVar.AGENT_DEVICE, help="cpu/cuda/mps"),
-    dtype: str = typer.Option("auto", envvar=EnvVar.AGENT_DTYPE, help="auto/float16/bfloat16/float32"),
+    dtype: str = typer.Option(
+        "auto", envvar=EnvVar.AGENT_DTYPE, help="auto/float16/bfloat16/float32"
+    ),
     temperature: float = typer.Option(0.2, envvar=EnvVar.AGENT_TEMPERATURE),
     top_p: float = typer.Option(0.95, envvar=EnvVar.AGENT_TOP_P),
     max_new_tokens: int = typer.Option(256, envvar=EnvVar.AGENT_MAX_NEW_TOKENS),
@@ -91,7 +100,12 @@ def chat(
     }
     python_tool = SafePythonReplTool(tool_ctx)
 
-    graph = build_agent_graph(llm=llm, python_repl=python_tool, prefabs_dir=prefabs_dir, max_tool_loops=max_tool_loops)
+    graph = build_agent_graph(
+        llm=llm,
+        python_repl=python_tool,
+        prefabs_dir=prefabs_dir,
+        max_tool_loops=max_tool_loops,
+    )
     state: AgentState = {"messages": []}
     logger.info("Local agent ready. Type 'exit' to quit.")
     try:
@@ -102,7 +116,9 @@ def chat(
             if not user_text:
                 continue
             logger.info("User message: {}", user_text)
-            state["messages"] = list(state.get("messages") or []) + [{"role": MessageRole.USER, "content": user_text}]
+            state["messages"] = list(state.get("messages") or []) + [
+                {"role": MessageRole.USER, "content": user_text}
+            ]
             state = cast(AgentState, graph.invoke(state))
             payload = {
                 "final_answer": state.get("final_answer"),

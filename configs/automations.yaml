@@ -17,6 +17,7 @@ gmail_tasks:
   _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
   name: Gmail Tasks
   frequency_in_minutes: 0.1
+  allow_interactive_auth: false
 habit_tracker:
   _target_: todoist.automations.habit_tracker.HabitTracker
   name: Habit Tracker

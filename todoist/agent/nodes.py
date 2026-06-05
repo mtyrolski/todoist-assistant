@@ -1,6 +1,5 @@
 """LangGraph nodes and schemas for the local Todoist agent."""
 
-
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -10,7 +9,8 @@ from typing import Protocol, Self, TypedDict, TypeVar
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from todoist.agent.constants import NodeName, PlannerAction
+from todoist.agent.constants import PlannerAction
+from todoist.agent.graph_nodes.naming import GraphNodeName
 from todoist.agent.prefabs import load_instruction_prefabs
 from todoist.agent.utils import build_planner_messages, last_user_text
 from todoist.llm.types import MessageRole
@@ -127,12 +127,16 @@ class PlannerDecision(BaseModel):
     @field_validator("tool_code", mode="before")
     @classmethod
     def _normalize_tool_code(cls, value: object) -> str | None:
-        return _normalize_text_field(value, dict_keys=("tool_code", "code", "python", "content", "text"))
+        return _normalize_text_field(
+            value, dict_keys=("tool_code", "code", "python", "content", "text")
+        )
 
     @field_validator("final_answer", mode="before")
     @classmethod
     def _normalize_final_answer(cls, value: object) -> str | None:
-        return _normalize_text_field(value, dict_keys=("final_answer", "message", "content", "text"))
+        return _normalize_text_field(
+            value, dict_keys=("final_answer", "message", "content", "text")
+        )
 
     @model_validator(mode="after")
     def _reconcile_action_fields(self) -> Self:
@@ -185,12 +189,16 @@ class AgentNodes:
             },
             {
                 "role": MessageRole.USER,
-                "content": json.dumps({"query": query, "available_prefabs": available}, ensure_ascii=False),
+                "content": json.dumps(
+                    {"query": query, "available_prefabs": available}, ensure_ascii=False
+                ),
             },
         ]
 
         try:
-            selection = self.llm.structured_chat(selector_messages, InstructionSelection)
+            selection = self.llm.structured_chat(
+                selector_messages, InstructionSelection
+            )
         except ValueError as exc:
             logger.error("Instruction selection failed: {}", exc)
             return {"selected_prefab_ids": [], "selected_prefab_contents": []}
@@ -198,11 +206,16 @@ class AgentNodes:
         allowed = {p.prefab_id for p in prefabs}
         selected_ids = [pid for pid in selection.selected_ids if pid in allowed]
         if selected_ids and _is_greeting_or_meta_query(query):
-            logger.info("Clearing instruction selection for greeting/meta query: {}", query)
+            logger.info(
+                "Clearing instruction selection for greeting/meta query: {}", query
+            )
             selected_ids = []
         selected_contents = [p.content for p in prefabs if p.prefab_id in selected_ids]
         logger.info("Selected prefabs: {}", selected_ids)
-        return {"selected_prefab_ids": selected_ids, "selected_prefab_contents": selected_contents}
+        return {
+            "selected_prefab_ids": selected_ids,
+            "selected_prefab_contents": selected_contents,
+        }
 
     def planner(self, state: AgentState) -> AgentState:
         messages = list(state.get("messages") or [])
@@ -216,15 +229,26 @@ class AgentNodes:
                 "pending_tool_code": None,
             }
 
-        base_messages = build_planner_messages(messages, state.get("selected_prefab_contents") or [])
+        base_messages = build_planner_messages(
+            messages, state.get("selected_prefab_contents") or []
+        )
         try:
             decision = self.llm.structured_chat(base_messages, PlannerDecision)
         except ValueError as exc:
             logger.warning("Planner structured output failed: {}", exc)
-            return {"final_answer": "I couldn't parse the model output. Please try again.", "pending_tool_code": None}
+            return {
+                "final_answer": "I couldn't parse the model output. Please try again.",
+                "pending_tool_code": None,
+            }
 
-        logger.info("Planner action: {} plan_steps={}", decision.action, len(decision.plan))
-        next_state: AgentState = {"plan": decision.plan, "pending_tool_code": None, "final_answer": None}
+        logger.info(
+            "Planner action: {} plan_steps={}", decision.action, len(decision.plan)
+        )
+        next_state: AgentState = {
+            "plan": decision.plan,
+            "pending_tool_code": None,
+            "final_answer": None,
+        }
 
         tool_code = (decision.tool_code or "").strip()
         final_answer = (decision.final_answer or "").strip()
@@ -233,19 +257,31 @@ class AgentNodes:
             if tool_code:
                 next_state["pending_tool_code"] = tool_code
             elif final_answer:
-                logger.warning("Planner returned action=tool without tool_code; using final_answer instead.")
+                logger.warning(
+                    "Planner returned action=tool without tool_code; using final_answer instead."
+                )
                 next_state["final_answer"] = final_answer
             else:
-                logger.warning("Planner returned action=tool but tool_code/final_answer are empty.")
-                next_state["final_answer"] = "I couldn't generate tool code for that request."
+                logger.warning(
+                    "Planner returned action=tool but tool_code/final_answer are empty."
+                )
+                next_state["final_answer"] = (
+                    "I couldn't generate tool code for that request."
+                )
         elif final_answer:
             next_state["final_answer"] = final_answer
         elif tool_code:
-            logger.warning("Planner returned action=final without final_answer; executing tool_code instead.")
+            logger.warning(
+                "Planner returned action=final without final_answer; executing tool_code instead."
+            )
             next_state["pending_tool_code"] = tool_code
         else:
-            logger.warning("Planner returned action=final but final_answer/tool_code are empty.")
-            next_state["final_answer"] = "I couldn't generate a complete response for that request."
+            logger.warning(
+                "Planner returned action=final but final_answer/tool_code are empty."
+            )
+            next_state["final_answer"] = (
+                "I couldn't generate a complete response for that request."
+            )
         return next_state
 
     def executor(self, state: AgentState) -> AgentState:
@@ -259,11 +295,15 @@ class AgentNodes:
         messages = list(state.get("messages") or [])
         if not messages:
             raise ValueError("executor requires state.messages")
-        messages.append({
-            "role": MessageRole.ASSISTANT,
-            "content": f"Calling python_repl with code:\n```python\n{code}\n```",
-        })
-        messages.append({"role": MessageRole.USER, "content": f"python_repl output:\n{output}"})
+        messages.append(
+            {
+                "role": MessageRole.ASSISTANT,
+                "content": f"Calling python_repl with code:\n```python\n{code}\n```",
+            }
+        )
+        messages.append(
+            {"role": MessageRole.USER, "content": f"python_repl output:\n{output}"}
+        )
         return {
             "messages": messages,
             "pending_tool_code": None,
@@ -281,4 +321,8 @@ class AgentNodes:
         return {"messages": messages}
 
     def route_after_planner(self, state: AgentState) -> str:
-        return NodeName.EXECUTOR if state.get("pending_tool_code") else NodeName.OUTPUT
+        return (
+            GraphNodeName.EXECUTOR
+            if state.get("pending_tool_code")
+            else GraphNodeName.OUTPUT
+        )

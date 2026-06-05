@@ -56,13 +56,14 @@ def _columns_with_completed_activity(
 
     always_visible_projects = always_visible_projects or set()
     df_visible = df_completed[
-        (df_completed.index >= beg_date)
-        & (df_completed.index <= end_date)
+        (df_completed.index >= beg_date) & (df_completed.index <= end_date)
     ]
     visible_names: set[str] = set()
     if not df_visible.empty:
         project_names = cast(pd.Series, df_visible["root_project_name"])
-        visible_names.update(str(name) for name in project_names.dropna().astype(str).unique())
+        visible_names.update(
+            str(name) for name in project_names.dropna().astype(str).unique()
+        )
 
     if always_visible_projects:
         all_project_names = cast(pd.Series, df_completed["root_project_name"])
@@ -85,9 +86,13 @@ def _period_freq_for_granularity(granularity: str) -> str:
     return granularity
 
 
-def _period_label_for_granularity(end_date: datetime, granularity: str) -> datetime | None:
+def _period_label_for_granularity(
+    end_date: datetime, granularity: str
+) -> datetime | None:
     try:
-        period = cast(Any, pd.Period(end_date, freq=_period_freq_for_granularity(granularity)))
+        period = cast(
+            Any, pd.Period(end_date, freq=_period_freq_for_granularity(granularity))
+        )
         period_end = period.end_time
         if pd.isna(period_end):
             return None
@@ -137,7 +142,9 @@ def _prepare_completed_periodic_frame(
     df_periodic = cast(pd.DataFrame, df_periodic[df_periodic.index >= beg_date])
     df_periodic = cast(
         pd.DataFrame,
-        df_periodic.loc[:, [column for column in active_columns if column in df_periodic.columns]],
+        df_periodic.loc[
+            :, [column for column in active_columns if column in df_periodic.columns]
+        ],
     )
     return df_completed, _drop_projects_without_period_activity(df_periodic)
 
@@ -146,7 +153,9 @@ def _period_bounds_for_granularity(
     end_date: datetime, granularity: str
 ) -> tuple[datetime | None, datetime | None]:
     try:
-        period = cast(Any, pd.Period(end_date, freq=_period_freq_for_granularity(granularity)))
+        period = cast(
+            Any, pd.Period(end_date, freq=_period_freq_for_granularity(granularity))
+        )
         start = period.start_time
         end = period.end_time
         if pd.isna(start) or pd.isna(end):
@@ -171,9 +180,7 @@ def _build_periodic_forecast_context(
     current_start: datetime | None = None
     current_end: datetime | None = None
     if current_label is not None:
-        current_start, current_end = _period_bounds_for_granularity(
-            as_of, granularity
-        )
+        current_start, current_end = _period_bounds_for_granularity(as_of, granularity)
 
     has_current_period_activity = bool(
         current_start is not None
@@ -234,7 +241,9 @@ def _activity_span(series: pd.Series) -> tuple[pd.Timestamp, pd.Timestamp] | Non
     if not bool(active.any()):
         return None
     active_index = cast(pd.Index, series.index[active])
-    return cast(pd.Timestamp, active_index.min()), cast(pd.Timestamp, active_index.max())
+    return cast(pd.Timestamp, active_index.min()), cast(
+        pd.Timestamp, active_index.max()
+    )
 
 
 def _trim_to_activity_span(series: pd.Series, activity_series: pd.Series) -> pd.Series:
@@ -275,7 +284,8 @@ def _add_total_overlay_periodic_traces(
 
     if context.show_forecast and context.current_label is not None:
         historical = cast(
-            pd.Series, total_series[total_series.index < pd.Timestamp(context.current_label)]
+            pd.Series,
+            total_series[total_series.index < pd.Timestamp(context.current_label)],
         )
     else:
         historical = cast(pd.Series, total_series)
@@ -303,9 +313,15 @@ def _add_total_overlay_periodic_traces(
     ):
         return
 
-    history_values = cast(
-        pd.Series, total_series[total_series.index < pd.Timestamp(context.current_label)]
-    ).fillna(0).astype(float).tolist()
+    history_values = (
+        cast(
+            pd.Series,
+            total_series[total_series.index < pd.Timestamp(context.current_label)],
+        )
+        .fillna(0)
+        .astype(float)
+        .tolist()
+    )
     recently_active = total_actual_so_far > 0 or any(v > 0 for v in history_values[-4:])
     if not recently_active:
         return
@@ -410,10 +426,17 @@ def _add_total_overlay_cumulative_traces(
     ):
         return
 
-    period_totals = total_cumulative_series.diff().fillna(total_cumulative_series).fillna(0)
-    history_values = cast(
-        pd.Series, period_totals[period_totals.index < pd.Timestamp(context.current_label)]
-    ).astype(float).tolist()
+    period_totals = (
+        total_cumulative_series.diff().fillna(total_cumulative_series).fillna(0)
+    )
+    history_values = (
+        cast(
+            pd.Series,
+            period_totals[period_totals.index < pd.Timestamp(context.current_label)],
+        )
+        .astype(float)
+        .tolist()
+    )
     recently_active = total_actual_so_far > 0 or any(v > 0 for v in history_values[-4:])
     if not recently_active:
         return
@@ -566,7 +589,9 @@ def plot_completed_tasks_periodically(
             )
             history_totals = history_source.fillna(0).astype(float).tolist()
             actual_so_far = int(current_counts.get(root_project_name, 0))
-            recently_active = actual_so_far > 0 or any(v > 0 for v in history_totals[-4:])
+            recently_active = actual_so_far > 0 or any(
+                v > 0 for v in history_totals[-4:]
+            )
             if not recently_active:
                 continue
 
@@ -704,10 +729,14 @@ def cumsum_completed_tasks_periodically(
         root_project_name = str(root_project)
         project_counts = cast(pd.Series, df_periodic_counts[root_project])
         is_archived_project = root_project_name in archived_project_names
-        project_cumulative = cast(
-            pd.Series,
-            df_weekly_per_project[root_project],
-        ).ffill().fillna(0)
+        project_cumulative = (
+            cast(
+                pd.Series,
+                df_weekly_per_project[root_project],
+            )
+            .ffill()
+            .fillna(0)
+        )
         if is_archived_project:
             project_series = _series_at_positive_activity_periods(
                 project_cumulative,
@@ -766,7 +795,9 @@ def cumsum_completed_tasks_periodically(
                 .tolist()
             )
             actual_so_far = int(current_counts.get(root_project_name, 0))
-            recently_active = actual_so_far > 0 or any(v > 0 for v in history_totals[-4:])
+            recently_active = actual_so_far > 0 or any(
+                v > 0 for v in history_totals[-4:]
+            )
             if not recently_active:
                 continue
 

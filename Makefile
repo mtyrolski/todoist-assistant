@@ -1,7 +1,10 @@
-.PHONY: init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage typecheck lint validate check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex dashboard_triton dashboard_triton_gpu run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
+PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/download_models.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/run_make_checks.py scripts/status.py
+PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
+PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 MODEL_ID ?=
@@ -9,6 +12,8 @@ TRITON_MODEL_NAME ?=
 TRITON_URL ?=
 BACKEND ?= raw
 BACKEND_AI ?=
+
+setup: init_local_env ## First-time source setup: sync Todoist data, then use make dashboard
 
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
@@ -47,7 +52,41 @@ run_api:
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-run_dashboard: ensure_frontend_deps
+dashboard: run_dashboard ## Start dashboard without AI by default; BACKEND/BACKEND_AI may override
+
+dashboard_raw: ensure_frontend_deps ## Start dashboard with AI disabled
+	MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start raw cpu
+
+dashboard_codex: ensure_frontend_deps ## Start dashboard using the local Codex CLI backend
+	MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start codex cpu
+
+dashboard_triton: ensure_frontend_deps ## Start dashboard using Triton on CPU
+	@MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start triton cpu
+
+dashboard_triton_gpu: ensure_frontend_deps ## Start dashboard using Triton on GPU
+	@MODEL_ID="$(MODEL_ID)" \
+	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
+	TRITON_URL="$(TRITON_URL)" \
+	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
+	bash ./scripts/dashboard_stack.sh start triton gpu
+
+run_dashboard: ensure_frontend_deps ## Start dashboard; supports BACKEND/BACKEND_AI=raw|codex|triton
 	@backend="$(BACKEND)"; \
 	if [ -n "$(BACKEND_AI)" ]; then backend="$(BACKEND_AI)"; fi; \
 	case "$$backend" in \
@@ -63,21 +102,9 @@ run_dashboard: ensure_frontend_deps
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start "$$stack_backend" cpu
 
-run_dashboard_cpu: ensure_frontend_deps
-	@MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start triton cpu
+run_dashboard_cpu: dashboard_triton ## Backward-compatible alias; use make dashboard_triton
 
-run_dashboard_gpu: ensure_frontend_deps
-	@MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start triton gpu
+run_dashboard_gpu: dashboard_triton_gpu ## Backward-compatible alias; use make dashboard_triton_gpu
 
 stop_dashboard:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -85,7 +112,7 @@ stop_dashboard:
 	bash ./scripts/dashboard_stack.sh stop
 
 status: ## Show local dashboard/API/frontend runtime status
-	@python3 scripts/status.py
+	@PYTHONPATH=. uv run python3 -m scripts.status
 
 triton_shell:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -138,7 +165,10 @@ clear_local_env:
 
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
-	make run_dashboard
+	make dashboard
+
+chat_agent: ## Start the local read-only Transformers chat agent
+	uv run python3 -m todoist.agent.chat chat
 
 test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
@@ -150,62 +180,55 @@ coverage: ## Run full pytest coverage report
 check_explicit_any: ## Reject `: Any =` variable annotations used as typecheck escape hatches
 	PYTHONPATH=. uv run python3 -m scripts.check_explicit_any
 
-typecheck: check_explicit_any ## Run pyright type checks
-	PYTHONPATH=. uv run pyright --warnings
+pyright: ## Run Pyright type checks
+	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)
 
-lint: ## Run pylint
-	PYTHONPATH=. uv run pylint -j 0 todoist tests
+pylint: ## Run pylint
+	PYTHONPATH=. uv run pylint -j 0 $(PY_SOURCE_PATHS)
 
-test_all: ## Run typecheck, lint, and tests in parallel, then print logs in order
-	+@bash -c '\
-		set -u; \
-		log_dir="$(DASHBOARD_STATE_DIR)/checks/$$(date +%Y%m%d-%H%M%S)"; \
-		mkdir -p "$$log_dir"; \
-		reported_file="$$log_dir/.reported"; \
-		: > "$$reported_file"; \
-		targets="typecheck lint test check_explicit_any"; \
-		total="$$(printf "%s\n" $$targets | wc -w | tr -d " ")"; \
-		echo "Running checks in parallel: $$targets"; \
-		echo "Logs: $$log_dir"; \
-		for target in $$targets; do \
-			( \
-				$(MAKE) --no-print-directory "$$target" >"$$log_dir/$$target.log" 2>&1; \
-				printf "%s\n" "$$?" >"$$log_dir/$$target.status"; \
-			) & \
-		done; \
-		completed=0; \
-		while [ "$$completed" -lt "$$total" ]; do \
-			for target in $$targets; do \
-				if [ -f "$$log_dir/$$target.status" ] && ! grep -qx "$$target" "$$reported_file"; then \
-					code="$$(cat "$$log_dir/$$target.status")"; \
-					printf "%s\n" "$$target" >> "$$reported_file"; \
-					completed="$$((completed + 1))"; \
-					printf "Completed [%s/%s] make %s: %s (exit %s)\n" "$$completed" "$$total" "$$target" "$$([ "$$code" -eq 0 ] && printf passed || printf failed)" "$$code"; \
-				fi; \
-			done; \
-			if [ "$$completed" -lt "$$total" ]; then \
-				sleep 1; \
-			fi; \
-		done; \
-		wait || true; \
-		status=0; \
-		for target in $$targets; do \
-			code="$$(cat "$$log_dir/$$target.status" 2>/dev/null || printf "1")"; \
-			printf "\n===== make %s (%s) =====\n" "$$target" "$$([ "$$code" -eq 0 ] && printf passed || printf failed)"; \
-			cat "$$log_dir/$$target.log"; \
-			printf "===== make %s exit %s =====\n" "$$target" "$$code"; \
-			if [ "$$code" -ne 0 ]; then \
-				status="$$code"; \
-			fi; \
-		done; \
-		printf "\nLogs kept in %s\n" "$$log_dir"; \
-		if [ "$$status" -eq 0 ]; then \
-			echo "test_all passed."; \
-		else \
-			echo "test_all failed."; \
-		fi; \
-		exit "$$status"; \
-	'
+ruff: ## Run Ruff lint checks
+	PYTHONPATH=. uv run ruff check $(PY_SOURCE_PATHS)
+
+ruff_format: ## Check Ruff formatting
+	PYTHONPATH=. uv run ruff format --check $(PY_SOURCE_PATHS)
+
+pyright_all: ## Run Pyright on source, tests, and scripts
+	PYTHONPATH=. uv run pyright --warnings $(PY_CHECK_PATHS)
+
+pylint_all: ## Run pylint on source, tests, and scripts
+	PYTHONPATH=. uv run pylint -j 0 $(PY_CHECK_PATHS)
+
+ruff_all: ## Run Ruff on source, tests, and scripts
+	PYTHONPATH=. uv run ruff check $(PY_CHECK_PATHS)
+
+typecheck: check_explicit_any pyright ## Run explicit-Any and Pyright checks
+
+lint: pylint ruff ruff_format ## Run pylint and Ruff checks
+
+check_fast: ## Run quick source-only checks with verbose progress
+	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
+		--title check_fast \
+		check_explicit_any=explicit-any \
+		ruff=ruff
+
+check: ## Run all static quality checks in parallel with verbose progress
+	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
+		--title check \
+		check_explicit_any=explicit-any \
+		pyright=pyright \
+		pylint=pylint \
+		ruff=ruff
+
+validate: check ## Alias for make check
+
+test_all: ## Run static checks and tests in parallel with verbose progress
+	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
+		--title test_all \
+		check_explicit_any=explicit-any \
+		pyright_all=pyright-all \
+		pylint_all=pylint-all \
+		ruff_all=ruff-all \
+		test=pytest
 
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
 	uv run python3 -m scripts.build_windows

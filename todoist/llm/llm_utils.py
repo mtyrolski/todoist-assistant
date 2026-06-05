@@ -4,7 +4,7 @@ from typing import Any, TypeAlias, cast
 
 from loguru import logger
 
-from todoist.types import Task, TaskEntry
+from todoist.core.types import Task, TaskEntry
 
 
 # === LLM UTILS ===============================================================
@@ -59,7 +59,9 @@ def _task_from_api_payload(payload: Mapping[str, Any] | None) -> Task | None:
     return Task(id=str(task_id), task_entry=cast(TaskEntry, entry))
 
 
-def _render_ancestor_context(ancestors: Iterable[Mapping[str, str | None]]) -> str | None:
+def _render_ancestor_context(
+    ancestors: Iterable[Mapping[str, str | None]],
+) -> str | None:
     parts: list[str] = []
     for ancestor in ancestors:
         content = _sanitize_text(ancestor.get("content"))
@@ -73,7 +75,9 @@ def _render_ancestor_context(ancestors: Iterable[Mapping[str, str | None]]) -> s
     return " > ".join(parts) if parts else None
 
 
-def _merge_description_with_context(description: str | None, context: str | None) -> str | None:
+def _merge_description_with_context(
+    description: str | None, context: str | None
+) -> str | None:
     description = _sanitize_text(description)
     context = _sanitize_text(context)
     if not context:

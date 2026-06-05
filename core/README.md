@@ -19,8 +19,8 @@ uv build core
 
 ## What’s included
 
-- `todoist.api`, `todoist.database`, `todoist.types`, `todoist.utils`
-- activity helpers (`todoist.activity`)
+- `todoist.api`, `todoist.database`, `todoist.core.types`, `todoist.core.utils`
+- activity helpers (`todoist.features.activity`)
 - automation base utilities (`todoist.automations.base`, `todoist.automations.activity`, etc.)
 
 ## What’s excluded

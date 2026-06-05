@@ -6,7 +6,7 @@ from todoist.database.base import Database
 from todoist.llm.llm_utils import (
     _task_from_api_payload,
 )
-from todoist.types import Task
+from todoist.core.types import Task
 
 from .generation import generate_breakdowns
 from .models import (
@@ -35,7 +35,9 @@ def _post_task_comment(db: Database, task_id: str, content: str) -> None:
     try:
         db.create_comment(task_id=task_id, content=content)
     except Exception as exc:  # pragma: no cover - comment audit must not block rollout
-        logger.warning("Failed to create AI breakdown comment for task {}: {}", task_id, exc)
+        logger.warning(
+            "Failed to create AI breakdown comment for task {}: {}", task_id, exc
+        )
 
 
 def _llm_descriptor(automation: Any, llm: Any) -> str:
@@ -76,7 +78,9 @@ def _failure_comment(*, run_id: str, error_message: str) -> str:
     )
 
 
-def _failure_comment_with_action(*, run_id: str, error_message: str, action: str) -> str:
+def _failure_comment_with_action(
+    *, run_id: str, error_message: str, action: str
+) -> str:
     return "\n".join(
         [
             _comment_header(),
@@ -130,7 +134,9 @@ def _task_failure_comment_count(db: Database, task_id: str) -> int:
     try:
         comments = db.fetch_task_comments(task_id)
     except Exception as exc:  # pragma: no cover - defensive retry policy
-        logger.warning("Failed to fetch AI breakdown comments for task {}: {}", task_id, exc)
+        logger.warning(
+            "Failed to fetch AI breakdown comments for task {}: {}", task_id, exc
+        )
         return 0
     return sum(
         1
@@ -191,7 +197,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
     if track_processed:
         raw_processed = previous_progress.get(ProgressKey.PROCESSED_IDS.value)
         if isinstance(raw_processed, list):
-            processed_ids = {str(task_id) for task_id in raw_processed if isinstance(task_id, str)}
+            processed_ids = {
+                str(task_id) for task_id in raw_processed if isinstance(task_id, str)
+            }
 
     queue_items = automation.queue_load()
     queue_additions: list[QueueItem] = []
@@ -226,7 +234,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
 
     if not candidates:
         if drop_queue_ids:
-            remaining = [item for item in queue_items if item["task_id"] not in drop_queue_ids]
+            remaining = [
+                item for item in queue_items if item["task_id"] not in drop_queue_ids
+            ]
             automation.queue_save(remaining)
         if automation.track_progress:
             idle_progress = build_idle_progress(
@@ -271,7 +281,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
         )
         automation.progress_save(progress)
         if drop_queue_ids:
-            remaining = [item for item in queue_items if item["task_id"] not in drop_queue_ids]
+            remaining = [
+                item for item in queue_items if item["task_id"] not in drop_queue_ids
+            ]
             automation.queue_save(remaining)
         return
 
@@ -289,7 +301,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
         _post_task_comment(
             db,
             request.task.id,
-            _start_comment(run_id=run_id, request=request, llm_descriptor=llm_descriptor),
+            _start_comment(
+                run_id=run_id, request=request, llm_descriptor=llm_descriptor
+            ),
         )
     generation_results = generate_breakdowns(
         automation=automation,
@@ -436,7 +450,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
             error_message = "; ".join(context.errors[:3])
             if len(context.errors) > 3:
                 error_message = f"{error_message}; and {len(context.errors) - 3} more"
-            logger.error("AI breakdown insert failed for task {}: {}", task.id, error_message)
+            logger.error(
+                "AI breakdown insert failed for task {}: {}", task.id, error_message
+            )
             _post_task_comment(
                 db,
                 task.id,
@@ -525,7 +541,8 @@ def run_breakdown(automation: Any, db: Database) -> None:
         queue_remaining = [
             item
             for item in queue_items
-            if item["task_id"] not in drop_queue_ids and item["task_id"] not in processed_queue_ids
+            if item["task_id"] not in drop_queue_ids
+            and item["task_id"] not in processed_queue_ids
         ]
         queue_remaining.extend(queue_additions)
         automation.queue_save(queue_remaining)

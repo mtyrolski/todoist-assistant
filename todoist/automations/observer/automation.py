@@ -12,7 +12,7 @@ from loguru import logger
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.database.base import Database
-from todoist.utils import Cache
+from todoist.core.utils import Cache
 
 POLL_INTERVAL_SECONDS = 30.0
 RECENT_ACTIVITY_PAGES = 1
@@ -76,7 +76,9 @@ class AutomationObserver:
 
         automations_to_run = self._eligible_automations(has_new_events=bool(new_events))
         if not automations_to_run:
-            logger.debug("Observer tick: no new activity events or polling automations to run.")
+            logger.debug(
+                "Observer tick: no new activity events or polling automations to run."
+            )
             return ObserverRunResult(new_events=0, automations_ran=0)
 
         # Refresh DB caches so automations work on up-to-date tasks/labels.
@@ -119,7 +121,9 @@ class AutomationObserver:
         ]
 
     def _refresh_activity_cache(self) -> set:
-        events, stats = self._activity.fetch_recent_events(self._db, max_pages=RECENT_ACTIVITY_PAGES)
+        events, stats = self._activity.fetch_recent_events(
+            self._db, max_pages=RECENT_ACTIVITY_PAGES
+        )
         if stats.get("total"):
             logger.debug(f"Observer activity snapshot: {stats}")
         if not events:
@@ -135,7 +139,9 @@ class AutomationObserver:
         cached_events.update(new_events)
         added = len(new_events)
         Cache().activity.save(cached_events)
-        logger.debug(f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}")
+        logger.debug(
+            f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}"
+        )
         return new_events
 
     @staticmethod
@@ -170,9 +176,13 @@ class AutomationObserver:
         enabled = bool(payload.get("enabled", True))
         raw_interval = payload.get("refreshIntervalSeconds")
         if raw_interval is None:
-            raw_interval = float(payload.get("refreshIntervalMinutes", 0.0) or 0.0) * 60.0
+            raw_interval = (
+                float(payload.get("refreshIntervalMinutes", 0.0) or 0.0) * 60.0
+            )
         try:
-            poll_interval_seconds = float(raw_interval) if raw_interval else self._poll_interval_seconds
+            poll_interval_seconds = (
+                float(raw_interval) if raw_interval else self._poll_interval_seconds
+            )
         except (TypeError, ValueError):
             poll_interval_seconds = self._poll_interval_seconds
         return enabled, poll_interval_seconds

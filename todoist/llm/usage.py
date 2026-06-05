@@ -1,13 +1,11 @@
 """Persistent LLM usage counters shared across local AI flows."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from datetime import datetime
 from threading import Lock
 from typing import Any
 
-from todoist.utils import Cache
+from todoist.core.utils import Cache
 
 
 _USAGE_LOCK = Lock()
@@ -93,7 +91,9 @@ def _load_usage_payload() -> dict[str, Any]:
     }
 
 
-def _increment_counter(counter: dict[str, int], *, operation: str, input_tokens: int, output_tokens: int) -> None:
+def _increment_counter(
+    counter: dict[str, int], *, operation: str, input_tokens: int, output_tokens: int
+) -> None:
     counter["inference_count"] += 1
     if operation == "chat":
         counter["chat_count"] += 1
@@ -166,7 +166,12 @@ def record_llm_usage(
         backends = payload.setdefault("backends", {})
         backend_entry = backends.setdefault(
             normalized_backend,
-            {"totals": _counter_payload(), "models": {}, "updated_at": None, "last_request": None},
+            {
+                "totals": _counter_payload(),
+                "models": {},
+                "updated_at": None,
+                "last_request": None,
+            },
         )
         backend_totals = _counter_payload(backend_entry.get("totals"))
         _increment_counter(
@@ -234,10 +239,14 @@ def _public_request_payload(payload: Any) -> dict[str, Any] | None:
     }
 
 
-def load_llm_usage_summary(*, selected_backend: str, selected_model_id: str) -> dict[str, Any]:
+def load_llm_usage_summary(
+    *, selected_backend: str, selected_model_id: str
+) -> dict[str, Any]:
     payload = _load_usage_payload()
     backends = payload.get("backends")
-    backend_entry = backends.get(selected_backend) if isinstance(backends, Mapping) else None
+    backend_entry = (
+        backends.get(selected_backend) if isinstance(backends, Mapping) else None
+    )
     models = backend_entry.get("models") if isinstance(backend_entry, Mapping) else None
     model_entry = models.get(selected_model_id) if isinstance(models, Mapping) else None
     return {

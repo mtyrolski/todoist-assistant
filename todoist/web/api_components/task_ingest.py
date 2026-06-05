@@ -3,14 +3,17 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable
 
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from datetime import date
+from pathlib import Path
 import re
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from todoist.automations.llm_breakdown.models import BreakdownNode
+from todoist.database.base import Database
+from todoist.core.types import Project
 
 
 def _sync_api_globals():
@@ -21,11 +24,15 @@ def _sync_api_globals():
         if name.startswith("__"):
             continue
         original = _ORIGINALS.get(name)
-        if original is not None and getattr(value, "_component_wrapper_for", None) == name:
+        if (
+            original is not None
+            and getattr(value, "_component_wrapper_for", None) == name
+        ):
             current[name] = original
         else:
             current[name] = value
     return web_api
+
 
 def _template_path(category: str, name: str) -> Path:
     _sync_api_globals()
@@ -45,7 +52,9 @@ class _TaskIngestTree(BaseModel):
 _TaskIngestNode.model_rebuild()
 
 
-_BULLET_LINE_RE = re.compile(r"^(?P<indent>\s*)(?:[-*+]|(?:\d+|[A-Za-z])[.)])\s+(?P<content>.+?)\s*$")
+_BULLET_LINE_RE = re.compile(
+    r"^(?P<indent>\s*)(?:[-*+]|(?:\d+|[A-Za-z])[.)])\s+(?P<content>.+?)\s*$"
+)
 
 
 def _task_ingest_db() -> Database:
@@ -153,9 +162,13 @@ def _normalize_task_ingest_node(
     return node
 
 
-def _task_ingest_tree_payload(tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _task_ingest_tree_payload(
+    tasks: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
     _sync_api_globals()
-    return _task_ingest_tree_payload_with_options(tasks, max_depth=3, include_descriptions=True)
+    return _task_ingest_tree_payload_with_options(
+        tasks, max_depth=3, include_descriptions=True
+    )
 
 
 def _task_ingest_tree_payload_with_options(
@@ -190,16 +203,27 @@ def _task_ingest_options(payload: Mapping[str, Any]) -> dict[str, Any]:
         max_depth = int(requested_depth.strip())
     max_depth = min(4, max(2, max_depth))
 
-    granularity = _task_ingest_trim_text(options.get("granularity")).lower() or "balanced"
+    granularity = (
+        _task_ingest_trim_text(options.get("granularity")).lower() or "balanced"
+    )
     if granularity not in {"compact", "balanced", "detailed"}:
         granularity = "balanced"
 
-    preference = _task_ingest_trim_text(options.get("preference")).lower() or "action-first"
-    if preference not in {"action-first", "milestone-driven", "checklist-heavy", "meeting-notes"}:
+    preference = (
+        _task_ingest_trim_text(options.get("preference")).lower() or "action-first"
+    )
+    if preference not in {
+        "action-first",
+        "milestone-driven",
+        "checklist-heavy",
+        "meeting-notes",
+    }:
         preference = "action-first"
 
     include_descriptions_raw = options.get("includeDescriptions")
-    include_descriptions = True if include_descriptions_raw is None else bool(include_descriptions_raw)
+    include_descriptions = (
+        True if include_descriptions_raw is None else bool(include_descriptions_raw)
+    )
 
     return {
         "maxDepth": max_depth,
@@ -209,7 +233,9 @@ def _task_ingest_options(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _heuristic_task_ingest_tree(raw_content: str, *, granularity: str) -> list[dict[str, Any]]:
+def _heuristic_task_ingest_tree(
+    raw_content: str, *, granularity: str
+) -> list[dict[str, Any]]:
     _sync_api_globals()
     lines = raw_content.splitlines()
     roots: list[dict[str, Any]] = []
@@ -239,7 +265,9 @@ def _heuristic_task_ingest_tree(raw_content: str, *, granularity: str) -> list[d
             continue
         if current_node is not None:
             description = _task_ingest_trim_text(current_node.get("description"))
-            current_node["description"] = f"{description}\n{stripped}".strip() if description else stripped
+            current_node["description"] = (
+                f"{description}\n{stripped}".strip() if description else stripped
+            )
         else:
             preamble.append(stripped)
 
@@ -252,11 +280,17 @@ def _heuristic_task_ingest_tree(raw_content: str, *, granularity: str) -> list[d
             return [wrapper]
         return roots
 
-    paragraphs = [segment.strip() for segment in re.split(r"\n\s*\n+", raw_content) if segment.strip()]
+    paragraphs = [
+        segment.strip()
+        for segment in re.split(r"\n\s*\n+", raw_content)
+        if segment.strip()
+    ]
     if len(paragraphs) > 1:
         tasks: list[dict[str, Any]] = []
         for paragraph in paragraphs:
-            paragraph_lines = [part.strip() for part in paragraph.splitlines() if part.strip()]
+            paragraph_lines = [
+                part.strip() for part in paragraph.splitlines() if part.strip()
+            ]
             if not paragraph_lines:
                 continue
             node: dict[str, Any] = {"content": paragraph_lines[0]}
@@ -378,9 +412,10 @@ def _task_ingest_rewrite_with_llm_sync(
         )
         if tasks:
             source = "llm"
-            if created_model and isinstance(model, TritonGenerateChatModel):
+            backend = model_backend(model)
+            if created_model and backend == "triton_local":
                 source = "triton"
-            elif created_model and isinstance(model, CodexCliChatModel):
+            elif created_model and backend == "codex":
                 source = "codex"
             elif not created_model:
                 source = "loaded-model"
@@ -458,7 +493,9 @@ def _task_ingest_create_node_sync(
             )
 
 
-def _task_ingest_create_sync(project_id: str, tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _task_ingest_create_sync(
+    project_id: str, tasks: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
     _sync_api_globals()
     dbio = _task_ingest_db()
     created: list[dict[str, Any]] = []
@@ -486,7 +523,10 @@ def _status_update_parse_date(value: Any, *, field: str) -> date:
     try:
         return date.fromisoformat(parsed)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DD") from exc
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be YYYY-MM-DD"
+        ) from exc
+
 
 _COMPONENT_EXPORTS = (
     "_TaskIngestNode",

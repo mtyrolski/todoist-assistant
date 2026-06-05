@@ -6,6 +6,8 @@
 *.pickle
 *.jl
 *.html
+.pytest_cache/
+.ruff_cache/
 scripts/*
 !scripts/windows/
 !scripts/windows/**
@@ -15,12 +17,15 @@ scripts/*
 !scripts/build_macos_pkg.sh
 !scripts/build_macos_dmg.sh
 !scripts/get_version.py
+!scripts/check_llm_activity_prompt.py
 !scripts/check_versions.py
 !scripts/check_explicit_any.py
 !scripts/clear_local_env.py
 !scripts/create_task_tree.py
 !scripts/download_models.py
 !scripts/dashboard_stack.sh
+!scripts/resolve_llm_backend.py
+!scripts/run_make_checks.py
 !scripts/status.py
 !scripts/macos/
 !scripts/macos/**

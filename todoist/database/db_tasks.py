@@ -9,10 +9,15 @@ from loguru import logger
 from tqdm import tqdm
 
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
-from todoist.constants import TaskField
+from todoist.core.constants import TaskField
 from todoist.api.client import EndpointCallResult
-from todoist.types import Task
-from todoist.utils import MaxRetriesExceeded, RETRY_MAX_ATTEMPTS, with_retry, get_max_concurrent_requests
+from todoist.core.types import Task
+from todoist.core.utils import (
+    MaxRetriesExceeded,
+    RETRY_MAX_ATTEMPTS,
+    with_retry,
+    get_max_concurrent_requests,
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +28,7 @@ class TaskTemplateInsertRequest:
 
 class DatabaseTasks:
     """Database class to manage tasks in the Todoist API"""
+
     def __init__(self):
         super().__init__()
         self._api_client = TodoistAPIClient()
@@ -36,7 +42,9 @@ class DatabaseTasks:
 
         return self._api_client.last_call_result
 
-    def insert_task_from_template(self, task: Task, **overrrides: Any) -> dict[str, Any]:
+    def insert_task_from_template(
+        self, task: Task, **overrrides: Any
+    ) -> dict[str, Any]:
         """
         Insert a task into the database using a template and optional overrides.
         This method creates a new task by merging the task template provided in the
@@ -58,8 +66,10 @@ class DatabaseTasks:
         """
         param_names = inspect.signature(self.insert_task).parameters.keys()
         if any(k not in param_names for k in overrrides.keys()):
-            logger.error(f'Invalid overrides: {overrrides.keys()} are not subset of {param_names}')
-            return {'error': 'Invalid overrides'}
+            logger.error(
+                f"Invalid overrides: {overrrides.keys()} are not subset of {param_names}"
+            )
+            return {"error": "Invalid overrides"}
 
         merged_kwargs = {**task.task_entry.kwargs, **overrrides}
         final_kwargs = {k: v for k, v in merged_kwargs.items() if k in param_names}
@@ -162,7 +172,9 @@ class DatabaseTasks:
         )
 
         logger.debug("Creating task via Todoist API", payload=payload)
-        result: Any | None = self._api_client.request_json(spec, operation_name="create task")
+        result: Any | None = self._api_client.request_json(
+            spec, operation_name="create task"
+        )
         if result is None:
             logger.error("Todoist API returned empty response for task creation")
             return {}
@@ -189,7 +201,9 @@ class DatabaseTasks:
         logger.debug("Deleting task", task_id=task_id)
         result = self._api_client.request(spec, operation_name=f"delete task {task_id}")
         if result.status_code not in (200, 204):
-            logger.error("Unexpected status when deleting task", status=result.status_code)
+            logger.error(
+                "Unexpected status when deleting task", status=result.status_code
+            )
             return False
         if result.text:
             logger.debug("Todoist delete response", body=result.text)
@@ -370,7 +384,9 @@ class DatabaseTasks:
             headers={"Content-Type": "application/json"},
         )
 
-        result: Any | None = self._api_client.request_json(spec, operation_name=f"fetch task {task_id}")
+        result: Any | None = self._api_client.request_json(
+            spec, operation_name=f"fetch task {task_id}"
+        )
         if result is None:
             logger.error("Todoist API returned empty response for fetch_task_by_id")
             return {}
@@ -379,11 +395,15 @@ class DatabaseTasks:
         return {"result": result}
 
     @staticmethod
-    def _extract_comments_page(payload: object, *, operation_name: str) -> tuple[list[dict[str, Any]], str | None]:
+    def _extract_comments_page(
+        payload: object, *, operation_name: str
+    ) -> tuple[list[dict[str, Any]], str | None]:
         if isinstance(payload, list):
             comments = [item for item in payload if isinstance(item, dict)]
             if len(comments) != len(payload):
-                raise RuntimeError(f"Unexpected non-object comment record in {operation_name} response")
+                raise RuntimeError(
+                    f"Unexpected non-object comment record in {operation_name} response"
+                )
             return comments, None
 
         if not isinstance(payload, dict):
@@ -395,11 +415,15 @@ class DatabaseTasks:
         if raw_comments is None:
             raw_comments = payload.get("comments")
         if not isinstance(raw_comments, list):
-            raise RuntimeError(f"Unexpected results payload returned from {operation_name}")
+            raise RuntimeError(
+                f"Unexpected results payload returned from {operation_name}"
+            )
 
         comments = [item for item in raw_comments if isinstance(item, dict)]
         if len(comments) != len(raw_comments):
-            raise RuntimeError(f"Unexpected non-object comment record in {operation_name} response")
+            raise RuntimeError(
+                f"Unexpected non-object comment record in {operation_name} response"
+            )
 
         next_cursor = payload.get("next_cursor")
         return comments, str(next_cursor) if isinstance(next_cursor, str) else None
@@ -435,17 +459,21 @@ class DatabaseTasks:
             try:
                 return self.insert_task(**task_data)
             except (RuntimeError, ValueError, TypeError, KeyError) as e:
-                logger.error(f"Failed to insert task at index {index}: {e.__class__.__name__}: {e}")
+                logger.error(
+                    f"Failed to insert task at index {index}: {e.__class__.__name__}: {e}"
+                )
                 return {}
 
-        def insert_single_task_with_retry(task_data: dict[str, Any], index: int) -> dict[str, Any]:
+        def insert_single_task_with_retry(
+            task_data: dict[str, Any], index: int
+        ) -> dict[str, Any]:
             """Insert a single task with built-in retry logic."""
             return with_retry(
                 partial(insert_single_task, task_data, index),
                 operation_name=(
                     f"insert task {index} (content: {task_data.get(TaskField.CONTENT.value, 'N/A')})"
                 ),
-                max_attempts=RETRY_MAX_ATTEMPTS
+                max_attempts=RETRY_MAX_ATTEMPTS,
             )
 
         logger.info(f"Inserting {len(tasks_data)} tasks with thread pool")
@@ -459,19 +487,27 @@ class DatabaseTasks:
             for future in tqdm(
                 as_completed(future_to_index),
                 total=len(tasks_data),
-                desc='Inserting tasks',
-                unit='task',
+                desc="Inserting tasks",
+                unit="task",
                 position=0,
-                leave=True
+                leave=True,
             ):
                 idx = future_to_index[future]
                 try:
                     result = future.result(timeout=60)
-                except (MaxRetriesExceeded, RuntimeError, ValueError, TypeError, OSError) as e:  # pragma: no cover - defensive
-                    logger.error(f"Failed inserting task at index {idx}: {e.__class__.__name__}: {e}")
+                except (
+                    MaxRetriesExceeded,
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    OSError,
+                ) as e:  # pragma: no cover - defensive
+                    logger.error(
+                        f"Failed inserting task at index {idx}: {e.__class__.__name__}: {e}"
+                    )
                     result = {}
                 ordered_results[idx] = result
-                logger.debug(f"Inserted task {idx+1}/{len(tasks_data)}")
+                logger.debug(f"Inserted task {idx + 1}/{len(tasks_data)}")
 
         # Replace any remaining None with empty dicts (should be rare)
         for i in range(len(ordered_results)):

@@ -18,10 +18,9 @@ Latest stable release: `v0.3.3`
 - Windows uninstall behavior: [windows_uninstall_behavior.md](windows_uninstall_behavior.md)
 - Windows prerequisite matrix: [windows_prereq_test_matrix.md](windows_prereq_test_matrix.md)
 
-## Integrations and plans
+## Integrations
 
 - Gmail automation setup: [gmail_setup.md](gmail_setup.md)
-- Status update automation plan: [status_update_automation_plan.md](status_update_automation_plan.md)
 
 ## Release history
 

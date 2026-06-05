@@ -3,12 +3,20 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,global-variable-undefined,used-before-assignment,line-too-long,global-statement
 
-from __future__ import annotations
-
 from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 import contextlib
 import threading
+
+from google.oauth2.credentials import Credentials
+from omegaconf import DictConfig
+
+from todoist.automations.base import Automation
+from todoist.automations.observer import AutomationObserver
+from todoist.database.base import Database
 
 
 def _sync_api_globals() -> None:
@@ -18,10 +26,14 @@ def _sync_api_globals() -> None:
         if name.startswith("__"):
             continue
         original = _ORIGINALS.get(name)
-        if original is not None and getattr(value, "_component_wrapper_for", None) == name:
+        if (
+            original is not None
+            and getattr(value, "_component_wrapper_for", None) == name
+        ):
             globals()[name] = original
         else:
             globals()[name] = value
+
 
 def _serialize_dt(value: Any) -> str | None:
     if value is None:
@@ -45,7 +57,9 @@ def _run_automation_sync(
         contextlib.redirect_stdout(output_stream),
         contextlib.redirect_stderr(output_stream),
     ):
-        loguru_handler_id = logger.add(output_stream, format="{message}", level=get_log_level())
+        loguru_handler_id = logger.add(
+            output_stream, format="{message}", level=get_log_level()
+        )
         try:
             task_delegations = automation.tick(dbio)
         except Exception as exc:
@@ -128,7 +142,11 @@ def _automation_requires_auth(key: str) -> bool:
 
 
 def _default_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    return [key for key in _available_automation_keys(config) if not _automation_requires_auth(key)]
+    return [
+        key
+        for key in _available_automation_keys(config)
+        if not _automation_requires_auth(key)
+    ]
 
 
 def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
@@ -216,9 +234,13 @@ def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
 
     credentials_path = resolve_gmail_credentials_path()
     if not credentials_path.exists():
-        raise FileNotFoundError("gmail_credentials.json is required before connecting Gmail.")
+        raise FileNotFoundError(
+            "gmail_credentials.json is required before connecting Gmail."
+        )
 
-    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), GmailTasksAutomation.SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(credentials_path), GmailTasksAutomation.SCOPES
+    )
 
     class _OAuthCallbackHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -243,7 +265,9 @@ def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
                     "</body></html>"
                 )
                 self.send_response(200)
-            except Exception as exc:  # pragma: no cover - callback failures are browser driven
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - callback failures are browser driven
                 with _GMAIL_AUTH_LOCK:
                     if _GMAIL_AUTH_SESSION is not None:
                         _GMAIL_AUTH_SESSION.error = f"{type(exc).__name__}: {exc}"
@@ -288,7 +312,9 @@ def _start_gmail_manual_auth_session() -> _PendingGmailAuthSession:
         finally:
             server.server_close()
 
-    threading.Thread(target=_serve_once, name="gmail-oauth-callback", daemon=True).start()
+    threading.Thread(
+        target=_serve_once, name="gmail-oauth-callback", daemon=True
+    ).start()
     return session
 
 
@@ -301,12 +327,16 @@ def _gmail_automation_status() -> dict[str, Any]:
     token_detail = "Missing token"
     if token_present:
         try:
-            creds = Credentials.from_authorized_user_file(str(token_path), GmailTasksAutomation.SCOPES)
+            creds = Credentials.from_authorized_user_file(
+                str(token_path), GmailTasksAutomation.SCOPES
+            )
             connected = bool(getattr(creds, "valid", False))
             if connected:
                 token_detail = "Authorized"
                 _clear_gmail_auth_session()
-            elif getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
+            elif getattr(creds, "expired", False) and getattr(
+                creds, "refresh_token", None
+            ):
                 token_detail = "Token expired but refreshable"
             else:
                 token_detail = "Token present but invalid"
@@ -339,15 +369,21 @@ def _gmail_automation_status() -> dict[str, Any]:
         "connected": connected,
         "credentialsPath": _safe_display_path(credentials_path, root=_REPO_ROOT),
         "tokenPath": _safe_display_path(token_path, root=_REPO_ROOT),
-        "detail": token_detail if credentials_present else "Missing Gmail credentials file",
-        "setupDocPath": _safe_display_path(_REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT),
+        "detail": token_detail
+        if credentials_present
+        else "Missing Gmail credentials file",
+        "setupDocPath": _safe_display_path(
+            _REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT
+        ),
     }
     if pending_auth is not None:
         status["pendingAuth"] = pending_auth
     return status
 
 
-def _automation_metadata_for_key(config: DictConfig, key: str, *, enabled: bool) -> dict[str, Any]:
+def _automation_metadata_for_key(
+    config: DictConfig, key: str, *, enabled: bool
+) -> dict[str, Any]:
     section = config.get(key)
     if not isinstance(section, Mapping):
         raise ValueError(f"Automation section missing or invalid: {key}")
@@ -371,7 +407,9 @@ def _load_automation_inventory() -> list[dict[str, Any]]:
     enabled_keys = set(_enabled_automation_keys(config))
     inventory: list[dict[str, Any]] = []
     for key in available_keys:
-        inventory.append(_automation_metadata_for_key(config, key, enabled=key in enabled_keys))
+        inventory.append(
+            _automation_metadata_for_key(config, key, enabled=key in enabled_keys)
+        )
     return inventory
 
 
@@ -412,7 +450,9 @@ def _restart_dashboard_observer_if_managed() -> bool:
     try:
         observer_pid = int(observer_pid_path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
-        logger.warning("Dashboard observer PID file is unreadable: {}", observer_pid_path)
+        logger.warning(
+            "Dashboard observer PID file is unreadable: {}", observer_pid_path
+        )
         return False
 
     try:
@@ -431,11 +471,15 @@ def _restart_dashboard_observer_if_managed() -> bool:
     observer_log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["HYDRA_FULL_ERROR"] = "1"
-    env["TODOIST_AGENT_MODEL_ID"] = os.getenv(str(EnvVar.AGENT_MODEL_ID), DEFAULT_MODEL_ID)
+    env["TODOIST_AGENT_MODEL_ID"] = os.getenv(
+        str(EnvVar.AGENT_MODEL_ID), DEFAULT_MODEL_ID
+    )
     env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
         str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
     )
-    env["TODOIST_AGENT_TRITON_URL"] = os.getenv(str(EnvVar.AGENT_TRITON_URL), DEFAULT_TRITON_URL)
+    env["TODOIST_AGENT_TRITON_URL"] = os.getenv(
+        str(EnvVar.AGENT_TRITON_URL), DEFAULT_TRITON_URL
+    )
 
     with observer_log_path.open("ab") as observer_log:
         process = subprocess.Popen(  # noqa: S603  # pylint: disable=consider-using-with
@@ -535,5 +579,33 @@ def _build_observer(db: Database) -> AutomationObserver:
         db=db, automations=short_automations, activity=activity_automation
     )
 
-_COMPONENT_EXPORTS = ('_serialize_dt', '_run_automation_sync', '_run_all_automations_sync', '_load_automations', '_available_automation_keys', '_automation_ref', '_automation_requires_auth', '_default_enabled_automation_keys', '_configured_enabled_automation_keys', '_enabled_automation_keys', '_clear_gmail_auth_session', '_current_gmail_auth_session', '_write_gmail_token', '_allow_insecure_oauth_transport', '_start_gmail_manual_auth_session', '_gmail_automation_status', '_automation_metadata_for_key', '_load_automation_inventory', '_save_enabled_automations', '_set_automation_enabled', '_restart_dashboard_observer_if_managed', '_automation_run_signal_metadata', '_automation_launch_metadata', '_load_observer_state', '_serialize_observer_state', '_build_observer')
+
+_COMPONENT_EXPORTS = (
+    "_serialize_dt",
+    "_run_automation_sync",
+    "_run_all_automations_sync",
+    "_load_automations",
+    "_available_automation_keys",
+    "_automation_ref",
+    "_automation_requires_auth",
+    "_default_enabled_automation_keys",
+    "_configured_enabled_automation_keys",
+    "_enabled_automation_keys",
+    "_clear_gmail_auth_session",
+    "_current_gmail_auth_session",
+    "_write_gmail_token",
+    "_allow_insecure_oauth_transport",
+    "_start_gmail_manual_auth_session",
+    "_gmail_automation_status",
+    "_automation_metadata_for_key",
+    "_load_automation_inventory",
+    "_save_enabled_automations",
+    "_set_automation_enabled",
+    "_restart_dashboard_observer_if_managed",
+    "_automation_run_signal_metadata",
+    "_automation_launch_metadata",
+    "_load_observer_state",
+    "_serialize_observer_state",
+    "_build_observer",
+)
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}

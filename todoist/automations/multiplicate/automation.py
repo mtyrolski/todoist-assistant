@@ -10,11 +10,11 @@ from omegaconf import DictConfig
 from loguru import logger
 
 from todoist.automations.base import Automation
-from todoist.constants import TaskField
+from todoist.core.constants import TaskField
 from todoist.database.base import Database
 from todoist.database.db_tasks import TaskTemplateInsertRequest
-from todoist.types import Task, TaskEntry
-from todoist.utils import Cache
+from todoist.core.types import Task, TaskEntry
+from todoist.core.utils import Cache
 
 
 _MULTIPLICATION_LABEL_PATTERN = re.compile(r"^X(?P<n>\d+)$")
@@ -23,6 +23,7 @@ _MULTIPLICATION_LABEL_PATTERN = re.compile(r"^X(?P<n>\d+)$")
 @dataclass
 class _CreatedTaskInfo:
     """Lightweight info about a task created during expansion, for tracking in children_by_parent."""
+
     id: str
     content: str
     labels: list[str]
@@ -68,6 +69,7 @@ def _compile(pattern: str) -> re.Pattern[str]:
     # Be permissive: Todoist content/labels are user-typed.
     return re.compile(pattern, flags=re.IGNORECASE)
 
+
 def _filter_out_multiplier_labels(
     labels: Iterable[str],
     *,
@@ -77,7 +79,8 @@ def _filter_out_multiplier_labels(
     return [
         label
         for label in labels
-        if flat_label_pattern.match(label) is None and deep_label_pattern.match(label) is None
+        if flat_label_pattern.match(label) is None
+        and deep_label_pattern.match(label) is None
     ]
 
 
@@ -105,7 +108,9 @@ def _build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:
     return children_by_parent
 
 
-def _collect_descendants(root_id: str, *, children_by_parent: dict[str, list[Task]]) -> list[str]:
+def _collect_descendants(
+    root_id: str, *, children_by_parent: dict[str, list[Task]]
+) -> list[str]:
     # Post-order so callers can delete leaves first.
     ordered: list[str] = []
     stack: list[tuple[str, bool]] = [(root_id, False)]
@@ -163,7 +168,9 @@ def _insert_tasks_from_templates_compat(
     ]
 
 
-def _resolve_parent_targets(task: Task, *, flat_expansions: dict[str, list[str]]) -> Sequence[str | None]:
+def _resolve_parent_targets(
+    task: Task, *, flat_expansions: dict[str, list[str]]
+) -> Sequence[str | None]:
     """Return the parent IDs that new copies of `task` should attach to.
 
     If a task's parent was previously expanded (and likely deleted), we must attach
@@ -225,22 +232,31 @@ def _depth_sort_children_first(tasks: list[Task]) -> list[Task]:
     return sorted(tasks, key=depth, reverse=True)
 
 
-def _flat_factor_from_labels(labels: Iterable[str], flat_label_pattern: re.Pattern[str]) -> int | None:
+def _flat_factor_from_labels(
+    labels: Iterable[str], flat_label_pattern: re.Pattern[str]
+) -> int | None:
     matched = [label for label in labels if flat_label_pattern.match(label) is not None]
     if not matched:
         return None
     if len(matched) != 1:
-        raise ValueError(f"Expected exactly one flat multiplication label, found: {matched}")
+        raise ValueError(
+            f"Expected exactly one flat multiplication label, found: {matched}"
+        )
     match = flat_label_pattern.match(matched[0])
     assert match is not None
     return int(match.group("n"))
 
-def _deep_factor_from_labels(labels: Iterable[str], deep_label_pattern: re.Pattern[str]) -> int | None:
+
+def _deep_factor_from_labels(
+    labels: Iterable[str], deep_label_pattern: re.Pattern[str]
+) -> int | None:
     matched = [label for label in labels if deep_label_pattern.match(label) is not None]
     if not matched:
         return None
     if len(matched) != 1:
-        raise ValueError(f"Expected exactly one deep multiplication label, found: {matched}")
+        raise ValueError(
+            f"Expected exactly one deep multiplication label, found: {matched}"
+        )
     match = deep_label_pattern.match(matched[0])
     assert match is not None
     return int(match.group("n"))
@@ -313,12 +329,17 @@ class Multiply(Automation):
                     parent_id = _task_parent_id(task)
                 else:
                     # Check if it's a task we just created
-                    created_info = next((info for info in created_task_infos if info.id == removed_id), None)
+                    created_info = next(
+                        (info for info in created_task_infos if info.id == removed_id),
+                        None,
+                    )
                     if created_info:
                         parent_id = created_info.parent_id
                     else:
                         # Try to find it in all_tasks or children_by_parent
-                        found_task = next((t for t in all_tasks if t.id == removed_id), None)
+                        found_task = next(
+                            (t for t in all_tasks if t.id == removed_id), None
+                        )
                         if found_task:
                             parent_id = _task_parent_id(found_task)
                         else:
@@ -339,7 +360,9 @@ class Multiply(Automation):
             for info in created_task_infos:
                 if info.parent_id is not None:
                     placeholder_task = _make_placeholder_task(info)
-                    children_by_parent.setdefault(info.parent_id, []).append(placeholder_task)
+                    children_by_parent.setdefault(info.parent_id, []).append(
+                        placeholder_task
+                    )
 
         self._cleanup_unused_multiplier_labels(
             db,
@@ -381,7 +404,9 @@ class Multiply(Automation):
                 return None
         return None
 
-    def _record_multiplier_label_usage(self, labels: Iterable[str], *, now: datetime) -> None:
+    def _record_multiplier_label_usage(
+        self, labels: Iterable[str], *, now: datetime
+    ) -> None:
         usage = self._load_multiplier_label_usage()
         for label in labels:
             usage[label] = {"lastSeenAt": now}
@@ -408,7 +433,9 @@ class Multiply(Automation):
             logger.warning(f"Failed to list labels for multiplier cleanup: {exc}")
             return
         if not isinstance(raw_labels, Sequence):
-            logger.warning("Failed to list labels for multiplier cleanup: unexpected payload")
+            logger.warning(
+                "Failed to list labels for multiplier cleanup: unexpected payload"
+            )
             return
         labels = cast(Sequence[object], raw_labels)
 
@@ -453,7 +480,9 @@ class Multiply(Automation):
             try:
                 deleted = bool(delete_label_by_name(raw_name))
             except Exception as exc:  # pragma: no cover - defensive around API failures
-                logger.warning(f"Failed to delete unused multiplier label {raw_name!r}: {exc}")
+                logger.warning(
+                    f"Failed to delete unused multiplier label {raw_name!r}: {exc}"
+                )
                 continue
             if deleted:
                 usage.pop(raw_name, None)
@@ -466,8 +495,14 @@ class Multiply(Automation):
     def _select_tasks_to_process(self, all_tasks: list[Task]) -> list[Task]:
         selected: list[Task] = []
         for task in all_tasks:
-            has_flat = any(self._flat_label_pattern.match(label) for label in task.task_entry.labels)
-            has_deep = any(self._deep_label_pattern.match(label) for label in task.task_entry.labels)
+            has_flat = any(
+                self._flat_label_pattern.match(label)
+                for label in task.task_entry.labels
+            )
+            has_deep = any(
+                self._deep_label_pattern.match(label)
+                for label in task.task_entry.labels
+            )
             if has_flat or has_deep:
                 selected.append(task)
         return selected
@@ -478,8 +513,12 @@ class Multiply(Automation):
         task: Task,
     ) -> tuple[list[str], set[str], list[_CreatedTaskInfo]]:
         try:
-            flat_n = _flat_factor_from_labels(task.task_entry.labels, self._flat_label_pattern)
-            deep_n = _deep_factor_from_labels(task.task_entry.labels, self._deep_label_pattern)
+            flat_n = _flat_factor_from_labels(
+                task.task_entry.labels, self._flat_label_pattern
+            )
+            deep_n = _deep_factor_from_labels(
+                task.task_entry.labels, self._deep_label_pattern
+            )
         except ValueError as e:
             logger.error(f"Task {task.id}: {e}")
             return [], set(), []
@@ -530,7 +569,9 @@ class Multiply(Automation):
         from the source tree.
         """
 
-        descendants_to_remove = _collect_descendants(source_root_id, children_by_parent=children_by_parent)
+        descendants_to_remove = _collect_descendants(
+            source_root_id, children_by_parent=children_by_parent
+        )
 
         for new_parent_id in new_parent_ids:
             stack: list[tuple[str, str]] = [(source_root_id, new_parent_id)]
@@ -543,7 +584,9 @@ class Multiply(Automation):
                         TaskField.PARENT_ID.value: current_new_parent_id,
                     }
                     created = db.insert_task_from_template(child, **overrides)
-                    new_child_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+                    new_child_id = (
+                        str(created.get("id", "")) if isinstance(created, dict) else ""
+                    )
                     if not new_child_id:
                         logger.error(
                             f"Task {child.id}: failed to clone under new parent {current_new_parent_id}; skipping its subtree"
@@ -586,7 +629,9 @@ class Multiply(Automation):
                 }
                 if parent_id is not None:
                     overrides[TaskField.PARENT_ID.value] = parent_id
-                requests.append(TaskTemplateInsertRequest(template=task, overrides=overrides))
+                requests.append(
+                    TaskTemplateInsertRequest(template=task, overrides=overrides)
+                )
                 contents.append(content)
 
             created_batch = _insert_tasks_from_templates_compat(db, requests)
@@ -595,13 +640,15 @@ class Multiply(Automation):
                 if not new_id:
                     continue
                 created_ids.append(new_id)
-                created_task_infos.append(_CreatedTaskInfo(
-                    id=new_id,
-                    content=content,
-                    labels=list(labels),
-                    parent_id=parent_id,
-                    source_task=task,
-                ))
+                created_task_infos.append(
+                    _CreatedTaskInfo(
+                        id=new_id,
+                        content=content,
+                        labels=list(labels),
+                        parent_id=parent_id,
+                        source_task=task,
+                    )
+                )
 
         removed_ids: set[str] = set()
         if children_by_parent.get(task.id):
@@ -666,13 +713,15 @@ class Multiply(Automation):
                     task.id,
                     child_labels,
                 )
-                created_task_infos.append(_CreatedTaskInfo(
-                    id=new_id,
-                    content=leaf_title,
-                    labels=list(child_labels),
-                    parent_id=task.id,
-                    source_task=task,
-                ))
+                created_task_infos.append(
+                    _CreatedTaskInfo(
+                        id=new_id,
+                        content=leaf_title,
+                        labels=list(child_labels),
+                        parent_id=task.id,
+                        source_task=task,
+                    )
+                )
 
         # Remove multiplier labels to keep the automation idempotent.
         db.update_task(task.id, labels=parent_labels)
@@ -703,5 +752,5 @@ def main() -> None:
     multiply.tick(db)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

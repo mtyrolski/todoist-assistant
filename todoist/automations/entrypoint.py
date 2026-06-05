@@ -8,7 +8,7 @@ from tqdm import tqdm
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation, run_automations_resiliently
 from todoist.database.base import Database
-from todoist.utils import automation_log_path, configure_runtime_logging
+from todoist.core.utils import automation_log_path, configure_runtime_logging
 
 _ENV_PATH = ".env"
 
@@ -24,23 +24,31 @@ def configure_automation_runtime() -> Database:
 
 
 def select_init_env_automations(automations: list[Automation]) -> list[Automation]:
-    activity_automations = [automation for automation in automations if isinstance(automation, Activity)]
+    activity_automations = [
+        automation for automation in automations if isinstance(automation, Activity)
+    ]
     if not activity_automations:
         logger.info("No activity automations found, running all remaining automations.")
         return list(automations)
 
-    longest_activity = max(activity_automations, key=lambda automation: automation.nweeks)
+    longest_activity = max(
+        activity_automations, key=lambda automation: automation.nweeks
+    )
     logger.info(
         "Activity automations found, running the longest one - last {} weeks of activity collection.",
         int(longest_activity.nweeks),
     )
-    rest_automations = [automation for automation in automations if not isinstance(automation, Activity)]
+    rest_automations = [
+        automation for automation in automations if not isinstance(automation, Activity)
+    ]
     return [longest_activity] + rest_automations
 
 
 def select_update_env_automations(automations: list[Automation]) -> list[Automation]:
     logger.info("Filtering only for short ones")
-    short_automations = [automation for automation in automations if not automation.is_long]
+    short_automations = [
+        automation for automation in automations if not automation.is_long
+    ]
     return select_init_env_automations(short_automations)
 
 

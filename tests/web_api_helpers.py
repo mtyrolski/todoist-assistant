@@ -42,12 +42,14 @@ def _stub_all_figures(monkeypatch) -> None:
         web_api, "plot_events_over_time", lambda *args, **kwargs: go.Figure()
     )
 
+
 def _set_state_with_df(df: pd.DataFrame) -> None:
     web_api._state.df_activity = df
     web_api._state.active_projects = []
     web_api._state.project_colors = {}
     web_api._state.db = None
     web_api._state.home_payload_cache = {}
+
 
 def _clear_dashboard_state() -> None:
     web_api._state.df_activity = None
@@ -56,6 +58,7 @@ def _clear_dashboard_state() -> None:
     web_api._state.db = None
     web_api._state.demo_mode = False
     web_api._state.home_payload_cache = {}
+
 
 def _single_event_df() -> pd.DataFrame:
     df = pd.DataFrame(

@@ -1,6 +1,5 @@
 """Shared LLM message and prompt tokens."""
 
-
 from enum import StrEnum
 
 
