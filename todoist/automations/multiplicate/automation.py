@@ -1,7 +1,7 @@
 import argparse
 import re
-from datetime import datetime, timedelta
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence, cast
 
@@ -13,22 +13,11 @@ from todoist.automations.base import Automation
 from todoist.core.constants import TaskField
 from todoist.database.base import Database
 from todoist.database.db_tasks import TaskTemplateInsertRequest
-from todoist.core.types import Task, TaskEntry
+from todoist.core.types import Task
 from todoist.core.utils import Cache
 
 
 _MULTIPLICATION_LABEL_PATTERN = re.compile(r"^X(?P<n>\d+)$")
-
-
-@dataclass
-class _CreatedTaskInfo:
-    """Lightweight info about a task created during expansion, for tracking in children_by_parent."""
-
-    id: str
-    content: str
-    labels: list[str]
-    parent_id: str | None
-    source_task: Task  # Keep reference to source for creating placeholder
 
 
 def is_multiplication_label(label: str) -> bool:
@@ -98,58 +87,6 @@ def _task_parent_id(task: Task) -> str | None:
     return task.task_entry.parent_id
 
 
-def _build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:
-    children_by_parent: dict[str, list[Task]] = {}
-    for task in tasks:
-        parent_id = _task_parent_id(task)
-        if parent_id is None:
-            continue
-        children_by_parent.setdefault(parent_id, []).append(task)
-    return children_by_parent
-
-
-def _collect_descendants(
-    root_id: str, *, children_by_parent: dict[str, list[Task]]
-) -> list[str]:
-    # Post-order so callers can delete leaves first.
-    ordered: list[str] = []
-    stack: list[tuple[str, bool]] = [(root_id, False)]
-    while stack:
-        node_id, expanded = stack.pop()
-        if expanded:
-            ordered.append(node_id)
-            continue
-        stack.append((node_id, True))
-        for child in children_by_parent.get(node_id, []):
-            stack.append((child.id, False))
-
-    return [task_id for task_id in ordered if task_id != root_id]
-
-
-def _make_placeholder_task(info: _CreatedTaskInfo) -> Task:
-    """Create a minimal Task object from created task info for tracking in children_by_parent.
-
-    Copies structure from source_task to stay compatible with TaskEntry schema changes.
-    """
-    # Copy all fields from source task_entry, then override the relevant ones
-    source_entry = info.source_task.task_entry
-    entry_dict = {
-        field: getattr(source_entry, field)
-        for field in source_entry.__dataclass_fields__
-    }
-    # Override with the new task's specific values
-    entry_dict.update(
-        id=info.id,
-        content=info.content,
-        labels=info.labels,
-        parent_id=info.parent_id,
-    )
-    return Task(
-        id=info.id,
-        task_entry=TaskEntry(**entry_dict),
-    )
-
-
 def _insert_tasks_from_templates_compat(
     db: Database,
     requests: list[TaskTemplateInsertRequest],
@@ -168,27 +105,11 @@ def _insert_tasks_from_templates_compat(
     ]
 
 
-def _resolve_parent_targets(
-    task: Task, *, flat_expansions: dict[str, list[str]]
-) -> Sequence[str | None]:
-    """Return the parent IDs that new copies of `task` should attach to.
-
-    If a task's parent was previously expanded (and likely deleted), we must attach
-    new children to the newly created parent copies, not the original parent id.
-    """
-
-    parent_id = _task_parent_id(task)
-    if parent_id is None:
-        return (None,)
-    return tuple(flat_expansions.get(parent_id, [parent_id]))
-
-
 def _depth_sort_children_first(tasks: list[Task]) -> list[Task]:
     """Sort tasks so that children are processed before parents (DFS post-order).
 
-    This ensures that when a parent task with label X2 has a child with label X3,
-    the child is expanded first (creating 3 copies), and then the parent expansion
-    will clone the already-expanded subtree.
+    This ensures that a deep-labeled child is expanded before a flat-labeled
+    parent has its legacy label removed.
     """
     task_by_id: dict[str, Task] = {task.id: task for task in tasks}
     depth_cache: dict[str, int] = {}
@@ -303,66 +224,12 @@ class Multiply(Automation):
         seen_multiplier_labels = self._multiplier_labels_on_tasks(all_tasks)
         self._record_multiplier_label_usage(seen_multiplier_labels, now=now)
 
-        children_by_parent = _build_children_by_parent(all_tasks)
-
         tasks_to_process = self._select_tasks_to_process(all_tasks)
         tasks_to_process = _depth_sort_children_first(tasks_to_process)
 
-        # Expanding a parent may delete its entire subtree; skip any later processing.
-        deleted_ids: set[str] = set()
-
         logger.info(f"Found {len(tasks_to_process)} tasks to expand")
         for task in tasks_to_process:
-            if task.id in deleted_ids:
-                continue
-            _, removed_ids, created_task_infos = self._process_task(
-                db,
-                task,
-            )
-            deleted_ids.update(removed_ids)
-
-            # Update children_by_parent to remove deleted tasks so later parent
-            # expansions don't try to clone already-deleted children.
-            for removed_id in removed_ids:
-                # Find the parent_id for this removed task
-                if removed_id == task.id:
-                    parent_id = _task_parent_id(task)
-                else:
-                    # Check if it's a task we just created
-                    created_info = next(
-                        (info for info in created_task_infos if info.id == removed_id),
-                        None,
-                    )
-                    if created_info:
-                        parent_id = created_info.parent_id
-                    else:
-                        # Try to find it in all_tasks or children_by_parent
-                        found_task = next(
-                            (t for t in all_tasks if t.id == removed_id), None
-                        )
-                        if found_task:
-                            parent_id = _task_parent_id(found_task)
-                        else:
-                            # Search in children_by_parent values
-                            parent_id = None
-                            for pid, children in children_by_parent.items():
-                                if any(c.id == removed_id for c in children):
-                                    parent_id = pid
-                                    break
-
-                if parent_id and parent_id in children_by_parent:
-                    children_by_parent[parent_id] = [
-                        c for c in children_by_parent[parent_id] if c.id != removed_id
-                    ]
-
-            # Add newly created tasks to children_by_parent so later parent expansions
-            # will clone them correctly.
-            for info in created_task_infos:
-                if info.parent_id is not None:
-                    placeholder_task = _make_placeholder_task(info)
-                    children_by_parent.setdefault(info.parent_id, []).append(
-                        placeholder_task
-                    )
+            self._process_task(db, task)
 
         self._cleanup_unused_multiplier_labels(
             db,
@@ -511,7 +378,7 @@ class Multiply(Automation):
         self,
         db: Database,
         task: Task,
-    ) -> tuple[list[str], set[str], list[_CreatedTaskInfo]]:
+    ) -> None:
         try:
             flat_n = _flat_factor_from_labels(
                 task.task_entry.labels, self._flat_label_pattern
@@ -521,19 +388,19 @@ class Multiply(Automation):
             )
         except ValueError as e:
             logger.error(f"Task {task.id}: {e}")
-            return [], set(), []
+            return
 
         # Deep label (_Xn) has priority.
         if deep_n is not None:
             if deep_n <= 0:
                 logger.error(f"Task {task.id}: deep multiplication factor must be > 0")
-                return [], set(), []
+                return
             if flat_n is not None:
                 logger.warning(
                     f"Task {task.id}: has both deep (_Xn) and flat (Xn) labels; applying deep and ignoring flat"
                 )
-            created_task_infos = self._expand_deep(db, task, deep_n)
-            return [], set(), created_task_infos
+            self._expand_deep(db, task, deep_n)
+            return
 
         if flat_n is not None:
             labels = _filter_out_multiplier_labels(
@@ -548,133 +415,10 @@ class Multiply(Automation):
                 task.task_entry.content,
                 labels,
             )
-            return [], set(), []
+            return
 
-        return [], set(), []
-
-    def _clone_subtree_under_new_parents(
-        self,
-        db: Database,
-        *,
-        source_root_id: str,
-        new_parent_ids: Sequence[str],
-        children_by_parent: dict[str, list[Task]],
-    ) -> list[str]:
-        """Clone `source_root_id` subtree under each newly created parent copy.
-
-        If we expand+delete a parent task, its existing children would otherwise become
-        top-level tasks (Todoist doesn't support re-parenting via update).
-
-        Returns descendant task IDs (not including the root) that should be removed
-        from the source tree.
-        """
-
-        descendants_to_remove = _collect_descendants(
-            source_root_id, children_by_parent=children_by_parent
-        )
-
-        for new_parent_id in new_parent_ids:
-            stack: list[tuple[str, str]] = [(source_root_id, new_parent_id)]
-            while stack:
-                old_parent_id, current_new_parent_id = stack.pop()
-                for child in children_by_parent.get(old_parent_id, []):
-                    overrides: dict[str, Any] = {
-                        TaskField.CONTENT.value: child.task_entry.content,
-                        TaskField.LABELS.value: list(child.task_entry.labels),
-                        TaskField.PARENT_ID.value: current_new_parent_id,
-                    }
-                    created = db.insert_task_from_template(child, **overrides)
-                    new_child_id = (
-                        str(created.get("id", "")) if isinstance(created, dict) else ""
-                    )
-                    if not new_child_id:
-                        logger.error(
-                            f"Task {child.id}: failed to clone under new parent {current_new_parent_id}; skipping its subtree"
-                        )
-                        continue
-
-                    stack.append((child.id, new_child_id))
-
-        return descendants_to_remove
-
-    def _expand_flat(
-        self,
-        db: Database,
-        task: Task,
-        n: int,
-        *,
-        parent_targets: Sequence[str | None],
-        children_by_parent: dict[str, list[Task]],
-    ) -> tuple[list[str], set[str], list[_CreatedTaskInfo]]:
-        labels = _filter_out_multiplier_labels(
-            task.task_entry.labels,
-            flat_label_pattern=self._flat_label_pattern,
-            deep_label_pattern=self._deep_label_pattern,
-        )
-        base = task.task_entry.content
-
-        created_ids: list[str] = []
-        created_task_infos: list[_CreatedTaskInfo] = []
-
-        # If the parent was expanded earlier, replicate this task under each parent copy.
-        for parent_id in parent_targets:
-            requests: list[TaskTemplateInsertRequest] = []
-            contents: list[str] = []
-            for i in range(1, n + 1):
-                content = _render(self.config.flat_leaf_template, base=base, i=i, n=n)
-                logger.debug(f"Creating flat task: {content}")
-                overrides: dict[str, object] = {
-                    TaskField.CONTENT.value: content,
-                    TaskField.LABELS.value: labels,
-                }
-                if parent_id is not None:
-                    overrides[TaskField.PARENT_ID.value] = parent_id
-                requests.append(
-                    TaskTemplateInsertRequest(template=task, overrides=overrides)
-                )
-                contents.append(content)
-
-            created_batch = _insert_tasks_from_templates_compat(db, requests)
-            for content, created in zip(contents, created_batch, strict=False):
-                new_id = str(created.get("id", "")) if isinstance(created, dict) else ""
-                if not new_id:
-                    continue
-                created_ids.append(new_id)
-                created_task_infos.append(
-                    _CreatedTaskInfo(
-                        id=new_id,
-                        content=content,
-                        labels=list(labels),
-                        parent_id=parent_id,
-                        source_task=task,
-                    )
-                )
-
-        removed_ids: set[str] = set()
-        if children_by_parent.get(task.id):
-            descendants_to_remove = self._clone_subtree_under_new_parents(
-                db,
-                source_root_id=task.id,
-                new_parent_ids=created_ids,
-                children_by_parent=children_by_parent,
-            )
-        else:
-            descendants_to_remove = []
-
-        for descendant_id in descendants_to_remove:
-            removed_ids.add(descendant_id)
-            self._remove_source_task(db, descendant_id)
-
-        removed_ids.add(task.id)
-        self._remove_source_task(db, task.id)
-
-        return created_ids, removed_ids, created_task_infos
-
-    def _expand_deep(self, db: Database, task: Task, n: int) -> list[_CreatedTaskInfo]:
-        """Create N subtasks under `task` and remove multiplier labels from the parent.
-
-        Returns info about created subtasks for tracking in children_by_parent.
-        """
+    def _expand_deep(self, db: Database, task: Task, n: int) -> None:
+        """Create N subtasks under `task` and remove multiplier labels from the parent."""
 
         parent_labels = _filter_out_multiplier_labels(
             task.task_entry.labels,
@@ -683,7 +427,6 @@ class Multiply(Automation):
         )
         child_labels = _append_unique_label(parent_labels, self.config.deep_child_label)
 
-        created_task_infos: list[_CreatedTaskInfo] = []
         base = task.task_entry.content
         requests: list[TaskTemplateInsertRequest] = []
         leaf_titles: list[str] = []
@@ -713,15 +456,6 @@ class Multiply(Automation):
                     task.id,
                     child_labels,
                 )
-                created_task_infos.append(
-                    _CreatedTaskInfo(
-                        id=new_id,
-                        content=leaf_title,
-                        labels=list(child_labels),
-                        parent_id=task.id,
-                        source_task=task,
-                    )
-                )
 
         # Remove multiplier labels to keep the automation idempotent.
         db.update_task(task.id, labels=parent_labels)
@@ -731,13 +465,6 @@ class Multiply(Automation):
             task.task_entry.content,
             parent_labels,
         )
-
-        return created_task_infos
-
-    def _remove_source_task(self, db: Database, task_id: str) -> None:
-        logger.debug(f"Removing source task {task_id}")
-        if db.remove_task(task_id):
-            logger.debug(f"Task {task_id} removed")
 
 
 def main() -> None:
