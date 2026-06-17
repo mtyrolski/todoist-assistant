@@ -2,9 +2,12 @@
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/run_make_checks.py scripts/status.py
+PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/status.py
 PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
 PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
+CHECK_FAST_TARGETS := check_explicit_any ruff
+CHECK_TARGETS := check_explicit_any pyright pylint ruff
+TEST_ALL_TARGETS := check_explicit_any pyright_all pylint_all ruff_all test
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 MODEL_ID ?=
@@ -162,30 +165,16 @@ typecheck: check_explicit_any pyright ## Run explicit-Any and Pyright checks
 
 lint: pylint ruff ruff_format ## Run pylint and Ruff checks
 
-check_fast: ## Run quick source-only checks with verbose progress
-	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
-		--title check_fast \
-		check_explicit_any=explicit-any \
-		ruff=ruff
+check_fast: ## Run quick source-only checks in parallel
+	+@$(MAKE) --no-print-directory -j$(words $(CHECK_FAST_TARGETS)) $(CHECK_FAST_TARGETS)
 
-check: ## Run all static quality checks in parallel with verbose progress
-	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
-		--title check \
-		check_explicit_any=explicit-any \
-		pyright=pyright \
-		pylint=pylint \
-		ruff=ruff
+check: ## Run all static quality checks in parallel
+	+@$(MAKE) --no-print-directory -j$(words $(CHECK_TARGETS)) $(CHECK_TARGETS)
 
 validate: check ## Alias for make check
 
-test_all: ## Run static checks and tests in parallel with verbose progress
-	+@PYTHONPATH=. uv run python3 -m scripts.run_make_checks \
-		--title test_all \
-		check_explicit_any=explicit-any \
-		pyright_all=pyright-all \
-		pylint_all=pylint-all \
-		ruff_all=ruff-all \
-		test=pytest
+test_all: ## Run static checks and tests in parallel
+	+@$(MAKE) --no-print-directory -j$(words $(TEST_ALL_TARGETS)) $(TEST_ALL_TARGETS)
 
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
 	uv run python3 -m scripts.build_windows
