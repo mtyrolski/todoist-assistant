@@ -12,7 +12,6 @@ This document explains where the main parts of Todoist Assistant live and what e
 - `core/`: core-only package variant
 - `scripts/`: packaging, build, and local workflow helpers
 - `windows/`: WiX installer and bootstrapper assets
-- `deploy/`: deployment assets, including Triton model packaging
 
 ## Python package layout
 
@@ -82,7 +81,6 @@ modules are loaded lazily from the selected environment value:
 - `config.py`, `constants.py`, `model_catalog.py`, `structured.py`: safe shared surface
 - `backends/raw.py`: explicit no-AI backend marker used by launch/runtime selection
 - `backends/codex.py`: Codex CLI adapter
-- `backends/triton.py`: Triton inference adapter
 - `backends/transformers.py`: direct Transformers adapter used by the CLI agent
 - `factory.py`: facade for constructing only the selected backend
 
@@ -95,7 +93,7 @@ Local agent and chat helpers built on top of cached Todoist data.
 - `frontend/` is the user interface
 - `todoist.web` is the local backend API
 - `make dashboard` starts both together for local development or usage
-- `make dashboard_codex` and `make dashboard_triton` opt into AI backends
+- `make dashboard_codex` opts into the Codex AI backend
 
 ## Core package
 

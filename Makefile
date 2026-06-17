@@ -1,15 +1,13 @@
-.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex dashboard_triton dashboard_triton_gpu run_dashboard run_dashboard_cpu run_dashboard_gpu stop_dashboard status triton_shell download_models run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/download_models.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/run_make_checks.py scripts/status.py
+PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/run_make_checks.py scripts/status.py
 PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
 PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 MODEL_ID ?=
-TRITON_MODEL_NAME ?=
-TRITON_URL ?=
 BACKEND ?= raw
 BACKEND_AI ?=
 
@@ -44,10 +42,7 @@ reinstall_frontend: # force reinstall frontend deps (clean node_modules)
 reinstall: reinstall_frontend # convenience alias
 
 run_api:
-	@TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" \
-	TODOIST_AGENT_TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TODOIST_AGENT_TRITON_URL="$(TRITON_URL)" \
-	uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
+	@TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
 
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
@@ -56,55 +51,28 @@ dashboard: run_dashboard ## Start dashboard without AI by default; BACKEND/BACKE
 
 dashboard_raw: ensure_frontend_deps ## Start dashboard with AI disabled
 	MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start raw cpu
+	bash ./scripts/dashboard_stack.sh start raw
 
 dashboard_codex: ensure_frontend_deps ## Start dashboard using the local Codex CLI backend
 	MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start codex cpu
+	bash ./scripts/dashboard_stack.sh start codex
 
-dashboard_triton: ensure_frontend_deps ## Start dashboard using Triton on CPU
-	@MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start triton cpu
-
-dashboard_triton_gpu: ensure_frontend_deps ## Start dashboard using Triton on GPU
-	@MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start triton gpu
-
-run_dashboard: ensure_frontend_deps ## Start dashboard; supports BACKEND/BACKEND_AI=raw|codex|triton
+run_dashboard: ensure_frontend_deps ## Start dashboard; supports BACKEND/BACKEND_AI=raw|codex
 	@backend="$(BACKEND)"; \
 	if [ -n "$(BACKEND_AI)" ]; then backend="$(BACKEND_AI)"; fi; \
 	case "$$backend" in \
 		raw|none|disabled) stack_backend="raw" ;; \
 		codex) stack_backend="codex" ;; \
-		triton|triton_local) stack_backend="triton" ;; \
-		*) echo "Unsupported dashboard backend: $$backend (use raw, codex, or triton)"; exit 2 ;; \
+		*) echo "Unsupported dashboard backend: $$backend (use raw or codex)"; exit 2 ;; \
 	esac; \
 	MODEL_ID="$(MODEL_ID)" \
-	TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TRITON_URL="$(TRITON_URL)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start "$$stack_backend" cpu
-
-run_dashboard_cpu: dashboard_triton ## Backward-compatible alias; use make dashboard_triton
-
-run_dashboard_gpu: dashboard_triton_gpu ## Backward-compatible alias; use make dashboard_triton_gpu
+	bash ./scripts/dashboard_stack.sh start "$$stack_backend"
 
 stop_dashboard:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -113,14 +81,6 @@ stop_dashboard:
 
 status: ## Show local dashboard/API/frontend runtime status
 	@PYTHONPATH=. uv run python3 -m scripts.status
-
-triton_shell:
-	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh triton-shell
-
-download_models: ## Download configured Hugging Face local/Triton models with progress
-	PYTHONPATH=. uv run python3 -m scripts.download_models $(DOWNLOAD_MODELS_ARGS)
 
 run_demo: ensure_frontend_deps
 	@bash -c '\
@@ -155,10 +115,7 @@ run_demo: ensure_frontend_deps
 	'
 
 run_observer:
-	@HYDRA_FULL_ERROR=1 TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" \
-	TODOIST_AGENT_TRITON_MODEL_NAME="$(TRITON_MODEL_NAME)" \
-	TODOIST_AGENT_TRITON_URL="$(TRITON_URL)" \
-	uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
+	@HYDRA_FULL_ERROR=1 TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
 
 clear_local_env:
 	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env $(CLEAR_LOCAL_ENV_ARGS)

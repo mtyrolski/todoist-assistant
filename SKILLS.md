@@ -33,7 +33,7 @@ Use this mental model when exploring:
 - `todoist/dashboard/`: plotting and dashboard-specific data presentation
 - `todoist/web/`: FastAPI routes and dashboard payload shaping
 - `todoist/automations/`: activity sync, templates, multiplicate, observer, Gmail, LLM breakdown
-- `todoist/llm/`: local, Codex, and Triton-backed chat/model helpers
+- `todoist/llm/`: local and Codex-backed chat/model helpers
 - `todoist/agent/`: read-only chat and agent graph helpers
 - `frontend/app/`: Next.js app router UI
 - `configs/automations.yaml`: default automation wiring

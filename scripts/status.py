@@ -4,10 +4,8 @@
 
 import json
 import os
-import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -15,8 +13,6 @@ from urllib.request import Request, urlopen
 
 API_BASE_URL = "http://127.0.0.1:8000"
 FRONTEND_URL = "http://127.0.0.1:3000"
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_TRITON_MODEL_REPOSITORY = _REPO_ROOT / "deploy" / "triton" / "model_repository"
 
 
 @dataclass
@@ -82,116 +78,6 @@ def _print_line(label: str, status: str, detail: str, *, indent: str = "") -> No
     print(f"{indent}{badge} {label_text:<18} {detail}")
 
 
-def _format_list(items: list[str]) -> str:
-    if not items:
-        return "none"
-    return ", ".join(items)
-
-
-def _triton_model_repository_path() -> Path:
-    override = os.getenv("TODOIST_TRITON_MODEL_REPOSITORY")
-    if override:
-        return Path(override).expanduser().resolve()
-    return _TRITON_MODEL_REPOSITORY
-
-
-def _extract_model_id_from_triton_entrypoint(
-    model_dir: Path, versions: list[str]
-) -> str | None:
-    for version in versions:
-        model_path = model_dir / version / "model.py"
-        if not model_path.exists():
-            continue
-        try:
-            model_text = model_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-
-        match = re.search(
-            r'TODOIST_AGENT_(?:TRITON_)?MODEL_ID"\s*,\s*"([^"]+)"',
-            model_text,
-        )
-        if match:
-            return match.group(1).strip() or None
-    return None
-
-
-def discover_triton_models() -> list[dict[str, Any]]:
-    repo_path = _triton_model_repository_path()
-    if not repo_path.exists():
-        return []
-
-    discovered: list[dict[str, Any]] = []
-    for model_dir in sorted(path for path in repo_path.iterdir() if path.is_dir()):
-        config_path = model_dir / "config.pbtxt"
-        if not config_path.exists():
-            continue
-        try:
-            config_text = config_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-
-        versions = sorted(
-            child.name
-            for child in model_dir.iterdir()
-            if child.is_dir() and child.name.isdigit()
-        )
-        discovered.append(
-            {
-                "name": _extract_triton_config_field(config_text, "name")
-                or model_dir.name,
-                "backend": _extract_triton_config_field(config_text, "backend"),
-                "platform": _extract_triton_config_field(config_text, "platform"),
-                "directory": model_dir.name,
-                "versions": versions,
-                "model_id": _extract_model_id_from_triton_entrypoint(
-                    model_dir, versions
-                ),
-            }
-        )
-    return discovered
-
-
-def _extract_triton_config_field(config_text: str, field: str) -> str | None:
-    match = re.search(rf'^\s*{field}:\s*"([^"]+)"', config_text, re.MULTILINE)
-    return match.group(1) if match else None
-
-
-def discover_served_triton_models(base_url: str) -> list[dict[str, Any]]:
-    url = f"{base_url.rstrip('/')}/v2/repository/index"
-    request = Request(
-        url,
-        data=b"{}",
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=2.0) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, ValueError):
-        return []
-
-    if not isinstance(payload, list):
-        return []
-
-    discovered: list[dict[str, Any]] = []
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        if not name:
-            continue
-        discovered.append(
-            {
-                "name": name,
-                "version": str(item.get("version") or "").strip() or None,
-                "state": str(item.get("state") or "").strip() or None,
-                "reason": str(item.get("reason") or "").strip() or None,
-            }
-        )
-    return discovered
-
-
 def _fetch_json(url: str) -> EndpointResult:
     request = Request(url, headers={"Accept": "application/json"})
     try:
@@ -223,31 +109,7 @@ def _fetch_http_code(url: str) -> tuple[bool, int | None, str | None]:
         return False, None, str(exc.reason)
 
 
-def _backend_payload(llm_payload: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(llm_payload, dict):
-        return {}
-    backend = llm_payload.get("backend")
-    return backend if isinstance(backend, dict) else {}
-
-
-def _backend_label(llm_payload: dict[str, Any] | None) -> str:
-    backend = _backend_payload(llm_payload)
-    return str(backend.get("label") or backend.get("selected") or "unknown").strip()
-
-
-def _backend_selected(llm_payload: dict[str, Any] | None) -> str:
-    backend = _backend_payload(llm_payload)
-    return str(backend.get("selected") or backend.get("label") or "").strip().lower()
-
-
-def _triton_required(llm_payload: dict[str, Any] | None) -> bool:
-    selected = _backend_selected(llm_payload)
-    return selected in {"triton", "triton_local"} or "triton" in selected
-
-
-def _print_services(
-    payload: dict[str, Any], llm_payload: dict[str, Any] | None = None
-) -> None:
+def _print_services(payload: dict[str, Any]) -> None:
     services = payload.get("services")
     if not isinstance(services, list) or not services:
         _print_line("Dashboard", "warn", "no service entries returned")
@@ -259,10 +121,6 @@ def _print_services(
         name = str(service.get("name") or "Unknown")
         status = str(service.get("status") or "neutral")
         detail = str(service.get("detail") or "no detail")
-        if name.lower() == "triton" and not _triton_required(llm_payload):
-            backend_label = _backend_label(llm_payload) or "current"
-            _print_line(name, "neutral", f"not required for {backend_label} backend")
-            continue
         _print_line(name, status, detail)
 
 
@@ -288,10 +146,7 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
     backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
     backend_selected = str(backend.get("selected") or backend_label).strip().lower()
     backend_status = (
-        "ok"
-        if payload.get("enabled")
-        or backend_selected in {"codex", "triton_local", "triton"}
-        else "warn"
+        "ok" if payload.get("enabled") or backend_selected == "codex" else "warn"
     )
     _print_line("Backend", backend_status, backend_label)
 
@@ -314,67 +169,6 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
         f"{int(queue.get('failed') or 0)} failed"
     )
     _print_line("Queue", "neutral", queue_detail)
-
-
-def _print_triton_models(llm_payload: dict[str, Any] | None = None) -> None:
-    _section("Triton Inventory")
-    if not _triton_required(llm_payload):
-        backend_label = _backend_label(llm_payload) or "current"
-        _print_line("Endpoint", "neutral", f"not required for {backend_label} backend")
-        return
-    llm_payload = llm_payload if isinstance(llm_payload, dict) else {}
-    backend_payload = _backend_payload(llm_payload)
-    triton_payload = backend_payload.get("triton")
-    triton = triton_payload if isinstance(triton_payload, dict) else {}
-    triton_base_url = str(triton.get("baseUrl") or "").strip()
-    configured_model_id = str(triton.get("modelId") or "").strip()
-    served_models = (
-        discover_served_triton_models(triton_base_url) if triton_base_url else []
-    )
-    repo_path = _triton_model_repository_path()
-    models = discover_triton_models()
-
-    if triton_base_url:
-        detail = triton_base_url
-        if served_models:
-            detail = f"{detail} | served={len(served_models)}"
-            _print_line("Endpoint", "ok", detail)
-        else:
-            _print_line("Endpoint", "warn", f"{detail} | served models unavailable")
-
-    if configured_model_id:
-        _print_line("Configured model", "neutral", configured_model_id)
-
-    if served_models:
-        for model in served_models:
-            state = str(model.get("state") or "unknown")
-            status = "ok" if state.upper() == "READY" else "warn"
-            version = str(model.get("version") or "n/a")
-            reason = str(model.get("reason") or "").strip()
-            detail = f"version={version} | state={state}"
-            if reason:
-                detail = f"{detail} | {reason}"
-            _print_line(
-                str(model.get("name") or "unknown"), status, detail, indent="  "
-            )
-
-    if not models and not served_models:
-        _print_line("Repository", "warn", f"no model configs found under {repo_path}")
-        return
-
-    _print_line("Repository", "ok" if models else "warn", str(repo_path))
-    for model in models:
-        version_text = _format_list(
-            [str(version) for version in model.get("versions", [])]
-        )
-        backend = model.get("backend") or model.get("platform") or "unknown backend"
-        detail = f"{backend} | dir={model.get('directory')} | versions={version_text}"
-        _print_line(
-            str(model.get("name") or model.get("directory")),
-            "neutral",
-            detail,
-            indent="  ",
-        )
 
 
 def main() -> int:
@@ -414,11 +208,7 @@ def main() -> int:
         _print_line("Dashboard", "down", f"status endpoint unavailable ({error})")
         return 0
 
-    _print_services(
-        dashboard_status.payload, llm_snapshot.payload if llm_snapshot.ok else None
-    )
-    print()
-    _print_triton_models(llm_snapshot.payload if llm_snapshot.ok else None)
+    _print_services(dashboard_status.payload)
     return 0
 
 

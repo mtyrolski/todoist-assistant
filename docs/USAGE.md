@@ -20,8 +20,6 @@ make dashboard
 Optional AI dashboard modes:
 ```bash
 make dashboard_codex   # Codex CLI backend
-make dashboard_triton  # Triton CPU backend
-make dashboard_triton_gpu
 ```
 
 Demo (anonymized):
