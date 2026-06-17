@@ -10,7 +10,7 @@ export default function LiveLogsPage() {
       <PageHeader
         eyebrow="Operations"
         title="Live Log Inspector"
-        lede="Read-only inspection for backend, frontend, Triton, observer, and automation runtime logs."
+        lede="Read-only inspection for backend, frontend, Codex, observer, and automation runtime logs."
       />
       <Suspense fallback={<div className="card">Loading runtime logs…</div>}>
         <LogInspector />
