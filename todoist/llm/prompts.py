@@ -3,14 +3,11 @@
 from collections.abc import Callable, Sequence
 from typing import cast
 
-from transformers import PreTrainedTokenizerBase
 
 from .types import MessageRole, PromptToken
 
 
-def _render_chat_prompt(
-    messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase
-) -> str:
+def _render_chat_prompt(messages: Sequence[dict[str, str]], tokenizer: object) -> str:
     apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
     if callable(apply_chat_template):
         template_fn = cast(Callable[..., object], apply_chat_template)
@@ -46,7 +43,7 @@ def _render_chat_prompt(
 
 
 def _render_mistral_instruct_prompt(
-    messages: Sequence[dict[str, str]], tokenizer: PreTrainedTokenizerBase
+    messages: Sequence[dict[str, str]], tokenizer: object
 ) -> str:
     system_parts: list[str] = []
     turns: list[tuple[str, str | None]] = []
@@ -82,8 +79,8 @@ def _render_mistral_instruct_prompt(
             "Last user message must be unanswered (append user message before generating)"
         )
 
-    bos = tokenizer.bos_token or PromptToken.BOS_FALLBACK
-    eos = tokenizer.eos_token or PromptToken.EOS_FALLBACK
+    bos = getattr(tokenizer, "bos_token", None) or PromptToken.BOS_FALLBACK
+    eos = getattr(tokenizer, "eos_token", None) or PromptToken.EOS_FALLBACK
     system_prefix = "\n\n".join(system_parts).strip()
     if system_prefix:
         system_prefix += "\n\n"
