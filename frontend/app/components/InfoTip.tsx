@@ -1,7 +1,13 @@
 "use client";
 
 import { useId, type KeyboardEvent } from "react";
-import { Markdown } from "./Markdown";
+
+function plainHelpText(content: string) {
+  return content
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+}
 
 export function InfoTip({
   label,
@@ -14,6 +20,7 @@ export function InfoTip({
 }) {
   const id = useId();
   const alignClass = align === "center" ? "" : ` infoTipWrap-${align}`;
+  const plainContent = plainHelpText(content);
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "Escape") {
       event.currentTarget.blur();
@@ -31,7 +38,9 @@ export function InfoTip({
         <span aria-hidden>?</span>
       </button>
       <span id={id} role="tooltip" className="infoTipPanel">
-        <Markdown content={content} className="markdown markdownTooltip" />
+        <span className="markdown markdownTooltip" style={{ whiteSpace: "pre-line" }}>
+          {plainContent}
+        </span>
       </span>
     </span>
   );

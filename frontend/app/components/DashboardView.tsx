@@ -10,11 +10,7 @@ import { StatCard } from "./StatCard";
 import { LoadingBar } from "./LoadingBar";
 import { ProgressSteps } from "./ProgressSteps";
 import { LeaderboardCard } from "./LeaderboardCard";
-import { ServiceMonitor } from "./ServiceMonitor";
 import { InsightCard } from "./InsightCard";
-import { AdminPanel } from "./AdminPanel";
-import { LlmBreakdownStatus } from "./LlmBreakdownStatus";
-import { ObserverControl } from "./ObserverControl";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
 import {
@@ -31,7 +27,6 @@ import {
   useApiHealth,
   useDashboardHome,
   useDashboardStatus,
-  useLlmBreakdownProgress,
   useSyncLabel
 } from "../lib/dashboardHooks";
 
@@ -156,8 +151,7 @@ export function DashboardView({
     setCustomEnd,
     refresh
   } = useDashboardHome({ enabled: !setupActive });
-  const { status, loadingStatus, refreshStatus } = useDashboardStatus();
-  const { progress: llmProgress, loading: loadingLlmProgress, refresh: refreshLlmProgress } = useLlmBreakdownProgress();
+  const { status, loadingStatus } = useDashboardStatus();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
   const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
   const focusMetricsRef = useRef<HTMLDivElement | null>(null);
@@ -362,10 +356,6 @@ export function DashboardView({
       help: PLOT_HELP.eventsOverTime
     }
   ];
-  const onAfterMutation = () => {
-    refresh();
-    refreshStatus();
-  };
   const badgeItems = [
     { key: "p1", label: "P1", className: "badge badge-p1", value: dashboard?.badges.p1 },
     { key: "p2", label: "P2", className: "badge badge-p2", value: dashboard?.badges.p2 },
@@ -570,7 +560,7 @@ export function DashboardView({
           </div>
           <p className="muted">
             Once Todoist events start syncing, charts and insights will appear here. You can still manage automations and
-            configuration in the Control Panel below.
+            configuration in the Control Panel.
           </p>
           <div className="emptyStateActions">
             <button className="button buttonSmall" type="button" onClick={refresh} disabled={loadingDashboard}>
@@ -856,22 +846,18 @@ export function DashboardView({
           </div>
         </section>
 
-        <section className="stack">
-          <AdminPanel onAfterMutation={onAfterMutation} />
-
-          <LlmBreakdownStatus
-            progress={llmProgress}
-            loading={loadingLlmProgress}
-            onRefresh={refreshLlmProgress}
-          />
-
-          <ObserverControl onAfterMutation={onAfterMutation} />
-
-          <ServiceMonitor
-            services={status?.services ?? null}
-            configurableItems={status?.configurableItems}
-            onRefresh={refreshStatus}
-          />
+        <section className="card">
+          <header className="cardHeader">
+            <div className="cardTitleRow">
+              <h2>Control Panel</h2>
+            </div>
+          </header>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Run automations, monitor services, and update runtime settings from the dedicated operations page.
+          </p>
+          <a className="button buttonSmall buttonGhost" href="/control-panel">
+            Open Control Panel
+          </a>
         </section>
       </section>
     </div>

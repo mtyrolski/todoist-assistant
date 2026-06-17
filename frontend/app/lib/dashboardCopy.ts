@@ -1,21 +1,21 @@
 export const METRIC_HELP: Record<string, string> = {
-  Events: `**Events**
+  Events: `Events
 Total task activity (added, completed, rescheduled) in the selected period.
 
 - Delta compares against the previous period of equal length.`,
-  "Completed Tasks": `**Completed tasks**
+  "Completed Tasks": `Completed tasks
 Total completed tasks in the selected period.
 
 - Delta compares against the previous period of equal length.`,
-  "Added Tasks": `**Added tasks**
+  "Added Tasks": `Added tasks
 Total tasks added in the selected period.
 
 - Delta compares against the previous period of equal length.`,
-  "Rescheduled Tasks": `**Rescheduled tasks**
+  "Rescheduled Tasks": `Rescheduled tasks
 Total tasks rescheduled in the selected period.
 
 - Lower is better, so the delta is inverted.`,
-  "Urgency Status": `**Urgency status**
+  "Urgency Status": `Urgency status
 Live health check for active tasks.
 
 - Green means no active fire, P1, P2, due-today, or deadline-today tasks.
@@ -24,66 +24,66 @@ Live health check for active tasks.
 - Counts are based on active tasks only and due/deadline are compared with today.`,
 };
 
-export const DEFAULT_METRIC_HELP = `**Metric**
+export const DEFAULT_METRIC_HELP = `Metric
 Value for the selected period.
 
 - Delta compares against the previous period of equal length.`;
 
 export const INSIGHT_HELP: Record<string, string> = {
-  "Most active project": `**Most active project**
+  "Most active project": `Most active project
 Project with the highest number of completed tasks in the last full week.`,
-  "Most rescheduled project": `**Most rescheduled project**
+  "Most rescheduled project": `Most rescheduled project
 Project with the most reschedules in the last full week. High values can indicate churn.`,
-  "Busiest day": `**Busiest day**
+  "Busiest day": `Busiest day
 Day of the week with the most events in the selected range.`,
-  "Added vs completed": `**Added vs completed**
+  "Added vs completed": `Added vs completed
 Compares added and completed tasks in the last week.
 
 - Ratio shows throughput (completed / added).`,
-  "Peak hour": `**Peak hour**
+  "Peak hour": `Peak hour
 Hour of day with the most events in the selected range.`,
 };
 
-export const DEFAULT_INSIGHT_HELP = `**Insight**
+export const DEFAULT_INSIGHT_HELP = `Insight
 Quick highlight computed from recent activity.`;
 
 export const PLOT_HELP = {
-  weeklyCompletionTrend: `**Weekly completion trend**
+  weeklyCompletionTrend: `Weekly completion trend
 Normalized cumulative completion pace by weekday.
 
 - Fixed view: current week + previous 3-week baseline.
 - Optional 6w / 12w / 24w baselines can be toggled in the legend.
 - Current week hover shows raw cumulative task counts (no forecast).`,
-  taskLifespans: `**Task Lifespans**
+  taskLifespans: `Task Lifespans
 Distribution of time between task creation and completion.`,
-  completedTasksPeriodically: `**Periodically Completed Tasks**
+  completedTasksPeriodically: `Periodically Completed Tasks
 Completed tasks per project for each period in the selected range.`,
-  cumsumCompletedTasksPeriodically: `**Cumulative Completed Tasks**
+  cumsumCompletedTasksPeriodically: `Cumulative Completed Tasks
 Running total of completions per project across the range.`,
-  activeProjectHierarchy: `**Active Project Hierarchy**
+  activeProjectHierarchy: `Active Project Hierarchy
 Sunburst view of the busiest active root projects and their busiest subprojects.
 
 - Ring area is proportional to completed tasks in the selected range.
 - The inner ring shows active roots and outer rings show active subprojects.
-- Smaller long-tail projects are folded into \`Other\` only when they stay smaller than the smallest visible sibling.`,
-  heatmapEventsByDayHour: `**Event Heatmap**
+- Smaller long-tail projects are folded into Other only when they stay smaller than the smallest visible sibling.`,
+  heatmapEventsByDayHour: `Event Heatmap
 Activity intensity by day of week and hour. Darker means more events.`,
-  eventsOverTime: `**Events Over Time**
+  eventsOverTime: `Events Over Time
 Timeline of activity events across the selected range.`,
 };
 
-export const BADGES_HELP = `**Priority badges**
+export const BADGES_HELP = `Priority badges
 Snapshot of current tasks by priority.
 
 - P1 is highest urgency, P4 is lowest.`;
 
-export const SPOTLIGHT_HELP = `**Activity spotlight**
+export const SPOTLIGHT_HELP = `Activity spotlight
 Top projects by completed tasks in the most recent finished week.
 
 - Subprojects includes nested projects.
 - Root projects are top-level only.`;
 
-export const HABIT_TRACKER_LAB_HELP = `**Habit Tracker Lab**
+export const HABIT_TRACKER_LAB_HELP = `Habit Tracker Lab
 A focused view for the weekly habit payload.
 
 - About sits first so the page reads like an overview instead of a chart dump.

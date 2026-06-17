@@ -27,12 +27,6 @@ const NAV_GROUPS = [
     items: [{ href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Hosted chat and queued prompts" }]
   },
   {
-    title: "Experimental",
-    items: [
-      { href: "/experimental/habits", label: "Habit Tracker Lab", hint: "Opt-in habit dashboard cards" }
-    ]
-  },
-  {
     title: "Operations",
     items: [
       { href: "/live-logs", label: "Live Logs", hint: "Read-only runtime inspection" },

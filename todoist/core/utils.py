@@ -8,7 +8,7 @@ import sys
 import tempfile
 from lzma import LZMAError
 from os import getenv
-from os.path import exists, join
+from os.path import exists
 from pathlib import Path
 from pickle import HIGHEST_PROTOCOL, UnpicklingError
 from typing import Any, Callable, Generic, KeysView, Type, TypeVar, cast
@@ -40,22 +40,25 @@ LOCAL_STORAGE_EXCEPTIONS = (
 DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
 MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
 MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.3"
-RUNTIME_CACHE_FILENAMES: tuple[str, ...] = (
-    "activity.joblib",
-    "observer_state.joblib",
-    "integration_launches.joblib",
-    "automation_launches.joblib",
-    "automation_run_signals.joblib",
-    "stale_task_warnings.joblib",
-    "multiplication_label_usage.joblib",
-    "habit_tracker_posts.joblib",
-    "processed_gmail_messages.joblib",
-    "dashboard_state.joblib",
-    "llm_breakdown_progress.joblib",
-    "llm_breakdown_queue.joblib",
-    "llm_chat_queue.joblib",
-    "llm_chat_conversations.joblib",
-    "llm_usage_stats.joblib",
+CACHE_STORAGE_REGISTRY: dict[str, tuple[str, Callable[[], Any]]] = {
+    "activity": ("activity.joblib", set),
+    "observer_state": ("observer_state.joblib", dict),
+    "integration_launches": ("integration_launches.joblib", dict),
+    "automation_launches": ("automation_launches.joblib", dict),
+    "automation_run_signals": ("automation_run_signals.joblib", dict),
+    "stale_task_warnings": ("stale_task_warnings.joblib", dict),
+    "multiplication_label_usage": ("multiplication_label_usage.joblib", dict),
+    "habit_tracker_posts": ("habit_tracker_posts.joblib", dict),
+    "processed_gmail_messages": ("processed_gmail_messages.joblib", set),
+    "dashboard_state": ("dashboard_state.joblib", dict),
+    "llm_breakdown_progress": ("llm_breakdown_progress.joblib", dict),
+    "llm_breakdown_queue": ("llm_breakdown_queue.joblib", dict),
+    "llm_chat_queue": ("llm_chat_queue.joblib", list),
+    "llm_chat_conversations": ("llm_chat_conversations.joblib", list),
+    "llm_usage_stats": ("llm_usage_stats.joblib", dict),
+}
+RUNTIME_CACHE_FILENAMES: tuple[str, ...] = tuple(
+    filename for filename, _default_factory in CACHE_STORAGE_REGISTRY.values()
 )
 RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = (
@@ -396,49 +399,23 @@ class Cache:
         if not explicit_path:
             migrate_legacy_runtime_files(self.path)
         Path(self.path).mkdir(parents=True, exist_ok=True)
-        self.activity = LocalStorage(join(self.path, "activity.joblib"), set)
-        self.observer_state = LocalStorage(
-            join(self.path, "observer_state.joblib"), dict
-        )
-        self.integration_launches = LocalStorage(
-            join(self.path, "integration_launches.joblib"), dict
-        )
-        self.automation_launches = LocalStorage(
-            join(self.path, "automation_launches.joblib"), dict
-        )
-        self.automation_run_signals = LocalStorage(
-            join(self.path, "automation_run_signals.joblib"), dict
-        )
-        self.stale_task_warnings = LocalStorage(
-            join(self.path, "stale_task_warnings.joblib"), dict
-        )
-        self.multiplication_label_usage = LocalStorage(
-            join(self.path, "multiplication_label_usage.joblib"), dict
-        )
-        self.habit_tracker_posts = LocalStorage(
-            join(self.path, "habit_tracker_posts.joblib"), dict
-        )
-        self.processed_gmail_messages = LocalStorage(
-            join(self.path, "processed_gmail_messages.joblib"), set
-        )
-        self.dashboard_state = LocalStorage(
-            join(self.path, "dashboard_state.joblib"), dict
-        )
-        self.llm_breakdown_progress = LocalStorage(
-            join(self.path, "llm_breakdown_progress.joblib"), dict
-        )
-        self.llm_breakdown_queue = LocalStorage(
-            join(self.path, "llm_breakdown_queue.joblib"), dict
-        )
-        self.llm_chat_queue = LocalStorage(
-            join(self.path, "llm_chat_queue.joblib"), list
-        )
-        self.llm_chat_conversations = LocalStorage(
-            join(self.path, "llm_chat_conversations.joblib"), list
-        )
-        self.llm_usage_stats = LocalStorage(
-            join(self.path, "llm_usage_stats.joblib"), dict
-        )
+        for name, (_filename, default_factory) in CACHE_STORAGE_REGISTRY.items():
+            setattr(self, name, self.storage(name, default_factory))
+
+    def storage(self, name: str, default_factory: Callable[[], T]) -> LocalStorage[T]:
+        registry_entry = CACHE_STORAGE_REGISTRY.get(name)
+        filename = registry_entry[0] if registry_entry else f"{name}.joblib"
+        return LocalStorage(str(Path(self.path) / filename), default_factory)
+
+    def __getattr__(self, name: str) -> LocalStorage[Any]:
+        registry_entry = CACHE_STORAGE_REGISTRY.get(name)
+        if registry_entry is None:
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+        storage = self.storage(name, registry_entry[1])
+        setattr(self, name, storage)
+        return storage
 
 
 class Anonymizable(ABC):

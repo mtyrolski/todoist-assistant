@@ -388,7 +388,7 @@ def _task_ingest_rewrite_with_llm_sync(
     if model is None:
         settings = _resolve_llm_chat_settings()
         try:
-            model = _build_llm_from_settings(settings, max_output_tokens=768)
+            model = _build_llm_from_settings(settings)
             created_model = True
         except (TypeError, ValueError) as exc:
             logger.warning(f"Task ingest LLM unavailable: {type(exc).__name__}: {exc}")
@@ -413,9 +413,7 @@ def _task_ingest_rewrite_with_llm_sync(
         if tasks:
             source = "llm"
             backend = model_backend(model)
-            if created_model and backend == "triton_local":
-                source = "triton"
-            elif created_model and backend == "codex":
+            if created_model and backend == "codex":
                 source = "codex"
             elif not created_model:
                 source = "loaded-model"

@@ -1,4 +1,4 @@
-"""Shared model option catalog for local and Triton LLM backends."""
+"""Shared model option catalog for local and Codex LLM backends."""
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -21,20 +21,13 @@ CODEX_MODEL_OPTIONS: tuple[ModelOption, ...] = (
     {"id": "gpt-5", "label": "GPT-5"},
 )
 
-TRITON_MODEL_OPTIONS: tuple[ModelOption, ...] = (
-    {"id": DEFAULT_MODEL_ID, "label": "Qwen 2.5 3B Instruct"},
-)
-
-
-ModelBackend = Literal["local", "triton", "all"]
+ModelBackend = Literal["local", "all"]
 
 
 def model_options_for_backend(backend: ModelBackend) -> tuple[ModelOption, ...]:
     if backend == "local":
         return LOCAL_MODEL_OPTIONS
-    if backend == "triton":
-        return TRITON_MODEL_OPTIONS
-    return (*LOCAL_MODEL_OPTIONS, *TRITON_MODEL_OPTIONS)
+    return LOCAL_MODEL_OPTIONS
 
 
 def coerce_model_id_for_backend(model_id: str | None, backend: ModelBackend) -> str:

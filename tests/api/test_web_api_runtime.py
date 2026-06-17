@@ -33,8 +33,6 @@ def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> N
         "api",
         "frontend",
         "observer",
-        "triton",
-        "triton_inference",
         "automation",
     ]
     assert "rogue" not in ids
@@ -88,8 +86,6 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> Non
         "api",
         "frontend",
         "observer",
-        "triton",
-        "triton_inference",
         "automation",
     ]
     assert payload["logs"][0]["available"] is True
@@ -149,7 +145,9 @@ def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None
     assert by_id["automation"]["available"] is True
 
 
-def test_runtime_read_log_reads_curated_source(monkeypatch, tmp_path: Path) -> None:
+def test_runtime_read_log_rejects_removed_triton_source(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
@@ -165,12 +163,7 @@ def test_runtime_read_log_reads_curated_source(monkeypatch, tmp_path: Path) -> N
         "/api/runtime/logs/read",
         params={"source": "triton", "tail_lines": 2, "page": 1},
     )
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["id"] == "triton"
-    assert payload["inspectOnly"] is True
-    assert payload["content"] == "line 2\nline 3\n"
-    assert payload["totalLines"] == 3
+    assert res.status_code == 404
 
 
 def test_admin_timezone_status_uses_system_timezone_when_not_configured(
@@ -479,12 +472,10 @@ def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
     assert payload["subTotal"] == 3
 
 
-def test_dashboard_status_includes_triton_service(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
-
+def test_dashboard_status_excludes_triton_service() -> None:
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/status")
 
     assert res.status_code == 200
     payload = res.json()
-    assert any(svc.get("name") == "Triton" for svc in payload["services"])
+    assert all(svc.get("name") != "Triton" for svc in payload["services"])

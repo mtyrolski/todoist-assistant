@@ -22,11 +22,10 @@ def _collect(module_name):
 
 
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
-matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matplotlib")
 
-binaries = plotly_binaries + matplotlib_binaries
-datas = plotly_datas + matplotlib_datas
-hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
+binaries = plotly_binaries
+datas = plotly_datas
+hiddenimports = plotly_hiddenimports
 
 block_cipher = None
 

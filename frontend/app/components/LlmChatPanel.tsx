@@ -80,15 +80,14 @@ type ChatStatus = {
 const POLL_MS = 5000;
 const DISABLED_BACKEND_ID = "disabled";
 const CODEX_BACKEND_ID = "codex";
-const TRITON_BACKEND_ID = "triton_local";
-const SERVER_HOSTED_BACKENDS = new Set([CODEX_BACKEND_ID, TRITON_BACKEND_ID]);
+const AVAILABLE_BACKEND_IDS = new Set([DISABLED_BACKEND_ID, CODEX_BACKEND_ID]);
 const CHAT_HELP = `**LLM Chat**
 Local or hosted model for quick analysis and summaries.
 
 - Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
 - Pick a backend before loading the model.
 - Enable loads the selected backend on demand.
-- Codex uses the local Codex CLI.
+- Codex uses the local Codex CLI and langgraph-codex.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
 
@@ -111,14 +110,21 @@ function modelLabel(enabled: boolean, loading: boolean): { label: string; tone: 
 }
 
 function isServerHostedBackend(backendId?: string | null): boolean {
-  return !!backendId && SERVER_HOSTED_BACKENDS.has(backendId);
+  return backendId === CODEX_BACKEND_ID;
 }
 
 function backendDisplayName(backendId: string, fallbackLabel?: string): string {
-  if (backendId === TRITON_BACKEND_ID) return "Triton Inference Server";
   if (backendId === CODEX_BACKEND_ID) return "Codex";
   if (backendId === DISABLED_BACKEND_ID) return "Disabled";
   return fallbackLabel ?? backendId;
+}
+
+function normalizeBackendId(backendId?: string | null): string {
+  return backendId && AVAILABLE_BACKEND_IDS.has(backendId) ? backendId : DISABLED_BACKEND_ID;
+}
+
+function visibleBackendOptions(options: ChatOption[]): ChatOption[] {
+  return options.filter((option) => AVAILABLE_BACKEND_IDS.has(option.id));
 }
 
 export function LlmChatPanel() {
@@ -185,7 +191,7 @@ export function LlmChatPanel() {
 
   useEffect(() => {
     if (!status) return;
-    setBackendDraft(status.backend.selected);
+    setBackendDraft(normalizeBackendId(status.backend.selected));
     setDeviceDraft(status.device.selected);
   }, [status]);
 
@@ -257,7 +263,7 @@ export function LlmChatPanel() {
       const res = await fetch("/api/llm_chat/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backend: backendDraft, device: deviceDraft })
+        body: JSON.stringify({ backend: normalizeBackendId(backendDraft), device: deviceDraft })
       });
       const payload = (await res.json()) as { detail?: string };
       if (!res.ok) {
@@ -309,16 +315,18 @@ export function LlmChatPanel() {
   const queueSummary = queue
     ? `${queue.queued} queued / ${queue.running} running / ${queue.failed} failed`
     : "Queue unavailable";
-  const backendOptions = status?.backend.options ?? [];
+  const backendOptions = visibleBackendOptions(status?.backend.options ?? []);
   const deviceOptions = status?.device.options ?? [];
-  const currentBackendId = status?.backend.selected ?? DISABLED_BACKEND_ID;
-  const selectedBackendId = backendDraft || status?.backend.selected || DISABLED_BACKEND_ID;
+  const currentBackendId = normalizeBackendId(status?.backend.selected);
+  const selectedBackendId = normalizeBackendId(backendDraft || status?.backend.selected);
   const backendIsServerHosted = isServerHostedBackend(selectedBackendId);
   const currentBackendIsServerHosted = isServerHostedBackend(currentBackendId);
   const deviceControlDisabled = savingSettings || loading || backendIsServerHosted;
   const backendControlDisabled = savingSettings || loading || backendOptions.length <= 1;
   const settingsChanged =
-    !!status && (backendDraft !== status.backend.selected || deviceDraft !== status.device.selected);
+    !!status &&
+    (normalizeBackendId(backendDraft) !== normalizeBackendId(status.backend.selected) ||
+      deviceDraft !== status.device.selected);
   const backendStatusLabel = status
     ? `Backend: ${backendDisplayName(currentBackendId, status.backend.label)}${
         currentBackendId === CODEX_BACKEND_ID && status.backend.codex?.model
@@ -328,13 +336,11 @@ export function LlmChatPanel() {
     : null;
   const deviceStatusLabel = status
     ? currentBackendIsServerHosted
-      ? `Device: managed by ${currentBackendId === TRITON_BACKEND_ID ? "Triton" : "backend"}`
+      ? "Device: managed by backend"
       : `Device: ${status.device.label}`
     : null;
   const deviceHelpText = backendIsServerHosted
-    ? selectedBackendId === TRITON_BACKEND_ID
-      ? "Triton hosts the model server-side, so local device selection does not apply."
-      : "Codex manages execution through the CLI, so local device selection does not apply."
+    ? "Codex manages execution through the CLI and langgraph-codex, so local device selection does not apply."
     : "AI functions are disabled.";
 
   const pendingForSelected = useMemo(() => {

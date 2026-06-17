@@ -69,19 +69,16 @@ from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNod
 from todoist.llm import (
     DEFAULT_CODEX_MODEL,
     DEFAULT_MODEL_ID,
-    DEFAULT_TRITON_MODEL_NAME,
-    DEFAULT_TRITON_URL,
     MessageRole,
 )
 from todoist.llm.factory import (
     ChatModel,
     build_codex_chat_model,
-    build_triton_chat_model,
     model_backend,
 )
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.llm.usage import load_llm_usage_summary
-from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS, TRITON_MODEL_OPTIONS
+from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS
 from todoist.dashboard.settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -259,7 +256,6 @@ _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 _TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
 _TEMPLATES_DIR = _CONFIG_DIR / "templates"
-_TRITON_MODEL_OPTIONS = TRITON_MODEL_OPTIONS
 _CODEX_MODEL_OPTIONS = CODEX_MODEL_OPTIONS
 
 
@@ -325,7 +321,6 @@ _LLM_CHAT_TIMEOUT_S = 60 * 60
 _LLM_CHAT_BACKEND_DEFAULT = "disabled"
 _LLM_CHAT_BACKEND_LABELS = {
     "disabled": "Disabled",
-    "triton_local": "Triton local",
     "codex": "Codex",
 }
 _LLM_CHAT_DEVICE_DEFAULT = "cpu"
@@ -497,16 +492,8 @@ def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) ->
     )
 
 
-def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._resolve_triton_settings(file_values)
-
-
 def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._resolve_codex_settings(file_values)
-
-
-def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
-    return _llm_chat_component._triton_ready(triton_settings)
 
 
 def _resolve_llm_chat_settings() -> dict[str, Any]:
@@ -526,14 +513,8 @@ def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._public_llm_chat_settings(settings)
 
 
-def _build_llm_from_settings(
-    settings: Mapping[str, Any],
-    *,
-    max_output_tokens: int,
-) -> _LlmChatModel:
-    return _llm_chat_component._build_llm_from_settings(
-        settings, max_output_tokens=max_output_tokens
-    )
+def _build_llm_from_settings(settings: Mapping[str, Any]) -> _LlmChatModel:
+    return _llm_chat_component._build_llm_from_settings(settings)
 
 
 async def _llm_chat_model_status() -> tuple[bool, bool]:
@@ -557,7 +538,6 @@ async def _load_llm_chat_model_task() -> None:
         model = await asyncio.to_thread(
             _build_llm_from_settings,
             settings,
-            max_output_tokens=256,
         )
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model
@@ -647,7 +627,6 @@ async def _load_inline_codex_chat_model() -> tuple[_LlmChatModel | None, str | N
         model = await asyncio.to_thread(
             _build_llm_from_settings,
             settings,
-            max_output_tokens=256,
         )
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL = model

@@ -90,6 +90,8 @@ Setup details: [docs/INSTALLATION.md](docs/INSTALLATION.md)
 
 ### Docker
 
+Compose runs the API and frontend services. The published container workflow builds the same two images for GHCR.
+
 ```bash
 docker compose up --build
 ```
@@ -129,7 +131,6 @@ Open:
 make setup             # first sync and local setup
 make dashboard         # start the dashboard without AI
 make dashboard_codex   # start the dashboard with Codex CLI AI
-make dashboard_triton  # start the dashboard with Triton CPU AI
 make update_env        # refresh local cache and run short automations
 make run_observer      # keep syncing in the background
 make run_demo          # run the dashboard with demo/anonymized data
@@ -177,12 +178,11 @@ Automation setup lives in [`configs/automations.yaml`](configs/automations.yaml)
 AI is opt-in. The user-facing commands are explicit:
 
 - `make dashboard`: default raw dashboard; no AI backend module is loaded
-- `make dashboard_codex`: uses the local Codex CLI backend for chat and task breakdown
-- `make dashboard_triton`: uses the local Triton inference endpoint and the configured catalog model
+- `make dashboard_codex`: uses the local Codex/langgraph-codex backend for chat and task breakdown
 
-Advanced users can still set `TODOIST_AGENT_BACKEND` in `.env`; supported values are `disabled`, `codex`, and `triton_local`.
+Advanced users can still set `TODOIST_AGENT_BACKEND` in `.env`; supported values are `disabled` and `codex`.
 
-Currently supported models are the catalog entries in `todoist/llm/model_catalog.py`. The project does not currently support arbitrary OpenAI-compatible HTTP endpoints, Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard, or write-capable AI agents.
+The project does not currently support arbitrary OpenAI-compatible HTTP endpoints, Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard, or write-capable AI agents.
 
 Usage details: [docs/USAGE.md](docs/USAGE.md)
 
@@ -213,9 +213,12 @@ Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
 Run this before closing code changes:
 
 ```bash
+uv sync --locked --extra local-llm
 make test_all
 make coverage
 ```
+
+CI also runs a dashboard smoke test in raw/demo mode and a Docker image workflow for the API and frontend images. Workflow details live in [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Contributing
 

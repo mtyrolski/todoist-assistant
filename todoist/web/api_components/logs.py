@@ -49,20 +49,6 @@ def runtime_log_specs() -> tuple[RuntimeLogSpec, ...]:
             relative_path="dashboard/observer.log",
         ),
         RuntimeLogSpec(
-            key="triton",
-            label="Triton",
-            category="triton",
-            description="Triton container logs tailed by the dashboard launcher.",
-            relative_path="dashboard/triton.log",
-        ),
-        RuntimeLogSpec(
-            key="triton_inference",
-            label="Triton Inference",
-            category="triton",
-            description="Per-request Triton model logs including grouped batch execution details.",
-            relative_path="dashboard/triton-inference.log",
-        ),
-        RuntimeLogSpec(
             key="automation",
             label="Automation Jobs",
             category="automation",

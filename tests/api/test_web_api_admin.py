@@ -1209,11 +1209,6 @@ def test_task_ingest_rewrite_uses_selected_codex_model_when_runtime_is_idle(
             "backend": "codex",
             "device": "cpu",
             "codex": {"model": "gpt-5.5", "modelOptions": []},
-            "triton": {
-                "baseUrl": "http://127.0.0.1:8003",
-                "modelName": "todoist_llm",
-                "modelId": "Qwen/Qwen2.5-0.5B-Instruct",
-            },
         },
     )
 

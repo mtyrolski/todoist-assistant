@@ -3,11 +3,10 @@
 from PyInstaller.utils.hooks import collect_all
 
 plotly = collect_all("plotly")
-matplotlib = collect_all("matplotlib")
 
-binaries = plotly.binaries + matplotlib.binaries
-datas = plotly.datas + matplotlib.datas
-hiddenimports = plotly.hiddenimports + matplotlib.hiddenimports
+binaries = plotly.binaries
+datas = plotly.datas
+hiddenimports = plotly.hiddenimports
 
 block_cipher = None
 

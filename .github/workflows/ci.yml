@@ -29,7 +29,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --locked || uv sync
+          uv sync --locked --extra local-llm || uv sync --extra local-llm
 
       - name: Check versions
         run: |
@@ -97,16 +97,7 @@ jobs:
       PYTHONPATH: .
       API_KEY: dummy_ci_key
       TODOIST_DASHBOARD_DEMO: "1"
-      TODOIST_AGENT_TRITON_MODEL_ID: sshleifer/tiny-gpt2
-      TODOIST_AGENT_TRITON_MODEL_NAME: todoist_llm_ci
-      TODOIST_TRITON_DEVICE: cpu
-      TODOIST_TRITON_MODEL_DTYPE: float32
-      TODOIST_TRITON_TORCH_INSTALL_FLAVOR: cpu
-      TODOIST_TRITON_MAX_TOKENS: "32"
-      TODOIST_TRITON_TEMPERATURE: "0.0"
-      TODOIST_TRITON_TOP_P: "1.0"
-      TODOIST_TRITON_TRUST_REMOTE_CODE: "false"
-      TODOIST_TRITON_HTTP_PORT: "8003"
+      TODOIST_DASHBOARD_LLM_BACKEND_LOCK: disabled
       DASHBOARD_API_PORT: "8000"
       DASHBOARD_FRONTEND_PORT: "3000"
 
@@ -151,7 +142,6 @@ jobs:
           api_log="${cache_root}/api.log"
           frontend_log="${cache_root}/frontend.log"
           observer_log="${cache_root}/observer.log"
-          triton_log="${cache_root}/triton.log"
           mkdir -p "${cache_root}"
           : > "${observer_log}"
 
@@ -163,13 +153,7 @@ jobs:
             if [[ -n "${API_PID:-}" ]] && kill -0 "${API_PID}" 2>/dev/null; then
               kill "${API_PID}" 2>/dev/null || true
             fi
-            if [[ -n "${TRITON_LOG_PID:-}" ]] && kill -0 "${TRITON_LOG_PID}" 2>/dev/null; then
-              kill "${TRITON_LOG_PID}" 2>/dev/null || true
-            fi
-            docker compose -f compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
             if [[ $status -ne 0 ]]; then
-              echo "== Triton log =="
-              tail -n 80 "${triton_log}" 2>/dev/null || true
               echo "== API log =="
               tail -n 80 "${api_log}" 2>/dev/null || true
               echo "== Frontend log =="
@@ -179,18 +163,6 @@ jobs:
             exit $status
           }
           trap cleanup EXIT
-
-          echo "Starting Triton with tiny model override..."
-          docker compose -f compose.yaml up -d --build triton
-          for _ in $(seq 1 300); do
-            if curl -fsS "http://127.0.0.1:${TODOIST_TRITON_HTTP_PORT}/v2/health/ready" >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          curl -fsS "http://127.0.0.1:${TODOIST_TRITON_HTTP_PORT}/v2/health/ready" >/dev/null
-          docker compose -f compose.yaml logs --no-color triton > "${triton_log}" 2>&1 || true
-          tail -n 40 "${triton_log}"
 
           echo "Starting API process..."
           nohup uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${DASHBOARD_API_PORT}" > "${api_log}" 2>&1 &
@@ -219,19 +191,22 @@ jobs:
           echo "Checking runtime log surface..."
           python - <<'PY'
           import json
+          import os
           import urllib.request
 
-          with urllib.request.urlopen("http://127.0.0.1:8000/api/runtime/logs") as res:
+          api_port = os.environ["DASHBOARD_API_PORT"]
+          api_base = f"http://127.0.0.1:{api_port}"
+          with urllib.request.urlopen(f"{api_base}/api/runtime/logs") as res:
               payload = json.load(res)
           assert payload["inspectOnly"] is True
           sources = {item["id"]: item for item in payload["sources"]}
-          expected = {"api", "frontend", "observer", "triton", "automation"}
+          expected = {"api", "frontend", "observer", "automation"}
           missing = expected - sources.keys()
           assert not missing, f"missing sources: {sorted(missing)}"
           assert all(item["inspectOnly"] is True for item in payload["sources"])
 
-          for source in ("api", "observer", "triton"):
-              url = f"http://127.0.0.1:8000/api/runtime/logs/read?source={source}&tail_lines=20&page=1"
+          for source in ("api", "frontend", "observer", "automation"):
+              url = f"{api_base}/api/runtime/logs/read?source={source}&tail_lines=20&page=1"
               with urllib.request.urlopen(url) as res:
                   read_payload = json.load(res)
               assert read_payload["inspectOnly"] is True

@@ -12,14 +12,9 @@ from loguru import logger
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.core.env import EnvVar
-from todoist.llm import DEFAULT_MODEL_ID, LocalChatConfig
-from todoist.llm.factory import (
-    ChatModel,
-    build_codex_chat_model,
-    build_triton_chat_model,
-)
+from todoist.llm import LocalChatConfig
+from todoist.llm.factory import ChatModel, build_codex_chat_model
 from todoist.llm.llm_utils import _sanitize_text
-from todoist.llm.model_catalog import coerce_model_id_for_backend
 from todoist.core.runtime_env import (
     load_runtime_env_values,
     normalize_llm_backend,
@@ -203,7 +198,7 @@ class LLMBreakdown(Automation):
         if _sanitize_text(raw_backend) is None:
             return None
         backend = normalize_llm_backend(raw_backend)
-        if backend in {"codex", "triton_local", "disabled"}:
+        if backend in {"codex", "disabled"}:
             return backend
         return None
 
@@ -222,29 +217,6 @@ class LLMBreakdown(Automation):
     def _build_codex_llm(values: Mapping[str, Any]) -> ChatModel:
         return build_codex_chat_model(values, cwd=_REPO_ROOT)
 
-    def _build_triton_llm(self, values: Mapping[str, Any]) -> ChatModel:
-        base_url = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_TRITON_URL))
-            or values.get(str(EnvVar.AGENT_TRITON_URL))
-        )
-        model_name = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-            or values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-        )
-        model_id = _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_MODEL_ID))
-            or values.get(str(EnvVar.AGENT_MODEL_ID))
-        )
-        coerced_model_id = coerce_model_id_for_backend(model_id, "triton")
-        return build_triton_chat_model(
-            base_url=base_url,
-            model_name=model_name,
-            model_id=coerced_model_id or DEFAULT_MODEL_ID,
-            temperature=float(self.model_config.temperature),
-            top_p=float(self.model_config.top_p),
-            max_output_tokens=int(self.model_config.max_new_tokens),
-        )
-
     def _get_llm(
         self,
     ) -> ChatModel:
@@ -252,8 +224,6 @@ class LLMBreakdown(Automation):
         if self._llm is None or self._llm_backend != backend:
             if backend == "codex":
                 self._llm = self._build_codex_llm(values)
-            elif backend == "triton_local":
-                self._llm = self._build_triton_llm(values)
             else:
                 raise RuntimeError("AI breakdown backend is disabled.")
             self._llm_backend = backend
@@ -299,18 +269,14 @@ class LLMBreakdown(Automation):
 
     def selected_backend(self) -> str:
         backend, _values = self._resolve_selected_backend()
-        if backend in {"codex", "triton_local"}:
+        if backend == "codex":
             return backend
         return "disabled"
 
     def llm_request_parallelism(self, task_count: int) -> int:
         if task_count <= 0:
             return 1
-        if self.selected_backend() != "triton_local":
-            return 1
-        if self.max_tasks_per_tick <= 0:
-            return max(1, int(task_count))
-        return max(1, min(int(self.max_tasks_per_tick), int(task_count)))
+        return 1
 
     @staticmethod
     def concurrent_executor(max_workers: int) -> ThreadPoolExecutor:

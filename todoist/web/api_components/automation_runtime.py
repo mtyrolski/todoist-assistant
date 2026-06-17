@@ -474,12 +474,6 @@ def _restart_dashboard_observer_if_managed() -> bool:
     env["TODOIST_AGENT_MODEL_ID"] = os.getenv(
         str(EnvVar.AGENT_MODEL_ID), DEFAULT_MODEL_ID
     )
-    env["TODOIST_AGENT_TRITON_MODEL_NAME"] = os.getenv(
-        str(EnvVar.AGENT_TRITON_MODEL_NAME), DEFAULT_TRITON_MODEL_NAME
-    )
-    env["TODOIST_AGENT_TRITON_URL"] = os.getenv(
-        str(EnvVar.AGENT_TRITON_URL), DEFAULT_TRITON_URL
-    )
 
     with observer_log_path.open("ab") as observer_log:
         process = subprocess.Popen(  # noqa: S603  # pylint: disable=consider-using-with

@@ -83,8 +83,6 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     )
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
     monkeypatch.delenv(str(EnvVar.AGENT_BACKEND), raising=False)
-    monkeypatch.delenv(str(EnvVar.AGENT_TRITON_URL), raising=False)
-    monkeypatch.delenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_MODEL_ID), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_CODEX_MODEL), raising=False)
     monkeypatch.chdir(tmp_path)
@@ -111,7 +109,7 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     assert captured["values"][str(EnvVar.AGENT_CODEX_MODEL)] == "gpt-5"
 
 
-def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> None:
+def test_breakdown_launch_lock_overrides_stale_triton_env(monkeypatch, tmp_path) -> None:
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     env_path = cache_dir / ".env"
@@ -140,18 +138,9 @@ def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> No
         captured["cwd"] = cwd
         return _FakeCodex()
 
-    def _unexpected_triton_builder(**kwargs):
-        raise AssertionError(
-            f"Triton must not be constructed under a Codex launch lock: {kwargs}"
-        )
-
     monkeypatch.setattr(
         "todoist.automations.llm_breakdown.automation.build_codex_chat_model",
         _fake_codex_builder,
-    )
-    monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.build_triton_chat_model",
-        _unexpected_triton_builder,
     )
 
     automation = LLMBreakdown()
@@ -162,33 +151,30 @@ def test_breakdown_launch_lock_overrides_triton_env(monkeypatch, tmp_path) -> No
     assert captured["values"][str(EnvVar.AGENT_CODEX_MODEL)] == "gpt-5.5"
 
 
-def test_breakdown_uses_triton_backend_from_env(monkeypatch, tmp_path) -> None:
+def test_breakdown_maps_stale_triton_backend_env_to_codex(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
-    monkeypatch.setenv(str(EnvVar.AGENT_TRITON_URL), "http://127.0.0.1:9100")
-    monkeypatch.setenv(str(EnvVar.AGENT_TRITON_MODEL_NAME), "todoist_llm")
-    monkeypatch.setenv(str(EnvVar.AGENT_MODEL_ID), "Qwen/Qwen2.5-0.5B-Instruct")
+    monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
 
     captured: dict[str, Any] = {}
 
-    class _FakeTriton:
+    class _FakeCodex:
         pass
 
-    def _fake_triton_builder(**kwargs):
-        captured["config"] = kwargs
-        return _FakeTriton()
+    def _fake_codex_builder(values, *, cwd):
+        captured["values"] = values
+        captured["cwd"] = cwd
+        return _FakeCodex()
 
     monkeypatch.setattr(
-        "todoist.automations.llm_breakdown.automation.build_triton_chat_model",
-        _fake_triton_builder,
+        "todoist.automations.llm_breakdown.automation.build_codex_chat_model",
+        _fake_codex_builder,
     )
 
     automation = LLMBreakdown()
     llm = automation.get_llm()
 
-    assert isinstance(llm, _FakeTriton)
-    config = captured["config"]
-    assert config["base_url"] == "http://127.0.0.1:9100"
-    assert config["model_name"] == "todoist_llm"
-    assert config["model_id"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert automation.selected_backend() == "codex"
+    assert isinstance(llm, _FakeCodex)
+    assert captured["values"] == {}

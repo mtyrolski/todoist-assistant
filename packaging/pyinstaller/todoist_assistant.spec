@@ -23,11 +23,10 @@ ENTRYPOINT = ROOT / "todoist" / "launcher.py"
 ICON_PATH = ROOT / "windows" / "bootstrapper" / "todoist-assistant.ico"
 
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
-matplotlib_datas, matplotlib_binaries, matplotlib_hiddenimports = _collect("matplotlib")
 
-binaries = plotly_binaries + matplotlib_binaries
-datas = plotly_datas + matplotlib_datas
-hiddenimports = plotly_hiddenimports + matplotlib_hiddenimports
+binaries = plotly_binaries
+datas = plotly_datas
+hiddenimports = plotly_hiddenimports
 
 # launcher.py imports the FastAPI app object and calls uvicorn.run(api_app, ...),
 # but PyInstaller still needs these as explicit hidden imports to bundle the API modules.

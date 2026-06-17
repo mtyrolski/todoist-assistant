@@ -49,20 +49,24 @@ type LlmSettingsStatus = {
     model?: string | null;
     modelOptions: LlmOption[];
   };
-  triton: {
-    configured: boolean;
-    healthy?: boolean;
-    baseUrl?: string;
-    modelName?: string;
-    modelId?: string;
-    modelOptions: LlmOption[];
-  };
   usage?: LlmUsageSnapshot;
   envPath?: string;
   enabled?: boolean;
   loading?: boolean;
   reloadedRequired?: boolean;
 };
+
+const DISABLED_BACKEND_ID = "disabled";
+const CODEX_BACKEND_ID = "codex";
+const AVAILABLE_BACKEND_IDS = new Set([DISABLED_BACKEND_ID, CODEX_BACKEND_ID]);
+
+function normalizeBackendId(backendId?: string | null): string {
+  return backendId && AVAILABLE_BACKEND_IDS.has(backendId) ? backendId : DISABLED_BACKEND_ID;
+}
+
+function visibleBackendOptions(options: LlmOption[]): LlmOption[] {
+  return options.filter((option) => AVAILABLE_BACKEND_IDS.has(option.id));
+}
 
 function formatMetricCount(value?: number | null): string {
   const normalized = typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -97,15 +101,10 @@ export function LlmRuntimeSettings({
         throw new Error(payload.detail ?? "Failed to load LLM settings");
       }
       setLlmStatus(payload);
-      setLlmBackendDraft(payload.backend);
+      const normalizedBackend = normalizeBackendId(payload.backend);
+      setLlmBackendDraft(normalizedBackend);
       setLlmDeviceDraft(payload.device);
-      setLlmModelDraft(
-        payload.backend === "codex"
-          ? payload.codex.model ?? ""
-          : payload.backend === "triton_local"
-            ? payload.triton.modelId ?? ""
-            : ""
-      );
+      setLlmModelDraft(normalizedBackend === CODEX_BACKEND_ID ? payload.codex.model ?? "" : "");
     } catch (e) {
       setLlmStatus(null);
       setLlmError(e instanceof Error ? e.message : "Failed to load LLM settings");
@@ -116,36 +115,26 @@ export function LlmRuntimeSettings({
     loadLlmSettings();
   }, [loadLlmSettings]);
 
-  const selectedLlmBackend = llmBackendDraft || llmStatus?.backend || "disabled";
-  const llmUsesRemoteDevice = selectedLlmBackend === "codex" || selectedLlmBackend === "triton_local";
+  const selectedLlmBackend = normalizeBackendId(llmBackendDraft || llmStatus?.backend);
+  const llmUsesRemoteDevice = selectedLlmBackend === CODEX_BACKEND_ID;
   const modelOptions = useMemo(() => {
     if (!llmStatus) return [];
-    if (selectedLlmBackend === "codex") return llmStatus.codex.modelOptions;
-    if (selectedLlmBackend === "triton_local") return llmStatus.triton.modelOptions;
+    if (selectedLlmBackend === CODEX_BACKEND_ID) return llmStatus.codex.modelOptions;
     return [];
   }, [llmStatus, selectedLlmBackend]);
 
   useEffect(() => {
     if (!llmStatus) return;
-    setLlmModelDraft(
-      selectedLlmBackend === "codex"
-        ? llmStatus.codex.model ?? ""
-        : selectedLlmBackend === "triton_local"
-          ? llmStatus.triton.modelId ?? ""
-          : ""
-    );
+    setLlmModelDraft(selectedLlmBackend === CODEX_BACKEND_ID ? llmStatus.codex.model ?? "" : "");
   }, [llmStatus, selectedLlmBackend]);
 
   const llmSettingsChanged = useMemo(() => {
     if (!llmStatus) return false;
-    const currentModel =
-      llmBackendDraft === "codex"
-        ? llmStatus.codex.model ?? ""
-        : llmBackendDraft === "triton_local"
-          ? llmStatus.triton.modelId ?? ""
-          : "";
+    const normalizedStatusBackend = normalizeBackendId(llmStatus.backend);
+    const normalizedDraftBackend = normalizeBackendId(llmBackendDraft);
+    const currentModel = normalizedDraftBackend === CODEX_BACKEND_ID ? llmStatus.codex.model ?? "" : "";
     return (
-      llmBackendDraft !== llmStatus.backend ||
+      normalizedDraftBackend !== normalizedStatusBackend ||
       llmDeviceDraft !== llmStatus.device ||
       llmModelDraft !== currentModel
     );
@@ -153,10 +142,10 @@ export function LlmRuntimeSettings({
 
   const currentSummary = useMemo(() => {
     if (!llmStatus) return "LLM settings unavailable";
-    if (llmStatus.backend === "disabled") return "AI disabled";
-    if (llmStatus.backend === "codex") return `Codex • ${llmStatus.codex.model ?? "unknown model"}`;
-    if (llmStatus.backend === "triton_local") return `Triton • ${llmStatus.triton.modelId ?? "unknown model"}`;
-    return llmStatus.backend;
+    const backend = normalizeBackendId(llmStatus.backend);
+    if (backend === DISABLED_BACKEND_ID) return "AI disabled";
+    if (backend === CODEX_BACKEND_ID) return `Codex • ${llmStatus.codex.model ?? "unknown model"}`;
+    return backend;
   }, [llmStatus]);
 
   const saveLlmSettings = async () => {
@@ -168,10 +157,9 @@ export function LlmRuntimeSettings({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          backend: llmBackendDraft,
+          backend: normalizeBackendId(llmBackendDraft),
           device: llmDeviceDraft,
-          codexModel: llmBackendDraft === "codex" ? llmModelDraft : llmStatus?.codex.model,
-          tritonModelId: llmBackendDraft === "triton_local" ? llmModelDraft : llmStatus?.triton.modelId
+          codexModel: normalizeBackendId(llmBackendDraft) === CODEX_BACKEND_ID ? llmModelDraft : llmStatus?.codex.model
         })
       });
       const payload = (await res.json()) as LlmSettingsStatus & { detail?: string };
@@ -179,15 +167,10 @@ export function LlmRuntimeSettings({
         throw new Error(payload.detail ?? "Failed to save LLM settings");
       }
       setLlmStatus(payload);
-      setLlmBackendDraft(payload.backend);
+      const normalizedBackend = normalizeBackendId(payload.backend);
+      setLlmBackendDraft(normalizedBackend);
       setLlmDeviceDraft(payload.device);
-      setLlmModelDraft(
-        payload.backend === "codex"
-          ? payload.codex.model ?? ""
-          : payload.backend === "triton_local"
-            ? payload.triton.modelId ?? ""
-            : ""
-      );
+      setLlmModelDraft(normalizedBackend === CODEX_BACKEND_ID ? payload.codex.model ?? "" : "");
       setLlmNotice(payload.reloadedRequired ? "LLM updated. Re-enable chat to load the new model." : "LLM updated.");
       onAfterMutation?.();
     } catch (e) {
@@ -203,7 +186,8 @@ export function LlmRuntimeSettings({
         <div>
           <h2>{compact ? "Underlying LLM" : "Underlying LLM"}</h2>
           <p className="muted tiny" style={{ margin: "6px 0 0" }}>
-            Pick the backend and actual model used under the hood. This controls dashboard chat, task ingest, and the LLM task rollout automation.
+            Pick Codex/langgraph-codex or disable AI. This controls dashboard chat, task ingest, and the LLM task
+            rollout automation.
           </p>
         </div>
       </header>
@@ -310,11 +294,12 @@ export function LlmRuntimeSettings({
               className="dateInput"
               value={llmBackendDraft}
               onChange={(e) => setLlmBackendDraft(e.target.value)}
-              disabled={llmSaving || !llmStatus || (llmStatus.availableBackends ?? []).length <= 1}
+              disabled={llmSaving || !llmStatus || visibleBackendOptions(llmStatus.availableBackends ?? []).length <= 1}
             >
-              {(llmStatus?.availableBackends ?? []).map((option) => (
+              {visibleBackendOptions(llmStatus?.availableBackends ?? []).map((option) => (
                 <option key={option.id} value={option.id} disabled={option.available === false}>
-                  {option.label}{option.available === false ? " (unavailable)" : ""}
+                  {option.label}
+                  {option.available === false ? " (unavailable)" : ""}
                 </option>
               ))}
             </select>
@@ -358,11 +343,9 @@ export function LlmRuntimeSettings({
         </div>
         <div className="adminRow">
           <span className="muted tiny">
-            {selectedLlmBackend === "codex"
-                ? `Codex model: ${llmStatus?.codex.model ?? "unknown"}`
-              : selectedLlmBackend === "triton_local"
-                ? `Triton endpoint: ${llmStatus?.triton.baseUrl ?? "unknown"}`
-                : "AI functions disabled"}
+            {selectedLlmBackend === CODEX_BACKEND_ID
+              ? `Codex model: ${llmStatus?.codex.model ?? "unknown"}`
+              : "AI functions disabled"}
           </span>
           <div className="adminRowRight">
             <button className="button buttonSmall" type="button" onClick={saveLlmSettings} disabled={llmSaving || !llmSettingsChanged}>
