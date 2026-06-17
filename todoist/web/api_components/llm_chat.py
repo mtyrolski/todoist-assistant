@@ -371,11 +371,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     )
     os.environ[backend_key] = backend
     os.environ[device_key] = device
-    selected_model_id = (
-        codex_settings["model"]
-        if backend == "codex"
-        else "disabled"
-    )
+    selected_model_id = codex_settings["model"] if backend == "codex" else "disabled"
 
     return {
         "backend": backend,
