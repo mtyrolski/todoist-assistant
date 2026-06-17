@@ -6,8 +6,6 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from .constants import DEFAULT_MODEL_ID, DEFAULT_TRITON_MODEL_NAME, DEFAULT_TRITON_URL
-
 _StructuredT = TypeVar("_StructuredT", bound=BaseModel)
 _ModelT = TypeVar("_ModelT", bound="ChatModel")
 
@@ -38,30 +36,4 @@ def build_codex_chat_model(values: Mapping[str, object], *, cwd: Path) -> ChatMo
 
     return mark_backend(
         CodexCliChatModel(codex_config_from_values(values, cwd=cwd)), "codex"
-    )
-
-
-def build_triton_chat_model(
-    *,
-    base_url: str | None,
-    model_name: str | None,
-    model_id: str | None,
-    temperature: float = 0.2,
-    top_p: float = 0.95,
-    max_output_tokens: int = 384,
-) -> ChatModel:
-    from .backends.triton import TritonChatConfig, TritonGenerateChatModel
-
-    return mark_backend(
-        TritonGenerateChatModel(
-            TritonChatConfig(
-                base_url=base_url or DEFAULT_TRITON_URL,
-                model_name=model_name or DEFAULT_TRITON_MODEL_NAME,
-                model_id=model_id or DEFAULT_MODEL_ID,
-                temperature=temperature,
-                top_p=top_p,
-                max_output_tokens=max_output_tokens,
-            )
-        ),
-        "triton_local",
     )

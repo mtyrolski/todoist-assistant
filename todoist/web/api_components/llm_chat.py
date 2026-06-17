@@ -292,8 +292,8 @@ def _coerce_model_option_id(
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
-    if value == "triton":
-        value = "triton_local"
+    if value in {"triton", "triton_local"}:
+        value = "codex"
     if value in {"raw", "none"}:
         value = "disabled"
     if value in _LLM_CHAT_BACKEND_LABELS:
@@ -306,8 +306,8 @@ def _locked_llm_chat_backend() -> str | None:
     value = str(os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK") or "").strip().lower()
     if not value:
         return None
-    if value == "triton":
-        value = "triton_local"
+    if value in {"triton", "triton_local"}:
+        value = "codex"
     if value in {"raw", "none"}:
         value = "disabled"
     return value if value in _LLM_CHAT_BACKEND_LABELS else None
@@ -318,7 +318,7 @@ def _available_llm_chat_backends(backend: str) -> set[str]:
     locked_backend = _locked_llm_chat_backend()
     if locked_backend:
         return {locked_backend}
-    available = {"disabled", "triton_local", "codex"}
+    available = {"disabled", "codex"}
     if backend in _LLM_CHAT_BACKEND_LABELS:
         available.add(backend)
     return available
@@ -349,55 +349,6 @@ def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _resolve_triton_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    _sync_api_globals()
-    base_url = (
-        _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_TRITON_URL))
-            or file_values.get(str(EnvVar.AGENT_TRITON_URL))
-        )
-        or DEFAULT_TRITON_URL
-    )
-    model_name = (
-        _sanitize_text(
-            os.getenv(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-            or file_values.get(str(EnvVar.AGENT_TRITON_MODEL_NAME))
-        )
-        or DEFAULT_TRITON_MODEL_NAME
-    )
-    model_id = _coerce_model_option_id(
-        os.getenv(str(EnvVar.AGENT_MODEL_ID))
-        or file_values.get(str(EnvVar.AGENT_MODEL_ID)),
-        options=_TRITON_MODEL_OPTIONS,
-        default=DEFAULT_MODEL_ID,
-    )
-    os.environ[str(EnvVar.AGENT_TRITON_URL)] = base_url
-    os.environ[str(EnvVar.AGENT_TRITON_MODEL_NAME)] = model_name
-    os.environ[str(EnvVar.AGENT_MODEL_ID)] = model_id
-    return {
-        "baseUrl": base_url,
-        "modelName": model_name,
-        "modelId": model_id,
-        "modelOptions": _llm_model_options_payload(_TRITON_MODEL_OPTIONS, model_id),
-    }
-
-
-def _triton_ready(triton_settings: Mapping[str, Any]) -> bool:
-    _sync_api_globals()
-    base_url = _sanitize_text(triton_settings.get("baseUrl"))
-    if not base_url:
-        return False
-    try:
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/v2/health/ready",
-            timeout=0.5,
-        )
-        response.raise_for_status()
-    except (httpx.HTTPError, ValueError):
-        return False
-    return True
-
-
 def _resolve_llm_chat_settings() -> dict[str, Any]:
     _sync_api_globals()
     env_path = _resolve_env_path()
@@ -414,19 +365,6 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     if locked_backend:
         backend = locked_backend
     available_backend_ids = _available_llm_chat_backends(backend)
-    triton_available = (
-        "triton_local" in available_backend_ids or backend == "triton_local"
-    )
-    triton_settings = (
-        _resolve_triton_settings(file_values)
-        if triton_available
-        else {
-            "baseUrl": "",
-            "modelName": "",
-            "modelId": "",
-            "modelOptions": [],
-        }
-    )
     device = _normalize_llm_chat_device(
         os.getenv(device_key) or file_values.get(device_key),
         available_devices=available_devices,
@@ -436,8 +374,6 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     selected_model_id = (
         codex_settings["model"]
         if backend == "codex"
-        else triton_settings["modelId"]
-        if backend == "triton_local"
         else "disabled"
     )
 
@@ -465,14 +401,6 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
             for device_id, label in _LLM_CHAT_DEVICE_LABELS.items()
         ],
         "codex": codex_settings,
-        "triton": {
-            "configured": triton_available,
-            "healthy": _triton_ready(triton_settings) if triton_available else False,
-            "baseUrl": triton_settings["baseUrl"],
-            "modelName": triton_settings["modelName"],
-            "modelId": triton_settings["modelId"],
-            "modelOptions": triton_settings["modelOptions"],
-        },
         "usage": load_llm_usage_summary(
             selected_backend=backend,
             selected_model_id=str(selected_model_id or ""),
@@ -487,30 +415,9 @@ def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
-def _build_llm_from_settings(
-    settings: Mapping[str, Any],
-    *,
-    max_output_tokens: int,
-) -> Any:
+def _build_llm_from_settings(settings: Mapping[str, Any]) -> Any:
     _sync_api_globals()
     backend = str(settings.get("backend") or _LLM_CHAT_BACKEND_DEFAULT)
-    if backend == "triton_local":
-        triton_settings = settings.get("triton")
-        if not isinstance(triton_settings, Mapping):
-            raise ValueError("Triton settings are unavailable.")
-        return build_triton_chat_model(
-            base_url=str(triton_settings.get("baseUrl") or DEFAULT_TRITON_URL),
-            model_name=str(
-                triton_settings.get("modelName") or DEFAULT_TRITON_MODEL_NAME
-            ),
-            model_id=_coerce_model_option_id(
-                triton_settings.get("modelId"),
-                options=_TRITON_MODEL_OPTIONS,
-                default=DEFAULT_MODEL_ID,
-            ),
-            max_output_tokens=max_output_tokens,
-        )
-
     if backend == "codex":
         env_path = _resolve_env_path()
         values = dotenv_values(env_path) if env_path.exists() else {}
@@ -568,45 +475,27 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "locked": settings["lockedBackend"],
             "options": settings["availableBackends"],
             "codex": settings["codex"],
-            "triton": {
-                "configured": settings["triton"]["configured"],
-                "healthy": settings["triton"]["healthy"],
-                "baseUrl": settings["triton"]["baseUrl"],
-                "modelName": settings["triton"]["modelName"],
-                "modelId": settings["triton"]["modelId"],
-                "modelOptions": settings["triton"]["modelOptions"],
-            },
             "envPath": settings["envPath"],
         },
         "model": {
             "selected": (
                 settings["codex"]["model"]
                 if settings["backend"] == "codex"
-                else settings["triton"]["modelId"]
-                if settings["backend"] == "triton_local"
                 else "disabled"
             ),
             "label": (
                 settings["codex"]["model"]
                 if settings["backend"] == "codex"
-                else settings["triton"]["modelId"]
-                if settings["backend"] == "triton_local"
                 else "AI disabled"
             ),
             "active": (
                 settings["codex"]["model"]
                 if (enabled or loading) and settings["backend"] == "codex"
-                else settings["triton"]["modelId"]
-                if (enabled or loading) and settings["backend"] == "triton_local"
                 else None
             ),
             "codex": {
                 "selected": settings["codex"]["model"],
                 "options": settings["codex"]["modelOptions"],
-            },
-            "triton": {
-                "selected": settings["triton"]["modelId"],
-                "options": settings["triton"]["modelOptions"],
             },
             "envPath": settings["envPath"],
         },
@@ -652,10 +541,8 @@ _COMPONENT_EXPORTS = (
     "_queue_item_payload",
     "_resolve_codex_settings",
     "_resolve_llm_chat_settings",
-    "_resolve_triton_settings",
     "_save_llm_chat_conversations",
     "_save_llm_chat_queue",
-    "_triton_ready",
     "_truncate_text",
 )
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}

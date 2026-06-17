@@ -1,33 +1,23 @@
 """Optional LLM adapters and backend-neutral shared types.
 
 Backend classes are exposed lazily so importing :mod:`todoist.llm` does not load
-Codex, Triton, Torch, or Transformers unless a caller asks for that backend.
+Codex, Torch, or Transformers unless a caller asks for that backend.
 """
 
 from typing import TYPE_CHECKING, Any
 
 from .config import DEFAULT_MODEL_ID, DType, Device, LocalChatConfig
-from .constants import (
-    DEFAULT_CODEX_MODEL,
-    DEFAULT_TRITON_MODEL_NAME,
-    DEFAULT_TRITON_URL,
-)
-from .factory import ChatModel, build_codex_chat_model, build_triton_chat_model
+from .constants import DEFAULT_CODEX_MODEL
+from .factory import ChatModel, build_codex_chat_model
 from .types import MessageRole, PromptToken
 
 if TYPE_CHECKING:
     from todoist.llm.backends.codex import CodexChatConfig, CodexCliChatModel
     from todoist.llm.backends.transformers import TransformersMistral3ChatModel
-    from todoist.llm.backends.triton import TritonChatConfig, TritonGenerateChatModel
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "CodexChatConfig": ("todoist.llm.backends.codex", "CodexChatConfig"),
     "CodexCliChatModel": ("todoist.llm.backends.codex", "CodexCliChatModel"),
-    "TritonChatConfig": ("todoist.llm.backends.triton", "TritonChatConfig"),
-    "TritonGenerateChatModel": (
-        "todoist.llm.backends.triton",
-        "TritonGenerateChatModel",
-    ),
     "TransformersMistral3ChatModel": (
         "todoist.llm.backends.transformers",
         "TransformersMistral3ChatModel",
@@ -53,16 +43,11 @@ __all__ = [
     "CodexCliChatModel",
     "DEFAULT_CODEX_MODEL",
     "DEFAULT_MODEL_ID",
-    "DEFAULT_TRITON_MODEL_NAME",
-    "DEFAULT_TRITON_URL",
     "DType",
     "Device",
     "LocalChatConfig",
     "MessageRole",
     "PromptToken",
-    "TritonChatConfig",
-    "TritonGenerateChatModel",
     "TransformersMistral3ChatModel",
     "build_codex_chat_model",
-    "build_triton_chat_model",
 ]

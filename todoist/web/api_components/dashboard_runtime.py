@@ -626,10 +626,6 @@ def _service_statuses() -> list[dict[str, Any]]:
     api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file(_cache_runtime_path("activity.joblib"))
     automation_log = _stat_file(automation_log_path())
-    env_path = _resolve_env_path()
-    file_values = dotenv_values(env_path) if env_path.exists() else {}
-    triton_settings = _resolve_triton_settings(file_values)
-    triton_ready = _triton_ready(triton_settings)
     observer_settings = observer_settings_payload(
         load_dashboard_config(_DASHBOARD_CONFIG_PATH),
         path=_DASHBOARD_CONFIG_PATH,
@@ -669,15 +665,6 @@ def _service_statuses() -> list[dict[str, Any]]:
             "name": "Automation log",
             "status": "ok" if automation_log else "warn",
             "detail": automation_log or "automation.log missing",
-        },
-        {
-            "name": "Triton",
-            "status": "ok" if triton_ready else "warn",
-            "detail": (
-                f"{triton_settings['modelName']} ready at {triton_settings['baseUrl']}"
-                if triton_ready
-                else f"not ready at {triton_settings['baseUrl']}"
-            ),
         },
         {"name": "Observer", "status": observer_status, "detail": observer_detail},
     ]

@@ -59,15 +59,9 @@ async def llm_chat_update_settings(
     codex_model = (
         _sanitize_text(payload.get("codexModel")) or settings["codex"]["model"]
     )
-    triton_model_id = (
-        _sanitize_text(payload.get("tritonModelId")) or settings["triton"]["modelId"]
-    )
     codex_model_ids = {str(item["id"]) for item in settings["codex"]["modelOptions"]}
-    triton_model_ids = {str(item["id"]) for item in settings["triton"]["modelOptions"]}
     if codex_model not in codex_model_ids:
         raise HTTPException(status_code=400, detail="Unsupported Codex model.")
-    if triton_model_id not in triton_model_ids:
-        raise HTTPException(status_code=400, detail="Unsupported Triton LLM model.")
 
     enabled, loading = await _llm_chat_model_status()
     if loading:
@@ -80,17 +74,11 @@ async def llm_chat_update_settings(
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
     set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
-    if backend == "triton_local":
-        set_key(str(env_path), str(EnvVar.AGENT_MODEL_ID), triton_model_id)
-    else:
-        unset_key(str(env_path), str(EnvVar.AGENT_MODEL_ID))
+    unset_key(str(env_path), str(EnvVar.AGENT_MODEL_ID))
     set_key(str(env_path), str(EnvVar.AGENT_CODEX_MODEL), codex_model)
     os.environ[str(EnvVar.AGENT_BACKEND)] = backend
     os.environ[str(EnvVar.AGENT_DEVICE)] = device
-    if backend == "triton_local":
-        os.environ[str(EnvVar.AGENT_MODEL_ID)] = triton_model_id
-    else:
-        os.environ.pop(str(EnvVar.AGENT_MODEL_ID), None)
+    os.environ.pop(str(EnvVar.AGENT_MODEL_ID), None)
     os.environ[str(EnvVar.AGENT_CODEX_MODEL)] = codex_model
 
     if enabled:
