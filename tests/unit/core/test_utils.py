@@ -14,6 +14,7 @@ import pytest
 
 from todoist.core.env import EnvVar
 from todoist.core.utils import (
+    CACHE_STORAGE_REGISTRY,
     DEFAULT_CACHE_SUBDIR,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_LOG_LEVEL,
@@ -534,24 +535,18 @@ def test_local_storage_error_on_invalid_save_path(tmp_path):
 
 def test_cache_initialization_creates_expected_storages(tmp_path):
     cache = Cache(str(tmp_path))
-    expected_files = {
-        "activity": "activity.joblib",
-        "observer_state": "observer_state.joblib",
-        "integration_launches": "integration_launches.joblib",
-        "automation_launches": "automation_launches.joblib",
-        "automation_run_signals": "automation_run_signals.joblib",
-        "processed_gmail_messages": "processed_gmail_messages.joblib",
-        "dashboard_state": "dashboard_state.joblib",
-        "llm_breakdown_progress": "llm_breakdown_progress.joblib",
-        "llm_breakdown_queue": "llm_breakdown_queue.joblib",
-        "llm_chat_queue": "llm_chat_queue.joblib",
-        "llm_chat_conversations": "llm_chat_conversations.joblib",
-        "llm_usage_stats": "llm_usage_stats.joblib",
-    }
-    for attr_name, filename in expected_files.items():
+    for attr_name, (filename, _default_factory) in CACHE_STORAGE_REGISTRY.items():
         storage = getattr(cache, attr_name)
         assert isinstance(storage, LocalStorage)
         assert storage.path == str(tmp_path / filename)
+
+
+def test_cache_storage_uses_registered_filename_and_default(tmp_path):
+    cache = Cache(str(tmp_path))
+    storage = cache.storage("processed_gmail_messages", set)
+
+    assert storage.path == str(tmp_path / "processed_gmail_messages.joblib")
+    assert storage.load() == set()
 
 
 def test_cache_uses_env_path_by_default(monkeypatch, tmp_path):
