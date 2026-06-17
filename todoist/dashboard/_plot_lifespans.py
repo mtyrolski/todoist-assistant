@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from loguru import logger
-from scipy import stats
 
 from todoist.dashboard._plot_common import (
     _DASHBOARD_GRID_COLOR,
@@ -169,6 +168,23 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             return None
         return x_segment, y_segment
 
+    def _smooth_log_density(
+        log_samples: np.ndarray,
+        log_bounds: np.ndarray,
+    ) -> np.ndarray:
+        sample_count = int(log_samples.size)
+        sample_std = float(np.std(log_samples, ddof=1))
+        bandwidth = sample_std * sample_count ** (-1 / 5)
+        if not np.isfinite(bandwidth) or bandwidth <= 0:
+            bandwidth = max(float(np.ptp(log_bounds)) / 64, 0.05)
+
+        scaled_offsets = log_bounds[:, np.newaxis] - log_samples[np.newaxis, :]
+        scaled_offsets = scaled_offsets / bandwidth
+        kernel_values = np.exp(-0.5 * np.square(scaled_offsets))
+        return kernel_values.sum(axis=1) / (
+            sample_count * bandwidth * np.sqrt(2 * np.pi)
+        )
+
     def _format_duration_compact(seconds: float) -> str:
         total = int(round(max(0.0, seconds)))
         units = [
@@ -291,10 +307,9 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     fig = go.Figure()
     if total_count >= 2 and not np.isclose(log_durations.var(), 0.0):
-        kde = stats.gaussian_kde(log_durations, bw_method="scott")
         log_bounds = np.linspace(min_log - pad, max_log + pad, 512)
         x_values = np.power(10.0, log_bounds)
-        densities = kde(log_bounds)
+        densities = _smooth_log_density(log_durations, log_bounds)
         integral = float(np.trapezoid(densities, x_values))
         if np.isfinite(integral) and integral > 0:
             densities = densities * (total_count / integral)
