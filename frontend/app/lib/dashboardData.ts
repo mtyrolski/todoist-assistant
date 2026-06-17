@@ -1,6 +1,5 @@
 import type { PlotlyFigure } from "../components/PlotCard";
 import type { InsightItem } from "../components/InsightCard";
-import type { HabitTrackerItem } from "../components/HabitTrackerCard";
 import type { LeaderboardItem } from "../components/LeaderboardCard";
 import type { ServiceStatus } from "../components/ServiceMonitor";
 
@@ -25,6 +24,19 @@ export type ConfigurableItem = {
   configPath?: string;
   anchor?: string;
   summary?: string;
+};
+
+export type HabitTrackerItem = {
+  taskId: string;
+  name: string;
+  projectId: string;
+  projectName: string;
+  color: string;
+  weeklyCompleted: number;
+  weeklyRescheduled: number;
+  allTimeCompleted: number;
+  allTimeRescheduled: number;
+  reliability: number | null;
 };
 
 export type DashboardHome = {
