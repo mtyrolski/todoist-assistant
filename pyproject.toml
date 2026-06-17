@@ -52,7 +52,7 @@ notebook = [
 local-llm = [
     "accelerate>=0.34.0",
     "langchain-huggingface>=1.2.0",
-    "torch>=2.2.0",
+    "torch>=2.12.1",
     "transformers>=4.47.0",
 ]
 
