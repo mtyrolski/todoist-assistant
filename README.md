@@ -90,6 +90,8 @@ Setup details: [docs/INSTALLATION.md](docs/INSTALLATION.md)
 
 ### Docker
 
+Compose runs the API and frontend services. The published container workflow builds the same two images for GHCR.
+
 ```bash
 docker compose up --build
 ```
@@ -211,9 +213,12 @@ Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
 Run this before closing code changes:
 
 ```bash
+uv sync --locked --extra local-llm
 make test_all
 make coverage
 ```
+
+CI also runs a dashboard smoke test in raw/demo mode and a Docker image workflow for the API and frontend images. Workflow details live in [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Contributing
 
