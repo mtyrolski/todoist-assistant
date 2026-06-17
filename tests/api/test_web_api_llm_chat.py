@@ -13,6 +13,21 @@ from todoist.core.env import EnvVar
 # LLM Chat endpoint tests
 
 
+def _assert_triton_disabled(payload: dict[str, object]) -> None:
+    triton = payload.get("triton")
+    if triton is None:
+        return
+    assert isinstance(triton, dict)
+    assert triton == {
+        "configured": False,
+        "healthy": False,
+        "baseUrl": "",
+        "modelName": "",
+        "modelId": "",
+        "modelOptions": [],
+    }
+
+
 def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
@@ -58,11 +73,8 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["enabled"] is False
     assert payload["loading"] is False
     assert payload["backend"]["selected"] == "disabled"
-    assert payload["backend"]["triton"]["configured"] is True
+    _assert_triton_disabled(payload["backend"])
     assert payload["backend"]["codex"]["model"] == "gpt-5.5"
-    assert payload["backend"]["triton"]["modelId"] in {
-        option["id"] for option in payload["backend"]["triton"]["modelOptions"]
-    }
     assert payload["model"]["selected"] == "disabled"
     assert payload["device"]["selected"] == "cpu"
     assert payload["usage"]["totals"]["inferenceCount"] == 0
@@ -106,7 +118,7 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     assert web_api._LLM_CHAT_AGENT is None
 
 
-def test_llm_chat_settings_response_exposes_codex_and_triton_options(
+def test_llm_chat_settings_response_exposes_codex_options_without_triton(
     monkeypatch, tmp_path
 ) -> None:
     env_path = tmp_path / ".env"
@@ -121,7 +133,6 @@ def test_llm_chat_settings_response_exposes_codex_and_triton_options(
     )
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
 
     client = TestClient(web_api.app)
     res = client.get("/api/llm_chat/settings")
@@ -131,13 +142,10 @@ def test_llm_chat_settings_response_exposes_codex_and_triton_options(
     assert payload["envPath"] == ".env"
     assert payload["codex"]["model"] == "gpt-5.5"
     assert "gpt-5.5" in {option["id"] for option in payload["codex"]["modelOptions"]}
-    assert [option["id"] for option in payload["triton"]["modelOptions"]] == [
-        "Qwen/Qwen2.5-3B-Instruct"
-    ]
-    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    _assert_triton_disabled(payload)
 
 
-def test_llm_chat_settings_lock_hides_and_rejects_triton(monkeypatch, tmp_path) -> None:
+def test_llm_chat_settings_lock_rejects_triton_local(monkeypatch, tmp_path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
         "\n".join(
@@ -153,13 +161,6 @@ def test_llm_chat_settings_lock_hides_and_rejects_triton(monkeypatch, tmp_path) 
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
 
-    def _unexpected_triton_probe(_settings):
-        raise AssertionError(
-            "Triton should not be probed when the dashboard is locked to Codex"
-        )
-
-    monkeypatch.setattr(web_api, "_triton_ready", _unexpected_triton_probe)
-
     client = TestClient(web_api.app)
     res = client.get("/api/llm_chat/settings")
 
@@ -168,14 +169,7 @@ def test_llm_chat_settings_lock_hides_and_rejects_triton(monkeypatch, tmp_path) 
     assert payload["backend"] == "codex"
     assert payload["lockedBackend"] == "codex"
     assert [option["id"] for option in payload["availableBackends"]] == ["codex"]
-    assert payload["triton"] == {
-        "configured": False,
-        "healthy": False,
-        "baseUrl": "",
-        "modelName": "",
-        "modelId": "",
-        "modelOptions": [],
-    }
+    _assert_triton_disabled(payload)
 
     update = client.put(
         "/api/llm_chat/settings",
@@ -236,16 +230,8 @@ def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path) 
     assert web_api._LLM_CHAT_AGENT is None
 
 
-def test_llm_chat_update_settings_supports_triton_backend(
-    monkeypatch, tmp_path
-) -> None:
-    env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+def test_llm_chat_update_settings_rejects_triton_backend(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: True)
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
 
     client = TestClient(web_api.app)
     res = client.put(
@@ -257,15 +243,45 @@ def test_llm_chat_update_settings_supports_triton_backend(
         },
     )
 
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Unsupported LLM backend."
+
+
+def test_llm_chat_update_settings_clears_stale_triton_model(
+    monkeypatch, tmp_path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "TODOIST_AGENT_BACKEND='triton_local'",
+                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+
+    client = TestClient(web_api.app)
+    res = client.put(
+        "/api/llm_chat/settings",
+        json={
+            "backend": "disabled",
+            "device": "cpu",
+        },
+    )
+
     assert res.status_code == 200
     payload = res.json()
-    assert payload["backend"] == "triton_local"
-    assert payload["triton"]["healthy"] is True
-    assert payload["triton"]["modelName"] == "todoist_llm"
-    assert payload["triton"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert payload["backend"] == "disabled"
+    _assert_triton_disabled(payload)
     saved = env_path.read_text(encoding="utf-8")
-    assert "TODOIST_AGENT_BACKEND='triton_local'" in saved
-    assert "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'" in saved
+    assert "TODOIST_AGENT_BACKEND='disabled'" in saved
+    assert "TODOIST_AGENT_MODEL_ID" not in saved
 
 
 def test_llm_chat_send_requires_message() -> None:
@@ -301,7 +317,6 @@ def test_llm_chat_send_allows_codex_inline_without_model_loaded(
     monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
     monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", None)
     monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
-    monkeypatch.setattr(web_api, "_triton_ready", lambda _settings: False)
 
     async def _mock_model_status():
         return False, False
@@ -562,6 +577,8 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
 
 def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     """Test /api/llm_chat/enable returns model status."""
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
+    monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
 
     # Mock start load to do nothing
     async def _mock_start_load():
@@ -731,9 +748,8 @@ def test_llm_chat_queue_worker_builds_codex_inline(monkeypatch, tmp_path) -> Non
             assert messages[-1]["content"] == "Reply with inline-ok"
             return "inline-ok"
 
-    def _fake_build_model(settings, *, max_output_tokens: int):
+    def _fake_build_model(settings):
         captured_settings.append(dict(settings))
-        assert max_output_tokens == 256
         return _FakeChatModel()
 
     original_resolve_settings = getattr(web_api, "_resolve_llm_chat_settings")
@@ -745,7 +761,6 @@ def test_llm_chat_queue_worker_builds_codex_inline(monkeypatch, tmp_path) -> Non
             "backend": "codex",
             "device": "cpu",
             "codex": {"model": "gpt-5.5", "modelOptions": []},
-            "triton": {},
         },
     )
     setattr(web_api, "_build_llm_from_settings", _fake_build_model)
@@ -811,8 +826,7 @@ def test_llm_chat_queue_worker_marks_inline_codex_load_failure(
     monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", None)
     monkeypatch.setattr(web_api, "_LLM_CHAT_WORKER_RUNNING", False)
 
-    def _fake_build_model(_settings, *, max_output_tokens: int):
-        assert max_output_tokens == 256
+    def _fake_build_model(_settings):
         raise ValueError("codex unavailable")
 
     original_resolve_settings = getattr(web_api, "_resolve_llm_chat_settings")
@@ -824,7 +838,6 @@ def test_llm_chat_queue_worker_marks_inline_codex_load_failure(
             "backend": "codex",
             "device": "cpu",
             "codex": {"model": "gpt-5.5", "modelOptions": []},
-            "triton": {},
         },
     )
     setattr(web_api, "_build_llm_from_settings", _fake_build_model)

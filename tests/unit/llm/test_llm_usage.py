@@ -24,8 +24,8 @@ def test_record_llm_usage_aggregates_totals_and_selected_model(
         output_tokens=9,
     )
     record_llm_usage(
-        backend="triton_local",
-        model_id="Qwen/Qwen2.5-3B-Instruct",
+        backend="codex",
+        model_id="gpt-5",
         operation="repair",
         input_tokens=7,
         output_tokens=3,
@@ -45,6 +45,6 @@ def test_record_llm_usage_aggregates_totals_and_selected_model(
     assert usage["current"]["structuredCount"] == 1
     assert usage["current"]["inputTokens"] == 32
     assert usage["current"]["outputTokens"] == 14
-    assert usage["lastRequest"]["backend"] == "triton_local"
-    assert usage["lastRequest"]["modelId"] == "Qwen/Qwen2.5-3B-Instruct"
+    assert usage["lastRequest"]["backend"] == "codex"
+    assert usage["lastRequest"]["modelId"] == "gpt-5"
     assert usage["lastRequest"]["operation"] == "repair"

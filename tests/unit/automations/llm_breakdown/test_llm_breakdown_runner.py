@@ -64,10 +64,10 @@ class _RefreshableFakeDb(_FakeDb):
         self.project = self.refreshed_project
 
 
-def test_run_breakdown_uses_concurrent_triton_requests(monkeypatch, tmp_path) -> None:
+def test_run_breakdown_uses_serial_codex_requests(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
     tasks = [
         make_task(f"task-{index}", content=f"Task {index}", labels=["ai-breakdown"])
@@ -79,7 +79,7 @@ def test_run_breakdown_uses_concurrent_triton_requests(monkeypatch, tmp_path) ->
     state = {"active": 0, "max_active": 0, "calls": 0}
     lock = Lock()
 
-    class _FakeTriton:
+    class _FakeLlm:
         def structured_chat(self, messages, schema):
             assert schema is TaskBreakdown
             assert messages
@@ -92,26 +92,26 @@ def test_run_breakdown_uses_concurrent_triton_requests(monkeypatch, tmp_path) ->
                 state["active"] -= 1
             return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
 
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeTriton())
+    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
 
     run_breakdown(automation, cast(Database, db))
 
     assert automation.max_tasks_per_tick == 4
     assert state["calls"] == 4
-    assert state["max_active"] >= 2
+    assert state["max_active"] == 1
     assert len(db.updated) == 4
 
 
-def test_llm_request_parallelism_treats_zero_max_tasks_per_tick_as_unlimited(
+def test_llm_request_parallelism_uses_single_codex_worker(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "triton_local")
+    monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
     automation = LLMBreakdown(max_tasks_per_tick=0)
 
-    assert automation.llm_request_parallelism(4) == 4
+    assert automation.llm_request_parallelism(4) == 1
 
 
 def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch, tmp_path) -> None:

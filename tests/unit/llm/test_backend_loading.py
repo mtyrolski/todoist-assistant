@@ -15,7 +15,6 @@ importlib.import_module("todoist.llm.model_catalog")
 loaded = [
     name for name in (
         "todoist.llm.backends.transformers",
-        "todoist.llm.backends.triton",
         "todoist.llm.backends.codex",
     )
     if name in sys.modules
