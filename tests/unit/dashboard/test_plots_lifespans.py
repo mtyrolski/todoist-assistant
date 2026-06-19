@@ -325,3 +325,39 @@ def test_plot_task_lifespans_handles_missing_task_names():
 
     # Should handle missing names and still create the figure
     assert isinstance(fig, go.Figure)
+
+
+def test_plot_task_lifespans_weights_recent_completions_more():
+    """Recent completions should influence percentile guides more than old tasks."""
+    rows: list[dict[str, str]] = []
+    dates: list[datetime] = []
+
+    for index in range(100):
+        task_id = f"old-{index}"
+        rows.extend(
+            [
+                {"parent_item_id": task_id, "type": "added", "title": task_id},
+                {"parent_item_id": task_id, "type": "completed", "title": task_id},
+            ]
+        )
+        dates.extend([datetime(2020, 1, 1), datetime(2020, 1, 2)])
+
+    for index in range(5):
+        task_id = f"recent-{index}"
+        rows.extend(
+            [
+                {"parent_item_id": task_id, "type": "added", "title": task_id},
+                {"parent_item_id": task_id, "type": "completed", "title": task_id},
+            ]
+        )
+        dates.extend([datetime(2025, 1, 1), datetime(2025, 1, 31)])
+
+    df = pd.DataFrame(rows, index=pd.DatetimeIndex(dates))
+    df.index.name = "date"
+
+    fig = plot_task_lifespans(df)
+    guide_positions = sorted(float(shape.x0) for shape in fig.layout.shapes)
+    trace_names = [str(trace.name) for trace in cast(tuple[Any, ...], fig.data)]
+
+    assert guide_positions[-1] == pytest.approx(30.0)
+    assert "Recency-weighted frequency" in trace_names
