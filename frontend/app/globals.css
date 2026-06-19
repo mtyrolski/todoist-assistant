@@ -2126,7 +2126,7 @@ textarea.textInput {
 
 .assistantRail {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   min-width: 0;
 }
 
@@ -2146,6 +2146,16 @@ textarea.textInput {
   gap: 8px;
   padding: 10px;
   overflow: auto;
+}
+
+.assistantRailSearch {
+  border-bottom: 1px solid var(--border);
+  padding: 10px;
+}
+
+.assistantRailSearch .textInput {
+  min-height: 38px;
+  padding: 8px 10px;
 }
 
 .assistantConversationButton {
@@ -2208,9 +2218,45 @@ textarea.textInput {
   gap: 8px;
 }
 
+.assistantRenameForm {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.assistantRenameForm .textInput {
+  min-height: 38px;
+  min-width: min(420px, 50vw);
+  padding: 8px 10px;
+}
+
+.buttonDanger {
+  border-color: rgba(255, 123, 123, 0.35);
+  color: var(--danger);
+}
+
+.buttonDanger:hover {
+  background: rgba(255, 123, 123, 0.12);
+}
+
 .assistantRuntime {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
+}
+
+.assistantThreadStats {
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 8px 18px;
+  padding: 8px 14px;
+}
+
+.assistantNotice {
+  color: var(--success);
 }
 
 .assistantMain > .muted {
@@ -3453,18 +3499,6 @@ textarea.textInput {
     grid-template-columns: 1fr;
   }
 
-  .assistantWorkspace {
-    grid-template-columns: 1fr;
-  }
-
-  .assistantMain {
-    min-height: 620px;
-  }
-
-  .assistantComposer {
-    grid-template-columns: 1fr;
-  }
-
   .row {
     grid-template-columns: 12px 1fr;
   }
@@ -3495,6 +3529,30 @@ textarea.textInput {
 }
 
 @media (max-width: 980px) {
+  .assistantWorkspace {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .assistantRail {
+    grid-template-rows: auto auto auto;
+  }
+
+  .assistantConversationList {
+    grid-auto-columns: minmax(220px, 280px);
+    grid-auto-flow: column;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .assistantMain {
+    min-height: min(720px, calc(100vh - 120px));
+  }
+
+  .assistantComposer {
+    grid-template-columns: 1fr;
+  }
+
   .appShell {
     grid-template-columns: 1fr;
   }

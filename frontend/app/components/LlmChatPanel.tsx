@@ -9,6 +9,9 @@ type ChatConversationSummary = {
   createdAt?: string | null;
   updatedAt?: string | null;
   messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  toolMessageCount: number;
   lastMessage?: string | null;
 };
 
@@ -56,6 +59,13 @@ type ChatStatus = {
       endpointConfigured: boolean;
     };
   };
+  statistics?: {
+    conversationCount: number;
+    messageCount: number;
+    userMessageCount: number;
+    assistantMessageCount: number;
+    toolMessageCount: number;
+  };
   conversations: ChatConversationSummary[];
 };
 
@@ -97,6 +107,11 @@ async function readApiResponse<T>(response: Response): Promise<T & { detail?: st
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
   return value.replace("T", " ");
+}
+
+function chatIdFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URL(window.location.href).searchParams.get("chat");
 }
 
 function formatCount(value?: number | null): string {
@@ -205,6 +220,11 @@ export function LlmChatPanel() {
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [runElapsedSeconds, setRunElapsedSeconds] = useState(0);
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [threadActionBusy, setThreadActionBusy] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -214,6 +234,24 @@ export function LlmChatPanel() {
     if (!selectedConversationId) return null;
     return conversations.find((item) => item.id === selectedConversationId) ?? null;
   }, [conversations, selectedConversationId]);
+  const filteredConversations = useMemo(() => {
+    const query = conversationQuery.trim().toLowerCase();
+    if (!query) return conversations;
+    return conversations.filter((item) =>
+      `${item.title} ${item.lastMessage ?? ""}`.toLowerCase().includes(query)
+    );
+  }, [conversationQuery, conversations]);
+
+  const selectConversation = useCallback((conversationId: string | null, replace = false) => {
+    setSelectedConversationId(conversationId);
+    setEditingTitle(false);
+    setActionNotice(null);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (conversationId) url.searchParams.set("chat", conversationId);
+    else url.searchParams.delete("chat");
+    window.history[replace ? "replaceState" : "pushState"]({}, "", url);
+  }, []);
 
   const refreshStatus = useCallback(async (silent = false) => {
     try {
@@ -251,10 +289,21 @@ export function LlmChatPanel() {
   }, [refreshStatus]);
 
   useEffect(() => {
+    const syncFromLocation = () => {
+      const linkedChatId = chatIdFromLocation();
+      if (linkedChatId) didAutoSelect.current = true;
+      setSelectedConversationId(linkedChatId);
+    };
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, []);
+
+  useEffect(() => {
     if (didAutoSelect.current || !conversations.length) return;
-    setSelectedConversationId(conversations[0].id);
+    selectConversation(conversations[0].id, true);
     didAutoSelect.current = true;
-  }, [conversations]);
+  }, [conversations, selectConversation]);
 
   useEffect(() => {
     if (!selectedConversationId) {
@@ -262,7 +311,8 @@ export function LlmChatPanel() {
       return;
     }
     if (status && !conversations.some((item) => item.id === selectedConversationId)) {
-      setSelectedConversationId(null);
+      selectConversation(null, true);
+      setActionError("The linked chat no longer exists.");
       return;
     }
     if (conversation?.id === selectedConversationId && conversation?.updatedAt === selectedSummary?.updatedAt) return;
@@ -274,8 +324,13 @@ export function LlmChatPanel() {
     loadConversation,
     selectedConversationId,
     selectedSummary?.updatedAt,
+    selectConversation,
     status
   ]);
+
+  useEffect(() => {
+    setTitleDraft(conversation?.title ?? selectedSummary?.title ?? "");
+  }, [conversation?.title, selectedSummary?.title]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -301,6 +356,63 @@ export function LlmChatPanel() {
       await refreshStatus();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to warm up Codex");
+    }
+  };
+
+  const handleRename = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedConversationId || !titleDraft.trim() || threadActionBusy) return;
+    try {
+      setThreadActionBusy(true);
+      setActionError(null);
+      const res = await fetch(`/api/llm_chat/conversations/${encodeURIComponent(selectedConversationId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: titleDraft.trim() })
+      });
+      const updated = await readApiResponse<ChatConversation>(res);
+      setConversation(updated);
+      setEditingTitle(false);
+      setActionNotice("Thread renamed");
+      await refreshStatus(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to rename thread");
+    } finally {
+      setThreadActionBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedConversationId || threadActionBusy) return;
+    const title = conversation?.title ?? selectedSummary?.title ?? "this chat";
+    if (!window.confirm(`Delete “${title}”? This cannot be undone.`)) return;
+    try {
+      setThreadActionBusy(true);
+      setActionError(null);
+      const res = await fetch(`/api/llm_chat/conversations/${encodeURIComponent(selectedConversationId)}`, {
+        method: "DELETE"
+      });
+      await readApiResponse<{ deleted: boolean }>(res);
+      setConversation(null);
+      selectConversation(null, true);
+      setActionNotice("Thread deleted");
+      await refreshStatus(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to delete thread");
+    } finally {
+      setThreadActionBusy(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (!selectedConversationId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("chat", selectedConversationId);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setActionNotice("Thread link copied");
+    } catch {
+      setActionError("Could not copy the thread link");
     }
   };
 
@@ -336,7 +448,7 @@ export function LlmChatPanel() {
       const payload = await readApiResponse<SendResponse>(res);
       setMessageDraft("");
       if (payload.conversationId) {
-        setSelectedConversationId(payload.conversationId);
+        selectConversation(payload.conversationId, !selectedConversationId);
       }
       if (payload.conversation) {
         setConversation(payload.conversation);
@@ -358,13 +470,15 @@ export function LlmChatPanel() {
         <div className="assistantRailHeader">
           <div>
             <p className="muted tiny">Chats</p>
-            <p className="rowTitle">{conversations.length} saved</p>
+            <p className="rowTitle">{status?.statistics?.conversationCount ?? conversations.length} saved</p>
+            <p className="muted tiny">{formatCount(status?.statistics?.messageCount)} messages total</p>
           </div>
           <button
             className="button buttonSmall"
             type="button"
             onClick={() => {
-              setSelectedConversationId(null);
+              didAutoSelect.current = true;
+              selectConversation(null);
               setConversation(null);
               setMessageDraft("");
             }}
@@ -373,29 +487,41 @@ export function LlmChatPanel() {
           </button>
         </div>
 
+        <div className="assistantRailSearch">
+          <input
+            className="textInput"
+            type="search"
+            placeholder="Search chats"
+            value={conversationQuery}
+            onChange={(event) => setConversationQuery(event.target.value)}
+            aria-label="Search chats"
+          />
+        </div>
+
         <div className="assistantConversationList">
           {!status ? (
             <div className="skeleton" style={{ minHeight: 120 }} />
-          ) : conversations.length ? (
-            conversations.map((item) => {
+          ) : filteredConversations.length ? (
+            filteredConversations.map((item) => {
               const active = item.id === selectedConversationId;
               return (
                 <button
                   key={item.id}
                   type="button"
                   className={`assistantConversationButton${active ? " assistantConversationButtonActive" : ""}`}
-                  onClick={() => setSelectedConversationId(item.id)}
+                  onClick={() => selectConversation(item.id)}
                 >
                   <span className="assistantConversationTitle">{item.title}</span>
                   <span className="assistantConversationMeta">
-                    {item.messageCount} messages | {formatTimestamp(item.updatedAt)}
+                    {item.userMessageCount} prompts · {item.assistantMessageCount} answers · {item.toolMessageCount} tools
                   </span>
+                  <span className="assistantConversationMeta">Updated {formatTimestamp(item.updatedAt)}</span>
                   {item.lastMessage ? <span className="assistantConversationPreview">{item.lastMessage}</span> : null}
                 </button>
               );
             })
           ) : (
-            <p className="muted tiny">No saved chats.</p>
+            <p className="muted tiny">{conversationQuery ? "No matching chats." : "No saved chats."}</p>
           )}
         </div>
       </aside>
@@ -404,9 +530,41 @@ export function LlmChatPanel() {
         <header className="assistantTopbar">
           <div>
             <p className="muted tiny">Personal Assistant</p>
-            <h1>{conversation?.title ?? selectedSummary?.title ?? "New chat"}</h1>
+            {editingTitle && selectedConversationId ? (
+              <form className="assistantRenameForm" onSubmit={handleRename}>
+                <input
+                  className="textInput"
+                  value={titleDraft}
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  maxLength={120}
+                  autoFocus
+                  aria-label="Thread title"
+                />
+                <button className="button buttonSmall" type="submit" disabled={threadActionBusy || !titleDraft.trim()}>
+                  Save
+                </button>
+                <button className="button buttonSmall" type="button" onClick={() => setEditingTitle(false)}>
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <h1>{conversation?.title ?? selectedSummary?.title ?? "New chat"}</h1>
+            )}
           </div>
           <div className="assistantActions">
+            {selectedConversationId ? (
+              <>
+                <button className="button buttonSmall" type="button" onClick={() => setEditingTitle(true)} disabled={threadActionBusy}>
+                  Rename
+                </button>
+                <button className="button buttonSmall" type="button" onClick={handleCopyLink}>
+                  Copy link
+                </button>
+                <button className="button buttonSmall buttonDanger" type="button" onClick={handleDelete} disabled={threadActionBusy || sending}>
+                  Delete
+                </button>
+              </>
+            ) : null}
             <button className="button buttonSmall" type="button" onClick={handleEnable} disabled={status?.enabled || status?.loading}>
               {status?.enabled ? "Ready" : status?.loading ? "Loading" : "Warm"}
             </button>
@@ -440,8 +598,18 @@ export function LlmChatPanel() {
           ) : null}
         </div>
 
+        {selectedSummary ? (
+          <div className="assistantThreadStats">
+            <span>{selectedSummary.userMessageCount} prompts</span>
+            <span>{selectedSummary.assistantMessageCount} answers</span>
+            <span>{selectedSummary.toolMessageCount} tool events</span>
+            <span>{selectedSummary.messageCount} stored fragments</span>
+          </div>
+        ) : null}
+
         {statusError ? <p className="muted tiny">Status error: {statusError}</p> : null}
         {actionError ? <p className="muted tiny">Error: {actionError}</p> : null}
+        {actionNotice ? <p className="muted tiny assistantNotice">{actionNotice}</p> : null}
 
         <div className="assistantMessages" aria-live="polite">
           {loadingConversation ? (
