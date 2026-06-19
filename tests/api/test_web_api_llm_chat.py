@@ -54,6 +54,21 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["conversations"] == []
 
 
+def test_dashboard_llm_chat_reports_invalid_backend_as_json(
+    monkeypatch, tmp_path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("TODOIST_AGENT_BACKEND='unsupported'", encoding="utf-8")
+    monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+
+    client = TestClient(web_api.app)
+    res = client.get("/api/dashboard/llm_chat")
+
+    assert res.status_code == 409
+    assert res.json() == {"detail": "Unsupported LLM backend: unsupported"}
+
+
 def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     monkeypatch, tmp_path
 ) -> None:

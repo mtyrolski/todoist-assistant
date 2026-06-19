@@ -76,6 +76,24 @@ const POLL_MS = 7000;
 const PYTHON_CALL_PREFIX = "Calling python_repl with code:";
 const PYTHON_OUTPUT_PREFIX = "python_repl output:";
 
+async function readApiResponse<T>(response: Response): Promise<T & { detail?: string }> {
+  const body = await response.text();
+  let payload: (T & { detail?: string }) | null = null;
+  if (body) {
+    try {
+      payload = JSON.parse(body) as T & { detail?: string };
+    } catch {
+      if (!response.ok) throw new Error(body);
+      throw new Error("Server returned an invalid JSON response");
+    }
+  }
+  if (!response.ok) {
+    throw new Error(payload?.detail ?? `Request failed (${response.status})`);
+  }
+  if (!payload) throw new Error("Server returned an empty response");
+  return payload;
+}
+
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
   return value.replace("T", " ");
@@ -186,11 +204,12 @@ export function LlmChatPanel() {
 
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [runElapsedSeconds, setRunElapsedSeconds] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const conversations = status?.conversations ?? [];
+  const conversations = useMemo(() => status?.conversations ?? [], [status?.conversations]);
   const selectedSummary = useMemo(() => {
     if (!selectedConversationId) return null;
     return conversations.find((item) => item.id === selectedConversationId) ?? null;
@@ -201,10 +220,7 @@ export function LlmChatPanel() {
       if (!silent) setLoadingStatus(true);
       setStatusError(null);
       const res = await fetch("/api/dashboard/llm_chat");
-      const payload = (await res.json()) as ChatStatus & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to load chat status");
-      }
+      const payload = await readApiResponse<ChatStatus>(res);
       setStatus(payload);
     } catch (err) {
       setStatusError(err instanceof Error ? err.message : "Failed to load chat status");
@@ -218,10 +234,7 @@ export function LlmChatPanel() {
       setActionError(null);
       setLoadingConversation(true);
       const res = await fetch(`/api/llm_chat/conversations/${encodeURIComponent(conversationId)}`);
-      const payload = (await res.json()) as ChatConversation & { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to load conversation");
-      }
+      const payload = await readApiResponse<ChatConversation>(res);
       setConversation(payload);
     } catch (err) {
       setConversation(null);
@@ -268,14 +281,23 @@ export function LlmChatPanel() {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [conversation?.messages.length, sending]);
 
+  useEffect(() => {
+    if (!sending) {
+      setRunElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const updateElapsed = () => setRunElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(interval);
+  }, [sending]);
+
   const handleEnable = async () => {
     try {
       setActionError(null);
       const res = await fetch("/api/llm_chat/enable", { method: "POST" });
-      const payload = (await res.json()) as { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to warm up Codex");
-      }
+      await readApiResponse<Record<string, never>>(res);
       await refreshStatus();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to warm up Codex");
@@ -311,10 +333,7 @@ export function LlmChatPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      const payload = (await res.json()) as SendResponse;
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to run assistant turn");
-      }
+      const payload = await readApiResponse<SendResponse>(res);
       setMessageDraft("");
       if (payload.conversationId) {
         setSelectedConversationId(payload.conversationId);
@@ -450,14 +469,23 @@ export function LlmChatPanel() {
             </div>
           )}
           {sending ? (
-            <article className="assistantMessage assistantMessage-assistant assistantMessagePending">
+            <article
+              className="assistantMessage assistantMessage-assistant assistantMessagePending"
+              aria-label={`Codex is working, ${runElapsedSeconds} seconds elapsed`}
+            >
               <div className="assistantMessageMeta">
-                <span>Codex</span>
-                <span>running</span>
+                <span>Codex is working</span>
+                <span>{runElapsedSeconds}s elapsed</span>
               </div>
-              <div className="assistantTyping">
-                <span />
-                <span />
+              <div className="assistantPendingBody">
+                <div className="assistantTyping" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <span>LangGraph turn in progress</span>
+              </div>
+              <div className="assistantPendingRail" aria-hidden>
                 <span />
               </div>
             </article>

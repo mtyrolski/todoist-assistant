@@ -13,18 +13,45 @@ from todoist.web.routes.common import _sync_api_globals
 router = APIRouter()
 
 
+def _configuration_error(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc))
+
+
+def _conversation_response(conversation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": conversation.get("id"),
+        "title": conversation.get("title"),
+        "createdAt": conversation.get("created_at"),
+        "updatedAt": conversation.get("updated_at"),
+        "messages": [
+            {
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "createdAt": msg.get("created_at"),
+            }
+            for msg in conversation.get("messages") or []
+        ],
+    }
+
+
 @router.get("/api/dashboard/llm_chat", tags=["dashboard"])
 async def dashboard_llm_chat() -> dict[str, Any]:
     _sync_api_globals(globals())
     """Return LLM chat runtime status and conversation summaries."""
 
-    return await _llm_chat_snapshot()
+    try:
+        return await _llm_chat_snapshot()
+    except ValueError as exc:
+        raise _configuration_error(exc) from exc
 
 
 @router.get("/api/llm_chat/settings", tags=["llm"])
 async def llm_chat_settings() -> dict[str, Any]:
     _sync_api_globals(globals())
-    return _public_llm_chat_settings(_resolve_llm_chat_settings())
+    try:
+        return _public_llm_chat_settings(_resolve_llm_chat_settings())
+    except ValueError as exc:
+        raise _configuration_error(exc) from exc
 
 
 @router.put("/api/llm_chat/settings", tags=["llm"])
@@ -160,7 +187,8 @@ async def llm_chat_send(
         new_messages = await _run_llm_chat_turn(conversation, message)
     except Exception as exc:  # pragma: no cover - defensive API boundary
         raise HTTPException(
-            status_code=500, detail=f"Assistant turn failed: {type(exc).__name__}: {exc}"
+            status_code=500,
+            detail=f"Assistant turn failed: {type(exc).__name__}: {exc}",
         ) from exc
 
     finished_at = _now_iso()
@@ -199,20 +227,7 @@ async def llm_chat_send(
 
     return {
         "conversationId": conversation_id,
-        "conversation": {
-            "id": conversation.get("id"),
-            "title": conversation.get("title"),
-            "createdAt": conversation.get("created_at"),
-            "updatedAt": conversation.get("updated_at"),
-            "messages": [
-                {
-                    "role": msg.get("role"),
-                    "content": msg.get("content"),
-                    "createdAt": msg.get("created_at"),
-                }
-                for msg in conversation.get("messages") or []
-            ],
-        },
+        "conversation": _conversation_response(conversation),
     }
 
 
