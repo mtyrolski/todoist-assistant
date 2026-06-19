@@ -2111,200 +2111,273 @@ textarea.textInput {
   padding-right: 6px;
 }
 
-.chatLayout {
+.assistantWorkspace {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
   gap: 18px;
-  margin-top: 12px;
+  min-height: calc(100vh - 230px);
 }
 
-.chatPane {
+.assistantRail,
+.assistantMain {
+  border: 1px solid var(--border);
+  background: rgba(5, 8, 14, 0.46);
+}
+
+.assistantRail {
   display: grid;
-  gap: 12px;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
 }
 
-.chatHeader {
-  display: grid;
-  gap: 6px;
-}
-
-.chatPaneHeader {
+.assistantRailHeader,
+.assistantTopbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
 }
 
-.chatHeaderTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.chatTitle {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 650;
-}
-
-.chatMessages {
+.assistantConversationList {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.22);
-  min-height: 220px;
-}
-
-.chatBubble {
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.chatBubble-user {
-  border-color: rgba(106, 227, 255, 0.35);
-  background: rgba(106, 227, 255, 0.12);
-}
-
-.chatBubble-assistant {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.chatBubble-system {
-  border-color: rgba(255, 184, 108, 0.35);
-  background: rgba(255, 184, 108, 0.12);
-}
-
-.chatBubbleMeta {
-  display: flex;
-  justify-content: space-between;
+  align-content: start;
   gap: 8px;
-  font-size: 11px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.assistantConversationButton {
+  width: 100%;
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  text-align: left;
+}
+
+.assistantConversationButton:hover,
+.assistantConversationButtonActive {
+  border-color: rgba(106, 227, 255, 0.32);
+  background: rgba(106, 227, 255, 0.08);
+}
+
+.assistantConversationTitle,
+.assistantConversationMeta,
+.assistantConversationPreview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistantConversationTitle {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.assistantConversationMeta,
+.assistantConversationPreview {
   color: var(--muted);
+  font-size: 11px;
+}
+
+.assistantMain {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  min-width: 0;
+}
+
+.assistantTopbar h1 {
+  font-size: 22px;
+  letter-spacing: 0;
+  margin: 2px 0 0;
+}
+
+.assistantActions,
+.assistantRuntime {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assistantRuntime {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.assistantMain > .muted {
+  padding: 0 14px;
+}
+
+.assistantMessages {
+  align-content: start;
+  display: grid;
+  gap: 12px;
+  min-height: 340px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.assistantMessage {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  max-width: min(780px, 92%);
+  padding: 11px 12px;
+}
+
+.assistantMessage-user {
+  justify-self: end;
+  border-color: rgba(106, 227, 255, 0.35);
+  background: rgba(106, 227, 255, 0.1);
+}
+
+.assistantMessage-assistant,
+.assistantMessage-tool {
+  justify-self: start;
+}
+
+.assistantMessage-system {
+  border-color: rgba(255, 184, 108, 0.32);
+  background: rgba(255, 184, 108, 0.1);
+}
+
+.assistantMessageMeta {
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 10px;
+  justify-content: space-between;
   margin-bottom: 6px;
 }
 
-.chatBubble .codeBlock,
-.chatBubble .markdown pre {
+.assistantMessage .codeBlock,
+.assistantMessage .markdown pre {
   margin: 0;
 }
 
-.chatPending {
-  display: grid;
-  gap: 8px;
+.assistantOperation {
+  max-width: min(840px, 96%);
+  justify-self: start;
 }
 
-.chatSettingsBar {
+.assistantOperationLine {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(140px, 180px) 1fr;
-  gap: 12px;
-  align-items: end;
-}
-
-.chatSettingControl {
-  display: grid;
-  gap: 6px;
-}
-
-.chatSettingsActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  grid-template-columns: 18px minmax(0, 1fr);
   gap: 10px;
-  justify-content: flex-end;
+  align-items: start;
 }
 
-.chatInputRow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: end;
+.assistantOperationDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 10px;
+  background: rgba(106, 227, 255, 0.85);
+  box-shadow: 0 0 0 5px rgba(106, 227, 255, 0.1);
 }
 
-.chatInputRow .textInput {
-  min-height: 80px;
+.assistantOperation-complete .assistantOperationDot {
+  background: rgba(119, 240, 181, 0.9);
+  box-shadow: 0 0 0 5px rgba(119, 240, 181, 0.1);
 }
 
-.chatSidebar {
-  display: grid;
-  gap: 12px;
+.assistantOperation-failed .assistantOperationDot {
+  background: rgba(255, 120, 120, 0.95);
+  box-shadow: 0 0 0 5px rgba(255, 120, 120, 0.12);
 }
 
-.chatSection {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.18);
+.assistantOperationMain {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  min-width: 0;
+  overflow: hidden;
 }
 
-.chatSectionHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.chatSectionHeaderMain {
-  display: grid;
-  gap: 4px;
-}
-
-.chatSectionMeta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.chatSubHeader {
+.assistantOperationHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+  padding: 10px 12px;
+  color: rgba(232, 236, 242, 0.94);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.chatQueueInline {
-  display: grid;
-  gap: 10px;
+.assistantOperationHeader span:last-child {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.chatConversationList {
-  display: grid;
-  gap: 10px;
+.assistantOperationDetails {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.chatLists {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(320px, 1.4fr);
-  gap: 16px;
+.assistantOperationDetails summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 8px 12px;
 }
 
-@media (max-width: 980px) {
-  .chatSettingsBar {
-    grid-template-columns: 1fr;
-  }
-
-  .chatSettingsActions {
-    justify-content: flex-start;
-  }
-
-  .chatLists {
-    grid-template-columns: 1fr;
-  }
-}
-
-.chatSectionHighlight {
-  background: rgba(255, 184, 108, 0.08);
-  border-color: rgba(255, 184, 108, 0.25);
-}
-
-.queueList {
-  max-height: 220px;
+.assistantOperationDetails pre {
+  max-height: 300px;
   overflow: auto;
-  padding-right: 6px;
+  margin: 0;
+  padding: 0 12px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(232, 236, 242, 0.9);
+  font-size: 11px;
+}
+
+.assistantMessagePending {
+  min-width: 160px;
+}
+
+.assistantTyping {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.assistantTyping span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  opacity: 0.6;
+}
+
+.assistantEmptyState {
+  align-self: center;
+  justify-self: center;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.assistantComposer {
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 14px;
+}
+
+.assistantComposer .textInput {
+  min-height: 86px;
 }
 
 .rowCompact {
@@ -3302,15 +3375,15 @@ textarea.textInput {
     grid-template-columns: 1fr;
   }
 
-  .chatLayout {
+  .assistantWorkspace {
     grid-template-columns: 1fr;
   }
 
-  .chatInputRow {
-    grid-template-columns: 1fr;
+  .assistantMain {
+    min-height: 620px;
   }
 
-  .chatLists {
+  .assistantComposer {
     grid-template-columns: 1fr;
   }
 

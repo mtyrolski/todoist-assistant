@@ -310,15 +310,14 @@ class _AdminJob:
 
 _JOBS: dict[str, _AdminJob] = {}
 
-# === LLM CHAT QUEUE =========================================================
-_CHAT_QUEUE_STATUSES = {"queued", "running", "done", "failed"}
+# === LLM CHAT ===============================================================
 _CHAT_ROLES = {
     MessageRole.SYSTEM.value,
     MessageRole.USER.value,
     MessageRole.ASSISTANT.value,
+    "operation",
+    "tool",
 }
-_CHAT_QUEUE_LIMIT = 200
-_LLM_CHAT_TIMEOUT_S = 60 * 60
 _LLM_CHAT_BACKEND_DEFAULT = "codex"
 _LLM_CHAT_BACKEND_LABELS = {
     "codex": "Codex",
@@ -342,8 +341,6 @@ _LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
 _LLM_CHAT_MODEL_LOCK = asyncio.Lock()
 _LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
-_LLM_CHAT_WORKER_LOCK = asyncio.Lock()
-_LLM_CHAT_WORKER_RUNNING = False
 _LLM_CHAT_AGENT = None
 _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 
@@ -430,10 +427,6 @@ def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
     return _llm_chat_component._normalize_chat_conversation(raw)
 
 
-def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
-    return _llm_chat_component._normalize_chat_queue_item(raw)
-
-
 def _load_llm_chat_conversations() -> list[dict[str, Any]]:
     return _llm_chat_component._load_llm_chat_conversations()
 
@@ -442,36 +435,12 @@ def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
     return _llm_chat_component._save_llm_chat_conversations(conversations)
 
 
-def _load_llm_chat_queue() -> list[dict[str, Any]]:
-    return _llm_chat_component._load_llm_chat_queue()
-
-
-def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
-    return _llm_chat_component._save_llm_chat_queue(items)
-
-
 def _truncate_text(value: str, limit: int = 120) -> str:
     return _llm_chat_component._truncate_text(value, limit)
 
 
 def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
     return _llm_chat_component._conversation_summary(conv)
-
-
-def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._queue_item_payload(item)
-
-
-def _parse_iso_timestamp(value: Any) -> datetime | None:
-    return _llm_chat_component._parse_iso_timestamp(value)
-
-
-def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> bool:
-    return _llm_chat_component._expire_llm_chat_queue(queue, now_dt)
-
-
-def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return _llm_chat_component._prune_queue(queue)
 
 
 def _available_llm_chat_devices() -> list[str]:
@@ -549,7 +518,6 @@ async def _load_llm_chat_model_task() -> None:
     finally:
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL_LOADING = False
-    await _maybe_start_llm_chat_worker()
 
 
 def _build_chat_messages(
@@ -610,22 +578,6 @@ def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
     _LLM_CHAT_AGENT = agent
 
 
-async def _maybe_start_llm_chat_worker() -> None:
-    global _LLM_CHAT_WORKER_RUNNING
-    async with _LLM_CHAT_WORKER_LOCK:
-        if _LLM_CHAT_WORKER_RUNNING:
-            return
-        if _LLM_CHAT_MODEL is None and _LLM_CHAT_MODEL_LOADING:
-            return
-        if (
-            _LLM_CHAT_MODEL is None
-            and _resolve_llm_chat_settings()["backend"] != "codex"
-        ):
-            return
-        _LLM_CHAT_WORKER_RUNNING = True
-    asyncio.create_task(_run_llm_chat_queue())
-
-
 async def _load_inline_codex_chat_model() -> tuple[_LlmChatModel | None, str | None]:
     global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
     settings = _resolve_llm_chat_settings()
@@ -656,156 +608,45 @@ async def _load_inline_codex_chat_model() -> tuple[_LlmChatModel | None, str | N
             _LLM_CHAT_MODEL_LOADING = False
 
 
-async def _run_llm_chat_queue_inline() -> None:
-    global _LLM_CHAT_WORKER_RUNNING
-    async with _LLM_CHAT_WORKER_LOCK:
-        if _LLM_CHAT_WORKER_RUNNING:
-            return
-        _LLM_CHAT_WORKER_RUNNING = True
-    await _run_llm_chat_queue()
+async def _run_llm_chat_turn(
+    conversation: dict[str, Any], user_content: str
+) -> list[dict[str, Any]]:
+    async with _LLM_CHAT_MODEL_LOCK:
+        model = _LLM_CHAT_MODEL
+    if model is None:
+        model, load_error = await _load_inline_codex_chat_model()
+        if model is None:
+            raise RuntimeError(load_error or "Codex model unavailable")
 
+    async with _LLM_CHAT_AGENT_LOCK:
+        agent = _LLM_CHAT_AGENT
+    if agent is None:
+        raise RuntimeError("Codex assistant agent is unavailable")
 
-async def _run_llm_chat_queue() -> None:
-    global _LLM_CHAT_WORKER_RUNNING
-    try:
-        while True:
-            async with _LLM_CHAT_STORAGE_LOCK:
-                queue = _load_llm_chat_queue()
-                if _expire_llm_chat_queue(queue, datetime.now()):
-                    _save_llm_chat_queue(queue)
-                next_item = next(
-                    (item for item in queue if item.get("status") == "queued"), None
-                )
-                if next_item is None:
-                    return
-                next_item["status"] = "running"
-                next_item["started_at"] = _now_iso()
-                _save_llm_chat_queue(queue)
-                conversations = _load_llm_chat_conversations()
-                conversation = next(
-                    (
-                        item
-                        for item in conversations
-                        if item.get("id") == next_item["conversation_id"]
-                    ),
-                    None,
-                )
-
-            async with _LLM_CHAT_MODEL_LOCK:
-                model = _LLM_CHAT_MODEL
-            if model is None:
-                model, load_error = await _load_inline_codex_chat_model()
-                if model is None:
-                    async with _LLM_CHAT_STORAGE_LOCK:
-                        queue = _load_llm_chat_queue()
-                        for item in queue:
-                            if item.get("id") == next_item["id"]:
-                                if item.get("status") != "running":
-                                    break
-                                item["status"] = "failed"
-                                item["finished_at"] = _now_iso()
-                                item["error"] = load_error or "Model unavailable"
-                                break
-                        _save_llm_chat_queue(queue)
-                    continue
-
-            if conversation is None:
-                async with _LLM_CHAT_STORAGE_LOCK:
-                    queue = _load_llm_chat_queue()
-                    for item in queue:
-                        if item.get("id") == next_item["id"]:
-                            item["status"] = "failed"
-                            item["finished_at"] = _now_iso()
-                            item["error"] = "Conversation not found"
-                            break
-                    _save_llm_chat_queue(queue)
-                continue
-
-            async with _LLM_CHAT_AGENT_LOCK:
-                agent = _LLM_CHAT_AGENT
-
-            try:
-                if agent is None:
-                    raise RuntimeError("Codex assistant agent is unavailable")
-                base_messages = [
-                    {"role": msg.get("role"), "content": msg.get("content")}
-                    for msg in (conversation.get("messages") or [])
-                    if msg.get("role") and msg.get("content")
-                ]
-                state = cast(
-                    "AgentState",
-                    {
-                        "messages": [
-                            *base_messages,
-                            {
-                                "role": MessageRole.USER.value,
-                                "content": next_item["content"],
-                            },
-                        ]
-                    },
-                )
-                result = await asyncio.to_thread(agent.invoke, state)
-                messages = result.get("messages") if isinstance(result, dict) else None
-                if not isinstance(messages, list):
-                    raise ValueError("Agent returned invalid messages")
-                new_messages = (
-                    messages[len(base_messages) :]
-                    if len(messages) >= len(base_messages)
-                    else messages
-                )
-                now = _now_iso()
-                async with _LLM_CHAT_STORAGE_LOCK:
-                    queue = _load_llm_chat_queue()
-                    queue_item = next(
-                        (
-                            item
-                            for item in queue
-                            if item.get("id") == next_item["id"]
-                        ),
-                        None,
-                    )
-                    if queue_item is None or queue_item.get("status") != "running":
-                        continue
-                    queue_item["status"] = "done"
-                    queue_item["finished_at"] = now
-                    queue_item["error"] = None
-                    _save_llm_chat_queue(queue)
-
-                    conversations = _load_llm_chat_conversations()
-                    for item in conversations:
-                        if item.get("id") == next_item["conversation_id"]:
-                            item.setdefault("messages", [])
-                            for msg in new_messages:
-                                role = str(msg.get("role") or "")
-                                content = _sanitize_text(msg.get("content"))
-                                if not role or not content:
-                                    continue
-                                item["messages"].append(
-                                    {
-                                        "role": role,
-                                        "content": content,
-                                        "created_at": now,
-                                    }
-                                )
-                            item["updated_at"] = now
-                            break
-                    _save_llm_chat_conversations(conversations)
-            except Exception as exc:  # pragma: no cover - defensive
-                async with _LLM_CHAT_STORAGE_LOCK:
-                    queue = _load_llm_chat_queue()
-                    for item in queue:
-                        if item.get("id") == next_item["id"]:
-                            if item.get("status") != "running":
-                                break
-                            item["status"] = "failed"
-                            item["finished_at"] = _now_iso()
-                            item["error"] = f"{type(exc).__name__}: {exc}"
-                            break
-                    _save_llm_chat_queue(queue)
-                continue
-    finally:
-        async with _LLM_CHAT_WORKER_LOCK:
-            _LLM_CHAT_WORKER_RUNNING = False
+    base_messages = [
+        {"role": msg.get("role"), "content": msg.get("content")}
+        for msg in (conversation.get("messages") or [])
+        if msg.get("role") and msg.get("content")
+    ]
+    state = cast(
+        "AgentState",
+        {
+            "messages": [
+                *base_messages,
+                {
+                    "role": MessageRole.USER.value,
+                    "content": user_content,
+                },
+            ]
+        },
+    )
+    result = await asyncio.to_thread(agent.invoke, state)
+    messages = result.get("messages") if isinstance(result, dict) else None
+    if not isinstance(messages, list):
+        raise ValueError("Agent returned invalid messages")
+    if len(messages) >= len(base_messages):
+        return messages[len(base_messages) :]
+    return messages
 
 
 async def _llm_chat_snapshot() -> dict[str, Any]:

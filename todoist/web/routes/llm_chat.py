@@ -16,7 +16,7 @@ router = APIRouter()
 @router.get("/api/dashboard/llm_chat", tags=["dashboard"])
 async def dashboard_llm_chat() -> dict[str, Any]:
     _sync_api_globals(globals())
-    """Return LLM chat queue status and conversation summaries."""
+    """Return LLM chat runtime status and conversation summaries."""
 
     return await _llm_chat_snapshot()
 
@@ -114,19 +114,17 @@ async def llm_chat_send(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     _sync_api_globals(globals())
-    """Queue a chat prompt for the local LLM."""
+    """Run an interactive Codex assistant turn and return the updated conversation."""
 
     message = _sanitize_text(payload.get("message"))
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
     settings = _resolve_llm_chat_settings()
-    enabled, loading = await _llm_chat_model_status()
-    can_run_inline = settings["backend"] == "codex"
-    if not (enabled or loading or can_run_inline):
+    if settings["backend"] != "codex":
         raise HTTPException(
             status_code=409,
-            detail="Model not loaded. Click Enable in the dashboard first.",
+            detail="Codex assistant backend is required.",
         )
 
     conversation_id = _sanitize_text(
@@ -156,39 +154,65 @@ async def llm_chat_send(
             }
             conversations.append(conversation)
 
-        conversation["updated_at"] = now
-
-        queue = _load_llm_chat_queue()
-        item = {
-            "id": str(uuid4()),
-            "conversation_id": conversation_id,
-            "content": message,
-            "status": "queued",
-            "created_at": now,
-            "started_at": None,
-            "finished_at": None,
-            "error": None,
-        }
-        queue.append(item)
-        queue = _prune_queue(queue)
-        _save_llm_chat_queue(queue)
         _save_llm_chat_conversations(conversations)
 
-    response_item = item
-    if can_run_inline and not (enabled or loading):
-        await _run_llm_chat_queue_inline()
-        async with _LLM_CHAT_STORAGE_LOCK:
-            queue = _load_llm_chat_queue()
-        response_item = next(
-            (queue_item for queue_item in queue if queue_item.get("id") == item["id"]),
-            item,
-        )
-    elif enabled or loading:
-        await _maybe_start_llm_chat_worker()
+    try:
+        new_messages = await _run_llm_chat_turn(conversation, message)
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        raise HTTPException(
+            status_code=500, detail=f"Assistant turn failed: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    finished_at = _now_iso()
+    async with _LLM_CHAT_STORAGE_LOCK:
+        conversations = _load_llm_chat_conversations()
+        found_conversation = False
+        for item in conversations:
+            if item.get("id") != conversation_id:
+                continue
+            found_conversation = True
+            item.setdefault("messages", [])
+            for msg in new_messages:
+                role = str(msg.get("role") or "")
+                content = _sanitize_text(msg.get("content"))
+                if not role or not content:
+                    continue
+                item["messages"].append(
+                    {"role": role, "content": content, "created_at": finished_at}
+                )
+            item["updated_at"] = finished_at
+            conversation = item
+            break
+        if not found_conversation:
+            conversation.setdefault("messages", [])
+            for msg in new_messages:
+                role = str(msg.get("role") or "")
+                content = _sanitize_text(msg.get("content"))
+                if not role or not content:
+                    continue
+                conversation["messages"].append(
+                    {"role": role, "content": content, "created_at": finished_at}
+                )
+            conversation["updated_at"] = finished_at
+            conversations.append(conversation)
+        _save_llm_chat_conversations(conversations)
+
     return {
-        "queued": True,
-        "item": _queue_item_payload(response_item),
         "conversationId": conversation_id,
+        "conversation": {
+            "id": conversation.get("id"),
+            "title": conversation.get("title"),
+            "createdAt": conversation.get("created_at"),
+            "updatedAt": conversation.get("updated_at"),
+            "messages": [
+                {
+                    "role": msg.get("role"),
+                    "content": msg.get("content"),
+                    "createdAt": msg.get("created_at"),
+                }
+                for msg in conversation.get("messages") or []
+            ],
+        },
     }
 
 

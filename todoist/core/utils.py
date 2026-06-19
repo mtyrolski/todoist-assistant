@@ -53,7 +53,6 @@ CACHE_STORAGE_REGISTRY: dict[str, tuple[str, Callable[[], Any]]] = {
     "dashboard_state": ("dashboard_state.joblib", dict),
     "llm_breakdown_progress": ("llm_breakdown_progress.joblib", dict),
     "llm_breakdown_queue": ("llm_breakdown_queue.joblib", dict),
-    "llm_chat_queue": ("llm_chat_queue.joblib", list),
     "llm_chat_conversations": ("llm_chat_conversations.joblib", list),
     "llm_usage_stats": ("llm_usage_stats.joblib", dict),
 }

@@ -17,7 +17,7 @@ PYTHON_TOOL_NAME = "python_repl"
 
 SYSTEM_PROMPT = (
     "You are a Codex-powered personal Todoist assistant. Answer productivity, "
-    "status, planning, and task-ingest questions using local context and the "
+    "status, planning, and pasted-file questions using local context and the "
     "Python tool when needed. Be brief, concrete, and explicit about assumptions. "
     "Draft Todoist task proposals in chat and iterate with the user before creation. "
     "Only create Todoist tasks when the user explicitly confirms the exact proposal."

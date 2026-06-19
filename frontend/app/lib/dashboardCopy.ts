@@ -90,4 +90,4 @@ A focused view for the weekly habit payload.
 - The plots section shows the overall completion rate and recent N-week slices.
 - The notes section stays focused on how the tracker works instead of repeating the roster.`;
 
-export const SURFACE_STATUS_SUMMARY = `Stable: dashboard, control panel, and automation tooling. Beta: LLM-Agent Chat. Experimental: Habit Tracker Lab.`;
+export const SURFACE_STATUS_SUMMARY = `Stable: dashboard, control panel, automation tooling, and the Codex personal assistant. Experimental: Habit Tracker Lab.`;

@@ -4,7 +4,6 @@
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,line-too-long
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timedelta
 import os
 from typing import Any
 
@@ -67,33 +66,6 @@ def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
     }
 
 
-def _normalize_chat_queue_item(raw: Any) -> dict[str, Any] | None:
-    _sync_api_globals()
-    if not isinstance(raw, dict):
-        return None
-    item_id = str(raw.get("id") or "").strip()
-    conversation_id = str(
-        raw.get("conversation_id") or raw.get("conversationId") or ""
-    ).strip()
-    content = _sanitize_text(raw.get("content"))
-    if not item_id or not conversation_id or not content:
-        return None
-    status = str(raw.get("status") or "queued").strip().lower()
-    if status not in _CHAT_QUEUE_STATUSES:
-        status = "queued"
-    created_at = str(raw.get("created_at") or raw.get("createdAt") or "")
-    return {
-        "id": item_id,
-        "conversation_id": conversation_id,
-        "content": content,
-        "status": status,
-        "created_at": created_at,
-        "started_at": raw.get("started_at") or raw.get("startedAt"),
-        "finished_at": raw.get("finished_at") or raw.get("finishedAt"),
-        "error": raw.get("error"),
-    }
-
-
 def _load_llm_chat_conversations() -> list[dict[str, Any]]:
     _sync_api_globals()
     try:
@@ -117,31 +89,6 @@ def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
         Cache().llm_chat_conversations.save(conversations)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Failed to save LLM chat conversations: {exc}")
-
-
-def _load_llm_chat_queue() -> list[dict[str, Any]]:
-    _sync_api_globals()
-    try:
-        payload = Cache().llm_chat_queue.load()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to load LLM chat queue: {exc}")
-        return []
-    if not isinstance(payload, list):
-        return []
-    queue_items: list[dict[str, Any]] = []
-    for raw in payload:
-        normalized = _normalize_chat_queue_item(raw)
-        if normalized:
-            queue_items.append(normalized)
-    return queue_items
-
-
-def _save_llm_chat_queue(items: list[dict[str, Any]]) -> None:
-    _sync_api_globals()
-    try:
-        Cache().llm_chat_queue.save(items)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to save LLM chat queue: {exc}")
 
 
 def _truncate_text(value: str, limit: int = 120) -> str:
@@ -169,66 +116,6 @@ def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
         "messageCount": len(messages),
         "lastMessage": last_message,
     }
-
-
-def _queue_item_payload(item: dict[str, Any]) -> dict[str, Any]:
-    _sync_api_globals()
-    return {
-        "id": item.get("id"),
-        "conversationId": item.get("conversation_id"),
-        "content": _truncate_text(item.get("content") or "", 160),
-        "status": item.get("status"),
-        "createdAt": item.get("created_at"),
-        "startedAt": item.get("started_at"),
-        "finishedAt": item.get("finished_at"),
-        "error": item.get("error"),
-    }
-
-
-def _parse_iso_timestamp(value: Any) -> datetime | None:
-    _sync_api_globals()
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value))
-    except ValueError:
-        return None
-
-
-def _expire_llm_chat_queue(queue: list[dict[str, Any]], now_dt: datetime) -> bool:
-    _sync_api_globals()
-    changed = False
-    cutoff = now_dt - timedelta(seconds=_LLM_CHAT_TIMEOUT_S)
-    now_iso = now_dt.isoformat(timespec="seconds")
-    for item in queue:
-        if item.get("status") != "running":
-            continue
-        started_at = item.get("started_at") or item.get("created_at")
-        started_dt = _parse_iso_timestamp(started_at)
-        if started_dt is None:
-            continue
-        if started_dt <= cutoff:
-            item["status"] = "failed"
-            item["finished_at"] = now_iso
-            item["error"] = "Timed out after 1h"
-            changed = True
-    return changed
-
-
-def _prune_queue(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    _sync_api_globals()
-    if len(queue) <= _CHAT_QUEUE_LIMIT:
-        return queue
-    to_drop = len(queue) - _CHAT_QUEUE_LIMIT
-    if to_drop <= 0:
-        return queue
-    trimmed: list[dict[str, Any]] = []
-    for item in queue:
-        if to_drop and item.get("status") in {"done", "failed"}:
-            to_drop -= 1
-            continue
-        trimmed.append(item)
-    return trimmed
 
 
 def _available_llm_chat_devices() -> list[str]:
@@ -459,21 +346,10 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
     enabled, loading = await _llm_chat_model_status()
     settings = _resolve_llm_chat_settings()
     async with _LLM_CHAT_STORAGE_LOCK:
-        queue = _load_llm_chat_queue()
-        if _expire_llm_chat_queue(queue, datetime.now()):
-            _save_llm_chat_queue(queue)
         conversations = _load_llm_chat_conversations()
 
-    counts = {status: 0 for status in _CHAT_QUEUE_STATUSES}
-    for item in queue:
-        status = item.get("status")
-        if status in counts:
-            counts[status] += 1
-
-    items = list(reversed(queue))[:12]
     summaries = [_conversation_summary(conv) for conv in conversations]
     summaries.sort(key=lambda item: item.get("updatedAt") or "", reverse=True)
-    current = next((item for item in queue if item.get("status") == "running"), None)
     return {
         "enabled": enabled,
         "loading": loading,
@@ -509,15 +385,6 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "options": settings["availableDevices"],
             "envPath": settings["envPath"],
         },
-        "queue": {
-            "total": len(queue),
-            "queued": counts["queued"],
-            "running": counts["running"],
-            "done": counts["done"],
-            "failed": counts["failed"],
-            "items": [_queue_item_payload(item) for item in items],
-            "current": _queue_item_payload(current) if current else None,
-        },
         "usage": settings["usage"],
         "assistant": _assistant_metadata_payload(),
         "conversations": summaries,
@@ -529,25 +396,18 @@ _COMPONENT_EXPORTS = (
     "_build_chat_messages",
     "_build_llm_from_settings",
     "_conversation_summary",
-    "_expire_llm_chat_queue",
     "_assistant_metadata_payload",
     "_llm_chat_snapshot",
     "_llm_model_options_payload",
     "_load_llm_chat_conversations",
-    "_load_llm_chat_queue",
     "_normalize_chat_conversation",
     "_normalize_chat_message",
-    "_normalize_chat_queue_item",
     "_normalize_llm_chat_backend",
     "_normalize_llm_chat_device",
-    "_parse_iso_timestamp",
-    "_prune_queue",
     "_public_llm_chat_settings",
-    "_queue_item_payload",
     "_resolve_codex_settings",
     "_resolve_llm_chat_settings",
     "_save_llm_chat_conversations",
-    "_save_llm_chat_queue",
     "_truncate_text",
 )
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}
