@@ -220,6 +220,7 @@ export function LlmChatPanel() {
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [runElapsedSeconds, setRunElapsedSeconds] = useState(0);
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const [conversationQuery, setConversationQuery] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -228,6 +229,7 @@ export function LlmChatPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLFormElement | null>(null);
 
   const conversations = useMemo(() => status?.conversations ?? [], [status?.conversations]);
   const selectedSummary = useMemo(() => {
@@ -438,6 +440,8 @@ export function LlmChatPanel() {
 
     try {
       setActionError(null);
+      setActionNotice(null);
+      setFailedMessage(null);
       setSending(true);
       const body = selectedConversationId ? { message: trimmed, conversationId: selectedConversationId } : { message: trimmed };
       const res = await fetch("/api/llm_chat/send", {
@@ -455,10 +459,23 @@ export function LlmChatPanel() {
       }
       await refreshStatus(true);
     } catch (err) {
+      setFailedMessage(trimmed);
+      setConversation((current) => {
+        if (!current) return null;
+        const messages = current.messages.slice(0, -1);
+        return selectedConversationId ? { ...current, messages } : null;
+      });
       setActionError(err instanceof Error ? err.message : "Failed to run assistant turn");
     } finally {
       setSending(false);
     }
+  };
+
+  const handleRetry = () => {
+    if (!failedMessage || sending) return;
+    setMessageDraft(failedMessage);
+    setActionError(null);
+    window.requestAnimationFrame(() => composerRef.current?.requestSubmit());
   };
 
   const model = status?.backend.codex?.model ?? status?.backend.label ?? "Codex";
@@ -481,6 +498,7 @@ export function LlmChatPanel() {
               selectConversation(null);
               setConversation(null);
               setMessageDraft("");
+              setFailedMessage(null);
             }}
           >
             New
@@ -608,7 +626,16 @@ export function LlmChatPanel() {
         ) : null}
 
         {statusError ? <p className="muted tiny">Status error: {statusError}</p> : null}
-        {actionError ? <p className="muted tiny">Error: {actionError}</p> : null}
+        {actionError ? (
+          <div className="assistantErrorBanner" role="alert">
+            <span>{actionError}</span>
+            {failedMessage ? (
+              <button className="button buttonSmall" type="button" onClick={handleRetry} disabled={sending}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {actionNotice ? <p className="muted tiny assistantNotice">{actionNotice}</p> : null}
 
         <div className="assistantMessages" aria-live="polite">
@@ -661,17 +688,24 @@ export function LlmChatPanel() {
           <div ref={messagesEndRef} />
         </div>
 
-        <form className="assistantComposer" onSubmit={handleSend}>
+        <form ref={composerRef} className="assistantComposer" onSubmit={handleSend}>
           <textarea
             className="textInput"
             placeholder="Paste notes, ask for status, propose tasks, or query local productivity stats."
             value={messageDraft}
             onChange={(event) => setMessageDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
             disabled={!canSend}
           />
           <button className="button" type="submit" disabled={!canSend || !messageDraft.trim()}>
             {sending ? "Running" : "Send"}
           </button>
+          <span className="assistantComposerHint">Ctrl/⌘ + Enter to send</span>
         </form>
       </div>
     </section>

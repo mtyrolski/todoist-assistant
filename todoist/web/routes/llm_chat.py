@@ -167,6 +167,7 @@ async def llm_chat_send(
         payload.get("conversationId") or payload.get("conversation_id")
     )
     now = _now_iso()
+    created_conversation = False
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
@@ -180,6 +181,7 @@ async def llm_chat_send(
                 raise HTTPException(status_code=404, detail="Conversation not found")
         else:
             conversation_id = str(uuid4())
+            created_conversation = True
             title = _truncate_text(message, 80)
             conversation = {
                 "id": conversation_id,
@@ -195,6 +197,16 @@ async def llm_chat_send(
     try:
         new_messages = await _run_llm_chat_turn(conversation, message)
     except Exception as exc:  # pragma: no cover - defensive API boundary
+        if created_conversation:
+            async with _LLM_CHAT_STORAGE_LOCK:
+                conversations = _load_llm_chat_conversations()
+                _save_llm_chat_conversations(
+                    [
+                        item
+                        for item in conversations
+                        if item.get("id") != conversation_id
+                    ]
+                )
         raise HTTPException(
             status_code=500,
             detail=f"Assistant turn failed: {type(exc).__name__}: {exc}",

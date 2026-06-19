@@ -338,6 +338,7 @@ _LLM_CHAT_MODEL_LOCK = asyncio.Lock()
 _LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
 _LLM_CHAT_AGENT = None
 _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
+_LLM_CHAT_TURN_LOCK = asyncio.Lock()
 
 
 def _call_dashboard_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -635,7 +636,8 @@ async def _run_llm_chat_turn(
             ]
         },
     )
-    result = await asyncio.to_thread(agent.invoke, state)
+    async with _LLM_CHAT_TURN_LOCK:
+        result = await asyncio.to_thread(agent.invoke, state)
     messages = result.get("messages") if isinstance(result, dict) else None
     if not isinstance(messages, list):
         raise ValueError("Agent returned invalid messages")

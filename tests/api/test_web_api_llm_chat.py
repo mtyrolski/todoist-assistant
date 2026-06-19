@@ -279,6 +279,31 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     ]
 
 
+def test_llm_chat_send_removes_empty_thread_after_failed_new_turn(monkeypatch) -> None:
+    stored: list[dict[str, object]] = []
+
+    def _load():
+        return [dict(item) for item in stored]
+
+    def _save(items):
+        stored.clear()
+        stored.extend(dict(item) for item in items)
+
+    async def _failed_turn(_conversation, _message):
+        raise RuntimeError("codex unavailable")
+
+    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", _load)
+    monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _save)
+    monkeypatch.setattr(web_api, "_run_llm_chat_turn", _failed_turn)
+
+    client = TestClient(web_api.app)
+    res = client.post("/api/llm_chat/send", json={"message": "New question"})
+
+    assert res.status_code == 500
+    assert "codex unavailable" in res.json()["detail"]
+    assert stored == []
+
+
 def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send appends to an existing conversation directly."""
 

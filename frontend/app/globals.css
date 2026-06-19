@@ -2259,6 +2259,18 @@ textarea.textInput {
   color: var(--success);
 }
 
+.assistantErrorBanner {
+  align-items: center;
+  background: rgba(255, 123, 123, 0.08);
+  border-bottom: 1px solid rgba(255, 123, 123, 0.25);
+  color: var(--danger);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 9px 14px;
+}
+
 .assistantMain > .muted {
   padding: 0 14px;
 }
@@ -2502,6 +2514,12 @@ textarea.textInput {
 
 .assistantComposer .textInput {
   min-height: 86px;
+}
+
+.assistantComposerHint {
+  color: var(--muted);
+  font-size: 10px;
+  grid-column: 1 / -1;
 }
 
 .rowCompact {
