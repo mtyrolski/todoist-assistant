@@ -17,6 +17,15 @@ def _configuration_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
 
+def _validate_conversation_id(conversation_id: str) -> None:
+    try:
+        UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid conversation ID format"
+        ) from exc
+
+
 def _conversation_response(conversation: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": conversation.get("id"),
@@ -236,13 +245,7 @@ async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
     _sync_api_globals(globals())
     """Fetch a conversation transcript."""
 
-    # Validate conversation_id format (should be a valid UUID)
-    try:
-        UUID(conversation_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail="Invalid conversation ID format"
-        ) from exc
+    _validate_conversation_id(conversation_id)
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
@@ -265,3 +268,45 @@ async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
             for msg in conversation.get("messages") or []
         ],
     }
+
+
+@router.patch("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
+async def llm_chat_rename_conversation(
+    conversation_id: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    _sync_api_globals(globals())
+    _validate_conversation_id(conversation_id)
+    title = _sanitize_text(payload.get("title"))
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    title = _truncate_text(title, 120)
+
+    async with _LLM_CHAT_STORAGE_LOCK:
+        conversations = _load_llm_chat_conversations()
+        conversation = next(
+            (item for item in conversations if item.get("id") == conversation_id),
+            None,
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conversation["title"] = title
+        conversation["updated_at"] = _now_iso()
+        _save_llm_chat_conversations(conversations)
+    return _conversation_response(conversation)
+
+
+@router.delete("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
+async def llm_chat_delete_conversation(conversation_id: str) -> dict[str, Any]:
+    _sync_api_globals(globals())
+    _validate_conversation_id(conversation_id)
+
+    async with _LLM_CHAT_STORAGE_LOCK:
+        conversations = _load_llm_chat_conversations()
+        remaining = [
+            item for item in conversations if item.get("id") != conversation_id
+        ]
+        if len(remaining) == len(conversations):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _save_llm_chat_conversations(remaining)
+    return {"deleted": True, "conversationId": conversation_id}

@@ -101,6 +101,9 @@ def _truncate_text(value: str, limit: int = 120) -> str:
 def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
     _sync_api_globals()
     messages = conv.get("messages") or []
+    user_count = sum(1 for msg in messages if msg.get("role") == "user")
+    assistant_count = sum(1 for msg in messages if msg.get("role") == "assistant")
+    tool_count = sum(1 for msg in messages if msg.get("role") in {"operation", "tool"})
     last_message = None
     if messages:
         last_message = messages[-1].get("content")
@@ -114,6 +117,9 @@ def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
         "createdAt": conv.get("created_at"),
         "updatedAt": conv.get("updated_at"),
         "messageCount": len(messages),
+        "userMessageCount": user_count,
+        "assistantMessageCount": assistant_count,
+        "toolMessageCount": tool_count,
         "lastMessage": last_message,
     }
 
@@ -350,6 +356,15 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
 
     summaries = [_conversation_summary(conv) for conv in conversations]
     summaries.sort(key=lambda item: item.get("updatedAt") or "", reverse=True)
+    statistics = {
+        "conversationCount": len(summaries),
+        "messageCount": sum(int(item["messageCount"]) for item in summaries),
+        "userMessageCount": sum(int(item["userMessageCount"]) for item in summaries),
+        "assistantMessageCount": sum(
+            int(item["assistantMessageCount"]) for item in summaries
+        ),
+        "toolMessageCount": sum(int(item["toolMessageCount"]) for item in summaries),
+    }
     return {
         "enabled": enabled,
         "loading": loading,
@@ -381,6 +396,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         },
         "usage": settings["usage"],
         "assistant": _assistant_metadata_payload(),
+        "statistics": statistics,
         "conversations": summaries,
     }
 

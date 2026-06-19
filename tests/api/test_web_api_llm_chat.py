@@ -51,6 +51,13 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["usage"]["current"]["modelId"] == "gpt-5.5"
     assert payload["assistant"]["mode"] == "codex"
     assert payload["assistant"]["telemetry"]["enabled"] is False
+    assert payload["statistics"] == {
+        "conversationCount": 0,
+        "messageCount": 0,
+        "userMessageCount": 0,
+        "assistantMessageCount": 0,
+        "toolMessageCount": 0,
+    }
     assert payload["conversations"] == []
 
 
@@ -530,6 +537,54 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
     assert payload["messages"][1]["role"] == "assistant"
     assert payload["messages"][1]["content"] == "Hi there!"
     assert payload["messages"][1]["createdAt"] == "2025-01-01T10:00:05"
+
+
+def test_llm_chat_conversation_can_be_renamed(monkeypatch) -> None:
+    conv_id = "550e8400-e29b-41d4-a716-446655440000"
+    conversations = [
+        {
+            "id": conv_id,
+            "title": "Old title",
+            "created_at": "2025-01-01T10:00:00",
+            "updated_at": "2025-01-01T10:00:00",
+            "messages": [],
+        }
+    ]
+    saved: list[dict[str, object]] = []
+    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: conversations)
+    monkeypatch.setattr(
+        web_api,
+        "_save_llm_chat_conversations",
+        lambda items: saved.extend(items),
+    )
+
+    client = TestClient(web_api.app)
+    res = client.patch(
+        f"/api/llm_chat/conversations/{conv_id}", json={"title": "Weekly review"}
+    )
+
+    assert res.status_code == 200
+    assert res.json()["title"] == "Weekly review"
+    assert saved[0]["title"] == "Weekly review"
+
+
+def test_llm_chat_conversation_can_be_deleted(monkeypatch) -> None:
+    conv_id = "550e8400-e29b-41d4-a716-446655440000"
+    conversations = [{"id": conv_id, "title": "Delete me", "messages": []}]
+    saved: list[list[dict[str, object]]] = []
+    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: conversations)
+    monkeypatch.setattr(
+        web_api,
+        "_save_llm_chat_conversations",
+        lambda items: saved.append(items),
+    )
+
+    client = TestClient(web_api.app)
+    res = client.delete(f"/api/llm_chat/conversations/{conv_id}")
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": True, "conversationId": conv_id}
+    assert saved == [[]]
 
 
 def test_llm_chat_enable_returns_status(monkeypatch) -> None:
