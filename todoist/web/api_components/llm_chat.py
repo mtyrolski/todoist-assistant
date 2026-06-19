@@ -292,12 +292,8 @@ def _coerce_model_option_id(
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
-    if value in {"triton", "triton_local"}:
-        value = "codex"
-    if value in {"raw", "none"}:
-        value = "disabled"
-    if value in _LLM_CHAT_BACKEND_LABELS:
-        return value
+    if value in {"codex", "triton", "triton_local", ""}:
+        return "codex"
     return _LLM_CHAT_BACKEND_DEFAULT
 
 
@@ -306,22 +302,13 @@ def _locked_llm_chat_backend() -> str | None:
     value = str(os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK") or "").strip().lower()
     if not value:
         return None
-    if value in {"triton", "triton_local"}:
-        value = "codex"
-    if value in {"raw", "none"}:
-        value = "disabled"
-    return value if value in _LLM_CHAT_BACKEND_LABELS else None
+    return "codex" if value in {"codex", "triton", "triton_local"} else None
 
 
 def _available_llm_chat_backends(backend: str) -> set[str]:
     _sync_api_globals()
-    locked_backend = _locked_llm_chat_backend()
-    if locked_backend:
-        return {locked_backend}
-    available = {"disabled", "codex"}
-    if backend in _LLM_CHAT_BACKEND_LABELS:
-        available.add(backend)
-    return available
+    _ = backend
+    return {"codex"}
 
 
 def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
@@ -371,7 +358,7 @@ def _resolve_llm_chat_settings() -> dict[str, Any]:
     )
     os.environ[backend_key] = backend
     os.environ[device_key] = device
-    selected_model_id = codex_settings["model"] if backend == "codex" else "disabled"
+    selected_model_id = codex_settings["model"]
 
     return {
         "backend": backend,
@@ -441,6 +428,32 @@ def _build_chat_messages(
     return messages
 
 
+def _assistant_metadata_payload() -> dict[str, Any]:
+    _sync_api_globals()
+    from todoist.agent.productivity_context import build_productivity_context
+
+    ctx = build_productivity_context(
+        cache_path=os.getenv(str(EnvVar.AGENT_CACHE_PATH), None),
+        repo_root=_REPO_ROOT,
+        env_path=_resolve_env_path(),
+    )
+    return {
+        "mode": "codex",
+        "tools": [
+            "cache_summary()",
+            "load_cache(name)",
+            "script_catalog()",
+            "run_script(name, args=None)",
+            "llm_usage()",
+            "telemetry_status()",
+            "projects()",
+            "create_tasks(project_id, tasks, confirmation='CREATE_TODOIST_TASKS')",
+        ],
+        "scripts": ctx.script_catalog(),
+        "telemetry": ctx.telemetry_status(),
+    }
+
+
 async def _llm_chat_snapshot() -> dict[str, Any]:
     _sync_api_globals()
     enabled, loading = await _llm_chat_model_status()
@@ -476,17 +489,11 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         "model": {
             "selected": (
                 settings["codex"]["model"]
-                if settings["backend"] == "codex"
-                else "disabled"
             ),
-            "label": (
-                settings["codex"]["model"]
-                if settings["backend"] == "codex"
-                else "AI disabled"
-            ),
+            "label": settings["codex"]["model"],
             "active": (
                 settings["codex"]["model"]
-                if (enabled or loading) and settings["backend"] == "codex"
+                if enabled or loading
                 else None
             ),
             "codex": {
@@ -512,6 +519,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "current": _queue_item_payload(current) if current else None,
         },
         "usage": settings["usage"],
+        "assistant": _assistant_metadata_payload(),
         "conversations": summaries,
     }
 
@@ -522,6 +530,7 @@ _COMPONENT_EXPORTS = (
     "_build_llm_from_settings",
     "_conversation_summary",
     "_expire_llm_chat_queue",
+    "_assistant_metadata_payload",
     "_llm_chat_snapshot",
     "_llm_model_options_payload",
     "_load_llm_chat_conversations",

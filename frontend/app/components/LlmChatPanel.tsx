@@ -74,26 +74,56 @@ type ChatStatus = {
     items: ChatQueueItem[];
     current: ChatQueueItem | null;
   };
+  usage?: {
+    totals?: {
+      inferenceCount?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+    updatedAt?: string | null;
+    lastRequest?: {
+      backend?: string | null;
+      modelId?: string | null;
+      operation?: string | null;
+      totalTokens?: number;
+      at?: string | null;
+    } | null;
+  };
+  assistant?: {
+    mode?: string;
+    tools?: string[];
+    scripts?: Array<{ name: string; path: string; command: string }>;
+    telemetry?: {
+      enabled: boolean;
+      endpointConfigured: boolean;
+      debugEnabled: boolean;
+      installSuccessSent: boolean;
+    };
+  };
   conversations: ChatConversationSummary[];
 };
 
 const POLL_MS = 5000;
-const DISABLED_BACKEND_ID = "disabled";
 const CODEX_BACKEND_ID = "codex";
-const AVAILABLE_BACKEND_IDS = new Set([DISABLED_BACKEND_ID, CODEX_BACKEND_ID]);
-const CHAT_HELP = `**LLM Chat**
-Local or hosted model for quick analysis and summaries.
+const AVAILABLE_BACKEND_IDS = new Set([CODEX_BACKEND_ID]);
+const CHAT_HELP = `**Personal Assistant**
+Codex-powered assistant for productivity analysis and task planning.
 
-- Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
-- Pick a backend before loading the model.
-- Enable loads the selected backend on demand.
-- Codex uses the local Codex CLI and langgraph-codex.
+- Uses Codex only.
+- Can inspect local caches, run allowlisted scripts, and answer status/statistics questions.
+- Can draft task proposals from pasted content and iterate before creation.
+- Todoist task creation requires explicit confirmation.
 - Prompts are queued and processed in order.
 - Conversations are stored locally on this machine.`;
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
   return value.replace("T", " ");
+}
+
+function formatCount(value?: number | null): string {
+  return typeof value === "number" ? value.toLocaleString() : "0";
 }
 
 function queueTone(status: string): "ok" | "warn" | "neutral" | "beta" {
@@ -115,12 +145,11 @@ function isServerHostedBackend(backendId?: string | null): boolean {
 
 function backendDisplayName(backendId: string, fallbackLabel?: string): string {
   if (backendId === CODEX_BACKEND_ID) return "Codex";
-  if (backendId === DISABLED_BACKEND_ID) return "Disabled";
   return fallbackLabel ?? backendId;
 }
 
 function normalizeBackendId(backendId?: string | null): string {
-  return backendId && AVAILABLE_BACKEND_IDS.has(backendId) ? backendId : DISABLED_BACKEND_ID;
+  return backendId && AVAILABLE_BACKEND_IDS.has(backendId) ? backendId : CODEX_BACKEND_ID;
 }
 
 function visibleBackendOptions(options: ChatOption[]): ChatOption[] {
@@ -143,7 +172,7 @@ export function LlmChatPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const [lastConversationId, setLastConversationId] = useState<string | null>(null);
-  const [backendDraft, setBackendDraft] = useState(DISABLED_BACKEND_ID);
+  const [backendDraft, setBackendDraft] = useState(CODEX_BACKEND_ID);
   const [deviceDraft, setDeviceDraft] = useState("cpu");
 
   const refreshStatus = useCallback(async (silent = false) => {
@@ -310,7 +339,6 @@ export function LlmChatPanel() {
   const conversations = status?.conversations ?? [];
   const enabled = status?.enabled ?? false;
   const loading = status?.loading ?? false;
-  const canSend = enabled || loading;
   const badge = status ? modelLabel(enabled, loading) : { label: "Model status unknown", tone: "neutral" };
   const queueSummary = queue
     ? `${queue.queued} queued / ${queue.running} running / ${queue.failed} failed`
@@ -319,6 +347,7 @@ export function LlmChatPanel() {
   const deviceOptions = status?.device.options ?? [];
   const currentBackendId = normalizeBackendId(status?.backend.selected);
   const selectedBackendId = normalizeBackendId(backendDraft || status?.backend.selected);
+  const canSend = selectedBackendId === CODEX_BACKEND_ID;
   const backendIsServerHosted = isServerHostedBackend(selectedBackendId);
   const currentBackendIsServerHosted = isServerHostedBackend(currentBackendId);
   const deviceControlDisabled = savingSettings || loading || backendIsServerHosted;
@@ -341,7 +370,7 @@ export function LlmChatPanel() {
     : null;
   const deviceHelpText = backendIsServerHosted
     ? "Codex manages execution through the CLI and langgraph-codex, so local device selection does not apply."
-    : "AI functions are disabled.";
+    : "Codex is the only supported assistant backend.";
 
   const pendingForSelected = useMemo(() => {
     if (!selectedConversationId || !queue?.items) return [];
@@ -355,13 +384,12 @@ export function LlmChatPanel() {
       <header className="cardHeader">
         <div className="chatHeader">
           <div className="chatHeaderTitle">
-            <h2>LLM Chat</h2>
-            <InfoTip label="About LLM chat" content={CHAT_HELP} />
+            <h2>Personal Assistant</h2>
+            <InfoTip label="About personal assistant" content={CHAT_HELP} />
             <span className="pill pill-beta">Beta</span>
           </div>
           <p className="muted tiny">
-            Chat model orchestration (beta). Load on demand, queue prompts, and review past conversations. For the
-            full local agent experience, use <code>make chat_agent</code>.
+            Codex-backed assistant for productivity questions, status updates, task proposal iteration, and local cache/script analysis.
           </p>
         </div>
         <div className="rowActions">
@@ -371,7 +399,7 @@ export function LlmChatPanel() {
             onClick={handleEnable}
             disabled={enabling || enabled || loading}
           >
-            {enabled ? "Model ready" : loading || enabling ? "Loading..." : "Enable"}
+            {enabled ? "Codex ready" : loading || enabling ? "Loading..." : "Warm up Codex"}
           </button>
           <button className="button buttonSmall" type="button" onClick={() => refreshStatus()} disabled={loadingStatus}>
             {loadingStatus ? "Refreshing..." : "Refresh"}
@@ -388,10 +416,48 @@ export function LlmChatPanel() {
 
       {actionError ? <p className="muted tiny">Error: {actionError}</p> : null}
 
+      <div className="chatSection">
+        <div className="chatSectionHeader">
+          <div className="chatSectionHeaderMain">
+            <p className="rowTitle">Assistant runtime</p>
+            <p className="muted tiny">
+              Codex only • {status?.assistant?.tools?.length ?? 0} tools • {status?.assistant?.scripts?.length ?? 0} scripts
+            </p>
+          </div>
+          <div className="chatSectionMeta">
+            <span className="pill pill-neutral">
+              {formatCount(status?.usage?.totals?.totalTokens)} tokens
+            </span>
+            <span className="pill pill-neutral">
+              Telemetry {status?.assistant?.telemetry?.enabled ? "on" : "off"}
+            </span>
+            <span className="pill pill-neutral">
+              Endpoint {status?.assistant?.telemetry?.endpointConfigured ? "set" : "unset"}
+            </span>
+          </div>
+        </div>
+        <div className="status-row">
+          <span className="pill pill-neutral">
+            Input {formatCount(status?.usage?.totals?.inputTokens)}
+          </span>
+          <span className="pill pill-neutral">
+            Output {formatCount(status?.usage?.totals?.outputTokens)}
+          </span>
+          <span className="pill pill-neutral">
+            Inferences {formatCount(status?.usage?.totals?.inferenceCount)}
+          </span>
+          {status?.usage?.lastRequest ? (
+            <span className="pill pill-neutral">
+              Last {status.usage.lastRequest.operation ?? "request"} • {formatCount(status.usage.lastRequest.totalTokens)} tokens
+            </span>
+          ) : null}
+        </div>
+      </div>
+
       <div className="chatSettingsBar">
         <div className="chatSettingControl">
           <label className="muted tiny" htmlFor="llm-backend-select">
-            LLM backend
+            Assistant backend
           </label>
           <select
             id="llm-backend-select"

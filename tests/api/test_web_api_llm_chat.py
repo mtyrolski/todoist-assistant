@@ -69,16 +69,18 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert "items" in payload["queue"]
     assert "current" in payload["queue"]
 
-    # Verify disabled state
+    # Verify Codex-only idle state
     assert payload["enabled"] is False
     assert payload["loading"] is False
-    assert payload["backend"]["selected"] == "disabled"
+    assert payload["backend"]["selected"] == "codex"
     _assert_triton_disabled(payload["backend"])
     assert payload["backend"]["codex"]["model"] == "gpt-5.5"
-    assert payload["model"]["selected"] == "disabled"
+    assert payload["model"]["selected"] == "gpt-5.5"
     assert payload["device"]["selected"] == "cpu"
     assert payload["usage"]["totals"]["inferenceCount"] == 0
-    assert payload["usage"]["current"]["modelId"] == "disabled"
+    assert payload["usage"]["current"]["modelId"] == "gpt-5.5"
+    assert payload["assistant"]["mode"] == "codex"
+    assert payload["assistant"]["telemetry"]["enabled"] is False
     assert payload["queue"]["total"] == 0
     assert payload["conversations"] == []
 
@@ -247,7 +249,7 @@ def test_llm_chat_update_settings_rejects_triton_backend(monkeypatch) -> None:
     assert res.json()["detail"] == "Unsupported LLM backend."
 
 
-def test_llm_chat_update_settings_clears_stale_triton_model(
+def test_llm_chat_update_settings_rejects_disabled_backend(
     monkeypatch, tmp_path
 ) -> None:
     env_path = tmp_path / ".env"
@@ -275,13 +277,8 @@ def test_llm_chat_update_settings_clears_stale_triton_model(
         },
     )
 
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["backend"] == "disabled"
-    _assert_triton_disabled(payload)
-    saved = env_path.read_text(encoding="utf-8")
-    assert "TODOIST_AGENT_BACKEND='disabled'" in saved
-    assert "TODOIST_AGENT_MODEL_ID" not in saved
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Unsupported LLM backend."
 
 
 def test_llm_chat_send_requires_message() -> None:
@@ -293,20 +290,24 @@ def test_llm_chat_send_requires_message() -> None:
     assert "message is required" in payload["detail"]
 
 
-def test_llm_chat_send_requires_model_loaded(monkeypatch) -> None:
-    """Test /api/llm_chat/send requires model to be loaded or loading."""
+def test_llm_chat_send_uses_codex_inline_without_model_loaded(monkeypatch) -> None:
+    """Codex-only chat can queue and run inline without an enabled local model."""
 
-    # Mock the model status to be disabled
     async def _mock_model_status():
-        return False, False  # enabled, loading
+        return False, False
+
+    async def _mock_run_inline():
+        return None
 
     monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
+    monkeypatch.setattr(web_api, "_run_llm_chat_queue_inline", _mock_run_inline)
 
     client = TestClient(web_api.app)
     res = client.post("/api/llm_chat/send", json={"message": "Hello"})
-    assert res.status_code == 409
+    assert res.status_code == 200
     payload = res.json()
-    assert "Model not loaded" in payload["detail"]
+    assert payload["queued"] is True
+    assert payload["conversationId"]
 
 
 def test_llm_chat_send_allows_codex_inline_without_model_loaded(
@@ -668,18 +669,23 @@ def test_build_chat_messages_filters_system_messages(monkeypatch) -> None:
 
 def test_llm_chat_queue_worker_saves_model_response(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", None)
     monkeypatch.setattr(web_api, "_LLM_CHAT_WORKER_RUNNING", False)
 
-    captured_messages: list[list[dict[str, str]]] = []
+    captured_states: list[dict[str, object]] = []
 
-    class _FakeChatModel:
-        def chat(self, messages):
-            captured_messages.append(messages)
-            return "worker-ok"
+    class _FakeAgent:
+        def invoke(self, state):
+            captured_states.append(state)
+            return {
+                "messages": [
+                    *state["messages"],
+                    {"role": "assistant", "content": "worker-ok"},
+                ]
+            }
 
     async def _run_worker() -> None:
-        monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", _FakeChatModel())
+        monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+        monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", _FakeAgent())
         now = web_api._now_iso()
         web_api._save_llm_chat_conversations(
             [
@@ -716,19 +722,12 @@ def test_llm_chat_queue_worker_saves_model_response(monkeypatch, tmp_path) -> No
 
     assert queue[0]["status"] == "done"
     assert queue[0]["error"] is None
-    assert conversations[0]["messages"][-2:] == [
-        {
-            "role": "user",
-            "content": "Reply with worker-ok",
-            "created_at": conversations[0]["messages"][-2]["created_at"],
-        },
-        {
-            "role": "assistant",
-            "content": "worker-ok",
-            "created_at": conversations[0]["messages"][-1]["created_at"],
-        },
-    ]
-    assert captured_messages[0][-1] == {
+    assert conversations[0]["messages"][-1] == {
+        "role": "assistant",
+        "content": "worker-ok",
+        "created_at": conversations[0]["messages"][-1]["created_at"],
+    }
+    assert captured_states[0]["messages"][-1] == {
         "role": web_api.MessageRole.USER.value,
         "content": "Reply with worker-ok",
     }
@@ -743,14 +742,19 @@ def test_llm_chat_queue_worker_builds_codex_inline(monkeypatch, tmp_path) -> Non
 
     captured_settings: list[dict[str, object]] = []
 
-    class _FakeChatModel:
-        def chat(self, messages):
-            assert messages[-1]["content"] == "Reply with inline-ok"
-            return "inline-ok"
-
     def _fake_build_model(settings):
         captured_settings.append(dict(settings))
-        return _FakeChatModel()
+        return object()
+
+    class _FakeAgent:
+        def invoke(self, state):
+            assert state["messages"][-1]["content"] == "Reply with inline-ok"
+            return {
+                "messages": [
+                    *state["messages"],
+                    {"role": "assistant", "content": "inline-ok"},
+                ]
+            }
 
     original_resolve_settings = getattr(web_api, "_resolve_llm_chat_settings")
     original_build_model = getattr(web_api, "_build_llm_from_settings")
@@ -765,7 +769,11 @@ def test_llm_chat_queue_worker_builds_codex_inline(monkeypatch, tmp_path) -> Non
     )
     setattr(web_api, "_build_llm_from_settings", _fake_build_model)
     web_api._llm_chat_component._sync_api_globals()
-    monkeypatch.setattr(web_api, "_build_llm_chat_agent_sync", lambda _model: None)
+    monkeypatch.setattr(
+        web_api,
+        "_build_llm_chat_agent_sync",
+        lambda _model: setattr(web_api, "_LLM_CHAT_AGENT", _FakeAgent()),
+    )
 
     async def _run_worker() -> None:
         now = web_api._now_iso()

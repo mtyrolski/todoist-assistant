@@ -2244,7 +2244,7 @@ requires-dist = [
     { name = "joblib", specifier = ">=1.5.0" },
     { name = "langchain-huggingface", marker = "extra == 'local-llm'", specifier = ">=1.2.0" },
     { name = "langgraph", specifier = ">=0.6.0" },
-    { name = "langgraph-codex", specifier = ">=0.1.0" },
+    { name = "langgraph-codex", specifier = ">=0.1.4" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.10.4" },
     { name = "numpy", specifier = ">=2.2.5" },
