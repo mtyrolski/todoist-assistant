@@ -2199,8 +2199,8 @@ textarea.textInput {
 }
 
 .assistantMain {
-  display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 
@@ -2278,6 +2278,7 @@ textarea.textInput {
 .assistantMessages {
   align-content: start;
   display: grid;
+  flex: 1 1 auto;
   gap: 12px;
   min-height: 340px;
   overflow: auto;
