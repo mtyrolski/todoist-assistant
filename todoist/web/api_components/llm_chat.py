@@ -179,9 +179,9 @@ def _coerce_model_option_id(
 def _normalize_llm_chat_backend(raw: Any) -> str:
     _sync_api_globals()
     value = str(raw or "").strip().lower()
-    if value in {"codex", "triton", "triton_local", ""}:
+    if value in {"codex", ""}:
         return "codex"
-    return _LLM_CHAT_BACKEND_DEFAULT
+    raise ValueError(f"Unsupported LLM backend: {value}")
 
 
 def _locked_llm_chat_backend() -> str | None:
@@ -189,7 +189,7 @@ def _locked_llm_chat_backend() -> str | None:
     value = str(os.getenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK") or "").strip().lower()
     if not value:
         return None
-    return "codex" if value in {"codex", "triton", "triton_local"} else None
+    return _normalize_llm_chat_backend(value)
 
 
 def _available_llm_chat_backends(backend: str) -> set[str]:

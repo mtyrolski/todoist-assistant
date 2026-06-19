@@ -11,21 +11,6 @@ from todoist.core.env import EnvVar
 # LLM Chat endpoint tests
 
 
-def _assert_triton_disabled(payload: dict[str, object]) -> None:
-    triton = payload.get("triton")
-    if triton is None:
-        return
-    assert isinstance(triton, dict)
-    assert triton == {
-        "configured": False,
-        "healthy": False,
-        "baseUrl": "",
-        "modelName": "",
-        "modelId": "",
-        "modelOptions": [],
-    }
-
-
 def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
@@ -59,7 +44,6 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["enabled"] is False
     assert payload["loading"] is False
     assert payload["backend"]["selected"] == "codex"
-    _assert_triton_disabled(payload["backend"])
     assert payload["backend"]["codex"]["model"] == "gpt-5.5"
     assert payload["model"]["selected"] == "gpt-5.5"
     assert payload["device"]["selected"] == "cpu"
@@ -105,7 +89,7 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     assert web_api._LLM_CHAT_AGENT is None
 
 
-def test_llm_chat_settings_response_exposes_codex_options_without_triton(
+def test_llm_chat_settings_response_exposes_codex_options(
     monkeypatch, tmp_path
 ) -> None:
     env_path = tmp_path / ".env"
@@ -129,41 +113,6 @@ def test_llm_chat_settings_response_exposes_codex_options_without_triton(
     assert payload["envPath"] == ".env"
     assert payload["codex"]["model"] == "gpt-5.5"
     assert "gpt-5.5" in {option["id"] for option in payload["codex"]["modelOptions"]}
-    _assert_triton_disabled(payload)
-
-
-def test_llm_chat_settings_lock_rejects_triton_local(monkeypatch, tmp_path) -> None:
-    env_path = tmp_path / ".env"
-    env_path.write_text(
-        "\n".join(
-            [
-                "TODOIST_AGENT_BACKEND='triton_local'",
-                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
-                "TODOIST_AGENT_CODEX_MODEL='gpt-5.5'",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("TODOIST_DASHBOARD_LLM_BACKEND_LOCK", "codex")
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
-
-    client = TestClient(web_api.app)
-    res = client.get("/api/llm_chat/settings")
-
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["backend"] == "codex"
-    assert payload["lockedBackend"] == "codex"
-    assert [option["id"] for option in payload["availableBackends"]] == ["codex"]
-    _assert_triton_disabled(payload)
-
-    update = client.put(
-        "/api/llm_chat/settings",
-        json={"backend": "triton_local", "device": "cpu"},
-    )
-    assert update.status_code == 400
-    assert update.json()["detail"] == "Unsupported LLM backend."
 
 
 def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
@@ -217,16 +166,15 @@ def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path) 
     assert web_api._LLM_CHAT_AGENT is None
 
 
-def test_llm_chat_update_settings_rejects_triton_backend(monkeypatch) -> None:
+def test_llm_chat_update_settings_rejects_unknown_backend(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
 
     client = TestClient(web_api.app)
     res = client.put(
         "/api/llm_chat/settings",
         json={
-            "backend": "triton_local",
+            "backend": "unknown",
             "device": "cpu",
-            "tritonModelId": "Qwen/Qwen2.5-3B-Instruct",
         },
     )
 
@@ -238,15 +186,6 @@ def test_llm_chat_update_settings_rejects_disabled_backend(
     monkeypatch, tmp_path
 ) -> None:
     env_path = tmp_path / ".env"
-    env_path.write_text(
-        "\n".join(
-            [
-                "TODOIST_AGENT_BACKEND='triton_local'",
-                "TODOIST_AGENT_MODEL_ID='Qwen/Qwen2.5-3B-Instruct'",
-            ]
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
     monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())

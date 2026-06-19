@@ -8,9 +8,6 @@ from dotenv import dotenv_values, load_dotenv
 
 from todoist.core.env import EnvVar
 
-LEGACY_AGENT_BACKEND_ENV = "TODOIST_LLM_BACKEND"
-
-
 def _sanitize_env_text(value: object) -> str | None:
     if value is None:
         return None
@@ -74,10 +71,8 @@ def load_local_dotenv(
 
 def normalize_llm_backend(value: object) -> str:
     backend = (_sanitize_env_text(value) or "disabled").lower()
-    if backend in {"triton", "triton_local"}:
-        return "codex"
-    if backend in {"raw", "none"}:
-        return "disabled"
+    if backend not in {"codex", "disabled"}:
+        raise ValueError(f"Unsupported agent backend: {backend}")
     return backend
 
 
@@ -92,7 +87,5 @@ def resolve_llm_backend(
     file_values = load_runtime_env_values(env_path)
     return normalize_llm_backend(
         env.get(str(EnvVar.AGENT_BACKEND))
-        or env.get(LEGACY_AGENT_BACKEND_ENV)
         or file_values.get(str(EnvVar.AGENT_BACKEND))
-        or file_values.get(LEGACY_AGENT_BACKEND_ENV)
     )
