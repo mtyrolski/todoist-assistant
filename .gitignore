@@ -32,6 +32,7 @@ scripts/*
 storage
 frontend/node_modules/
 frontend/.next/
+frontend/.next-dev/
 # ignore all pycaches:
 __pycache__/
 *.ipynb
