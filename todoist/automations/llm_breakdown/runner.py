@@ -70,14 +70,6 @@ def _start_comment(*, run_id: str, request: Any, llm_descriptor: str) -> str:
     )
 
 
-def _failure_comment(*, run_id: str, error_message: str) -> str:
-    return _failure_comment_with_action(
-        run_id=run_id,
-        error_message=error_message,
-        action="Label kept for retry.",
-    )
-
-
 def _failure_comment_with_action(
     *, run_id: str, error_message: str, action: str
 ) -> str:
@@ -92,17 +84,6 @@ def _failure_comment_with_action(
     )
 
 
-def _fallback_comment(*, run_id: str, reason: str) -> str:
-    return "\n".join(
-        [
-            _comment_header(),
-            "Status: fallback",
-            f"Run: {run_id}",
-            f"Reason: {reason}",
-        ]
-    )
-
-
 def _node_content(node: Any) -> str:
     return str(getattr(node, "content", "") or "").strip()
 
@@ -112,7 +93,6 @@ def _completion_comment(
     run_id: str,
     created_count: int,
     nodes: list[Any],
-    fallback_reason: str | None,
 ) -> str:
     lines = [
         _comment_header(),
@@ -120,8 +100,6 @@ def _completion_comment(
         f"Run: {run_id}",
         f"Created subtasks: {created_count}",
     ]
-    if fallback_reason:
-        lines.append(f"Fallback reason: {fallback_reason}")
     titles = [_node_content(node) for node in nodes]
     titles = [title for title in titles if title]
     if titles:
@@ -331,7 +309,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
         progress[ProgressKey.UPDATED_AT.value] = automation.now_iso()
         automation.progress_save(progress)
 
-        fallback_reason: str | None = None
         if result.error is not None or result.breakdown is None:
             error_message = result.error or "unknown error"
             logger.error("AI breakdown failed for task {}: {}", task.id, error_message)
@@ -376,18 +353,47 @@ def run_breakdown(automation: Any, db: Database) -> None:
             continue
         nodes = result.breakdown.children
         if not nodes:
-            fallback_reason = "empty breakdown"
-            logger.info(f"LLM returned no subtasks for task {task.id}")
-            nodes = automation.fallback_nodes(task, reason=fallback_reason)
-            logger.warning(
-                "Using fallback breakdown for task {} after empty result",
-                task.id,
+            error_message = "LLM returned an empty breakdown."
+            logger.error("AI breakdown failed for task {}: {}", task.id, error_message)
+            action = _failure_action_for_task(
+                automation,
+                db,
+                task=task,
+                label=label,
+                source=source,
             )
             _post_task_comment(
                 db,
                 task.id,
-                _fallback_comment(run_id=run_id, reason=fallback_reason),
+                _failure_comment_with_action(
+                    run_id=run_id,
+                    error_message=error_message,
+                    action=action,
+                ),
             )
+            failed += 1
+            append_progress_result(
+                progress,
+                task=task,
+                status="failed",
+                created_count=0,
+                error=error_message,
+                depth=depth,
+            )
+            pending = tasks_total - (completed + failed)
+            set_progress_counts(
+                progress,
+                completed=completed,
+                failed=failed,
+                pending=pending,
+                total=tasks_total,
+                now=automation.now_iso(),
+                processed_ids=processed_ids,
+                track_processed=track_processed,
+                current=None,
+            )
+            automation.progress_save(progress)
+            continue
 
         created_count = 0
 
@@ -428,24 +434,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
             return context, created[0]
 
         context, created_count = _insert_nodes(nodes)
-        if context.errors and created_count == 0 and fallback_reason is None:
-            error_message = "; ".join(context.errors[:3])
-            if len(context.errors) > 3:
-                error_message = f"{error_message}; and {len(context.errors) - 3} more"
-            fallback_reason = error_message
-            logger.warning(
-                "Retrying task {} with fallback breakdown after insert errors",
-                task.id,
-            )
-            _post_task_comment(
-                db,
-                task.id,
-                _fallback_comment(run_id=run_id, reason=error_message),
-            )
-            context, created_count = _insert_nodes(
-                automation.fallback_nodes(task, reason=error_message)
-            )
-
         if context.errors:
             error_message = "; ".join(context.errors[:3])
             if len(context.errors) > 3:
@@ -453,10 +441,21 @@ def run_breakdown(automation: Any, db: Database) -> None:
             logger.error(
                 "AI breakdown insert failed for task {}: {}", task.id, error_message
             )
+            action = _failure_action_for_task(
+                automation,
+                db,
+                task=task,
+                label=label,
+                source=source,
+            )
             _post_task_comment(
                 db,
                 task.id,
-                _failure_comment(run_id=run_id, error_message=error_message),
+                _failure_comment_with_action(
+                    run_id=run_id,
+                    error_message=error_message,
+                    action=action,
+                ),
             )
             failed += 1
             processed_ids.add(task.id)
@@ -500,7 +499,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 run_id=run_id,
                 created_count=created_count,
                 nodes=nodes,
-                fallback_reason=fallback_reason,
             ),
         )
 

@@ -139,7 +139,7 @@ def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch, tmp_path) -> N
     assert db.insert_calls[0]["project_id"] is None
 
 
-def test_run_breakdown_recovers_with_fallback_after_insert_failure(
+def test_run_breakdown_reports_insert_failure_without_fallback(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
@@ -171,19 +171,25 @@ def test_run_breakdown_recovers_with_fallback_after_insert_failure(
     progress = automation.progress_load()
     results = progress.get(ProgressKey.RESULTS.value)
     assert isinstance(results, list)
-    assert len(db.insert_calls) == 3
-    assert db.insert_calls[1]["content"] == "Define first concrete step"
+    assert len(db.insert_calls) == 2
     assert any(
-        item.get("task_id") == "task-0" and item.get("status") == "completed"
+        item.get("task_id") == "task-0"
+        and item.get("status") == "failed"
+        and "RuntimeError: Item not found" in str(item.get("error"))
         for item in results
     )
     assert any(
         item.get("task_id") == "task-1" and item.get("status") == "completed"
         for item in results
     )
+    assert any(
+        "Error: Failed inserting subtask 'Draft metrics'" in comment["content"]
+        and "RuntimeError: Item not found" in comment["content"]
+        for comment in db.comments
+    )
 
 
-def test_run_breakdown_uses_fallback_child_when_llm_returns_empty_breakdown(
+def test_run_breakdown_reports_empty_llm_breakdown_as_failure(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
@@ -205,13 +211,18 @@ def test_run_breakdown_uses_fallback_child_when_llm_returns_empty_breakdown(
 
     run_breakdown(automation, cast(Database, db))
 
-    assert len(db.insert_calls) == 1
-    assert db.insert_calls[0]["parent_id"] == "task-1"
-    assert db.insert_calls[0]["content"] == "Define first concrete step"
-    assert db.updated == [("task-1", [])]
+    progress = automation.progress_load()
+    results = progress.get(ProgressKey.RESULTS.value)
+    assert isinstance(results, list)
+    assert db.insert_calls == []
+    assert db.updated == []
+    assert "Status: failed" in db.comments[1]["content"]
+    assert "Error: LLM returned an empty breakdown." in db.comments[1]["content"]
+    assert results[0]["status"] == "failed"
+    assert results[0]["error"] == "LLM returned an empty breakdown."
 
 
-def test_run_breakdown_retries_empty_llm_breakdown_before_fallback(
+def test_run_breakdown_retries_empty_llm_breakdown_before_failure(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))

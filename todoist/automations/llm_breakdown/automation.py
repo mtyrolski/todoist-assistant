@@ -325,27 +325,6 @@ class LLMBreakdown(Automation):
         return labels or None
 
     @staticmethod
-    def _fallback_nodes(
-        task: Task, *, reason: str | None = None
-    ) -> list[BreakdownNode]:
-        description_parts = [
-            f"Fallback rollout for task: {task.task_entry.content.strip()}"
-        ]
-        task_description = _sanitize_text(task.task_entry.description)
-        if task_description:
-            description_parts.append(f"Context: {task_description}")
-        if reason:
-            description_parts.append(f"Reason: {reason}")
-        return [
-            BreakdownNode(
-                content="Define first concrete step",
-                description="\n".join(description_parts),
-                expand=False,
-                children=[],
-            )
-        ]
-
-    @staticmethod
     def _update_root_labels(db: Database, task: Task, label_to_remove: str) -> None:
         labels = task.task_entry.labels
         if not labels:
@@ -434,11 +413,6 @@ class LLMBreakdown(Automation):
 
     def child_labels(self, task: Task) -> list[str] | None:
         return self._child_labels(task)
-
-    def fallback_nodes(
-        self, task: Task, *, reason: str | None = None
-    ) -> list[BreakdownNode]:
-        return self._fallback_nodes(task, reason=reason)
 
     def update_root_labels(
         self, db: Database, task: Task, label_to_remove: str
