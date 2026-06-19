@@ -39,10 +39,6 @@ from todoist.database.dataframe import (
     render_adjustments_file_content,
     resolve_personal_dir,
 )
-from todoist.features.status_update import (
-    build_status_update_report,
-    load_status_update_projects,
-)
 from todoist.core.types import Event, Project
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
@@ -138,7 +134,6 @@ from todoist.web.api_components.templates import (
     template_to_camel as _template_to_camel,
 )
 from todoist.web.api_components import llm_chat as _llm_chat_component
-from todoist.web.api_components import task_ingest as _task_ingest_component
 from todoist.web.api_components import dashboard_runtime as _dashboard_runtime_component
 from todoist.web.api_components import (
     automation_runtime as _automation_runtime_component,
@@ -848,35 +843,6 @@ def _load_projects_for_adjustments_sync(
         [name for name in active_root if name in _REMAPPABLE_ACTIVE_ROOT_PROJECTS]
     )
     return active_root, archived_root, archived_names, remappable_active_root
-
-
-_TaskIngestNode = _task_ingest_component._TaskIngestNode
-_TaskIngestTree = _task_ingest_component._TaskIngestTree
-
-
-def _call_task_ingest_component(name: str, *args: Any, **kwargs: Any) -> Any:
-    _task_ingest_component._sync_api_globals()
-    return getattr(_task_ingest_component, name)(*args, **kwargs)
-
-
-def _make_task_ingest_wrapper(name: str):
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        return _call_task_ingest_component(name, *args, **kwargs)
-
-    _wrapper.__name__ = name
-    _wrapper._component_wrapper_for = name
-    return _wrapper
-
-
-for _name in _task_ingest_component._COMPONENT_EXPORTS:
-    if _name not in {"_TaskIngestNode", "_TaskIngestTree"}:
-        globals()[_name] = _make_task_ingest_wrapper(_name)
-
-
-def _status_update_db() -> Database:
-    if _state.db is not None:
-        return _state.db
-    return Database(str(_resolve_env_path()))
 
 
 def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
