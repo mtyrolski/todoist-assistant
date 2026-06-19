@@ -8,6 +8,7 @@ from dotenv import dotenv_values, load_dotenv
 
 from todoist.core.env import EnvVar
 
+
 def _sanitize_env_text(value: object) -> str | None:
     if value is None:
         return None
@@ -86,6 +87,5 @@ def resolve_llm_backend(
     env_path = resolve_runtime_env_path(repo_root=repo_root, cwd=cwd, environ=env)
     file_values = load_runtime_env_values(env_path)
     return normalize_llm_backend(
-        env.get(str(EnvVar.AGENT_BACKEND))
-        or file_values.get(str(EnvVar.AGENT_BACKEND))
+        env.get(str(EnvVar.AGENT_BACKEND)) or file_values.get(str(EnvVar.AGENT_BACKEND))
     )

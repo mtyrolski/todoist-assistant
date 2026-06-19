@@ -363,15 +363,9 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
             "envPath": settings["envPath"],
         },
         "model": {
-            "selected": (
-                settings["codex"]["model"]
-            ),
+            "selected": (settings["codex"]["model"]),
             "label": settings["codex"]["model"],
-            "active": (
-                settings["codex"]["model"]
-                if enabled or loading
-                else None
-            ),
+            "active": (settings["codex"]["model"] if enabled or loading else None),
             "codex": {
                 "selected": settings["codex"]["model"],
                 "options": settings["codex"]["modelOptions"],
