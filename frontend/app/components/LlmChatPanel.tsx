@@ -122,7 +122,7 @@ function runtimeLabel(status: ChatStatus | null): string {
   if (!status) return "Codex status unknown";
   if (status.enabled) return "Codex ready";
   if (status.loading) return "Codex loading";
-  return "Codex cold";
+  return "Codex not started";
 }
 
 function messageLabel(role: string): string {
@@ -228,7 +228,7 @@ export function LlmChatPanel() {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLFormElement | null>(null);
 
   const conversations = useMemo(() => status?.conversations ?? [], [status?.conversations]);
@@ -335,7 +335,8 @@ export function LlmChatPanel() {
   }, [conversation?.title, selectedSummary?.title]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
+    const messages = messagesRef.current;
+    if (messages) messages.scrollTop = messages.scrollHeight;
   }, [conversation?.messages.length, sending]);
 
   useEffect(() => {
@@ -357,7 +358,7 @@ export function LlmChatPanel() {
       await readApiResponse<Record<string, never>>(res);
       await refreshStatus();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to warm up Codex");
+      setActionError(err instanceof Error ? err.message : "Failed to start Codex");
     }
   };
 
@@ -584,7 +585,7 @@ export function LlmChatPanel() {
               </>
             ) : null}
             <button className="button buttonSmall" type="button" onClick={handleEnable} disabled={status?.enabled || status?.loading}>
-              {status?.enabled ? "Ready" : status?.loading ? "Loading" : "Warm"}
+              {status?.enabled ? "Ready" : status?.loading ? "Starting" : "Start Codex"}
             </button>
             <button className="button buttonSmall" type="button" onClick={() => refreshStatus()} disabled={loadingStatus}>
               {loadingStatus ? "Refreshing" : "Refresh"}
@@ -638,7 +639,7 @@ export function LlmChatPanel() {
         ) : null}
         {actionNotice ? <p className="muted tiny assistantNotice">{actionNotice}</p> : null}
 
-        <div className="assistantMessages" aria-live="polite">
+        <div ref={messagesRef} className="assistantMessages" aria-live="polite">
           {loadingConversation ? (
             <div className="skeleton" style={{ minHeight: 180 }} />
           ) : conversation?.messages?.length ? (
@@ -685,7 +686,6 @@ export function LlmChatPanel() {
               </div>
             </article>
           ) : null}
-          <div ref={messagesEndRef} />
         </div>
 
         <form ref={composerRef} className="assistantComposer" onSubmit={handleSend}>

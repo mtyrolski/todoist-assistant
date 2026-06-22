@@ -10,6 +10,7 @@ import typer
 from loguru import logger
 
 from todoist.agent.context import load_local_agent_context
+from todoist.agent.productivity_context import build_productivity_context
 from todoist.core.env import EnvVar
 from todoist.agent.graph import AgentState, build_agent_graph
 from todoist.llm import (
@@ -92,11 +93,23 @@ def chat(
     llm = TransformersMistral3ChatModel(cfg)
 
     local_ctx = load_local_agent_context(cache_path)
+    productivity_ctx = build_productivity_context(cache_path=cache_path)
     tool_ctx = {
         "events": local_ctx.events,
         "events_df": local_ctx.events_df.copy(),
         "pd": pd,
         "np": np,
+        "cache_summary": productivity_ctx.cache_summary,
+        "load_cache": productivity_ctx.load_cache,
+        "script_catalog": productivity_ctx.script_catalog,
+        "run_script": productivity_ctx.run_script,
+        "llm_usage": productivity_ctx.llm_usage,
+        "telemetry_status": productivity_ctx.telemetry_status,
+        "projects": productivity_ctx.projects,
+        "activity_dataframe": productivity_ctx.activity_dataframe,
+        "project_comparison": productivity_ctx.project_comparison,
+        "executive_summary": productivity_ctx.executive_summary,
+        "create_tasks": productivity_ctx.create_tasks,
     }
     python_tool = SafePythonReplTool(tool_ctx)
 

@@ -790,6 +790,48 @@ def test_fetch_activity_for_parent_projects_scans_each_parent_window(db_activity
     } == {"parent-a", "parent-b"}
 
 
+def test_fetch_activity_for_parent_projects_stops_after_cached_empty_windows(
+    db_activity,
+):
+    from datetime import datetime, timezone
+    from todoist.core.types import Event, EventEntry
+    import datetime as dt
+
+    cached_entry = EventEntry(
+        id="event-cached",
+        object_type="item",
+        object_id="task-cached",
+        event_type="completed",
+        event_date="2023-01-03T12:00:00Z",
+        parent_project_id="parent-a",
+        parent_item_id=None,
+        initiator_id="user1",
+        extra_data={"content": "Cached task"},
+        extra_data_id="extra-cached",
+        v2_object_id="v2_task_cached",
+        v2_parent_item_id=None,
+        v2_parent_project_id="parent-a",
+    )
+    cached_event = Event(
+        event_entry=cached_entry,
+        id="event-cached",
+        date=dt.datetime(2023, 1, 3, 12, 0, 0),
+    )
+
+    with patch.object(db_activity, "_fetch_activity_range", return_value=[]) as fetch:
+        events = db_activity.fetch_activity_for_parent_projects(
+            ["parent-a"],
+            date_from=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            date_to=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            window_weeks=4,
+            events_already_fetched={cached_event},
+            early_stop_after_n_windows=2,
+        )
+
+    assert events == []
+    assert fetch.call_count == 2
+
+
 def test_fetch_activity_signature(db_activity):
     """Test fetch_activity method signature."""
     signature = inspect.signature(db_activity.fetch_activity)

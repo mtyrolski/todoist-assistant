@@ -562,6 +562,9 @@ def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
         "llm_usage": productivity_ctx.llm_usage,
         "telemetry_status": productivity_ctx.telemetry_status,
         "projects": productivity_ctx.projects,
+        "activity_dataframe": productivity_ctx.activity_dataframe,
+        "project_comparison": productivity_ctx.project_comparison,
+        "executive_summary": productivity_ctx.executive_summary,
         "create_tasks": productivity_ctx.create_tasks,
     }
     python_tool = SafePythonReplTool(tool_ctx)

@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pandas as pd
 import plotly.graph_objects as go
+from todoist.dashboard._plot_periodic import _prepare_completed_periodic_frame
 
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
@@ -30,6 +31,30 @@ def _weekly_completion_df() -> pd.DataFrame:
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = "date"
     return df
+
+
+def test_periodic_frame_buckets_utc_events_in_configured_timezone(monkeypatch: Any):
+    monkeypatch.setenv("TODOIST_TIMEZONE", "Europe/Warsaw")
+    df = pd.DataFrame(
+        {
+            "root_project_name": ["Academy", "Academy"],
+            "type": ["completed", "completed"],
+            "title": ["Sunday local", "Monday local"],
+        },
+        index=pd.to_datetime(
+            ["2026-06-21T20:00:00Z", "2026-06-21T23:30:00Z"], utc=True
+        ),
+    )
+
+    _, periodic = _prepare_completed_periodic_frame(
+        df,
+        beg_date=datetime(2026, 6, 15),
+        end_date=datetime(2026, 6, 28),
+        granularity="W-SUN",
+    )
+
+    assert int(periodic.loc[pd.Timestamp("2026-06-21"), "Academy"]) == 1
+    assert int(periodic.loc[pd.Timestamp("2026-06-28"), "Academy"]) == 1
 
 
 def _weekly_completion_with_inactive_project_df() -> pd.DataFrame:

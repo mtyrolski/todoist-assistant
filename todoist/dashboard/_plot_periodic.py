@@ -1,9 +1,14 @@
 from dataclasses import dataclass
 from datetime import datetime
+import os
+from pathlib import Path
 from typing import Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 import plotly.graph_objects as go
+
+from todoist.core.env import EnvVar
 
 from todoist.dashboard._plot_common import (
     _ALL_TASKS_TOTAL_COLOR,
@@ -30,6 +35,40 @@ def _current_period_label(
     except (TypeError, ValueError):
         return fallback
     return fallback
+
+
+def _periodic_timezone() -> ZoneInfo | Any:
+    configured = os.getenv(str(EnvVar.TIMEZONE), "").strip().strip("'\"")
+    candidates = [configured]
+    timezone_file = Path("/etc/timezone")
+    if timezone_file.exists():
+        try:
+            candidates.append(timezone_file.read_text(encoding="utf-8").strip())
+        except OSError:
+            pass
+    try:
+        localtime = Path("/etc/localtime").resolve()
+        marker = "zoneinfo/"
+        if marker in str(localtime):
+            candidates.append(str(localtime).split(marker, 1)[1])
+    except OSError:
+        pass
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return ZoneInfo(candidate)
+        except ZoneInfoNotFoundError:
+            continue
+    return datetime.now().astimezone().tzinfo
+
+
+def _local_periodic_index(index: pd.Index) -> pd.DatetimeIndex:
+    utc_index = pd.to_datetime(index, errors="coerce", utc=True)
+    return cast(
+        pd.DatetimeIndex, utc_index.tz_convert(_periodic_timezone()).tz_localize(None)
+    )
 
 
 def _drop_projects_without_period_activity(df_periodic: pd.DataFrame) -> pd.DataFrame:
@@ -122,7 +161,7 @@ def _prepare_completed_periodic_frame(
     always_visible_projects: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     df_completed = cast(pd.DataFrame, df[df["type"] == "completed"].copy())
-    df_completed.index = pd.to_datetime(df_completed.index)
+    df_completed.index = _local_periodic_index(df_completed.index)
     df_completed = cast(pd.DataFrame, df_completed[df_completed.index <= end_date])
     visibility_beg = visibility_beg_date or beg_date
     visibility_end = visibility_end_date or end_date

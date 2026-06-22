@@ -2115,18 +2115,21 @@ textarea.textInput {
   display: grid;
   grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
   gap: 18px;
-  min-height: calc(100vh - 230px);
+  height: clamp(600px, calc(100dvh - 230px), 900px);
+  min-height: 0;
 }
 
 .assistantRail,
 .assistantMain {
   border: 1px solid var(--border);
   background: rgba(5, 8, 14, 0.46);
+  overflow: hidden;
 }
 
 .assistantRail {
   display: grid;
   grid-template-rows: auto auto 1fr;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -2201,6 +2204,7 @@ textarea.textInput {
 .assistantMain {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -2280,8 +2284,9 @@ textarea.textInput {
   display: grid;
   flex: 1 1 auto;
   gap: 12px;
-  min-height: 340px;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 18px;
 }
 
@@ -3550,6 +3555,7 @@ textarea.textInput {
 @media (max-width: 980px) {
   .assistantWorkspace {
     grid-template-columns: 1fr;
+    height: auto;
     min-height: auto;
   }
 
@@ -3565,7 +3571,7 @@ textarea.textInput {
   }
 
   .assistantMain {
-    min-height: min(720px, calc(100vh - 120px));
+    height: clamp(560px, calc(100dvh - 120px), 720px);
   }
 
   .assistantComposer {

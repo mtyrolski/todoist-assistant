@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any
+from typing import Any, cast
 
 from joblib import load as _joblib_load
+import pandas as pd
 
 from todoist.core import telemetry
 from todoist.core.env import EnvVar
@@ -22,6 +23,7 @@ from todoist.llm.usage import load_llm_usage_summary
 _SUBPROCESS_RUN = subprocess.run
 _SCRIPT_TIMEOUT_SECONDS = 120
 _SCRIPT_OUTPUT_LIMIT = 12_000
+_SUMMARY_EVENT_TYPES = ("completed", "added", "updated", "deleted", "rescheduled")
 _ALLOWED_SCRIPT_NAMES = frozenset(
     {
         "check_explicit_any",
@@ -77,6 +79,119 @@ class ProductivityContext:
             return registry_entry[1]()
         return _joblib_load(path)
 
+    def activity_dataframe(self) -> pd.DataFrame:
+        """Return the dashboard's mapped activity data as an isolated copy."""
+
+        payload = self.load_cache("dashboard_state")
+        frame = payload.get("df_activity") if isinstance(payload, dict) else None
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            raise RuntimeError(
+                "Mapped dashboard activity is unavailable. Refresh the dashboard first."
+            )
+        required = {"date", "root_project_name"}
+        missing = sorted(required - set(frame.columns))
+        if missing:
+            raise RuntimeError(
+                "Mapped dashboard activity is missing columns: " + ", ".join(missing)
+            )
+        return frame.copy(deep=True)
+
+    def project_comparison(
+        self,
+        period: str = "week",
+        *,
+        as_of: str | datetime | None = None,
+        offset: int = 0,
+        limit: int = 12,
+        timezone_name: str = "Europe/Warsaw",
+    ) -> dict[str, Any]:
+        """Compare mapped root-project activity with the preceding period."""
+
+        current_start, current_end = _period_bounds(
+            period, as_of=as_of, offset=offset, timezone_name=timezone_name
+        )
+        as_of_timestamp = _coerce_timestamp(as_of, timezone_name=timezone_name)
+        observed_end = (
+            current_end
+            if int(offset) > 0
+            else min(current_end, max(current_start, as_of_timestamp))
+        )
+        span = current_end - current_start
+        previous_start = current_start - span
+        previous_observed_end = previous_start + (observed_end - current_start)
+        frame = _prepare_activity_frame(
+            self.activity_dataframe(), timezone_name=timezone_name
+        )
+        current = _slice_period(frame, current_start, observed_end)
+        previous = _slice_period(frame, previous_start, previous_observed_end)
+        projects = _compare_project_frames(current, previous)
+        bounded_limit = max(1, min(int(limit), 50))
+        return {
+            "periodType": _normalize_period(period),
+            "timezone": timezone_name,
+            "asOf": as_of_timestamp.isoformat(),
+            "periodComplete": observed_end >= current_end,
+            "comparisonMode": (
+                "full_period" if observed_end >= current_end else "elapsed_to_elapsed"
+            ),
+            "currentPeriod": _period_payload(
+                current_start, current_end, observed_end=observed_end
+            ),
+            "previousPeriod": _period_payload(
+                previous_start, current_start, observed_end=previous_observed_end
+            ),
+            "currentTotals": _event_counts(current),
+            "previousTotals": _event_counts(previous),
+            "projects": projects[:bounded_limit],
+        }
+
+    def executive_summary(
+        self,
+        period: str = "week",
+        *,
+        as_of: str | datetime | None = None,
+        offset: int = 0,
+        limit: int = 8,
+        timezone_name: str = "Europe/Warsaw",
+    ) -> dict[str, Any]:
+        """Return decision-ready daily or weekly productivity context."""
+
+        comparison = self.project_comparison(
+            period,
+            as_of=as_of,
+            offset=offset,
+            limit=limit,
+            timezone_name=timezone_name,
+        )
+        start = cast(
+            pd.Timestamp,
+            pd.Timestamp(comparison["currentPeriod"]["start"], tz=timezone_name),
+        )
+        observed_end = cast(
+            pd.Timestamp,
+            pd.Timestamp(comparison["currentPeriod"]["observedThrough"]).tz_convert(
+                timezone_name
+            ),
+        )
+        frame = _prepare_activity_frame(
+            self.activity_dataframe(), timezone_name=timezone_name
+        )
+        current = _slice_period(frame, start, observed_end)
+        busiest_day = _busiest_day(current)
+        recent_completions = _recent_completions(current, limit=limit)
+        return {
+            "periodType": comparison["periodType"],
+            "timezone": timezone_name,
+            "period": comparison["currentPeriod"],
+            "comparisonPeriod": comparison["previousPeriod"],
+            "totals": comparison["currentTotals"],
+            "previousTotals": comparison["previousTotals"],
+            "leadingProjects": comparison["projects"],
+            "busiestDay": busiest_day,
+            "recentCompletions": recent_completions,
+            "signals": _summary_signals(comparison),
+        }
+
     def script_catalog(self) -> list[dict[str, str]]:
         scripts_dir = self.repo_root / "scripts"
         items: list[dict[str, str]] = []
@@ -103,7 +218,9 @@ class ProductivityContext:
         normalized = str(name or "").strip()
         if normalized not in _ALLOWED_SCRIPT_NAMES:
             allowed = ", ".join(sorted(_ALLOWED_SCRIPT_NAMES))
-            raise ValueError(f"Script {normalized!r} is not allowlisted. Allowed: {allowed}")
+            raise ValueError(
+                f"Script {normalized!r} is not allowlisted. Allowed: {allowed}"
+            )
         script_path = (self.repo_root / "scripts" / f"{normalized}.py").resolve()
         scripts_root = (self.repo_root / "scripts").resolve()
         if scripts_root not in script_path.parents or not script_path.exists():
@@ -142,9 +259,7 @@ class ProductivityContext:
         return {
             "enabled": telemetry.is_enabled(config_dir),
             "endpointConfigured": bool(endpoint),
-            "debugEnabled": os.getenv(str(EnvVar.TELEMETRY_DEBUG), "")
-            .strip()
-            .lower()
+            "debugEnabled": os.getenv(str(EnvVar.TELEMETRY_DEBUG), "").strip().lower()
             in {"1", "true", "yes"},
             "configPath": str(config_path),
             "sentinelPath": str(sentinel_path),
@@ -204,7 +319,9 @@ def build_productivity_context(
     cache_root = Path(resolve_cache_dir(str(cache_path) if cache_path else None))
     root = Path(repo_root or Path.cwd()).expanduser().resolve()
     dotenv_path = Path(env_path or (root / ".env")).expanduser().resolve()
-    return ProductivityContext(cache_path=cache_root, repo_root=root, env_path=dotenv_path)
+    return ProductivityContext(
+        cache_path=cache_root, repo_root=root, env_path=dotenv_path
+    )
 
 
 def productivity_context_payload(ctx: ProductivityContext) -> dict[str, Any]:
@@ -223,9 +340,208 @@ def productivity_context_payload(ctx: ProductivityContext) -> dict[str, Any]:
             "llm_usage()",
             "telemetry_status()",
             "projects()",
+            "activity_dataframe()",
+            "project_comparison(period='week', as_of=None, offset=0, limit=12)",
+            "executive_summary(period='week', as_of=None, offset=0, limit=8)",
             "create_tasks(project_id, tasks, confirmation='CREATE_TODOIST_TASKS')",
         ],
     }
+
+
+def _normalize_period(period: str) -> str:
+    normalized = str(period or "").strip().lower()
+    aliases = {"daily": "day", "today": "day", "weekly": "week", "this week": "week"}
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"day", "week"}:
+        raise ValueError("period must be 'day' or 'week'")
+    return normalized
+
+
+def _period_bounds(
+    period: str,
+    *,
+    as_of: str | datetime | None,
+    offset: int,
+    timezone_name: str,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    normalized_period = _normalize_period(period)
+    if int(offset) < 0:
+        raise ValueError("offset must be non-negative")
+    timestamp = _coerce_timestamp(as_of, timezone_name=timezone_name)
+    day_start = cast(pd.Timestamp, timestamp.normalize())
+    if normalized_period == "week":
+        start = day_start - pd.Timedelta(days=day_start.weekday())
+        start -= pd.Timedelta(weeks=int(offset))
+        return cast(pd.Timestamp, start), cast(
+            pd.Timestamp, start + pd.Timedelta(weeks=1)
+        )
+    start = day_start - pd.Timedelta(days=int(offset))
+    return cast(pd.Timestamp, start), cast(pd.Timestamp, start + pd.Timedelta(days=1))
+
+
+def _coerce_timestamp(
+    value: str | datetime | None, *, timezone_name: str
+) -> pd.Timestamp:
+    raw_timestamp = (
+        pd.Timestamp.now(tz=timezone_name) if value is None else pd.Timestamp(value)
+    )
+    if pd.isna(raw_timestamp):
+        raise ValueError("as_of must be a valid date or datetime")
+    timestamp = cast(pd.Timestamp, raw_timestamp)
+    timestamp = (
+        cast(pd.Timestamp, timestamp.tz_localize(timezone_name))
+        if timestamp.tzinfo is None
+        else cast(pd.Timestamp, timestamp.tz_convert(timezone_name))
+    )
+    return timestamp
+
+
+def _prepare_activity_frame(frame: pd.DataFrame, *, timezone_name: str) -> pd.DataFrame:
+    prepared = cast(pd.DataFrame, frame.reset_index(drop=True).copy())
+    date_values = cast(pd.Series, prepared["date"])
+    parsed_dates = cast(
+        pd.Series, pd.to_datetime(date_values, errors="coerce", utc=True)
+    )
+    prepared["_date"] = parsed_dates.dt.tz_convert(timezone_name)
+    valid_dates = cast(pd.Series, prepared["_date"]).notna()
+    prepared = cast(pd.DataFrame, prepared.loc[valid_dates].copy())
+    event_column = "type" if "type" in prepared.columns else "event_type"
+    if event_column not in prepared.columns:
+        raise RuntimeError("Mapped dashboard activity has no event type column")
+    prepared["_event_type"] = (
+        cast(pd.Series, prepared[event_column]).fillna("").astype(str)
+    )
+    prepared["_project"] = (
+        cast(pd.Series, prepared["root_project_name"]).fillna("(unknown)").astype(str)
+    )
+    if "title" not in prepared.columns:
+        prepared["title"] = ""
+    return prepared
+
+
+def _slice_period(
+    frame: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+) -> pd.DataFrame:
+    dates = cast(pd.Series, frame["_date"])
+    return cast(pd.DataFrame, frame.loc[(dates >= start) & (dates < end)].copy())
+
+
+def _event_counts(frame: pd.DataFrame) -> dict[str, int]:
+    counts = cast(
+        pd.Series,
+        cast(pd.Series, frame["_event_type"]).value_counts()
+        if not frame.empty
+        else pd.Series(dtype=int),
+    )
+    payload = {
+        event_type: int(cast(Any, counts[event_type]))
+        if event_type in counts.index
+        else 0
+        for event_type in _SUMMARY_EVENT_TYPES
+    }
+    payload["events"] = int(len(frame))
+    return payload
+
+
+def _compare_project_frames(
+    current: pd.DataFrame, previous: pd.DataFrame
+) -> list[dict[str, Any]]:
+    current_projects = cast(pd.Series, current["_project"]).astype(str).to_list()
+    previous_projects = cast(pd.Series, previous["_project"]).astype(str).to_list()
+    project_names = sorted(set(current_projects) | set(previous_projects))
+    rows: list[dict[str, Any]] = []
+    for project_name in project_names:
+        current_mask = cast(pd.Series, current["_project"]) == project_name
+        previous_mask = cast(pd.Series, previous["_project"]) == project_name
+        current_counts = _event_counts(cast(pd.DataFrame, current.loc[current_mask]))
+        previous_counts = _event_counts(cast(pd.DataFrame, previous.loc[previous_mask]))
+        change = {
+            key: int(current_counts[key] - previous_counts[key])
+            for key in current_counts
+        }
+        rows.append(
+            {
+                "project": str(project_name),
+                "current": current_counts,
+                "previous": previous_counts,
+                "change": change,
+            }
+        )
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
+        current_counts = cast(dict[str, int], item["current"])
+        change_counts = cast(dict[str, int], item["change"])
+        return (
+            current_counts["events"],
+            current_counts["completed"],
+            abs(change_counts["events"]),
+        )
+
+    rows.sort(key=sort_key, reverse=True)
+    return rows
+
+
+def _period_payload(
+    start: pd.Timestamp, end: pd.Timestamp, *, observed_end: pd.Timestamp
+) -> dict[str, str]:
+    return {
+        "start": start.date().isoformat(),
+        "end": (end - pd.Timedelta(days=1)).date().isoformat(),
+        "endExclusive": end.date().isoformat(),
+        "observedThrough": observed_end.isoformat(),
+    }
+
+
+def _busiest_day(frame: pd.DataFrame) -> dict[str, Any] | None:
+    if frame.empty:
+        return None
+    dates = cast(pd.Series, frame["_date"])
+    counts = cast(pd.Series, frame.groupby(dates.dt.date).size()).sort_values(
+        ascending=False
+    )
+    return {"date": str(counts.index[0]), "events": int(counts.iloc[0])}
+
+
+def _recent_completions(frame: pd.DataFrame, *, limit: int) -> list[dict[str, str]]:
+    completed_mask = cast(pd.Series, frame["_event_type"]) == "completed"
+    completed = cast(pd.DataFrame, frame.loc[completed_mask].sort_values(by="_date"))
+    rows: list[dict[str, str]] = []
+    for _, row in completed.tail(max(1, min(int(limit), 20))).iterrows():
+        rows.append(
+            {
+                "title": str(row.get("title") or "(untitled)"),
+                "project": str(row["_project"]),
+                "date": cast(pd.Timestamp, row["_date"]).isoformat(),
+            }
+        )
+    return rows
+
+
+def _summary_signals(comparison: dict[str, Any]) -> list[str]:
+    current = comparison["currentTotals"]
+    previous = comparison["previousTotals"]
+    completed_change = int(current["completed"] - previous["completed"])
+    signals = [
+        f"Completed tasks changed by {completed_change:+d} versus the previous period."
+    ]
+    if current["added"] > current["completed"]:
+        signals.append(
+            f"Task intake exceeded completions by {current['added'] - current['completed']}."
+        )
+    elif current["completed"] > current["added"]:
+        signals.append(
+            f"Completions exceeded task intake by {current['completed'] - current['added']}."
+        )
+    projects = comparison["projects"]
+    if projects:
+        leader = projects[0]
+        signals.append(
+            f"{leader['project']} led activity with {leader['current']['events']} events "
+            f"and {leader['current']['completed']} completions."
+        )
+    if current["deleted"]:
+        signals.append(f"The period included {current['deleted']} deleted tasks.")
+    return signals
 
 
 def _summarize_payload(payload: Any) -> dict[str, Any]:
