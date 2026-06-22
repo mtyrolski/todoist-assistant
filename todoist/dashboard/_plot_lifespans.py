@@ -186,9 +186,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                 )
             )
         )
-        effective_count = float(
-            np.square(weight_sum) / np.square(sample_weights).sum()
-        )
+        effective_count = float(np.square(weight_sum) / np.square(sample_weights).sum())
         bandwidth = sample_std * effective_count ** (-1 / 5)
         if not np.isfinite(bandwidth) or bandwidth <= 0:
             bandwidth = max(float(np.ptp(log_bounds)) / 64, 0.05)
