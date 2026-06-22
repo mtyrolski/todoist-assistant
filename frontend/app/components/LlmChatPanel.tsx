@@ -52,6 +52,7 @@ type ChatStatus = {
     } | null;
   };
   assistant?: {
+    customInstructions?: string;
     tools?: string[];
     scripts?: Array<{ name: string; path: string; command: string }>;
     telemetry?: {
@@ -66,6 +67,11 @@ type ChatStatus = {
     assistantMessageCount: number;
     toolMessageCount: number;
   };
+  activeTurns?: Array<{
+    conversationId: string;
+    message: string;
+    startedAt: string;
+  }>;
   conversations: ChatConversationSummary[];
 };
 
@@ -227,15 +233,29 @@ export function LlmChatPanel() {
   const [threadActionBusy, setThreadActionBusy] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [instructionsDraft, setInstructionsDraft] = useState("");
+  const [instructionsSaving, setInstructionsSaving] = useState(false);
   const didAutoSelect = useRef(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLFormElement | null>(null);
+  const localTurnStartedAt = useRef<number | null>(null);
 
   const conversations = useMemo(() => status?.conversations ?? [], [status?.conversations]);
   const selectedSummary = useMemo(() => {
     if (!selectedConversationId) return null;
     return conversations.find((item) => item.id === selectedConversationId) ?? null;
   }, [conversations, selectedConversationId]);
+  const activeTurn = useMemo(() => {
+    if (!selectedConversationId) return null;
+    return status?.activeTurns?.find((turn) => turn.conversationId === selectedConversationId) ?? null;
+  }, [selectedConversationId, status?.activeTurns]);
+  const turnRunning = sending || Boolean(activeTurn);
+  const visibleMessages = useMemo(() => {
+    const messages = conversation?.messages ?? [];
+    if (!activeTurn?.message || messages.at(-1)?.content === activeTurn.message) return messages;
+    return [...messages, { role: "user", content: activeTurn.message, createdAt: activeTurn.startedAt }];
+  }, [activeTurn, conversation?.messages]);
   const filteredConversations = useMemo(() => {
     const query = conversationQuery.trim().toLowerCase();
     if (!query) return conversations;
@@ -291,6 +311,12 @@ export function LlmChatPanel() {
   }, [refreshStatus]);
 
   useEffect(() => {
+    if (!status?.activeTurns?.length) return;
+    const interval = window.setInterval(() => refreshStatus(true), 1500);
+    return () => window.clearInterval(interval);
+  }, [refreshStatus, status?.activeTurns?.length]);
+
+  useEffect(() => {
     const syncFromLocation = () => {
       const linkedChatId = chatIdFromLocation();
       if (linkedChatId) didAutoSelect.current = true;
@@ -309,9 +335,11 @@ export function LlmChatPanel() {
 
   useEffect(() => {
     if (!selectedConversationId) {
+      if (conversation?.id === "pending" && (turnRunning || failedMessage)) return;
       setConversation(null);
       return;
     }
+    if (turnRunning && conversation?.id === selectedConversationId) return;
     if (status && !conversations.some((item) => item.id === selectedConversationId)) {
       selectConversation(null, true);
       setActionError("The linked chat no longer exists.");
@@ -323,10 +351,12 @@ export function LlmChatPanel() {
     conversations,
     conversation?.id,
     conversation?.updatedAt,
+    failedMessage,
     loadConversation,
     selectedConversationId,
     selectedSummary?.updatedAt,
     selectConversation,
+    turnRunning,
     status
   ]);
 
@@ -335,21 +365,29 @@ export function LlmChatPanel() {
   }, [conversation?.title, selectedSummary?.title]);
 
   useEffect(() => {
-    const messages = messagesRef.current;
-    if (messages) messages.scrollTop = messages.scrollHeight;
-  }, [conversation?.messages.length, sending]);
+    if (!instructionsOpen) {
+      setInstructionsDraft(status?.assistant?.customInstructions ?? "");
+    }
+  }, [instructionsOpen, status?.assistant?.customInstructions]);
 
   useEffect(() => {
-    if (!sending) {
+    const messages = messagesRef.current;
+    if (messages) messages.scrollTop = messages.scrollHeight;
+  }, [visibleMessages.length, turnRunning]);
+
+  useEffect(() => {
+    if (!turnRunning) {
       setRunElapsedSeconds(0);
+      localTurnStartedAt.current = null;
       return;
     }
-    const startedAt = Date.now();
+    const serverStartedAt = activeTurn?.startedAt ? new Date(activeTurn.startedAt).getTime() : Number.NaN;
+    const startedAt = Number.isFinite(serverStartedAt) ? serverStartedAt : localTurnStartedAt.current ?? Date.now();
     const updateElapsed = () => setRunElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
     updateElapsed();
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [sending]);
+  }, [activeTurn?.startedAt, turnRunning]);
 
   const handleEnable = async () => {
     try {
@@ -419,16 +457,39 @@ export function LlmChatPanel() {
     }
   };
 
+  const handleSaveInstructions = async () => {
+    try {
+      setInstructionsSaving(true);
+      setActionError(null);
+      const res = await fetch("/api/llm_chat/instructions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instructions: instructionsDraft })
+      });
+      const payload = await readApiResponse<{ instructions: string }>(res);
+      setInstructionsDraft(payload.instructions);
+      setInstructionsOpen(false);
+      setActionNotice(payload.instructions ? "Assistant instructions saved" : "Assistant instructions cleared");
+      await refreshStatus(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to save assistant instructions");
+    } finally {
+      setInstructionsSaving(false);
+    }
+  };
+
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = messageDraft.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || turnRunning) return;
 
     const optimisticMessage: ChatMessage = {
       role: "user",
       content: trimmed,
       createdAt: new Date().toISOString().slice(0, 19)
     };
+    localTurnStartedAt.current = Date.now();
+    setMessageDraft("");
     if (!conversation) {
       setConversation({
         id: selectedConversationId ?? "pending",
@@ -451,7 +512,6 @@ export function LlmChatPanel() {
         body: JSON.stringify(body)
       });
       const payload = await readApiResponse<SendResponse>(res);
-      setMessageDraft("");
       if (payload.conversationId) {
         selectConversation(payload.conversationId, !selectedConversationId);
       }
@@ -461,11 +521,6 @@ export function LlmChatPanel() {
       await refreshStatus(true);
     } catch (err) {
       setFailedMessage(trimmed);
-      setConversation((current) => {
-        if (!current) return null;
-        const messages = current.messages.slice(0, -1);
-        return selectedConversationId ? { ...current, messages } : null;
-      });
       setActionError(err instanceof Error ? err.message : "Failed to run assistant turn");
     } finally {
       setSending(false);
@@ -473,14 +528,19 @@ export function LlmChatPanel() {
   };
 
   const handleRetry = () => {
-    if (!failedMessage || sending) return;
+    if (!failedMessage || turnRunning) return;
+    setConversation((current) => {
+      if (!current) return null;
+      return { ...current, messages: current.messages.slice(0, -1) };
+    });
     setMessageDraft(failedMessage);
+    setFailedMessage(null);
     setActionError(null);
     window.requestAnimationFrame(() => composerRef.current?.requestSubmit());
   };
 
   const model = status?.backend.codex?.model ?? status?.backend.label ?? "Codex";
-  const canSend = !sending;
+  const canSend = !turnRunning;
 
   return (
     <section className="assistantWorkspace">
@@ -579,11 +639,14 @@ export function LlmChatPanel() {
                 <button className="button buttonSmall" type="button" onClick={handleCopyLink}>
                   Copy link
                 </button>
-                <button className="button buttonSmall buttonDanger" type="button" onClick={handleDelete} disabled={threadActionBusy || sending}>
+                <button className="button buttonSmall buttonDanger" type="button" onClick={handleDelete} disabled={threadActionBusy || turnRunning}>
                   Delete
                 </button>
               </>
             ) : null}
+            <button className="button buttonSmall" type="button" onClick={() => setInstructionsOpen((open) => !open)}>
+              Instructions
+            </button>
             <button className="button buttonSmall" type="button" onClick={handleEnable} disabled={status?.enabled || status?.loading}>
               {status?.enabled ? "Ready" : status?.loading ? "Starting" : "Start Codex"}
             </button>
@@ -617,6 +680,32 @@ export function LlmChatPanel() {
           ) : null}
         </div>
 
+        {instructionsOpen ? (
+          <section className="assistantInstructions" aria-label="Personal Assistant instructions">
+            <div>
+              <p className="rowTitle">Personal Assistant instructions</p>
+              <p className="muted tiny">Add persistent preferences, response style, priorities, or rules for every chat.</p>
+            </div>
+            <textarea
+              className="textInput"
+              value={instructionsDraft}
+              onChange={(event) => setInstructionsDraft(event.target.value)}
+              maxLength={12000}
+              placeholder="Example: Always compare the current period with the previous one. Keep answers under 10 bullets."
+              disabled={instructionsSaving}
+            />
+            <div className="assistantInstructionsActions">
+              <span className="muted tiny">{instructionsDraft.length.toLocaleString()} / 12,000</span>
+              <button className="button buttonSmall" type="button" onClick={() => setInstructionsOpen(false)} disabled={instructionsSaving}>
+                Cancel
+              </button>
+              <button className="button buttonSmall" type="button" onClick={handleSaveInstructions} disabled={instructionsSaving}>
+                {instructionsSaving ? "Saving" : "Save instructions"}
+              </button>
+            </div>
+          </section>
+        ) : null}
+
         {selectedSummary ? (
           <div className="assistantThreadStats">
             <span>{selectedSummary.userMessageCount} prompts</span>
@@ -631,7 +720,7 @@ export function LlmChatPanel() {
           <div className="assistantErrorBanner" role="alert">
             <span>{actionError}</span>
             {failedMessage ? (
-              <button className="button buttonSmall" type="button" onClick={handleRetry} disabled={sending}>
+              <button className="button buttonSmall" type="button" onClick={handleRetry} disabled={turnRunning}>
                 Retry
               </button>
             ) : null}
@@ -642,8 +731,8 @@ export function LlmChatPanel() {
         <div ref={messagesRef} className="assistantMessages" aria-live="polite">
           {loadingConversation ? (
             <div className="skeleton" style={{ minHeight: 180 }} />
-          ) : conversation?.messages?.length ? (
-            conversation.messages.map((msg, idx) => {
+          ) : visibleMessages.length ? (
+            visibleMessages.map((msg, idx) => {
               const content = msg.content ?? "";
               const operation = operationFromMessage(msg);
               if (operation) {
@@ -664,7 +753,7 @@ export function LlmChatPanel() {
               <p>Ask Codex about productivity stats, status updates, or pasted files.</p>
             </div>
           )}
-          {sending ? (
+          {turnRunning ? (
             <article
               className="assistantMessage assistantMessage-assistant assistantMessagePending"
               aria-label={`Codex is working, ${runElapsedSeconds} seconds elapsed`}
@@ -703,7 +792,7 @@ export function LlmChatPanel() {
             disabled={!canSend}
           />
           <button className="button" type="submit" disabled={!canSend || !messageDraft.trim()}>
-            {sending ? "Running" : "Send"}
+            {turnRunning ? "Running" : "Send"}
           </button>
           <span className="assistantComposerHint">Ctrl/⌘ + Enter to send</span>
         </form>

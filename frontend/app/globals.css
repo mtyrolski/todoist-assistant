@@ -2275,6 +2275,30 @@ textarea.textInput {
   padding: 9px 14px;
 }
 
+.assistantInstructions {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.assistantInstructions .textInput {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.assistantInstructionsActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.assistantInstructionsActions .muted {
+  margin-right: auto;
+}
+
 .assistantMain > .muted {
   padding: 0 14px;
 }
