@@ -134,7 +134,6 @@ make dashboard_codex   # start the dashboard with Codex CLI AI
 make update_env        # refresh local cache and run short automations
 make run_observer      # keep syncing in the background
 make run_demo          # run the dashboard with demo/anonymized data
-make chat_agent        # start the local read-only chat flow
 ```
 
 Command details: [docs/USAGE.md](docs/USAGE.md)
@@ -213,7 +212,7 @@ Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
 Run this before closing code changes:
 
 ```bash
-uv sync --locked --extra local-llm
+uv sync --locked
 make test_all
 make coverage
 ```

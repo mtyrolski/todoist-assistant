@@ -15,7 +15,6 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_DEVICE), raising=False)
-    monkeypatch.delenv(str(web_api.EnvVar.AGENT_MODEL_ID), raising=False)
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: tmp_path / ".env")
 
@@ -137,7 +136,6 @@ def test_llm_chat_settings_response_exposes_codex_options(
         "\n".join(
             [
                 "TODOIST_AGENT_CODEX_MODEL='gpt-5.5'",
-                "TODOIST_AGENT_MODEL_ID='not/supported'",
             ]
         ),
         encoding="utf-8",

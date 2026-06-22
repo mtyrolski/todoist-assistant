@@ -83,7 +83,6 @@ def test_breakdown_reads_backend_from_cache_env_path(monkeypatch, tmp_path) -> N
     )
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
     monkeypatch.delenv(str(EnvVar.AGENT_BACKEND), raising=False)
-    monkeypatch.delenv(str(EnvVar.AGENT_MODEL_ID), raising=False)
     monkeypatch.delenv(str(EnvVar.AGENT_CODEX_MODEL), raising=False)
     monkeypatch.chdir(tmp_path)
 

@@ -12,7 +12,6 @@ from loguru import logger
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.core.env import EnvVar
-from todoist.llm import LocalChatConfig
 from todoist.llm.factory import ChatModel, build_codex_chat_model
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.core.runtime_env import (
@@ -25,7 +24,6 @@ from todoist.core.utils import Cache
 
 from .config import (
     build_system_prompt,
-    coerce_model_config,
     merge_variants,
     resolve_variant,
 )
@@ -90,7 +88,6 @@ class LLMBreakdown(Automation):
         *,
         settings: BreakdownSettings | Mapping[str, Any] | None = None,
         variants: Mapping[str, Mapping[str, Any]] | None = None,
-        model_config: LocalChatConfig | Mapping[str, Any] | None = None,
         **overrides: Any,
     ):
         super().__init__("@ai-breakdown", frequency_in_minutes)
@@ -116,7 +113,6 @@ class LLMBreakdown(Automation):
         self.failed_label_lower = self.failed_label.lower()
         self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
-        self.model_config = coerce_model_config(model_config)
         self._llm: ChatModel | None = None
         self._llm_backend: str | None = None
         self._progress_storage = Cache().llm_breakdown_progress

@@ -3,9 +3,6 @@ from typing import Any
 
 from loguru import logger
 
-from todoist.llm.config import LocalChatConfig
-
-
 # === AI BREAKDOWN CONFIG ====================================================
 
 DEFAULT_VARIANTS: dict[str, dict[str, Any]] = {
@@ -47,18 +44,6 @@ def merge_variants(
     for key, value in variants.items():
         merged[key] = dict(value) if isinstance(value, Mapping) else {}
     return merged
-
-
-def coerce_model_config(
-    model_config: LocalChatConfig | Mapping[str, Any] | None,
-) -> LocalChatConfig:
-    if model_config is None:
-        return LocalChatConfig()
-    if isinstance(model_config, LocalChatConfig):
-        return model_config
-    if isinstance(model_config, Mapping):
-        return LocalChatConfig(**dict(model_config))
-    raise TypeError("model_config must be LocalChatConfig or Mapping[str, Any]")
 
 
 def resolve_variant(

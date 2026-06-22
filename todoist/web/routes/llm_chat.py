@@ -111,11 +111,9 @@ async def llm_chat_update_settings(
     env_path.parent.mkdir(parents=True, exist_ok=True)
     set_key(str(env_path), str(EnvVar.AGENT_BACKEND), backend)
     set_key(str(env_path), str(EnvVar.AGENT_DEVICE), device)
-    unset_key(str(env_path), str(EnvVar.AGENT_MODEL_ID))
     set_key(str(env_path), str(EnvVar.AGENT_CODEX_MODEL), codex_model)
     os.environ[str(EnvVar.AGENT_BACKEND)] = backend
     os.environ[str(EnvVar.AGENT_DEVICE)] = device
-    os.environ.pop(str(EnvVar.AGENT_MODEL_ID), None)
     os.environ[str(EnvVar.AGENT_CODEX_MODEL)] = codex_model
 
     if enabled:

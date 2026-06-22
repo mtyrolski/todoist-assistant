@@ -64,7 +64,6 @@ from todoist.automations.llm_breakdown.models import ProgressKey
 from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
 from todoist.llm import (
     DEFAULT_CODEX_MODEL,
-    DEFAULT_MODEL_ID,
     MessageRole,
 )
 from todoist.llm.factory import (

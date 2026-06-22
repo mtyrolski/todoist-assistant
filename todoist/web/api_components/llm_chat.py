@@ -127,13 +127,6 @@ def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
 def _available_llm_chat_devices() -> list[str]:
     _sync_api_globals()
     devices = ["cpu"]
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            devices.append("cuda")
-    except Exception:  # pragma: no cover - defensive
-        pass
     return devices
 
 

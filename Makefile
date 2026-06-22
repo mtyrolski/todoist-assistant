@@ -1,4 +1,4 @@
-.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any chat_agent build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -10,7 +10,6 @@ CHECK_TARGETS := check_explicit_any pyright pylint ruff
 TEST_ALL_TARGETS := check_explicit_any pyright_all pylint_all ruff_all test
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
-MODEL_ID ?=
 BACKEND ?= raw
 BACKEND_AI ?=
 
@@ -45,7 +44,7 @@ reinstall_frontend: # force reinstall frontend deps (clean node_modules)
 reinstall: reinstall_frontend # convenience alias
 
 run_api:
-	@TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
+	@uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
 
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
@@ -53,13 +52,11 @@ run_frontend: ensure_frontend_deps
 dashboard: run_dashboard ## Start dashboard without AI by default; BACKEND/BACKEND_AI may override
 
 dashboard_raw: ensure_frontend_deps ## Start dashboard with AI disabled
-	MODEL_ID="$(MODEL_ID)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start raw
 
 dashboard_codex: ensure_frontend_deps ## Start dashboard using the local Codex CLI backend
-	MODEL_ID="$(MODEL_ID)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start codex
@@ -72,7 +69,6 @@ run_dashboard: ensure_frontend_deps ## Start dashboard; supports BACKEND/BACKEND
 		codex) stack_backend="codex" ;; \
 		*) echo "Unsupported dashboard backend: $$backend (use raw or codex)"; exit 2 ;; \
 	esac; \
-	MODEL_ID="$(MODEL_ID)" \
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start "$$stack_backend"
@@ -118,7 +114,7 @@ run_demo: ensure_frontend_deps
 	'
 
 run_observer:
-	@HYDRA_FULL_ERROR=1 TODOIST_AGENT_MODEL_ID="$(MODEL_ID)" uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
+	@HYDRA_FULL_ERROR=1 uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
 
 clear_local_env:
 	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env $(CLEAR_LOCAL_ENV_ARGS)
@@ -126,9 +122,6 @@ clear_local_env:
 update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
 	make dashboard
-
-chat_agent: ## Start the local read-only Transformers chat agent
-	uv run python3 -m todoist.agent.chat chat
 
 test: ## Run unit tests with pytest
 	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
