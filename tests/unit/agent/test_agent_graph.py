@@ -13,6 +13,7 @@ from todoist.agent.graph import (
     PlannerDecision,
     build_agent_graph,
 )
+from todoist.agent.utils import build_planner_messages
 from todoist.llm.types import MessageRole
 
 
@@ -100,6 +101,18 @@ def test_default_graph_node_names_are_exposed_from_naming_module() -> None:
     assert GraphNodeName.PLANNER == "planner"
     assert GraphNodeName.EXECUTOR == "executor"
     assert NodeName is GraphNodeName
+
+
+def test_custom_instructions_are_added_to_planner_system_prompt() -> None:
+    messages = build_planner_messages(
+        [{"role": MessageRole.USER, "content": "Summarize this week"}],
+        [],
+        custom_instructions="Always compare against the previous week.",
+    )
+
+    assert messages[0]["role"] == MessageRole.SYSTEM
+    assert "User-configured assistant instructions:" in messages[0]["content"]
+    assert "Always compare against the previous week." in messages[0]["content"]
 
 
 def test_planner_decision_normalizes_log_like_output():

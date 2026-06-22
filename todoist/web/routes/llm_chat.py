@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, HTTPException
 from todoist.web.routes.common import _sync_api_globals
 
 router = APIRouter()
+_MAX_CUSTOM_INSTRUCTIONS_CHARS = 12_000
 
 
 def _configuration_error(exc: ValueError) -> HTTPException:
@@ -194,6 +195,13 @@ async def llm_chat_send(
 
         _save_llm_chat_conversations(conversations)
 
+    async with _LLM_CHAT_ACTIVE_TURNS_LOCK:
+        _LLM_CHAT_ACTIVE_TURNS[conversation_id] = {
+            "conversationId": conversation_id,
+            "message": message,
+            "startedAt": now,
+        }
+
     try:
         new_messages = await _run_llm_chat_turn(conversation, message)
     except Exception as exc:  # pragma: no cover - defensive API boundary
@@ -207,6 +215,8 @@ async def llm_chat_send(
                         if item.get("id") != conversation_id
                     ]
                 )
+        async with _LLM_CHAT_ACTIVE_TURNS_LOCK:
+            _LLM_CHAT_ACTIVE_TURNS.pop(conversation_id, None)
         raise HTTPException(
             status_code=500,
             detail=f"Assistant turn failed: {type(exc).__name__}: {exc}",
@@ -246,10 +256,35 @@ async def llm_chat_send(
             conversations.append(conversation)
         _save_llm_chat_conversations(conversations)
 
+    async with _LLM_CHAT_ACTIVE_TURNS_LOCK:
+        _LLM_CHAT_ACTIVE_TURNS.pop(conversation_id, None)
+
     return {
         "conversationId": conversation_id,
         "conversation": _conversation_response(conversation),
     }
+
+
+@router.put("/api/llm_chat/instructions", tags=["llm"])
+async def llm_chat_update_instructions(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, str]:
+    _sync_api_globals(globals())
+    raw = payload.get("instructions", "")
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="instructions must be text")
+    if len(raw) > _MAX_CUSTOM_INSTRUCTIONS_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"instructions must be at most {_MAX_CUSTOM_INSTRUCTIONS_CHARS} characters",
+        )
+    try:
+        instructions = _save_custom_assistant_instructions(raw)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail="Could not save assistant instructions"
+        ) from exc
+    return {"instructions": instructions}
 
 
 @router.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])

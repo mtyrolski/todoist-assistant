@@ -26,6 +26,17 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
 
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
+    monkeypatch.setattr(
+        web_api,
+        "_LLM_CHAT_ACTIVE_TURNS",
+        {
+            "active-id": {
+                "conversationId": "active-id",
+                "message": "Still running",
+                "startedAt": "2026-06-23T00:00:00",
+            }
+        },
+    )
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/llm_chat")
@@ -51,6 +62,13 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
     assert payload["usage"]["current"]["modelId"] == "gpt-5.5"
     assert payload["assistant"]["mode"] == "codex"
     assert payload["assistant"]["telemetry"]["enabled"] is False
+    assert payload["activeTurns"] == [
+        {
+            "conversationId": "active-id",
+            "message": "Still running",
+            "startedAt": "2026-06-23T00:00:00",
+        }
+    ]
     assert payload["statistics"] == {
         "conversationCount": 0,
         "messageCount": 0,
@@ -236,6 +254,34 @@ def test_llm_chat_send_requires_message() -> None:
     assert "message is required" in payload["detail"]
 
 
+def test_llm_chat_instructions_are_persisted(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
+    client = TestClient(web_api.app)
+
+    res = client.put(
+        "/api/llm_chat/instructions",
+        json={"instructions": "  Prefer weekly comparisons.\nBe concise.  "},
+    )
+
+    assert res.status_code == 200
+    assert res.json() == {"instructions": "Prefer weekly comparisons.\nBe concise."}
+    assert (tmp_path / "personal_assistant_instructions.md").read_text(
+        encoding="utf-8"
+    ) == "Prefer weekly comparisons.\nBe concise.\n"
+    assert web_api._load_custom_assistant_instructions() == (
+        "Prefer weekly comparisons.\nBe concise."
+    )
+
+
+def test_llm_chat_instructions_reject_oversized_value() -> None:
+    client = TestClient(web_api.app)
+
+    res = client.put("/api/llm_chat/instructions", json={"instructions": "x" * 12_001})
+
+    assert res.status_code == 400
+    assert "at most 12000 characters" in res.json()["detail"]
+
+
 def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     """Test /api/llm_chat/send runs a direct turn for a new conversation."""
 
@@ -247,6 +293,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
 
     async def _mock_turn(conversation, message):
         assert conversation["messages"] == []
+        assert next(iter(web_api._LLM_CHAT_ACTIVE_TURNS.values()))["message"] == message
         return [
             {"role": web_api.MessageRole.USER.value, "content": message},
             {"role": web_api.MessageRole.ASSISTANT.value, "content": "assistant-ok"},
@@ -266,6 +313,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     assert "conversationId" in payload
     assert payload["conversation"]["messages"][0]["content"] == "Hello, world!"
     assert payload["conversation"]["messages"][1]["content"] == "assistant-ok"
+    assert web_api._LLM_CHAT_ACTIVE_TURNS == {}
 
     assert len(saved_conversations) == 1
     conv = saved_conversations[0]
@@ -302,6 +350,7 @@ def test_llm_chat_send_removes_empty_thread_after_failed_new_turn(monkeypatch) -
     assert res.status_code == 500
     assert "codex unavailable" in res.json()["detail"]
     assert stored == []
+    assert web_api._LLM_CHAT_ACTIVE_TURNS == {}
 
 
 def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:

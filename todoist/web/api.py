@@ -336,6 +336,8 @@ _LLM_CHAT_MODEL: _LlmChatModel | None = None
 _LLM_CHAT_MODEL_LOADING = False
 _LLM_CHAT_MODEL_LOCK = asyncio.Lock()
 _LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
+_LLM_CHAT_ACTIVE_TURNS: dict[str, dict[str, str]] = {}
+_LLM_CHAT_ACTIVE_TURNS_LOCK = asyncio.Lock()
 _LLM_CHAT_AGENT = None
 _LLM_CHAT_AGENT_LOCK = asyncio.Lock()
 _LLM_CHAT_TURN_LOCK = asyncio.Lock()
@@ -429,6 +431,14 @@ def _load_llm_chat_conversations() -> list[dict[str, Any]]:
 
 def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
     return _llm_chat_component._save_llm_chat_conversations(conversations)
+
+
+def _load_custom_assistant_instructions() -> str:
+    return _llm_chat_component._load_custom_assistant_instructions()
+
+
+def _save_custom_assistant_instructions(value: str) -> str:
+    return _llm_chat_component._save_custom_assistant_instructions(value)
 
 
 def _truncate_text(value: str, limit: int = 120) -> str:
@@ -636,7 +646,8 @@ async def _run_llm_chat_turn(
                     "role": MessageRole.USER.value,
                     "content": user_content,
                 },
-            ]
+            ],
+            "custom_instructions": _load_custom_assistant_instructions(),
         },
     )
     async with _LLM_CHAT_TURN_LOCK:

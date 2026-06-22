@@ -332,6 +332,7 @@ def _assistant_metadata_payload() -> dict[str, Any]:
     )
     return {
         "mode": "codex",
+        "customInstructions": _load_custom_assistant_instructions(),
         "tools": [
             "cache_summary()",
             "load_cache(name)",
@@ -350,12 +351,39 @@ def _assistant_metadata_payload() -> dict[str, Any]:
     }
 
 
+def _custom_assistant_instructions_path():
+    _sync_api_globals()
+    return _CONFIG_DIR / "personal_assistant_instructions.md"
+
+
+def _load_custom_assistant_instructions() -> str:
+    path = _custom_assistant_instructions_path()
+    try:
+        return path.read_text(encoding="utf-8").strip() if path.exists() else ""
+    except OSError as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to load personal assistant instructions: {}", exc)
+        return ""
+
+
+def _save_custom_assistant_instructions(value: str) -> str:
+    instructions = value.strip()
+    path = _custom_assistant_instructions_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if instructions:
+        path.write_text(instructions + "\n", encoding="utf-8")
+    elif path.exists():
+        path.unlink()
+    return instructions
+
+
 async def _llm_chat_snapshot() -> dict[str, Any]:
     _sync_api_globals()
     enabled, loading = await _llm_chat_model_status()
     settings = _resolve_llm_chat_settings()
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
+    async with _LLM_CHAT_ACTIVE_TURNS_LOCK:
+        active_turns = [dict(turn) for turn in _LLM_CHAT_ACTIVE_TURNS.values()]
 
     summaries = [_conversation_summary(conv) for conv in conversations]
     summaries.sort(key=lambda item: item.get("updatedAt") or "", reverse=True)
@@ -400,6 +428,7 @@ async def _llm_chat_snapshot() -> dict[str, Any]:
         "usage": settings["usage"],
         "assistant": _assistant_metadata_payload(),
         "statistics": statistics,
+        "activeTurns": active_turns,
         "conversations": summaries,
     }
 
@@ -409,8 +438,10 @@ _COMPONENT_EXPORTS = (
     "_build_chat_messages",
     "_build_llm_from_settings",
     "_conversation_summary",
+    "_custom_assistant_instructions_path",
     "_assistant_metadata_payload",
     "_llm_chat_snapshot",
+    "_load_custom_assistant_instructions",
     "_llm_model_options_payload",
     "_load_llm_chat_conversations",
     "_normalize_chat_conversation",
@@ -421,6 +452,7 @@ _COMPONENT_EXPORTS = (
     "_resolve_codex_settings",
     "_resolve_llm_chat_settings",
     "_save_llm_chat_conversations",
+    "_save_custom_assistant_instructions",
     "_truncate_text",
 )
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}
