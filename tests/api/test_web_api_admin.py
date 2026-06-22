@@ -5,10 +5,8 @@ from datetime import datetime
 from typing import cast
 from unittest.mock import Mock
 
-import pandas as pd
 from fastapi.testclient import TestClient
 
-from tests.factories import make_project, make_project_entry
 import todoist.database.dataframe as dataframe_module
 from todoist.core.utils import MaxRetriesExceeded
 import todoist.web.api as web_api
