@@ -103,6 +103,7 @@ def _build_tqdm_progress_callback():
     adaptive_activity_stages = {
         "Backfilling activity history",
         "Fetching activity history",
+        "Fetching archived project activity",
     }
 
     def _callback(

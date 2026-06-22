@@ -130,7 +130,8 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
     model_raw = payload.get("model")
     device_raw = payload.get("device")
     env_path_raw = payload.get("envPath")
-    queue_raw = payload.get("queue")
+    usage_raw = payload.get("usage")
+    assistant_raw = payload.get("assistant")
     backend = backend_raw if isinstance(backend_raw, dict) else {}
     model = model_raw if isinstance(model_raw, dict) else {}
     device = device_raw if isinstance(device_raw, dict) else {}
@@ -141,7 +142,8 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
         or device.get("envPath")
         or ""
     ).strip()
-    queue = queue_raw if isinstance(queue_raw, dict) else {}
+    usage = usage_raw if isinstance(usage_raw, dict) else {}
+    assistant = assistant_raw if isinstance(assistant_raw, dict) else {}
 
     backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
     backend_selected = str(backend.get("selected") or backend_label).strip().lower()
@@ -162,13 +164,29 @@ def _print_llm_snapshot(payload: dict[str, Any]) -> None:
     device_label = str(device.get("label") or device.get("selected") or "unknown")
     _print_line("Device", "neutral", device_label)
 
-    queue_detail = (
-        f"{int(queue.get('queued') or 0)} queued, "
-        f"{int(queue.get('running') or 0)} running, "
-        f"{int(queue.get('done') or 0)} done, "
-        f"{int(queue.get('failed') or 0)} failed"
+    totals_raw = usage.get("totals")
+    totals = totals_raw if isinstance(totals_raw, dict) else {}
+    token_detail = (
+        f"{int(totals.get('totalTokens') or 0)} total "
+        f"({int(totals.get('inputTokens') or 0)} input, "
+        f"{int(totals.get('outputTokens') or 0)} output)"
     )
-    _print_line("Queue", "neutral", queue_detail)
+    _print_line("Tokens", "neutral", token_detail)
+
+    tools = assistant.get("tools")
+    scripts = assistant.get("scripts")
+    _print_line("Tools", "neutral", str(len(tools) if isinstance(tools, list) else 0))
+    _print_line(
+        "Scripts", "neutral", str(len(scripts) if isinstance(scripts, list) else 0)
+    )
+
+    telemetry_raw = assistant.get("telemetry")
+    telemetry = telemetry_raw if isinstance(telemetry_raw, dict) else {}
+    telemetry_enabled = bool(telemetry.get("enabled"))
+    telemetry_detail = "enabled" if telemetry_enabled else "disabled"
+    if telemetry.get("endpointConfigured"):
+        telemetry_detail += ", endpoint configured"
+    _print_line("Telemetry", "ok" if telemetry_enabled else "neutral", telemetry_detail)
 
 
 def main() -> int:

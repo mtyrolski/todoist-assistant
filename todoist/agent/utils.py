@@ -17,10 +17,16 @@ def last_user_text(messages: Sequence[dict[str, str]]) -> str:
 def build_planner_messages(
     messages: Sequence[dict[str, str]],
     prefab_contents: Sequence[str],
+    *,
+    custom_instructions: str = "",
 ) -> list[dict[str, str]]:
     """Build a single system prompt with tool + instruction context."""
 
     system_parts = [SYSTEM_PROMPT, TOOL_PROMPT]
+    if custom_instructions.strip():
+        system_parts.append(
+            "User-configured assistant instructions:\n" + custom_instructions.strip()
+        )
     if prefab_contents:
         system_parts.append("Prefabs:\n" + "\n---\n".join(prefab_contents))
     system_parts.append(PLANNER_PROMPT)

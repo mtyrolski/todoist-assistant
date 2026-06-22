@@ -7,9 +7,9 @@ export default function LlmAgentChatPage() {
   return (
     <>
       <PageHeader
-        eyebrow="LLM-Agent Chat"
-        title="Chat (Beta)"
-        lede="Use the chat surface to draft breakdowns, summaries, and next steps. Messages are queued and stored on this machine, with AI routed through Codex/langgraph-codex when enabled."
+        eyebrow="Codex"
+        title="Personal Assistant"
+        lede="Interactive chat for productivity questions, task proposals, status updates, and local cache or script-backed answers."
       />
       <LlmChatPanel />
     </>

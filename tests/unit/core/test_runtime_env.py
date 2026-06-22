@@ -76,7 +76,7 @@ def test_resolve_llm_backend_reads_agent_backend_from_env_file(tmp_path: Path) -
     assert backend == "codex"
 
 
-def test_resolve_llm_backend_maps_legacy_triton_to_codex(tmp_path: Path) -> None:
+def test_resolve_llm_backend_ignores_legacy_backend_env(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(
         "TODOIST_LLM_BACKEND='triton'",
         encoding="utf-8",
@@ -84,7 +84,7 @@ def test_resolve_llm_backend_maps_legacy_triton_to_codex(tmp_path: Path) -> None
 
     backend = resolve_llm_backend(repo_root=tmp_path, cwd=tmp_path, environ={})
 
-    assert backend == "codex"
+    assert backend == "disabled"
 
 
 def test_load_local_dotenv_loads_resolved_env_file(monkeypatch, tmp_path: Path) -> None:

@@ -1,19 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { InfoTip } from "./InfoTip";
 import { Markdown } from "./Markdown";
-
-type ChatQueueItem = {
-  id: string;
-  conversationId: string;
-  content: string;
-  status: "queued" | "running" | "done" | "failed" | string;
-  createdAt?: string | null;
-  startedAt?: string | null;
-  finishedAt?: string | null;
-  error?: string | null;
-};
 
 type ChatConversationSummary = {
   id: string;
@@ -21,11 +9,14 @@ type ChatConversationSummary = {
   createdAt?: string | null;
   updatedAt?: string | null;
   messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  toolMessageCount: number;
   lastMessage?: string | null;
 };
 
 type ChatMessage = {
-  role: "system" | "user" | "assistant" | string;
+  role: "system" | "user" | "assistant" | "tool" | string;
   content: string;
   createdAt?: string | null;
 };
@@ -38,99 +29,195 @@ type ChatConversation = {
   messages: ChatMessage[];
 };
 
-type ChatOption = {
-  id: string;
-  label: string;
-  available: boolean;
-};
-
 type ChatStatus = {
   enabled: boolean;
   loading: boolean;
   backend: {
     selected: string;
     label: string;
-    active: string | null;
-    locked?: string | null;
-    options: ChatOption[];
     codex?: {
       model?: string | null;
     };
-    envPath?: string;
   };
-  device: {
-    selected: string;
-    label: string;
-    active: string | null;
-    options: ChatOption[];
-    envPath?: string;
+  usage?: {
+    totals?: {
+      inferenceCount?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+    lastRequest?: {
+      operation?: string | null;
+      totalTokens?: number;
+    } | null;
   };
-  queue: {
-    total: number;
-    queued: number;
-    running: number;
-    done: number;
-    failed: number;
-    items: ChatQueueItem[];
-    current: ChatQueueItem | null;
+  assistant?: {
+    customInstructions?: string;
+    tools?: string[];
+    scripts?: Array<{ name: string; path: string; command: string }>;
+    telemetry?: {
+      enabled: boolean;
+      endpointConfigured: boolean;
+    };
   };
+  statistics?: {
+    conversationCount: number;
+    messageCount: number;
+    userMessageCount: number;
+    assistantMessageCount: number;
+    toolMessageCount: number;
+  };
+  activeTurns?: Array<{
+    conversationId: string;
+    message: string;
+    startedAt: string;
+  }>;
   conversations: ChatConversationSummary[];
 };
 
-const POLL_MS = 5000;
-const DISABLED_BACKEND_ID = "disabled";
-const CODEX_BACKEND_ID = "codex";
-const AVAILABLE_BACKEND_IDS = new Set([DISABLED_BACKEND_ID, CODEX_BACKEND_ID]);
-const CHAT_HELP = `**LLM Chat**
-Local or hosted model for quick analysis and summaries.
+type SendResponse = {
+  conversationId?: string;
+  conversation?: ChatConversation;
+  detail?: string;
+};
 
-- Dashboard chat is beta; for the full local agent experience use \`make chat_agent\`.
-- Pick a backend before loading the model.
-- Enable loads the selected backend on demand.
-- Codex uses the local Codex CLI and langgraph-codex.
-- Prompts are queued and processed in order.
-- Conversations are stored locally on this machine.`;
+type OperationEvent = {
+  title: string;
+  status: "running" | "complete" | "failed";
+  detailLabel: string;
+  detail: string;
+};
+
+const POLL_MS = 7000;
+const PYTHON_CALL_PREFIX = "Calling python_repl with code:";
+const PYTHON_OUTPUT_PREFIX = "python_repl output:";
+
+async function readApiResponse<T>(response: Response): Promise<T & { detail?: string }> {
+  const body = await response.text();
+  let payload: (T & { detail?: string }) | null = null;
+  if (body) {
+    try {
+      payload = JSON.parse(body) as T & { detail?: string };
+    } catch {
+      if (!response.ok) throw new Error(body);
+      throw new Error("Server returned an invalid JSON response");
+    }
+  }
+  if (!response.ok) {
+    throw new Error(payload?.detail ?? `Request failed (${response.status})`);
+  }
+  if (!payload) throw new Error("Server returned an empty response");
+  return payload;
+}
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--";
   return value.replace("T", " ");
 }
 
-function queueTone(status: string): "ok" | "warn" | "neutral" | "beta" {
-  if (status === "failed") return "warn";
-  if (status === "running") return "beta";
-  if (status === "done") return "ok";
-  return "neutral";
+function chatIdFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URL(window.location.href).searchParams.get("chat");
 }
 
-function modelLabel(enabled: boolean, loading: boolean): { label: string; tone: "good" | "warn" | "neutral" } {
-  if (enabled) return { label: "Model loaded", tone: "good" };
-  if (loading) return { label: "Loading model", tone: "neutral" };
-  return { label: "Model offline", tone: "warn" };
+function formatCount(value?: number | null): string {
+  return typeof value === "number" ? value.toLocaleString() : "0";
 }
 
-function isServerHostedBackend(backendId?: string | null): boolean {
-  return backendId === CODEX_BACKEND_ID;
+function runtimeLabel(status: ChatStatus | null): string {
+  if (!status) return "Codex status unknown";
+  if (status.enabled) return "Codex ready";
+  if (status.loading) return "Codex loading";
+  return "Codex not started";
 }
 
-function backendDisplayName(backendId: string, fallbackLabel?: string): string {
-  if (backendId === CODEX_BACKEND_ID) return "Codex";
-  if (backendId === DISABLED_BACKEND_ID) return "Disabled";
-  return fallbackLabel ?? backendId;
+function messageLabel(role: string): string {
+  if (role === "assistant") return "Codex";
+  if (role === "user") return "You";
+  return role;
 }
 
-function normalizeBackendId(backendId?: string | null): string {
-  return backendId && AVAILABLE_BACKEND_IDS.has(backendId) ? backendId : DISABLED_BACKEND_ID;
+function extractPythonCode(content: string): string {
+  const fenced = content.match(/```python\n([\s\S]*?)\n```/);
+  if (fenced?.[1]) return fenced[1].trim();
+  return content.replace(PYTHON_CALL_PREFIX, "").trim();
 }
 
-function visibleBackendOptions(options: ChatOption[]): ChatOption[] {
-  return options.filter((option) => AVAILABLE_BACKEND_IDS.has(option.id));
+function quotedArg(code: string, fnName: string): string | null {
+  const pattern = new RegExp(`${fnName}\\(\\s*['"]([^'"]+)['"]`);
+  return code.match(pattern)?.[1] ?? null;
+}
+
+function operationTitleFromCode(code: string): string {
+  const scriptName = quotedArg(code, "run_script");
+  if (scriptName) return `Running script: ${scriptName}`;
+  const cacheName = quotedArg(code, "load_cache");
+  if (cacheName) return `Reading cache: ${cacheName}`;
+  if (code.includes("cache_summary(")) return "Checking local cache";
+  if (code.includes("script_catalog(")) return "Checking available scripts";
+  if (code.includes("llm_usage(")) return "Checking token usage";
+  if (code.includes("telemetry_status(")) return "Checking telemetry";
+  if (code.includes("projects(")) return "Reading Todoist projects";
+  if (code.includes("create_tasks(")) return "Creating Todoist tasks";
+  return "Running Python tool";
+}
+
+function operationFromMessage(message: ChatMessage): OperationEvent | null {
+  const content = message.content ?? "";
+  if (content.startsWith(PYTHON_CALL_PREFIX)) {
+    const code = extractPythonCode(content);
+    return {
+      title: operationTitleFromCode(code),
+      status: "running",
+      detailLabel: "Code",
+      detail: code
+    };
+  }
+  if (content.startsWith(PYTHON_OUTPUT_PREFIX)) {
+    const output = content.replace(PYTHON_OUTPUT_PREFIX, "").trim();
+    const failed = output.startsWith("ERROR:");
+    return {
+      title: failed ? "Operation failed" : "Operation result",
+      status: failed ? "failed" : "complete",
+      detailLabel: "Output",
+      detail: output || "No output"
+    };
+  }
+  if (message.role === "tool") {
+    return {
+      title: "Tool event",
+      status: content.startsWith("ERROR:") ? "failed" : "complete",
+      detailLabel: "Output",
+      detail: content
+    };
+  }
+  return null;
+}
+
+function OperationEventCard({ event, createdAt }: { event: OperationEvent; createdAt?: string | null }) {
+  return (
+    <article className={`assistantOperation assistantOperation-${event.status}`}>
+      <div className="assistantOperationLine">
+        <span className="assistantOperationDot" aria-hidden />
+        <div className="assistantOperationMain">
+          <div className="assistantOperationHeader">
+            <span>{event.title}</span>
+            <span>{formatTimestamp(createdAt)}</span>
+          </div>
+          <details className="assistantOperationDetails">
+            <summary>{event.detailLabel}</summary>
+            <pre>{event.detail}</pre>
+          </details>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 export function LlmChatPanel() {
   const [status, setStatus] = useState<ChatStatus | null>(null);
-  const [loadingStatus, setLoadingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
 
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ChatConversation | null>(null);
@@ -138,24 +225,62 @@ export function LlmChatPanel() {
 
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [enabling, setEnabling] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [runElapsedSeconds, setRunElapsedSeconds] = useState(0);
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [threadActionBusy, setThreadActionBusy] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [instructionsDraft, setInstructionsDraft] = useState("");
+  const [instructionsSaving, setInstructionsSaving] = useState(false);
   const didAutoSelect = useRef(false);
-  const [lastConversationId, setLastConversationId] = useState<string | null>(null);
-  const [backendDraft, setBackendDraft] = useState(DISABLED_BACKEND_ID);
-  const [deviceDraft, setDeviceDraft] = useState("cpu");
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLFormElement | null>(null);
+  const localTurnStartedAt = useRef<number | null>(null);
+
+  const conversations = useMemo(() => status?.conversations ?? [], [status?.conversations]);
+  const selectedSummary = useMemo(() => {
+    if (!selectedConversationId) return null;
+    return conversations.find((item) => item.id === selectedConversationId) ?? null;
+  }, [conversations, selectedConversationId]);
+  const activeTurn = useMemo(() => {
+    if (!selectedConversationId) return null;
+    return status?.activeTurns?.find((turn) => turn.conversationId === selectedConversationId) ?? null;
+  }, [selectedConversationId, status?.activeTurns]);
+  const turnRunning = sending || Boolean(activeTurn);
+  const visibleMessages = useMemo(() => {
+    const messages = conversation?.messages ?? [];
+    if (!activeTurn?.message || messages.at(-1)?.content === activeTurn.message) return messages;
+    return [...messages, { role: "user", content: activeTurn.message, createdAt: activeTurn.startedAt }];
+  }, [activeTurn, conversation?.messages]);
+  const filteredConversations = useMemo(() => {
+    const query = conversationQuery.trim().toLowerCase();
+    if (!query) return conversations;
+    return conversations.filter((item) =>
+      `${item.title} ${item.lastMessage ?? ""}`.toLowerCase().includes(query)
+    );
+  }, [conversationQuery, conversations]);
+
+  const selectConversation = useCallback((conversationId: string | null, replace = false) => {
+    setSelectedConversationId(conversationId);
+    setEditingTitle(false);
+    setActionNotice(null);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (conversationId) url.searchParams.set("chat", conversationId);
+    else url.searchParams.delete("chat");
+    window.history[replace ? "replaceState" : "pushState"]({}, "", url);
+  }, []);
 
   const refreshStatus = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoadingStatus(true);
       setStatusError(null);
       const res = await fetch("/api/dashboard/llm_chat");
-      const payload = (await res.json()) as ChatStatus;
-      if (!res.ok) {
-        const detail = (payload as unknown as { detail?: string })?.detail;
-        throw new Error(detail ?? "Failed to load chat status");
-      }
+      const payload = await readApiResponse<ChatStatus>(res);
       setStatus(payload);
     } catch (err) {
       setStatusError(err instanceof Error ? err.message : "Failed to load chat status");
@@ -169,11 +294,7 @@ export function LlmChatPanel() {
       setActionError(null);
       setLoadingConversation(true);
       const res = await fetch(`/api/llm_chat/conversations/${encodeURIComponent(conversationId)}`);
-      const payload = (await res.json()) as ChatConversation;
-      if (!res.ok) {
-        const detail = (payload as unknown as { detail?: string })?.detail;
-        throw new Error(detail ?? "Failed to load conversation");
-      }
+      const payload = await readApiResponse<ChatConversation>(res);
       setConversation(payload);
     } catch (err) {
       setConversation(null);
@@ -190,99 +311,199 @@ export function LlmChatPanel() {
   }, [refreshStatus]);
 
   useEffect(() => {
-    if (!status) return;
-    setBackendDraft(normalizeBackendId(status.backend.selected));
-    setDeviceDraft(status.device.selected);
-  }, [status]);
+    if (!status?.activeTurns?.length) return;
+    const interval = window.setInterval(() => refreshStatus(true), 1500);
+    return () => window.clearInterval(interval);
+  }, [refreshStatus, status?.activeTurns?.length]);
 
   useEffect(() => {
-    if (didAutoSelect.current) return;
-    if (status?.conversations?.length) {
-      setSelectedConversationId(status.conversations[0].id);
-      didAutoSelect.current = true;
-    }
-  }, [status]);
+    const syncFromLocation = () => {
+      const linkedChatId = chatIdFromLocation();
+      if (linkedChatId) didAutoSelect.current = true;
+      setSelectedConversationId(linkedChatId);
+    };
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, []);
+
+  useEffect(() => {
+    if (didAutoSelect.current || !conversations.length) return;
+    selectConversation(conversations[0].id, true);
+    didAutoSelect.current = true;
+  }, [conversations, selectConversation]);
 
   useEffect(() => {
     if (!selectedConversationId) {
+      if (conversation?.id === "pending" && (turnRunning || failedMessage)) return;
       setConversation(null);
       return;
     }
-    if (status && !status.conversations.some((item) => item.id === selectedConversationId)) {
-      setSelectedConversationId(null);
+    if (turnRunning && conversation?.id === selectedConversationId) return;
+    if (status && !conversations.some((item) => item.id === selectedConversationId)) {
+      selectConversation(null, true);
+      setActionError("The linked chat no longer exists.");
       return;
     }
-  }, [status, selectedConversationId]);
-
-  useEffect(() => {
-    if (!status || !lastConversationId) return;
-    if (!status.conversations.some((item) => item.id === lastConversationId)) {
-      setLastConversationId(null);
-    }
-  }, [status, lastConversationId]);
-
-  const selectedSummary = useMemo(() => {
-    if (!status || !selectedConversationId) return null;
-    return status.conversations.find((item) => item.id === selectedConversationId) ?? null;
-  }, [status, selectedConversationId]);
-
-  useEffect(() => {
-    if (!selectedConversationId || !selectedSummary) return;
-    if (conversation?.id === selectedConversationId && conversation?.updatedAt === selectedSummary.updatedAt) return;
+    if (conversation?.id === selectedConversationId && conversation?.updatedAt === selectedSummary?.updatedAt) return;
     loadConversation(selectedConversationId);
-  }, [selectedConversationId, selectedSummary, loadConversation, conversation?.id, conversation?.updatedAt]);
+  }, [
+    conversations,
+    conversation?.id,
+    conversation?.updatedAt,
+    failedMessage,
+    loadConversation,
+    selectedConversationId,
+    selectedSummary?.updatedAt,
+    selectConversation,
+    turnRunning,
+    status
+  ]);
 
   useEffect(() => {
-    if (selectedConversationId) {
-      setLastConversationId(selectedConversationId);
+    setTitleDraft(conversation?.title ?? selectedSummary?.title ?? "");
+  }, [conversation?.title, selectedSummary?.title]);
+
+  useEffect(() => {
+    if (!instructionsOpen) {
+      setInstructionsDraft(status?.assistant?.customInstructions ?? "");
     }
-  }, [selectedConversationId]);
+  }, [instructionsOpen, status?.assistant?.customInstructions]);
+
+  useEffect(() => {
+    const messages = messagesRef.current;
+    if (messages) messages.scrollTop = messages.scrollHeight;
+  }, [visibleMessages.length, turnRunning]);
+
+  useEffect(() => {
+    if (!turnRunning) {
+      setRunElapsedSeconds(0);
+      localTurnStartedAt.current = null;
+      return;
+    }
+    const serverStartedAt = activeTurn?.startedAt ? new Date(activeTurn.startedAt).getTime() : Number.NaN;
+    const startedAt = Number.isFinite(serverStartedAt) ? serverStartedAt : localTurnStartedAt.current ?? Date.now();
+    const updateElapsed = () => setRunElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(interval);
+  }, [activeTurn?.startedAt, turnRunning]);
 
   const handleEnable = async () => {
     try {
       setActionError(null);
-      setEnabling(true);
       const res = await fetch("/api/llm_chat/enable", { method: "POST" });
-      const payload = (await res.json()) as { enabled?: boolean; loading?: boolean; detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to enable model");
-      }
-      setStatus((prev) => (prev ? { ...prev, enabled: !!payload.enabled, loading: !!payload.loading } : prev));
+      await readApiResponse<Record<string, never>>(res);
+      await refreshStatus();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to enable model");
-    } finally {
-      setEnabling(false);
-      refreshStatus();
+      setActionError(err instanceof Error ? err.message : "Failed to start Codex");
     }
   };
 
-  const handleApplySettings = async () => {
+  const handleRename = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedConversationId || !titleDraft.trim() || threadActionBusy) return;
     try {
+      setThreadActionBusy(true);
       setActionError(null);
-      setSavingSettings(true);
-      const res = await fetch("/api/llm_chat/settings", {
+      const res = await fetch(`/api/llm_chat/conversations/${encodeURIComponent(selectedConversationId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: titleDraft.trim() })
+      });
+      const updated = await readApiResponse<ChatConversation>(res);
+      setConversation(updated);
+      setEditingTitle(false);
+      setActionNotice("Thread renamed");
+      await refreshStatus(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to rename thread");
+    } finally {
+      setThreadActionBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedConversationId || threadActionBusy) return;
+    const title = conversation?.title ?? selectedSummary?.title ?? "this chat";
+    if (!window.confirm(`Delete “${title}”? This cannot be undone.`)) return;
+    try {
+      setThreadActionBusy(true);
+      setActionError(null);
+      const res = await fetch(`/api/llm_chat/conversations/${encodeURIComponent(selectedConversationId)}`, {
+        method: "DELETE"
+      });
+      await readApiResponse<{ deleted: boolean }>(res);
+      setConversation(null);
+      selectConversation(null, true);
+      setActionNotice("Thread deleted");
+      await refreshStatus(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to delete thread");
+    } finally {
+      setThreadActionBusy(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (!selectedConversationId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("chat", selectedConversationId);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setActionNotice("Thread link copied");
+    } catch {
+      setActionError("Could not copy the thread link");
+    }
+  };
+
+  const handleSaveInstructions = async () => {
+    try {
+      setInstructionsSaving(true);
+      setActionError(null);
+      const res = await fetch("/api/llm_chat/instructions", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backend: normalizeBackendId(backendDraft), device: deviceDraft })
+        body: JSON.stringify({ instructions: instructionsDraft })
       });
-      const payload = (await res.json()) as { detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to save LLM settings");
-      }
-      await refreshStatus();
+      const payload = await readApiResponse<{ instructions: string }>(res);
+      setInstructionsDraft(payload.instructions);
+      setInstructionsOpen(false);
+      setActionNotice(payload.instructions ? "Assistant instructions saved" : "Assistant instructions cleared");
+      await refreshStatus(true);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to save LLM settings");
+      setActionError(err instanceof Error ? err.message : "Failed to save assistant instructions");
     } finally {
-      setSavingSettings(false);
+      setInstructionsSaving(false);
     }
   };
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = messageDraft.trim();
-    if (!trimmed) return;
+    if (!trimmed || turnRunning) return;
+
+    const optimisticMessage: ChatMessage = {
+      role: "user",
+      content: trimmed,
+      createdAt: new Date().toISOString().slice(0, 19)
+    };
+    localTurnStartedAt.current = Date.now();
+    setMessageDraft("");
+    if (!conversation) {
+      setConversation({
+        id: selectedConversationId ?? "pending",
+        title: trimmed.slice(0, 80),
+        messages: [optimisticMessage]
+      });
+    } else {
+      setConversation({ ...conversation, messages: [...conversation.messages, optimisticMessage] });
+    }
+
     try {
       setActionError(null);
+      setActionNotice(null);
+      setFailedMessage(null);
       setSending(true);
       const body = selectedConversationId ? { message: trimmed, conversationId: selectedConversationId } : { message: trimmed };
       const res = await fetch("/api/llm_chat/send", {
@@ -290,332 +511,291 @@ export function LlmChatPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      const payload = (await res.json()) as { conversationId?: string; detail?: string };
-      if (!res.ok) {
-        throw new Error(payload.detail ?? "Failed to queue message");
+      const payload = await readApiResponse<SendResponse>(res);
+      if (payload.conversationId) {
+        selectConversation(payload.conversationId, !selectedConversationId);
       }
-      setMessageDraft("");
-      if (!selectedConversationId && payload.conversationId) {
-        setSelectedConversationId(payload.conversationId);
+      if (payload.conversation) {
+        setConversation(payload.conversation);
       }
-      refreshStatus();
+      await refreshStatus(true);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to queue message");
+      setFailedMessage(trimmed);
+      setActionError(err instanceof Error ? err.message : "Failed to run assistant turn");
     } finally {
       setSending(false);
     }
   };
 
-  const queue = status?.queue;
-  const conversations = status?.conversations ?? [];
-  const enabled = status?.enabled ?? false;
-  const loading = status?.loading ?? false;
-  const canSend = enabled || loading;
-  const badge = status ? modelLabel(enabled, loading) : { label: "Model status unknown", tone: "neutral" };
-  const queueSummary = queue
-    ? `${queue.queued} queued / ${queue.running} running / ${queue.failed} failed`
-    : "Queue unavailable";
-  const backendOptions = visibleBackendOptions(status?.backend.options ?? []);
-  const deviceOptions = status?.device.options ?? [];
-  const currentBackendId = normalizeBackendId(status?.backend.selected);
-  const selectedBackendId = normalizeBackendId(backendDraft || status?.backend.selected);
-  const backendIsServerHosted = isServerHostedBackend(selectedBackendId);
-  const currentBackendIsServerHosted = isServerHostedBackend(currentBackendId);
-  const deviceControlDisabled = savingSettings || loading || backendIsServerHosted;
-  const backendControlDisabled = savingSettings || loading || backendOptions.length <= 1;
-  const settingsChanged =
-    !!status &&
-    (normalizeBackendId(backendDraft) !== normalizeBackendId(status.backend.selected) ||
-      deviceDraft !== status.device.selected);
-  const backendStatusLabel = status
-    ? `Backend: ${backendDisplayName(currentBackendId, status.backend.label)}${
-        currentBackendId === CODEX_BACKEND_ID && status.backend.codex?.model
-          ? ` (${status.backend.codex.model})`
-          : ""
-      }`
-    : null;
-  const deviceStatusLabel = status
-    ? currentBackendIsServerHosted
-      ? "Device: managed by backend"
-      : `Device: ${status.device.label}`
-    : null;
-  const deviceHelpText = backendIsServerHosted
-    ? "Codex manages execution through the CLI and langgraph-codex, so local device selection does not apply."
-    : "AI functions are disabled.";
+  const handleRetry = () => {
+    if (!failedMessage || turnRunning) return;
+    setConversation((current) => {
+      if (!current) return null;
+      return { ...current, messages: current.messages.slice(0, -1) };
+    });
+    setMessageDraft(failedMessage);
+    setFailedMessage(null);
+    setActionError(null);
+    window.requestAnimationFrame(() => composerRef.current?.requestSubmit());
+  };
 
-  const pendingForSelected = useMemo(() => {
-    if (!selectedConversationId || !queue?.items) return [];
-    return queue.items.filter(
-      (item) => item.conversationId === selectedConversationId && item.status !== "done" && item.status !== "failed"
-    );
-  }, [queue?.items, selectedConversationId]);
+  const model = status?.backend.codex?.model ?? status?.backend.label ?? "Codex";
+  const canSend = !turnRunning;
 
   return (
-    <section className="card chatCard">
-      <header className="cardHeader">
-        <div className="chatHeader">
-          <div className="chatHeaderTitle">
-            <h2>LLM Chat</h2>
-            <InfoTip label="About LLM chat" content={CHAT_HELP} />
-            <span className="pill pill-beta">Beta</span>
-          </div>
-          <p className="muted tiny">
-            Chat model orchestration (beta). Load on demand, queue prompts, and review past conversations. For the
-            full local agent experience, use <code>make chat_agent</code>.
-          </p>
-        </div>
-        <div className="rowActions">
-          <button
-            className="button buttonSmall"
-            type="button"
-            onClick={handleEnable}
-            disabled={enabling || enabled || loading}
-          >
-            {enabled ? "Model ready" : loading || enabling ? "Loading..." : "Enable"}
-          </button>
-          <button className="button buttonSmall" type="button" onClick={() => refreshStatus()} disabled={loadingStatus}>
-            {loadingStatus ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </header>
-
-      <div className="status-row">
-        <span className={`pill pill-${badge.tone}`}>{badge.label}</span>
-        {backendStatusLabel ? <span className="pill pill-neutral">{backendStatusLabel}</span> : null}
-        {deviceStatusLabel ? <span className="pill pill-neutral">{deviceStatusLabel}</span> : null}
-        {statusError ? <span className="pill pill-warn">{statusError}</span> : null}
-      </div>
-
-      {actionError ? <p className="muted tiny">Error: {actionError}</p> : null}
-
-      <div className="chatSettingsBar">
-        <div className="chatSettingControl">
-          <label className="muted tiny" htmlFor="llm-backend-select">
-            LLM backend
-          </label>
-          <select
-            id="llm-backend-select"
-            className="select"
-            value={backendDraft}
-            onChange={(event) => setBackendDraft(event.target.value)}
-            disabled={backendControlDisabled}
-          >
-            {backendOptions.map((option) => (
-              <option key={option.id} value={option.id} disabled={!option.available}>
-                {option.label}{option.available ? "" : " (coming soon)"}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="chatSettingControl">
-          <label className="muted tiny" htmlFor="llm-device-select">
-            Device {backendIsServerHosted ? "(managed remotely)" : "(local runtime)"}
-          </label>
-          <select
-            id="llm-device-select"
-            className="select"
-            value={deviceDraft}
-            onChange={(event) => setDeviceDraft(event.target.value)}
-            disabled={deviceControlDisabled}
-          >
-            {deviceOptions.map((option) => (
-              <option key={option.id} value={option.id} disabled={!option.available}>
-                {option.label}{option.available ? "" : " (unavailable)"}
-              </option>
-            ))}
-          </select>
-          <p className="muted tiny">{deviceHelpText}</p>
-        </div>
-        <div className="chatSettingsActions">
-          <button
-            className="button buttonSmall"
-            type="button"
-            onClick={handleApplySettings}
-            disabled={!settingsChanged || savingSettings || loading}
-          >
-            {savingSettings ? "Saving..." : "Apply"}
-          </button>
-          {backendDraft === CODEX_BACKEND_ID && status?.backend.codex?.model ? (
-            <span className="muted tiny">
-              Codex model: {status.backend.codex.model}
-            </span>
-          ) : null}
-          {status?.backend.envPath ? <span className="muted tiny">{status.backend.envPath}</span> : null}
-        </div>
-      </div>
-
-      <div className="chatLayout">
-        <div className="chatPane">
-        <div className="chatPaneHeader">
+    <section className="assistantWorkspace">
+      <aside className="assistantRail" aria-label="Conversations">
+        <div className="assistantRailHeader">
           <div>
-            <p className="muted tiny">Conversation</p>
-            <p className="chatTitle">{conversation?.title ?? selectedSummary?.title ?? "New chat"}</p>
-            {selectedSummary?.updatedAt ? (
-              <p className="muted tiny">Updated {formatTimestamp(selectedSummary.updatedAt)}</p>
-            ) : null}
+            <p className="muted tiny">Chats</p>
+            <p className="rowTitle">{status?.statistics?.conversationCount ?? conversations.length} saved</p>
+            <p className="muted tiny">{formatCount(status?.statistics?.messageCount)} messages total</p>
           </div>
-          <div className="rowActions">
-            {selectedConversationId ? null : lastConversationId ? (
-              <button
-                className="button buttonSmall"
-                type="button"
-                onClick={() => setSelectedConversationId(lastConversationId)}
-              >
-                Back to last chat
-              </button>
-            ) : null}
-            <button
-              className="button buttonSmall"
-              type="button"
-              onClick={() => {
-                setSelectedConversationId(null);
-                setConversation(null);
-              }}
-            >
-              New chat
-            </button>
-          </div>
+          <button
+            className="button buttonSmall"
+            type="button"
+            onClick={() => {
+              didAutoSelect.current = true;
+              selectConversation(null);
+              setConversation(null);
+              setMessageDraft("");
+              setFailedMessage(null);
+            }}
+          >
+            New
+          </button>
         </div>
 
-          <div className="chatMessages scrollArea">
-            {loadingConversation ? (
-              <div className="skeleton" style={{ minHeight: 160 }} />
-            ) : conversation?.messages?.length ? (
-              conversation.messages.map((msg, idx) => {
-                const content = msg.content ?? "";
-                const isToolMessage = msg.role === "tool" || content.includes("python_repl");
-                const displayContent =
-                  isToolMessage && !content.includes("```") ? `\`\`\`\n${content}\n\`\`\`` : content;
-                return (
-                  <div key={`${msg.role}-${idx}`} className={`chatBubble chatBubble-${msg.role}`}>
-                    <div className="chatBubbleMeta">
-                      <span>{msg.role}</span>
-                      <span>{formatTimestamp(msg.createdAt)}</span>
-                    </div>
-                    <Markdown content={displayContent} className="markdown markdownChat" />
-                  </div>
-                );
-              })
+        <div className="assistantRailSearch">
+          <input
+            className="textInput"
+            type="search"
+            placeholder="Search chats"
+            value={conversationQuery}
+            onChange={(event) => setConversationQuery(event.target.value)}
+            aria-label="Search chats"
+          />
+        </div>
+
+        <div className="assistantConversationList">
+          {!status ? (
+            <div className="skeleton" style={{ minHeight: 120 }} />
+          ) : filteredConversations.length ? (
+            filteredConversations.map((item) => {
+              const active = item.id === selectedConversationId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`assistantConversationButton${active ? " assistantConversationButtonActive" : ""}`}
+                  onClick={() => selectConversation(item.id)}
+                >
+                  <span className="assistantConversationTitle">{item.title}</span>
+                  <span className="assistantConversationMeta">
+                    {item.userMessageCount} prompts · {item.assistantMessageCount} answers · {item.toolMessageCount} tools
+                  </span>
+                  <span className="assistantConversationMeta">Updated {formatTimestamp(item.updatedAt)}</span>
+                  {item.lastMessage ? <span className="assistantConversationPreview">{item.lastMessage}</span> : null}
+                </button>
+              );
+            })
+          ) : (
+            <p className="muted tiny">{conversationQuery ? "No matching chats." : "No saved chats."}</p>
+          )}
+        </div>
+      </aside>
+
+      <div className="assistantMain">
+        <header className="assistantTopbar">
+          <div>
+            <p className="muted tiny">Personal Assistant</p>
+            {editingTitle && selectedConversationId ? (
+              <form className="assistantRenameForm" onSubmit={handleRename}>
+                <input
+                  className="textInput"
+                  value={titleDraft}
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  maxLength={120}
+                  autoFocus
+                  aria-label="Thread title"
+                />
+                <button className="button buttonSmall" type="submit" disabled={threadActionBusy || !titleDraft.trim()}>
+                  Save
+                </button>
+                <button className="button buttonSmall" type="button" onClick={() => setEditingTitle(false)}>
+                  Cancel
+                </button>
+              </form>
             ) : (
-              <p className="muted tiny">No messages yet. Queue a prompt to begin.</p>
+              <h1>{conversation?.title ?? selectedSummary?.title ?? "New chat"}</h1>
             )}
           </div>
+          <div className="assistantActions">
+            {selectedConversationId ? (
+              <>
+                <button className="button buttonSmall" type="button" onClick={() => setEditingTitle(true)} disabled={threadActionBusy}>
+                  Rename
+                </button>
+                <button className="button buttonSmall" type="button" onClick={handleCopyLink}>
+                  Copy link
+                </button>
+                <button className="button buttonSmall buttonDanger" type="button" onClick={handleDelete} disabled={threadActionBusy || turnRunning}>
+                  Delete
+                </button>
+              </>
+            ) : null}
+            <button className="button buttonSmall" type="button" onClick={() => setInstructionsOpen((open) => !open)}>
+              Instructions
+            </button>
+            <button className="button buttonSmall" type="button" onClick={handleEnable} disabled={status?.enabled || status?.loading}>
+              {status?.enabled ? "Ready" : status?.loading ? "Starting" : "Start Codex"}
+            </button>
+            <button className="button buttonSmall" type="button" onClick={() => refreshStatus()} disabled={loadingStatus}>
+              {loadingStatus ? "Refreshing" : "Refresh"}
+            </button>
+          </div>
+        </header>
 
-          {pendingForSelected.length ? (
-            <div className="chatPending">
-              <p className="muted tiny">Pending prompts for this chat</p>
-              <div className="list">
-                {pendingForSelected.map((item) => (
-                  <div key={item.id} className="row rowTight">
-                    <div className={`dot dot-${queueTone(item.status)}`} />
-                    <div className="rowMain">
-                      <p className="rowTitle">{item.content}</p>
-                      <p className="muted tiny">{item.status}</p>
-                    </div>
-                    <p className="rowDetail">{formatTimestamp(item.createdAt)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+        <div className="assistantRuntime">
+          <span className={`pill ${status?.enabled ? "pill-good" : status?.loading ? "pill-neutral" : "pill-warn"}`}>
+            {runtimeLabel(status)}
+          </span>
+          <span className="pill pill-neutral">Model {model}</span>
+          <span className="pill pill-neutral">{formatCount(status?.usage?.totals?.totalTokens)} tokens</span>
+          <span className="pill pill-neutral">
+            Input {formatCount(status?.usage?.totals?.inputTokens)} / Output {formatCount(status?.usage?.totals?.outputTokens)}
+          </span>
+          <span className="pill pill-neutral">Inferences {formatCount(status?.usage?.totals?.inferenceCount)}</span>
+          <span className="pill pill-neutral">
+            Tools {status?.assistant?.tools?.length ?? 0} / Scripts {status?.assistant?.scripts?.length ?? 0}
+          </span>
+          <span className="pill pill-neutral">
+            Telemetry {status?.assistant?.telemetry?.enabled ? "on" : "off"}
+            {status?.assistant?.telemetry?.endpointConfigured ? " / endpoint set" : " / endpoint unset"}
+          </span>
+          {status?.usage?.lastRequest ? (
+            <span className="pill pill-neutral">
+              Last {status.usage.lastRequest.operation ?? "request"} {formatCount(status.usage.lastRequest.totalTokens)} tokens
+            </span>
           ) : null}
+        </div>
 
-          <form className="chatInputRow" onSubmit={handleSend}>
+        {instructionsOpen ? (
+          <section className="assistantInstructions" aria-label="Personal Assistant instructions">
+            <div>
+              <p className="rowTitle">Personal Assistant instructions</p>
+              <p className="muted tiny">Add persistent preferences, response style, priorities, or rules for every chat.</p>
+            </div>
             <textarea
               className="textInput"
-              placeholder={canSend ? "Ask a question or request a summary..." : "Enable the model to start chatting."}
-              value={messageDraft}
-              onChange={(event) => setMessageDraft(event.target.value)}
-              disabled={!canSend || sending}
+              value={instructionsDraft}
+              onChange={(event) => setInstructionsDraft(event.target.value)}
+              maxLength={12000}
+              placeholder="Example: Always compare the current period with the previous one. Keep answers under 10 bullets."
+              disabled={instructionsSaving}
             />
-            <button
-              className="button buttonSmall"
-              type="submit"
-              disabled={!canSend || sending || !messageDraft.trim()}
+            <div className="assistantInstructionsActions">
+              <span className="muted tiny">{instructionsDraft.length.toLocaleString()} / 12,000</span>
+              <button className="button buttonSmall" type="button" onClick={() => setInstructionsOpen(false)} disabled={instructionsSaving}>
+                Cancel
+              </button>
+              <button className="button buttonSmall" type="button" onClick={handleSaveInstructions} disabled={instructionsSaving}>
+                {instructionsSaving ? "Saving" : "Save instructions"}
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        {selectedSummary ? (
+          <div className="assistantThreadStats">
+            <span>{selectedSummary.userMessageCount} prompts</span>
+            <span>{selectedSummary.assistantMessageCount} answers</span>
+            <span>{selectedSummary.toolMessageCount} tool events</span>
+            <span>{selectedSummary.messageCount} stored fragments</span>
+          </div>
+        ) : null}
+
+        {statusError ? <p className="muted tiny">Status error: {statusError}</p> : null}
+        {actionError ? (
+          <div className="assistantErrorBanner" role="alert">
+            <span>{actionError}</span>
+            {failedMessage ? (
+              <button className="button buttonSmall" type="button" onClick={handleRetry} disabled={turnRunning}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {actionNotice ? <p className="muted tiny assistantNotice">{actionNotice}</p> : null}
+
+        <div ref={messagesRef} className="assistantMessages" aria-live="polite">
+          {loadingConversation ? (
+            <div className="skeleton" style={{ minHeight: 180 }} />
+          ) : visibleMessages.length ? (
+            visibleMessages.map((msg, idx) => {
+              const content = msg.content ?? "";
+              const operation = operationFromMessage(msg);
+              if (operation) {
+                return <OperationEventCard key={`${msg.role}-${idx}`} event={operation} createdAt={msg.createdAt} />;
+              }
+              return (
+                <article key={`${msg.role}-${idx}`} className={`assistantMessage assistantMessage-${msg.role}`}>
+                  <div className="assistantMessageMeta">
+                    <span>{messageLabel(msg.role)}</span>
+                    <span>{formatTimestamp(msg.createdAt)}</span>
+                  </div>
+                  <Markdown content={content} className="markdown markdownChat" />
+                </article>
+              );
+            })
+          ) : (
+            <div className="assistantEmptyState">
+              <p>Ask Codex about productivity stats, status updates, or pasted files.</p>
+            </div>
+          )}
+          {turnRunning ? (
+            <article
+              className="assistantMessage assistantMessage-assistant assistantMessagePending"
+              aria-label={`Codex is working, ${runElapsedSeconds} seconds elapsed`}
             >
-              {sending ? "Queueing..." : "Send"}
-            </button>
-          </form>
-        </div>
-
-        <div className="chatSection chatSectionHighlight">
-          <div className="chatSectionHeader">
-            <div className="chatSectionHeaderMain">
-              <p className="rowTitle">Conversations</p>
-              <p className="muted tiny">{conversations.length} total</p>
-            </div>
-          </div>
-
-          <div className="chatLists">
-            <div className="chatQueueInline">
-              <div className="chatSubHeader">
-                <p className="muted tiny">Queued prompts</p>
-                <div className="chatSectionMeta">
-                  <span className="pill pill-neutral">{queueSummary}</span>
-                  <span className="muted tiny">{queue?.total ?? 0} total</span>
+              <div className="assistantMessageMeta">
+                <span>Codex is working</span>
+                <span>{runElapsedSeconds}s elapsed</span>
+              </div>
+              <div className="assistantPendingBody">
+                <div className="assistantTyping" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
                 </div>
+                <span>LangGraph turn in progress</span>
               </div>
-              <div className="list queueList">
-                {!queue ? (
-                  <div className="skeleton" style={{ minHeight: 120 }} />
-                ) : queue.items.length ? (
-                  queue.items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="row rowButton rowCompact"
-                      onClick={() => setSelectedConversationId(item.conversationId)}
-                    >
-                      <div className={`dot dot-${queueTone(item.status)}`} />
-                      <div className="rowMain">
-                        <p className="rowTitle">{item.content}</p>
-                        <p className="muted tiny">{item.status}</p>
-                      </div>
-                      <p className="rowDetail">{formatTimestamp(item.createdAt)}</p>
-                    </button>
-                  ))
-                ) : (
-                  <p className="muted tiny">No queued prompts yet.</p>
-                )}
+              <div className="assistantPendingRail" aria-hidden>
+                <span />
               </div>
-            </div>
-
-            <div className="chatConversationList">
-              <div className="chatSubHeader">
-                <p className="muted tiny">Conversation history</p>
-                <p className="muted tiny">{conversations.length} total</p>
-              </div>
-              <div className="list">
-                {!status ? (
-                  <div className="skeleton" style={{ minHeight: 120 }} />
-                ) : conversations.length ? (
-                  conversations.map((item) => {
-                    const active = item.id === selectedConversationId;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`row rowButton ${active ? "rowActive" : ""}`}
-                        onClick={() => setSelectedConversationId(item.id)}
-                      >
-                        <div className="dot dot-neutral" />
-                        <div className="rowMain">
-                          <p className="rowTitle">{item.title}</p>
-                          <p className="muted tiny">
-                            {item.messageCount} messages
-                            {item.lastMessage ? ` | ${item.lastMessage}` : ""}
-                          </p>
-                        </div>
-                        <p className="rowDetail">{formatTimestamp(item.updatedAt)}</p>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <p className="muted tiny">No conversations saved yet.</p>
-                )}
-              </div>
-            </div>
-          </div>
+            </article>
+          ) : null}
         </div>
+
+        <form ref={composerRef} className="assistantComposer" onSubmit={handleSend}>
+          <textarea
+            className="textInput"
+            placeholder="Paste notes, ask for status, propose tasks, or query local productivity stats."
+            value={messageDraft}
+            onChange={(event) => setMessageDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            disabled={!canSend}
+          />
+          <button className="button" type="submit" disabled={!canSend || !messageDraft.trim()}>
+            {turnRunning ? "Running" : "Send"}
+          </button>
+          <span className="assistantComposerHint">Ctrl/⌘ + Enter to send</span>
+        </form>
       </div>
     </section>
   );

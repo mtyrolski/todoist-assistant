@@ -1,8 +1,14 @@
-describtion: "Weekly productivity / activity summary (read-only)."
+description: "Weekly executive productivity summary or week-over-week project comparison (read-only)."
 content: |
-  If the user asks for a weekly summary, focus on:
-  - Event counts by type (completed/added/updated/deleted/rescheduled) over the requested period.
-  - Trends vs the previous period (when possible).
-  - 3-5 concrete insights (e.g., busiest days, completion streaks, frequent reschedules).
-  - Actionable next steps (lightweight, non-invasive).
-
+  For a weekly summary, call print(executive_summary(period="week")) first.
+  For a comparison by project, call print(project_comparison(period="week")) first.
+  These helpers use mapped dashboard root names; never substitute raw parent_project_id values.
+  Present an executive brief with:
+  - Headline: one sentence describing the material week-over-week change.
+  - Scorecard: completed, added, updated, deleted, and total events versus the previous week.
+  - Project portfolio: the largest positive and negative shifts by mapped project name.
+  - Delivery risks: intake exceeding completions, cleanup spikes, stalled focus, or unusual churn.
+  - Decisions: 2-4 concrete priorities for the next period, clearly separated from observed facts.
+  State the exact date window and timezone. Do not dump every event or invent goals from counts.
+  When comparisonMode is elapsed_to_elapsed, explicitly say the active week is partial and the
+  previous week is cut to the same elapsed weekday/time. Never describe it as a full-week result.

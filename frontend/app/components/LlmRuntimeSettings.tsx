@@ -186,8 +186,8 @@ export function LlmRuntimeSettings({
         <div>
           <h2>{compact ? "Underlying LLM" : "Underlying LLM"}</h2>
           <p className="muted tiny" style={{ margin: "6px 0 0" }}>
-            Pick Codex/langgraph-codex or disable AI. This controls dashboard chat, task ingest, and the LLM task
-            rollout automation.
+            Pick Codex/langgraph-codex or disable AI. This controls dashboard chat and the LLM task rollout
+            automation.
           </p>
         </div>
       </header>
@@ -201,7 +201,7 @@ export function LlmRuntimeSettings({
             <div className="chatSectionHeaderMain">
               <p className="rowTitle">AI usage</p>
               <p className="muted tiny">
-                Local cumulative stats across dashboard chat, task ingest, and AI breakdown work.
+                Local cumulative stats across dashboard chat and AI breakdown work.
               </p>
             </div>
             <div className="chatSectionMeta">

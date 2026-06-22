@@ -352,9 +352,10 @@ class DatabaseActivity:
         date_to: datetime,
         window_weeks: int = 52,
         events_already_fetched: set[Event] | None = None,
+        early_stop_after_n_windows: int | None = 2,
         progress_desc: str = "Fetching archived project activity",
     ) -> list[Event]:
-        """Fetch activity scoped to specific Todoist parent project ids."""
+        """Fetch scoped activity, stopping early for projects already cached."""
 
         project_ids = sorted(
             {project_id for project_id in parent_project_ids if project_id}
@@ -365,8 +366,19 @@ class DatabaseActivity:
             return []
         if window_weeks <= 0:
             raise ValueError("window_weeks must be positive")
+        if early_stop_after_n_windows is not None and early_stop_after_n_windows <= 0:
+            raise ValueError("early_stop_after_n_windows must be positive")
 
         seen_events = set(events_already_fetched or set())
+        cached_project_ids = {
+            project_id
+            for event in seen_events
+            for project_id in (
+                event.event_entry.parent_project_id,
+                event.event_entry.v2_parent_project_id,
+            )
+            if project_id
+        }
         fetched_events: list[Event] = []
         window_delta = timedelta(weeks=window_weeks)
         estimated_windows_per_project = max(
@@ -386,9 +398,16 @@ class DatabaseActivity:
         report_tqdm_progress(progress_desc, 0, total_windows, "window")
         for project_index, parent_project_id in enumerate(project_ids, start=1):
             window_end = date_to
+            project_windows_scanned = 0
+            consecutive_empty_windows = 0
+            can_stop_early = (
+                early_stop_after_n_windows is not None
+                and parent_project_id in cached_project_ids
+            )
             while window_end > date_from:
                 window_start = max(date_from, window_end - window_delta)
                 completed_windows += 1
+                project_windows_scanned += 1
                 window_range = _format_progress_date_range(window_start, window_end)
                 report_tqdm_progress(
                     progress_desc,
@@ -412,6 +431,9 @@ class DatabaseActivity:
                 ]
                 fetched_events.extend(new_events)
                 seen_events.update(new_events)
+                consecutive_empty_windows = (
+                    0 if new_events else consecutive_empty_windows + 1
+                )
                 report_tqdm_progress(
                     progress_desc,
                     completed_windows,
@@ -423,6 +445,27 @@ class DatabaseActivity:
                     ),
                 )
                 window_end = window_start
+                if (
+                    can_stop_early
+                    and early_stop_after_n_windows is not None
+                    and consecutive_empty_windows >= early_stop_after_n_windows
+                ):
+                    skipped_windows = max(
+                        estimated_windows_per_project - project_windows_scanned, 0
+                    )
+                    completed_windows += skipped_windows
+                    report_tqdm_progress(
+                        progress_desc,
+                        completed_windows,
+                        total_windows,
+                        "window",
+                        detail=(
+                            f"{progress_desc}: project {project_index}/{len(project_ids)} "
+                            f"stopped after {consecutive_empty_windows} newest windows "
+                            f"with no new events; skipped {skipped_windows} older windows"
+                        ),
+                    )
+                    break
 
         fetched_events = list(set(fetched_events))
         fetched_events.sort(

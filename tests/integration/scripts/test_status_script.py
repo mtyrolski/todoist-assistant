@@ -28,7 +28,21 @@ def test_main_renders_colored_status_sections(monkeypatch, capsys) -> None:
                         "selected": "gpt-5.5",
                     },
                     "device": {"label": "CPU", "selected": "cpu"},
-                    "queue": {"queued": 1, "running": 0, "done": 2, "failed": 0},
+                    "usage": {
+                        "totals": {
+                            "inputTokens": 120,
+                            "outputTokens": 30,
+                            "totalTokens": 150,
+                        }
+                    },
+                    "assistant": {
+                        "tools": ["cache_summary()", "run_script()"],
+                        "scripts": [{"name": "weekly"}],
+                        "telemetry": {
+                            "enabled": True,
+                            "endpointConfigured": True,
+                        },
+                    },
                 },
             )
         if url.endswith("/api/dashboard/status"):
@@ -60,5 +74,10 @@ def test_main_renders_colored_status_sections(monkeypatch, capsys) -> None:
     assert "Settings source" in output
     assert "Selected model" in output
     assert "gpt-5.5" in output
+    assert "150 total (120 input, 30 output)" in output
+    assert "Tools" in output and "2" in output
+    assert "Scripts" in output and "1" in output
+    assert "Telemetry" in output and "enabled, endpoint configured" in output
+    assert "Queue" not in output
     assert "Triton Inventory" not in output
     assert "todoist_llm" not in output

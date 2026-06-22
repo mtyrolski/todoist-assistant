@@ -1,8 +1,13 @@
-describtion: "Status update for a specific project (read-only)."
+description: "Status update or comparison for a specific mapped project (read-only)."
 content: |
-  If the user asks for a status update for a project, produce:
-  - A short summary of what happened recently (based on events_df / events).
-  - A list of notable completions and additions (avoid dumping everything; sample the most relevant items).
-  - Clear time window assumptions (ask a clarifying question if missing).
-  - If project name is unknown (only IDs exist), ask for a keyword to filter titles or a project_id.
-
+  Use activity_dataframe() for a named-project status update and filter root_project_name or
+  parent_project_name. Use project_comparison(...) for project portfolio comparisons.
+  Mapped root names already include configured archived-project adjustments, so never expose raw
+  Todoist project IDs when a mapped name exists.
+  Produce:
+  - A concise delivery summary for the requested time window.
+  - Completed work, new intake, and meaningful churn.
+  - Comparison with the preceding equivalent period when useful.
+  - Risks/blockers inferred from data, explicitly labeled as inference.
+  - 1-3 practical next actions.
+  If the project name is ambiguous, show the matching mapped names and ask the user to choose.

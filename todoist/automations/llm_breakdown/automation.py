@@ -12,7 +12,6 @@ from loguru import logger
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.core.env import EnvVar
-from todoist.llm import LocalChatConfig
 from todoist.llm.factory import ChatModel, build_codex_chat_model
 from todoist.llm.llm_utils import _sanitize_text
 from todoist.core.runtime_env import (
@@ -25,7 +24,6 @@ from todoist.core.utils import Cache
 
 from .config import (
     build_system_prompt,
-    coerce_model_config,
     merge_variants,
     resolve_variant,
 )
@@ -90,7 +88,6 @@ class LLMBreakdown(Automation):
         *,
         settings: BreakdownSettings | Mapping[str, Any] | None = None,
         variants: Mapping[str, Mapping[str, Any]] | None = None,
-        model_config: LocalChatConfig | Mapping[str, Any] | None = None,
         **overrides: Any,
     ):
         super().__init__("@ai-breakdown", frequency_in_minutes)
@@ -116,7 +113,6 @@ class LLMBreakdown(Automation):
         self.failed_label_lower = self.failed_label.lower()
         self.max_failures_per_task = max(1, int(settings_obj.max_failures_per_task))
         self.variants = merge_variants(variants)
-        self.model_config = coerce_model_config(model_config)
         self._llm: ChatModel | None = None
         self._llm_backend: str | None = None
         self._progress_storage = Cache().llm_breakdown_progress
@@ -325,27 +321,6 @@ class LLMBreakdown(Automation):
         return labels or None
 
     @staticmethod
-    def _fallback_nodes(
-        task: Task, *, reason: str | None = None
-    ) -> list[BreakdownNode]:
-        description_parts = [
-            f"Fallback rollout for task: {task.task_entry.content.strip()}"
-        ]
-        task_description = _sanitize_text(task.task_entry.description)
-        if task_description:
-            description_parts.append(f"Context: {task_description}")
-        if reason:
-            description_parts.append(f"Reason: {reason}")
-        return [
-            BreakdownNode(
-                content="Define first concrete step",
-                description="\n".join(description_parts),
-                expand=False,
-                children=[],
-            )
-        ]
-
-    @staticmethod
     def _update_root_labels(db: Database, task: Task, label_to_remove: str) -> None:
         labels = task.task_entry.labels
         if not labels:
@@ -434,11 +409,6 @@ class LLMBreakdown(Automation):
 
     def child_labels(self, task: Task) -> list[str] | None:
         return self._child_labels(task)
-
-    def fallback_nodes(
-        self, task: Task, *, reason: str | None = None
-    ) -> list[BreakdownNode]:
-        return self._fallback_nodes(task, reason=reason)
 
     def update_root_labels(
         self, db: Database, task: Task, label_to_remove: str

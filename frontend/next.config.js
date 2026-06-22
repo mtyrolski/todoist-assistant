@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+const { PHASE_DEVELOPMENT_SERVER } = require("next/constants");
+
+module.exports = (phase) => ({
   output: "standalone",
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
+  experimental: {
+    // Codex/LangGraph turns can legitimately take several minutes.
+    proxyTimeout: 600000
+  },
   async rewrites() {
     return [
       {
@@ -9,6 +16,4 @@ const nextConfig = {
       }
     ];
   }
-};
-
-module.exports = nextConfig;
+});

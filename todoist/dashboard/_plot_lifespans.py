@@ -10,6 +10,9 @@ from todoist.dashboard._plot_common import (
     apply_dashboard_axes,
 )
 
+_RECENCY_WEIGHT_HALFLIFE_DAYS = 180.0
+_MIN_RECENCY_WEIGHT = 0.2
+
 
 def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     """Plot distribution of task completion lifespans with sensible fallbacks."""
@@ -171,18 +174,59 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     def _smooth_log_density(
         log_samples: np.ndarray,
         log_bounds: np.ndarray,
+        sample_weights: np.ndarray,
     ) -> np.ndarray:
-        sample_count = int(log_samples.size)
-        sample_std = float(np.std(log_samples, ddof=1))
-        bandwidth = sample_std * sample_count ** (-1 / 5)
+        weight_sum = float(sample_weights.sum())
+        weighted_mean = float(np.average(log_samples, weights=sample_weights))
+        sample_std = float(
+            np.sqrt(
+                np.average(
+                    np.square(log_samples - weighted_mean),
+                    weights=sample_weights,
+                )
+            )
+        )
+        effective_count = float(np.square(weight_sum) / np.square(sample_weights).sum())
+        bandwidth = sample_std * effective_count ** (-1 / 5)
         if not np.isfinite(bandwidth) or bandwidth <= 0:
             bandwidth = max(float(np.ptp(log_bounds)) / 64, 0.05)
 
         scaled_offsets = log_bounds[:, np.newaxis] - log_samples[np.newaxis, :]
         scaled_offsets = scaled_offsets / bandwidth
         kernel_values = np.exp(-0.5 * np.square(scaled_offsets))
-        return kernel_values.sum(axis=1) / (
-            sample_count * bandwidth * np.sqrt(2 * np.pi)
+        weighted_kernels = kernel_values * sample_weights[np.newaxis, :]
+        return weighted_kernels.sum(axis=1) / (
+            weight_sum * bandwidth * np.sqrt(2 * np.pi)
+        )
+
+    def _completion_recency_weights(completed_at: pd.Series) -> np.ndarray:
+        latest_completion = completed_at.max()
+        ages_days = (
+            (latest_completion - completed_at).dt.total_seconds() / (24 * 60 * 60)
+        ).to_numpy(dtype=float)
+        raw_weights = np.power(0.5, ages_days / _RECENCY_WEIGHT_HALFLIFE_DAYS)
+        raw_weights = np.clip(raw_weights, _MIN_RECENCY_WEIGHT, 1.0)
+        weight_sum = float(raw_weights.sum())
+        if not np.isfinite(weight_sum) or weight_sum <= 0:
+            return np.ones_like(raw_weights, dtype=float)
+        return raw_weights * (raw_weights.size / weight_sum)
+
+    def _weighted_percentile(
+        values: np.ndarray,
+        weights: np.ndarray,
+        percentile: float,
+    ) -> float:
+        if values.size == 0:
+            return float("nan")
+        order = np.argsort(values)
+        ordered_values = values[order]
+        ordered_weights = weights[order]
+        cumulative_weights = np.cumsum(ordered_weights)
+        cutoff = (percentile / 100.0) * float(ordered_weights.sum())
+        return float(
+            ordered_values[
+                int(np.searchsorted(cumulative_weights, cutoff, side="left"))
+            ]
         )
 
     def _format_duration_compact(seconds: float) -> str:
@@ -261,15 +305,27 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
         logger.info("No tasks have both added and completed events")
         return _empty_figure("No Tasks with Both Added and Completed Events")
 
-    durations = (
-        (completed_times.loc[common_ids] - added_times.loc[common_ids])
-        .dt.total_seconds()
-        .to_numpy(dtype=float)
+    lifespan_frame = pd.DataFrame(
+        {
+            "added_at": added_times.loc[common_ids],
+            "completed_at": completed_times.loc[common_ids],
+        }
     )
-    durations = durations[durations > 0]
+    lifespan_frame["duration_seconds"] = (
+        lifespan_frame["completed_at"] - lifespan_frame["added_at"]
+    ).dt.total_seconds()
+    lifespan_frame = cast(
+        pd.DataFrame, lifespan_frame[lifespan_frame["duration_seconds"] > 0].copy()
+    )
+    durations = cast(pd.Series, lifespan_frame["duration_seconds"]).to_numpy(
+        dtype=float
+    )
     if durations.size == 0:
         logger.info("All computed durations are non-positive; nothing to plot")
         return _empty_figure("No valid durations")
+    recency_weights = _completion_recency_weights(
+        cast(pd.Series, lifespan_frame["completed_at"])
+    )
 
     max_duration = float(durations.max())
     if max_duration < 60:
@@ -287,8 +343,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
-    percentile_low = float(np.percentile(durations_converted, 15))
-    percentile_high = float(np.percentile(durations_converted, 85))
+    percentile_low = _weighted_percentile(durations_converted, recency_weights, 15)
+    percentile_high = _weighted_percentile(durations_converted, recency_weights, 85)
     if total_count >= 20:
         plot_min = float(np.percentile(durations_converted, 1))
         plot_max = float(np.percentile(durations_converted, 99))
@@ -309,10 +365,14 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     if total_count >= 2 and not np.isclose(log_durations.var(), 0.0):
         log_bounds = np.linspace(min_log - pad, max_log + pad, 512)
         x_values = np.power(10.0, log_bounds)
-        densities = _smooth_log_density(log_durations, log_bounds)
+        densities = _smooth_log_density(
+            log_durations,
+            log_bounds,
+            recency_weights,
+        )
         integral = float(np.trapezoid(densities, x_values))
         if np.isfinite(integral) and integral > 0:
-            densities = densities * (total_count / integral)
+            densities = densities * (float(recency_weights.sum()) / integral)
             x_min = float(x_values.min())
             x_max = float(x_values.max())
             highlight_low = float(np.clip(highlight_low, x_min, x_max))
@@ -373,7 +433,7 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                     y=densities,
                     mode="lines",
                     line=dict(color="#1ABC9C", width=3),
-                    name="Smoothed frequency",
+                    name="Recency-weighted frequency",
                     hovertemplate="Duration: %{x:.4g} "
                     + unit_label
                     + "<br>Frequency: %{y:.2f}<extra></extra>",

@@ -3,7 +3,7 @@
 The goal is not perfect sandboxing, but a practical guardrail:
 - no imports
 - no dunder access
-- no file / OS / subprocess access
+- no direct file / OS / subprocess access from generated code
 """
 
 import ast
@@ -15,7 +15,6 @@ import builtins
 import os
 import pathlib
 import shutil
-import subprocess
 
 
 _BANNED_SUBSTRINGS = (
@@ -153,30 +152,27 @@ class SafePythonReplTool:
         stdout = io.StringIO()
         try:
             tree = ast.parse(code, mode="exec")
-            last_expr = tree.body[-1] if tree.body else None
-            value = None
-
-            if isinstance(last_expr, ast.Expr):
-                expr = ast.Expression(last_expr.value)
-                # Remove last expression from body for exec portion.
-                exec_body = ast.Module(body=tree.body[:-1], type_ignores=[])
-                with _read_only_sandbox(), contextlib.redirect_stdout(stdout):
+            with _read_only_sandbox(), contextlib.redirect_stdout(stdout):
+                for node in tree.body:
+                    if isinstance(node, ast.Expr):
+                        value = eval(  # pylint: disable=eval-used
+                            compile(
+                                ast.Expression(node.value),
+                                "<python_repl>",
+                                "eval",
+                            ),
+                            self._globals,
+                            self._locals,
+                        )
+                        if value is not None:
+                            print(repr(value))
+                        continue
                     exec(  # pylint: disable=exec-used
-                        compile(exec_body, "<python_repl>", "exec"),
-                        self._globals,
-                        self._locals,
-                    )
-                    value = eval(  # pylint: disable=eval-used
-                        compile(expr, "<python_repl>", "eval"),
-                        self._globals,
-                        self._locals,
-                    )
-                    if value is not None:
-                        print(repr(value))
-            else:
-                with _read_only_sandbox(), contextlib.redirect_stdout(stdout):
-                    exec(  # pylint: disable=exec-used
-                        compile(tree, "<python_repl>", "exec"),
+                        compile(
+                            ast.Module(body=[node], type_ignores=[]),
+                            "<python_repl>",
+                            "exec",
+                        ),
                         self._globals,
                         self._locals,
                     )
@@ -234,10 +230,6 @@ def _read_only_sandbox():
         _patch(pathlib.Path, "rmdir", _blocked)
         _patch(pathlib.Path, "rename", _blocked)
         _patch(pathlib.Path, "replace", _blocked)
-        _patch(subprocess, "Popen", _blocked)
-        _patch(subprocess, "run", _blocked)
-        _patch(subprocess, "call", _blocked)
-        _patch(subprocess, "check_output", _blocked)
         yield
     finally:
         for obj, name, old in reversed(originals):

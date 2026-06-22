@@ -15,16 +15,11 @@ const NAV_GROUPS = [
   {
     title: "Automation Studio",
     items: [
-      { href: "/task-ingest", label: "Task Ingest", hint: "Paste notes into task trees" },
-      { href: "/status-updates", label: "Status Updates", hint: "Draft sync updates from activity" },
+      { href: "/llm-agent-chat", label: "Personal Assistant", hint: "Interactive Codex chat" },
       { href: "/task-rollout-rules", label: "Task Rollout Rules", hint: "AI breakdown prompts" },
       { href: "/task-templates", label: "Task Templates", hint: "Create and edit templates" },
       { href: "/multiplication-labels", label: "Multiplication Labels", hint: "Tune Xn effects" }
     ]
-  },
-  {
-    title: "Beta",
-    items: [{ href: "/llm-agent-chat", label: "LLM-Agent Chat", hint: "Hosted chat and queued prompts" }]
   },
   {
     title: "Operations",
