@@ -29,7 +29,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --locked --extra local-llm || uv sync --extra local-llm
+          uv sync --locked || uv sync
 
       - name: Check versions
         run: |
