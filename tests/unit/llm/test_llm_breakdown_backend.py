@@ -37,6 +37,12 @@ def test_breakdown_uses_codex_backend_from_env(monkeypatch, tmp_path) -> None:
     assert captured["values"] == {}
 
 
+def test_breakdown_accepts_model_config_from_hydra_settings() -> None:
+    automation = LLMBreakdown(model_config={"max_new_tokens": 384})
+
+    assert automation.model_config == {"max_new_tokens": 384}
+
+
 def test_breakdown_rejects_disabled_backend(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)

@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 import os
 from pathlib import Path
@@ -52,6 +52,7 @@ class BreakdownSettings:
     track_progress: bool = True
     failed_label: str = "ai-breakdown-failed"
     max_failures_per_task: int = 3
+    model_config: Mapping[str, Any] = field(default_factory=dict)
 
 
 def _coerce_settings(
@@ -78,7 +79,19 @@ def _coerce_settings(
         unknown_list = ", ".join(sorted(unknown))
         raise TypeError(f"Unexpected AI breakdown settings: {unknown_list}")
 
-    return BreakdownSettings(**payload)
+    settings_obj = BreakdownSettings(**payload)
+    if not isinstance(settings_obj.model_config, dict):
+        return BreakdownSettings(
+            **{
+                field.name: (
+                    dict(settings_obj.model_config)
+                    if field.name == "model_config"
+                    else getattr(settings_obj, field.name)
+                )
+                for field in fields(BreakdownSettings)
+            }
+        )
+    return settings_obj
 
 
 class LLMBreakdown(Automation):
@@ -107,6 +120,7 @@ class LLMBreakdown(Automation):
         self.max_queue_depth = max(1, int(settings_obj.max_queue_depth))
         self.auto_queue_children = settings_obj.auto_queue_children
         self.track_progress = settings_obj.track_progress
+        self.model_config = dict(settings_obj.model_config)
         self.failed_label = (
             _sanitize_text(settings_obj.failed_label) or "ai-breakdown-failed"
         )
