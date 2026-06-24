@@ -58,27 +58,6 @@ def test_periodic_frame_buckets_utc_events_in_configured_timezone(monkeypatch: A
     assert int(periodic.loc[pd.Timestamp("2026-06-28"), "Academy"]) == 1
 
 
-def _weekly_completion_with_inactive_project_df() -> pd.DataFrame:
-    """Create data where one project has no completions in the selected window."""
-
-    base_date = datetime(2024, 6, 3, 12, 0, 0)  # Monday
-    data = {
-        "root_project_name": ["Project B", "Project A", "Project A"],
-        "root_project_id": ["proj_b", "proj_a", "proj_a"],
-        "type": ["completed", "completed", "completed"],
-        "parent_item_id": ["task3", "task1", "task2"],
-        "title": ["Task 3", "Task 1", "Task 2"],
-    }
-    dates = [
-        base_date - timedelta(days=10),  # B outside period
-        base_date + timedelta(days=0),  # A in period
-        base_date + timedelta(days=1),  # A in period
-    ]
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-    return df
-
-
 def _monthly_completion_df() -> pd.DataFrame:
     data = {
         "root_project_name": ["Project A", "Project A", "Project A", "Project A"],
@@ -135,10 +114,10 @@ def _weekly_completion_trend_df(*, total_weeks: int = 30) -> pd.DataFrame:
 def _completed_df(rows: list[tuple[Any, ...]]) -> pd.DataFrame:
     records = []
     for row in rows:
-        date, root_name, root_id, item_id, title, *parent = row
+        date, root_name, item_id, title, *parent = row
         record = {
             "root_project_name": root_name,
-            "root_project_id": root_id,
+            "root_project_id": str(root_name).lower(),
             "type": "completed",
             "parent_item_id": item_id,
             "title": title,
@@ -156,9 +135,24 @@ def _completed_df(rows: list[tuple[Any, ...]]) -> pd.DataFrame:
 def _archived_visibility_df() -> pd.DataFrame:
     return _completed_df(
         [
-            (datetime(2023, 3, 15, 12, 0, 0), "Deepflare", "deepflare", "deepflare-old", "Deepflare old task"),
-            (datetime(2024, 6, 2, 12, 0, 0), "Deepflare", "deepflare", "deepflare-selected", "Deepflare selected task"),
-            (datetime(2023, 5, 10, 12, 0, 0), "OldOnly", "old-only", "old-only-task", "Old only task"),
+            (
+                datetime(2023, 3, 15, 12, 0, 0),
+                "Deepflare",
+                "deepflare-old",
+                "Deepflare old task",
+            ),
+            (
+                datetime(2024, 6, 2, 12, 0, 0),
+                "Deepflare",
+                "deepflare-selected",
+                "Deepflare selected task",
+            ),
+            (
+                datetime(2023, 5, 10, 12, 0, 0),
+                "OldOnly",
+                "old-only-task",
+                "Old only task",
+            ),
         ]
     )
 
@@ -166,27 +160,61 @@ def _archived_visibility_df() -> pd.DataFrame:
 def _root_project_visibility_df() -> pd.DataFrame:
     return _completed_df(
         [
-            (datetime(2024, 6, 2, 12, 0, 0), "Academy", "academy", "deep-mhc-flare-task", "DeepMhcFlare task", "DeepMhcFlare", "deep-mhc-flare"),
-            (datetime(2024, 6, 3, 12, 0, 0), "skynet", "skynet", "msft-task", "MSFT task", "MSFT", "msft"),
+            (
+                datetime(2024, 6, 2, 12, 0, 0),
+                "Academy",
+                "deep-mhc-flare-task",
+                "DeepMhcFlare task",
+                "DeepMhcFlare",
+                "deep-mhc-flare",
+            ),
+            (
+                datetime(2024, 6, 3, 12, 0, 0),
+                "skynet",
+                "msft-task",
+                "MSFT task",
+                "MSFT",
+                "msft",
+            ),
         ]
     )
 
 
 def _sparse_cumulative_df() -> pd.DataFrame:
     rows = [
-        (datetime(2024, 1, 1, 12, 0, 0) + timedelta(seconds=idx), "Large", "large", f"large-{idx}", f"Large {idx}")
+        (
+            datetime(2024, 1, 1, 12, 0, 0) + timedelta(seconds=idx),
+            "Large",
+            f"large-{idx}",
+            f"Large {idx}",
+        )
         for idx in range(100)
     ]
-    rows.append((datetime(2024, 1, 8, 12, 0, 0), "Small", "small", "small-1", "Small 1"))
+    rows.append((datetime(2024, 1, 8, 12, 0, 0), "Small", "small-1", "Small 1"))
     return _completed_df(rows)
 
 
 def _archived_current_period_sparse_df() -> pd.DataFrame:
     return _completed_df(
         [
-            (datetime(2024, 5, 20, 12, 0, 0), "Archived", "archived", "archived-old", "Archived old"),
-            (datetime(2024, 5, 27, 12, 0, 0), "Active", "active", "active-gap", "Active gap"),
-            (datetime(2024, 6, 3, 12, 0, 0), "Archived", "archived", "archived-current", "Archived current"),
+            (
+                datetime(2024, 5, 20, 12, 0, 0),
+                "Archived",
+                "archived-old",
+                "Archived old",
+            ),
+            (
+                datetime(2024, 5, 27, 12, 0, 0),
+                "Active",
+                "active-gap",
+                "Active gap",
+            ),
+            (
+                datetime(2024, 6, 3, 12, 0, 0),
+                "Archived",
+                "archived-current",
+                "Archived current",
+            ),
         ]
     )
 
@@ -256,21 +284,26 @@ def _trace_by_lower_name(fig: go.Figure, name: str) -> Any:
     )
 
 
-@pytest.mark.parametrize(("plot_func", "_total_name"), PLOT_FUNCTIONS)
-def test_completed_tasks_periodically_keeps_current_week(plot_func: Any, _total_name: str):
-    """Current partial period should surface as 'so far' + forecast markers."""
-
-    df = _weekly_completion_df()
-    beg_date = datetime(2024, 5, 27)
-    end_date = datetime(2024, 6, 5)
-
-    fig = plot_func(
-        df,
-        beg_date,
-        end_date,
+def _weekly_plot(plot_func: Any, **kwargs: Any) -> go.Figure:
+    return plot_func(
+        _weekly_completion_df(),
+        datetime(2024, 5, 27),
+        datetime(2024, 6, 5),
         granularity="W-SUN",
         project_colors={"Project A": "#123456"},
+        **kwargs,
     )
+
+
+@pytest.mark.parametrize(("plot_func", "_total_name"), PLOT_FUNCTIONS)
+def test_completed_tasks_periodically_keeps_current_week(
+    plot_func: Any, _total_name: str
+):
+    """Current partial period should surface as 'so far' + forecast markers."""
+
+    end_date = datetime(2024, 6, 5)
+
+    fig = _weekly_plot(plot_func)
 
     dotted_traces = [
         trace
@@ -400,10 +433,29 @@ def test_completed_tasks_periodically_keeps_archived_points_sparse_without_forec
 def test_completed_tasks_periodically_hides_inactive_projects_in_range(
     plot_func: Any, _total_name: str
 ):
-    df = _weekly_completion_with_inactive_project_df()
-
     fig = plot_func(
-        df,
+        _completed_df(
+            [
+                (
+                    datetime(2024, 5, 24, 12, 0, 0),
+                    "Project B",
+                    "task3",
+                    "Task 3",
+                ),
+                (
+                    datetime(2024, 6, 3, 12, 0, 0),
+                    "Project A",
+                    "task1",
+                    "Task 1",
+                ),
+                (
+                    datetime(2024, 6, 4, 12, 0, 0),
+                    "Project A",
+                    "task2",
+                    "Task 2",
+                ),
+            ]
+        ),
         datetime(2024, 6, 1),
         datetime(2024, 6, 5),
         granularity="W-SUN",
@@ -440,8 +492,7 @@ def test_completed_tasks_periodically_keeps_projects_from_full_history_range(
     if check_color:
         deepflare_trace = _trace_by_name(fig, "Deepflare")
         assert (
-            getattr(getattr(deepflare_trace, "line", None), "color", None)
-            == "#ff8800"
+            getattr(getattr(deepflare_trace, "line", None), "color", None) == "#ff8800"
         )
 
 
@@ -506,7 +557,7 @@ def test_completed_tasks_periodically_groups_by_root_project_when_parent_exists(
     assert "MSFT" not in trace_names
 
 
-def test_cumsum_completed_tasks_periodically_forward_fills_sparse_project_totals():
+def test_cumsum_completed_tasks_periodically_keeps_sparse_project_totals_compact():
     fig = cumsum_completed_tasks_periodically(
         _sparse_cumulative_df(),
         datetime(2024, 1, 1),
@@ -521,27 +572,11 @@ def test_cumsum_completed_tasks_periodically_forward_fills_sparse_project_totals
         if str(getattr(trace, "name", "")).lower() == "all projects (total cumulative)"
     )
     values = [float(value) for value in cast(Any, total_trace).y]
+
     assert values == sorted(values)
     assert values[-1] == 101.0
-
-
-def test_cumsum_completed_tasks_periodically_trims_project_lines_to_activity_span():
-    fig = cumsum_completed_tasks_periodically(
-        _sparse_cumulative_df(),
-        datetime(2024, 1, 1),
-        datetime(2024, 1, 20),
-        granularity="W-SUN",
-        project_colors={"Large": "#123456", "Small": "#654321"},
-    )
-
-    traces = cast(tuple[Any, ...], fig.data)
-    small_trace = next(
-        trace for trace in traces if str(getattr(trace, "name", "")) == "Small"
-    )
-    large_trace = next(
-        trace for trace in traces if str(getattr(trace, "name", "")) == "Large"
-    )
-
+    small_trace = _trace_by_name(fig, "Small")
+    large_trace = _trace_by_name(fig, "Large")
     assert _normalized_trace_x(small_trace) == [pd.Timestamp("2024-01-14")]
     assert _normalized_trace_x(large_trace) == [pd.Timestamp("2024-01-07")]
 
@@ -550,13 +585,7 @@ def test_cumsum_completed_tasks_periodically_trims_project_lines_to_activity_spa
 def test_completed_tasks_periodically_adds_total_overlay_on_primary_axis(
     plot_func: Any, total_name: str
 ):
-    fig = plot_func(
-        _weekly_completion_df(),
-        datetime(2024, 5, 27),
-        datetime(2024, 6, 5),
-        granularity="W-SUN",
-        project_colors={"Project A": "#123456"},
-    )
+    fig = _weekly_plot(plot_func)
 
     total_traces = [
         trace for trace in _fig_traces(fig) if total_name in _trace_name(trace).lower()
@@ -569,17 +598,7 @@ def test_completed_tasks_periodically_adds_total_overlay_on_primary_axis(
 def test_cumsum_completed_tasks_periodically_keeps_cumulative_lines_linear():
     """Cumulative lines should not use smoothing that can imply decreases."""
 
-    df = _weekly_completion_df()
-    beg_date = datetime(2024, 5, 27)
-    end_date = datetime(2024, 6, 5)
-
-    fig = cumsum_completed_tasks_periodically(
-        df,
-        beg_date,
-        end_date,
-        granularity="W-SUN",
-        project_colors={"Project A": "#123456"},
-    )
+    fig = _weekly_plot(cumsum_completed_tasks_periodically)
 
     traces = cast(tuple[Any, ...], fig.data)
     project_lines = [
@@ -605,18 +624,7 @@ def test_cumsum_completed_tasks_periodically_keeps_cumulative_lines_linear():
 def test_plot_completed_tasks_periodically_can_disable_total_overlay():
     """Secondary-axis total line should be optional and hideable via function flag."""
 
-    df = _weekly_completion_df()
-    beg_date = datetime(2024, 5, 27)
-    end_date = datetime(2024, 6, 5)
-
-    fig = plot_completed_tasks_periodically(
-        df,
-        beg_date,
-        end_date,
-        granularity="W-SUN",
-        project_colors={"Project A": "#123456"},
-        include_total_overlay=False,
-    )
+    fig = _weekly_plot(plot_completed_tasks_periodically, include_total_overlay=False)
 
     trace_names = [
         str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)

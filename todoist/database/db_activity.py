@@ -276,30 +276,14 @@ class DatabaseActivity:
             project_suffix = (
                 f" parent_project_id={parent_project_id}" if parent_project_id else ""
             )
-            decoded_result = self._api_client.request_json(
+            page_entries, next_cursor = self._fetch_activity_entries_page(
                 spec,
                 operation_name=(
                     f"fetch activity range {date_from.isoformat()} "
                     f"{date_to.isoformat()}{project_suffix}"
                 ),
+                context="activity range",
             )
-            if not isinstance(decoded_result, dict):
-                raise RuntimeError(
-                    "Unexpected response payload when fetching activity range"
-                )
-
-            raw_events = decoded_result.get("results")
-            if not isinstance(raw_events, list):
-                raise RuntimeError(
-                    "Unexpected results payload when fetching activity range"
-                )
-            if not all(isinstance(event, dict) for event in raw_events):
-                raise RuntimeError(
-                    "Unexpected non-object event record in activity range payload"
-                )
-            page_entries = [
-                safe_instantiate_entry(EventEntry, **event) for event in raw_events
-            ]
             page_events = self._events_from_entries(page_entries)
             fetched_pages += 1
             report_tqdm_progress(
@@ -328,8 +312,7 @@ class DatabaseActivity:
             # already cached. Otherwise gaps in deeper pages can never be healed.
             events.extend(page_new_events)
 
-            next_cursor = decoded_result.get("next_cursor")
-            if not isinstance(next_cursor, str):
+            if next_cursor is None:
                 report_tqdm_progress(
                     progress_desc,
                     fetched_pages,
@@ -506,20 +489,31 @@ class DatabaseActivity:
             params=params,
             rate_limited=True,
         )
+        return self._fetch_activity_entries_page(
+            spec,
+            operation_name=f"fetch activity page {page_index}",
+            context="activity page",
+        )
+
+    def _fetch_activity_entries_page(
+        self,
+        spec: RequestSpec,
+        *,
+        operation_name: str,
+        context: str,
+    ) -> tuple[list[EventEntry], str | None]:
         decoded_result = self._api_client.request_json(
-            spec, operation_name=f"fetch activity page {page_index}"
+            spec, operation_name=operation_name
         )
         if not isinstance(decoded_result, dict):
-            raise RuntimeError(
-                "Unexpected response payload when fetching activity page"
-            )
+            raise RuntimeError(f"Unexpected response payload when fetching {context}")
 
         raw_events = decoded_result.get("results")
         if not isinstance(raw_events, list):
-            raise RuntimeError("Unexpected results payload when fetching activity page")
+            raise RuntimeError(f"Unexpected results payload when fetching {context}")
         if not all(isinstance(event, dict) for event in raw_events):
             raise RuntimeError(
-                "Unexpected non-object event record in activity page payload"
+                f"Unexpected non-object event record in {context} payload"
             )
 
         events = [safe_instantiate_entry(EventEntry, **event) for event in raw_events]
