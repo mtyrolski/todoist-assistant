@@ -38,6 +38,18 @@ DEFAULT_URGENCY_SETTINGS = {
 }
 DEFAULT_PLOT_EVENT_COLOR = "#ff6b7a"
 MAX_PLOT_HISTORY_WEEKS = 260
+URGENCY_COUNT_KEYS = (
+    "fireTasks",
+    "p1Tasks",
+    "p2Tasks",
+    "p3Tasks",
+    "p4Tasks",
+    "priorityTasks",
+    "dueTasks",
+    "deadlineTasks",
+)
+URGENCY_PRIORITY_CHIPS = ((4, "p1Tasks"), (3, "p2Tasks"), (2, "p3Tasks"), (1, "p4Tasks"))
+URGENCY_PRIORITY_CHIP_BY_VALUE = dict(URGENCY_PRIORITY_CHIPS)
 
 
 def _normalize_label_name(value: str) -> str:
@@ -164,6 +176,23 @@ def _join_condition_labels(labels: Sequence[str]) -> str:
     return f"{', '.join(visible[:-1])}, and {visible[-1]}"
 
 
+def _empty_urgency_counts() -> dict[str, int]:
+    return dict.fromkeys(URGENCY_COUNT_KEYS, 0)
+
+
+def _dominant_counts(series: pd.Series, limit: int | None = None) -> pd.Series:
+    counts = series.fillna("").replace("", "(unknown)").value_counts()
+    return counts.head(limit) if limit is not None else counts
+
+
+def _first_count(counts: pd.Series) -> tuple[str, int] | None:
+    return None if counts.empty else (str(counts.index[0]), int(counts.iloc[0]))
+
+
+def _top_count(series: pd.Series) -> tuple[str, int] | None:
+    return _first_count(series.value_counts())
+
+
 def evaluate_urgency_status(
     active_projects: Sequence[Project] | None,
     *,
@@ -181,31 +210,13 @@ def evaluate_urgency_status(
             "summary": "Urgency monitoring is disabled in dashboard settings.",
             "todayLabel": reference_day.isoformat(),
             "total": 0,
-            "counts": {
-                "fireTasks": 0,
-                "p1Tasks": 0,
-                "p2Tasks": 0,
-                "p3Tasks": 0,
-                "p4Tasks": 0,
-                "priorityTasks": 0,
-                "dueTasks": 0,
-                "deadlineTasks": 0,
-            },
+            "counts": _empty_urgency_counts(),
             "badgeLabel": str(urgency_settings["badge_labels"]["good"]),
             "helpKey": "Urgency Status",
             "configurable": True,
             "visibleChips": visible_chips,
         }
-    counts = {
-        "fireTasks": 0,
-        "p1Tasks": 0,
-        "p2Tasks": 0,
-        "p3Tasks": 0,
-        "p4Tasks": 0,
-        "priorityTasks": 0,
-        "dueTasks": 0,
-        "deadlineTasks": 0,
-    }
+    counts = _empty_urgency_counts()
     warn_priority_thresholds = set(
         int(value) for value in urgency_settings["warn_priority_thresholds"]
     )
@@ -219,17 +230,13 @@ def evaluate_urgency_status(
     if bool(urgency_settings["danger_on_fire_label"]) and fire_labels:
         visible_chips.append("fireTasks")
     if bool(urgency_settings["warn_on_priority"]):
-        priority_enabled = False
-        for chip_key, threshold in (
-            ("p1Tasks", 4),
-            ("p2Tasks", 3),
-            ("p3Tasks", 2),
-            ("p4Tasks", 1),
-        ):
-            if threshold in warn_priority_thresholds:
-                visible_chips.append(chip_key)
-                priority_enabled = True
-        if priority_enabled:
+        priority_chips = [
+            chip_key
+            for threshold, chip_key in URGENCY_PRIORITY_CHIPS
+            if threshold in warn_priority_thresholds
+        ]
+        visible_chips.extend(priority_chips)
+        if priority_chips:
             active_condition_labels.append("priority")
     if bool(urgency_settings["warn_on_due"]):
         visible_chips.append("dueTasks")
@@ -244,26 +251,13 @@ def evaluate_urgency_status(
             fire = bool(
                 urgency_settings["danger_on_fire_label"]
             ) and _task_matches_any_label(task, fire_labels)
-            p1 = (
-                bool(urgency_settings["warn_on_priority"])
-                and 4 in warn_priority_thresholds
-                and task_entry.priority == 4
-            )
-            p2 = (
-                bool(urgency_settings["warn_on_priority"])
-                and 3 in warn_priority_thresholds
-                and task_entry.priority == 3
-            )
-            p3 = (
-                bool(urgency_settings["warn_on_priority"])
-                and 2 in warn_priority_thresholds
-                and task_entry.priority == 2
-            )
-            p4 = (
-                bool(urgency_settings["warn_on_priority"])
-                and 1 in warn_priority_thresholds
-                and task_entry.priority == 1
-            )
+            priority_chip = URGENCY_PRIORITY_CHIP_BY_VALUE.get(task_entry.priority)
+            if (
+                task_entry.priority not in warn_priority_thresholds
+                or not bool(urgency_settings["warn_on_priority"])
+            ):
+                priority_chip = None
+            priority = priority_chip is not None
             due = bool(urgency_settings["warn_on_due"]) and _task_due_within_days(
                 task_entry.due,
                 reference_day,
@@ -277,30 +271,22 @@ def evaluate_urgency_status(
                 warn_deadline_within_days,
             )
 
-            if fire:
-                counts["fireTasks"] += 1
-            if p1:
-                counts["p1Tasks"] += 1
-            if p2:
-                counts["p2Tasks"] += 1
-            if p3:
-                counts["p3Tasks"] += 1
-            if p4:
-                counts["p4Tasks"] += 1
-            if due:
-                counts["dueTasks"] += 1
-            if deadline:
-                counts["deadlineTasks"] += 1
-            if p1 or p2 or p3 or p4:
-                counts["priorityTasks"] += 1
-            task_matches.append(
-                {
-                    "fire": fire,
-                    "priority": p1 or p2 or p3 or p4,
-                    "due": due,
-                    "deadline": deadline,
-                }
-            )
+            matches = {
+                "fire": fire,
+                "priority": priority,
+                "due": due,
+                "deadline": deadline,
+            }
+            for key, matched in (
+                ("fireTasks", fire),
+                (priority_chip or "", priority),
+                ("priorityTasks", priority),
+                ("dueTasks", due),
+                ("deadlineTasks", deadline),
+            ):
+                if matched:
+                    counts[key] += 1
+            task_matches.append(matches)
 
     fire_count = counts["fireTasks"]
     priority_count = counts["priorityTasks"]
@@ -744,28 +730,20 @@ def completed_share_leaderboard(
     df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
     total_completed = int(len(df_completed))
 
-    counts = (
-        cast(pd.Series, df_completed[column])
-        .fillna("")
-        .replace("", "(unknown)")
-        .value_counts()
-        .head(limit)
-    )
-
-    items: list[dict[str, Any]] = []
-    for name, completed in counts.items():
-        completed_i = int(completed)
-        pct = (
-            round((completed_i / total_completed) * 100, 2) if total_completed else 0.0
-        )
-        items.append(
-            {
-                "name": name,
-                "completed": completed_i,
-                "percentOfCompleted": pct,
-                "color": project_colors.get(str(name), "#808080"),
-            }
-        )
+    items = [
+        {
+            "name": name,
+            "completed": completed_i,
+            "percentOfCompleted": round(completed_i / total_completed * 100, 2)
+            if total_completed
+            else 0.0,
+            "color": project_colors.get(str(name), "#808080"),
+        }
+        for name, completed in _dominant_counts(
+            cast(pd.Series, df_completed[column]), limit
+        ).items()
+        for completed_i in [int(completed)]
+    ]
 
     fig = go.Figure(
         data=[
@@ -818,22 +796,19 @@ def build_habit_tracker_payload(
             )
     history = summary["history"]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=[item["label"] for item in history],
-            y=[item["completed"] for item in history],
-            name="Completed",
-            marker=dict(color="#61f4b3"),
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=[item["label"] for item in history],
-            y=[item["rescheduled"] for item in history],
-            name="Rescheduled",
-            marker=dict(color="#ffb86c"),
-        )
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=[item["label"] for item in history],
+                y=[item[key] for item in history],
+                name=name,
+                marker=dict(color=color),
+            )
+            for key, name, color in (
+                ("completed", "Completed", "#61f4b3"),
+                ("rescheduled", "Rescheduled", "#ffb86c"),
+            )
+        ]
     )
     fig.update_layout(
         template="plotly_dark",
@@ -873,51 +848,36 @@ def compute_insights(
         if "parent_project_name" in df_period.columns
         else "root_project_name"
     )
-    df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
-    if not df_completed.empty and project_col in df_completed.columns:
-        project_series = cast(pd.Series, df_completed[project_col])
-        counts = project_series.fillna("").replace("", "(unknown)").value_counts()
-        if not counts.empty:
-            name = str(counts.index[0])
-            completed_i = int(counts.iloc[0])
-            insights.append(
-                {
-                    "title": "Most active project",
-                    "value": name,
-                    "detail": f"{completed_i} completed tasks (last week)",
-                    "color": project_colors.get(name),
-                }
-            )
-
-    df_rescheduled = cast(pd.DataFrame, df_period[df_period["type"] == "rescheduled"])
-    if not df_rescheduled.empty and project_col in df_rescheduled.columns:
-        counts = (
-            cast(pd.Series, df_rescheduled[project_col])
-            .fillna("")
-            .replace("", "(unknown)")
-            .value_counts()
+    for task_type, title, noun in (
+        ("completed", "Most active project", "completed tasks"),
+        ("rescheduled", "Most rescheduled project", "reschedules"),
+    ):
+        df_type = cast(pd.DataFrame, df_period[df_period["type"] == task_type])
+        if df_type.empty or project_col not in df_type.columns:
+            continue
+        top_project = _first_count(
+            _dominant_counts(cast(pd.Series, df_type[project_col]))
         )
-        if not counts.empty:
-            name = str(counts.index[0])
-            rescheduled_i = int(counts.iloc[0])
-            insights.append(
-                {
-                    "title": "Most rescheduled project",
-                    "value": name,
-                    "detail": f"{rescheduled_i} reschedules (last week)",
-                    "color": project_colors.get(name),
-                }
-            )
+        if top_project is None:
+            continue
+        name, count = top_project
+        insights.append(
+            {
+                "title": title,
+                "value": name,
+                "detail": f"{count} {noun} (last week)",
+                "color": project_colors.get(name),
+            }
+        )
 
     try:
         if not df_period.empty:
             day_names = pd.Series(
                 pd.to_datetime(df_period.index), index=df_period.index
             ).dt.day_name()
-            day_counts = day_names.value_counts()
-            if not day_counts.empty:
-                day = str(day_counts.index[0])
-                cnt = int(day_counts.iloc[0])
+            top_day = _top_count(day_names)
+            if top_day is not None:
+                day, cnt = top_day
                 insights.append(
                     {
                         "title": "Busiest day",
@@ -949,9 +909,9 @@ def compute_insights(
             hours = (
                 pd.to_datetime(df_period.index).to_series(index=df_period.index).dt.hour
             )
-            hour_counts = hours.value_counts()
-            if not hour_counts.empty:
-                peak_hour = int(hour_counts.index.to_list()[0])
+            top_hour = _top_count(hours)
+            if top_hour is not None:
+                peak_hour = int(top_hour[0])
                 insights.append(
                     {
                         "title": "Peak hour",
