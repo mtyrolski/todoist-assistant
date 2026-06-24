@@ -16,22 +16,13 @@ from todoist.dashboard.plots import (
 
 
 def _weekly_completion_df() -> pd.DataFrame:
-    base_date = datetime(2024, 6, 3, 12, 0, 0)  # Monday
-    data = {
-        "root_project_name": ["Project A", "Project A", "Project A"],
-        "root_project_id": ["proj_a"] * 3,
-        "type": ["completed", "completed", "completed"],
-        "parent_item_id": ["task1", "task2", "task3"],
-        "title": ["Task 1", "Task 2", "Task 3"],
-    }
-    dates = [
-        base_date - timedelta(days=2),  # previous Saturday (prior week)
-        base_date + timedelta(days=0),  # Monday current week
-        base_date + timedelta(days=1),  # Tuesday current week
-    ]
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-    return df
+    return _completed_df(
+        [
+            ("2024-06-01", "Project A", "task1", "Task 1"),
+            ("2024-06-03", "Project A", "task2", "Task 2"),
+            ("2024-06-04", "Project A", "task3", "Task 3"),
+        ]
+    )
 
 
 def test_periodic_frame_buckets_utc_events_in_configured_timezone(monkeypatch: Any):
@@ -59,22 +50,14 @@ def test_periodic_frame_buckets_utc_events_in_configured_timezone(monkeypatch: A
 
 
 def _monthly_completion_df() -> pd.DataFrame:
-    data = {
-        "root_project_name": ["Project A", "Project A", "Project A", "Project A"],
-        "root_project_id": ["proj_a"] * 4,
-        "type": ["completed", "completed", "completed", "completed"],
-        "parent_item_id": ["task1", "task2", "task3", "task4"],
-        "title": ["Task 1", "Task 2", "Task 3", "Task 4"],
-    }
-    dates = [
-        datetime(2024, 4, 10, 12, 0, 0),
-        datetime(2024, 4, 20, 12, 0, 0),
-        datetime(2024, 5, 3, 12, 0, 0),
-        datetime(2024, 5, 10, 12, 0, 0),
-    ]
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-    return df
+    return _completed_df(
+        [
+            ("2024-04-10", "Project A", "task1", "Task 1"),
+            ("2024-04-20", "Project A", "task2", "Task 2"),
+            ("2024-05-03", "Project A", "task3", "Task 3"),
+            ("2024-05-10", "Project A", "task4", "Task 4"),
+        ]
+    )
 
 
 def _weekly_completion_trend_df(*, total_weeks: int = 30) -> pd.DataFrame:
@@ -135,24 +118,14 @@ def _completed_df(rows: list[tuple[Any, ...]]) -> pd.DataFrame:
 def _archived_visibility_df() -> pd.DataFrame:
     return _completed_df(
         [
+            ("2023-03-15", "Deepflare", "deepflare-old", "Deepflare old task"),
             (
-                datetime(2023, 3, 15, 12, 0, 0),
-                "Deepflare",
-                "deepflare-old",
-                "Deepflare old task",
-            ),
-            (
-                datetime(2024, 6, 2, 12, 0, 0),
+                "2024-06-02",
                 "Deepflare",
                 "deepflare-selected",
                 "Deepflare selected task",
             ),
-            (
-                datetime(2023, 5, 10, 12, 0, 0),
-                "OldOnly",
-                "old-only-task",
-                "Old only task",
-            ),
+            ("2023-05-10", "OldOnly", "old-only-task", "Old only task"),
         ]
     )
 
@@ -161,21 +134,14 @@ def _root_project_visibility_df() -> pd.DataFrame:
     return _completed_df(
         [
             (
-                datetime(2024, 6, 2, 12, 0, 0),
+                "2024-06-02",
                 "Academy",
                 "deep-mhc-flare-task",
                 "DeepMhcFlare task",
                 "DeepMhcFlare",
                 "deep-mhc-flare",
             ),
-            (
-                datetime(2024, 6, 3, 12, 0, 0),
-                "skynet",
-                "msft-task",
-                "MSFT task",
-                "MSFT",
-                "msft",
-            ),
+            ("2024-06-03", "skynet", "msft-task", "MSFT task", "MSFT", "msft"),
         ]
     )
 
@@ -197,24 +163,9 @@ def _sparse_cumulative_df() -> pd.DataFrame:
 def _archived_current_period_sparse_df() -> pd.DataFrame:
     return _completed_df(
         [
-            (
-                datetime(2024, 5, 20, 12, 0, 0),
-                "Archived",
-                "archived-old",
-                "Archived old",
-            ),
-            (
-                datetime(2024, 5, 27, 12, 0, 0),
-                "Active",
-                "active-gap",
-                "Active gap",
-            ),
-            (
-                datetime(2024, 6, 3, 12, 0, 0),
-                "Archived",
-                "archived-current",
-                "Archived current",
-            ),
+            ("2024-05-20", "Archived", "archived-old", "Archived old"),
+            ("2024-05-27", "Active", "active-gap", "Active gap"),
+            ("2024-06-03", "Archived", "archived-current", "Archived current"),
         ]
     )
 
@@ -436,24 +387,9 @@ def test_completed_tasks_periodically_hides_inactive_projects_in_range(
     fig = plot_func(
         _completed_df(
             [
-                (
-                    datetime(2024, 5, 24, 12, 0, 0),
-                    "Project B",
-                    "task3",
-                    "Task 3",
-                ),
-                (
-                    datetime(2024, 6, 3, 12, 0, 0),
-                    "Project A",
-                    "task1",
-                    "Task 1",
-                ),
-                (
-                    datetime(2024, 6, 4, 12, 0, 0),
-                    "Project A",
-                    "task2",
-                    "Task 2",
-                ),
+                ("2024-05-24", "Project B", "task3", "Task 3"),
+                ("2024-06-03", "Project A", "task1", "Task 1"),
+                ("2024-06-04", "Project A", "task2", "Task 2"),
             ]
         ),
         datetime(2024, 6, 1),
