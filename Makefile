@@ -2,7 +2,7 @@
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/status.py
+PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/loc_audit.py scripts/resolve_llm_backend.py scripts/status.py
 PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
 PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
 CHECK_FAST_TARGETS := check_explicit_any ruff
@@ -80,6 +80,9 @@ stop_dashboard:
 
 status: ## Show local dashboard/API/frontend runtime status
 	@PYTHONPATH=. uv run python3 -m scripts.status
+
+loc_audit: ## Count tracked Python and source lines
+	@PYTHONPATH=. uv run python3 -m scripts.loc_audit
 
 run_demo: ensure_frontend_deps
 	@bash -c '\
