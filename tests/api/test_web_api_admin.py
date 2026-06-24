@@ -6,12 +6,38 @@ from typing import cast
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
+import pytest
 
 import todoist.database.dataframe as dataframe_module
 from todoist.core.utils import MaxRetriesExceeded
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
+
+
+def _client() -> TestClient:
+    return TestClient(web_api.app)
+
+
+def _pending_gmail_status(port: int, started_at: str) -> dict[str, object]:
+    auth_url = f"http://127.0.0.1:{port}/auth"
+    redirect_uri = f"http://127.0.0.1:{port}/"
+    return {
+        "credentialsPresent": True,
+        "tokenPresent": False,
+        "connected": False,
+        "credentialsPath": "gmail_credentials.json",
+        "tokenPath": "gmail_token.json",
+        "detail": "Pending authorization",
+        "setupDocPath": "docs/gmail_setup.md",
+        "pendingAuth": {
+            "active": True,
+            "authUrl": auth_url,
+            "redirectUri": redirect_uri,
+            "startedAt": started_at,
+            "error": None,
+        },
+    }
 
 
 def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) -> None:
@@ -35,8 +61,7 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) 
         web_api, "_load_projects_for_adjustments_sync", _fake_projects_for_adjustments
     )
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/admin/project_adjustments")
+    res = _client().get("/api/admin/project_adjustments")
     assert res.status_code == 200
     payload = res.json()
 
@@ -85,9 +110,7 @@ def test_admin_save_project_adjustments_roundtrips_safe_literals(
             ["Inbox"],
         ),
     )
-    client = TestClient(web_api.app)
-
-    response = client.put(
+    response = _client().put(
         "/api/admin/project_adjustments",
         params={"file": "adj_private.py", "refresh": "false"},
         json={
@@ -131,8 +154,7 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
 
     monkeypatch.setattr(web_api, "_ensure_state", _boom)
 
-    client = TestClient(web_api.app)
-    response = client.put(
+    response = _client().put(
         "/api/admin/project_adjustments",
         params={"file": "adj_private.py", "refresh": "true"},
         json={"mappings": {"Archived Research": "Academy"}},
@@ -152,8 +174,21 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
     assert archived_parents == []
 
 
-def test_admin_save_project_adjustments_rejects_active_child_source(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    ("body", "expected_detail"),
+    [
+        (
+            {"mappings": {"DeepMhcFlare": "deepflare"}},
+            "Mapping sources must be archived projects",
+        ),
+        (
+            {"mappings": {}, "archivedParents": ["DeepMhcFlare"]},
+            "archivedParents must contain archived projects only",
+        ),
+    ],
+)
+def test_admin_save_project_adjustments_rejects_active_project_inputs(
+    monkeypatch, tmp_path, body, expected_detail
 ) -> None:
     personal_dir = tmp_path / "personal"
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
@@ -167,46 +202,15 @@ def test_admin_save_project_adjustments_rejects_active_child_source(
             ["Inbox"],
         ),
     )
-    client = TestClient(web_api.app)
 
-    response = client.put(
+    response = _client().put(
         "/api/admin/project_adjustments",
         params={"file": "adj_private.py", "refresh": "false"},
-        json={"mappings": {"DeepMhcFlare": "deepflare"}},
+        json=body,
     )
 
     assert response.status_code == 400
-    assert "Mapping sources must be archived projects" in response.json()["detail"]
-
-
-def test_admin_save_project_adjustments_rejects_active_archived_parent(
-    monkeypatch, tmp_path
-) -> None:
-    personal_dir = tmp_path / "personal"
-    monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
-    monkeypatch.setattr(
-        web_api,
-        "_load_projects_for_adjustments_sync",
-        lambda refresh: (
-            ["Academy"],
-            ["deepflare"],
-            ["deepflare"],
-            ["Inbox"],
-        ),
-    )
-    client = TestClient(web_api.app)
-
-    response = client.put(
-        "/api/admin/project_adjustments",
-        params={"file": "adj_private.py", "refresh": "false"},
-        json={"mappings": {}, "archivedParents": ["DeepMhcFlare"]},
-    )
-
-    assert response.status_code == 400
-    assert (
-        "archivedParents must contain archived projects only"
-        in response.json()["detail"]
-    )
+    assert expected_detail in response.json()["detail"]
 
 
 def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
@@ -289,8 +293,7 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None
 
     monkeypatch.setattr(web_api, "Database", _FakeDatabase)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/admin/dashboard/labels")
+    res = _client().get("/api/admin/dashboard/labels")
     assert res.status_code == 200
     payload = res.json()
     assert payload["labels"] == [
@@ -329,8 +332,7 @@ def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
         ],
     )
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/admin/automations")
+    res = _client().get("/api/admin/automations")
 
     assert res.status_code == 200
     payload = res.json()
@@ -485,8 +487,7 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
     monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
 
-    client = TestClient(web_api.app)
-    res = client.post(
+    res = _client().post(
         "/api/admin/automations/gmail_tasks/enabled", json={"enabled": True}
     )
 
@@ -521,8 +522,7 @@ def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path) -> None:
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
-    client = TestClient(web_api.app)
-    res = client.put(
+    res = _client().put(
         "/api/admin/stale_tasks",
         json={
             "oldAfterDays": 14,
@@ -563,8 +563,7 @@ def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path) 
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
-    client = TestClient(web_api.app)
-    res = client.put(
+    res = _client().put(
         "/api/admin/multiplication",
         json={
             "flatLeafTemplate": "{base} #{i}",
@@ -640,104 +639,52 @@ def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
 
-    client = TestClient(web_api.app)
-    res = client.post("/api/admin/automations/gmail/connect")
+    res = _client().post("/api/admin/automations/gmail/connect")
 
     assert res.status_code == 400
     assert "gmail_credentials.json is required" in res.json()["detail"]
 
 
-def test_admin_gmail_connect_reports_connected(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
-    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(
-        web_api,
-        "_start_gmail_manual_auth_session",
-        lambda: web_api._PendingGmailAuthSession(
-            state="state-1",
-            auth_url="http://127.0.0.1:9999/auth",
-            redirect_uri="http://127.0.0.1:9999/",
-            started_at="2026-03-29T12:00:00",
-        ),
-    )
-    monkeypatch.setattr(
-        web_api,
-        "_gmail_automation_status",
-        lambda: {
-            "credentialsPresent": True,
-            "tokenPresent": False,
-            "connected": False,
-            "credentialsPath": "gmail_credentials.json",
-            "tokenPath": "gmail_token.json",
-            "detail": "Pending authorization",
-            "setupDocPath": "docs/gmail_setup.md",
-            "pendingAuth": {
-                "active": True,
-                "authUrl": "http://127.0.0.1:9999/auth",
-                "redirectUri": "http://127.0.0.1:9999/",
-                "startedAt": "2026-03-29T12:00:00",
-                "error": None,
-            },
-        },
-    )
-
-    client = TestClient(web_api.app)
-    res = client.post("/api/admin/automations/gmail/connect")
-
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["credentialsPresent"] is True
-    assert payload["connected"] is False
-    assert payload["authUrl"] == "http://127.0.0.1:9999/auth"
-    assert payload["pendingAuth"]["active"] is True
-
-
-def test_admin_gmail_connect_accepts_repo_root_credentials_by_default(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    ("port", "state", "started_at", "use_config_dir"),
+    [
+        (9999, "state-1", "2026-03-29T12:00:00", True),
+        (9998, "state-2", "2026-03-29T12:05:00", False),
+    ],
+)
+def test_admin_gmail_connect_reports_pending_auth(
+    monkeypatch, tmp_path, port, state, started_at, use_config_dir
 ) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv(str(web_api.EnvVar.CONFIG_DIR), raising=False)
+    if use_config_dir:
+        monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
+    else:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(str(web_api.EnvVar.CONFIG_DIR), raising=False)
     (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         web_api,
         "_start_gmail_manual_auth_session",
         lambda: web_api._PendingGmailAuthSession(
-            state="state-2",
-            auth_url="http://127.0.0.1:9998/auth",
-            redirect_uri="http://127.0.0.1:9998/",
-            started_at="2026-03-29T12:05:00",
+            state=state,
+            auth_url=f"http://127.0.0.1:{port}/auth",
+            redirect_uri=f"http://127.0.0.1:{port}/",
+            started_at=started_at,
         ),
     )
     monkeypatch.setattr(
         web_api,
         "_gmail_automation_status",
-        lambda: {
-            "credentialsPresent": True,
-            "tokenPresent": False,
-            "connected": False,
-            "credentialsPath": "gmail_credentials.json",
-            "tokenPath": "gmail_token.json",
-            "detail": "Pending authorization",
-            "setupDocPath": "docs/gmail_setup.md",
-            "pendingAuth": {
-                "active": True,
-                "authUrl": "http://127.0.0.1:9998/auth",
-                "redirectUri": "http://127.0.0.1:9998/",
-                "startedAt": "2026-03-29T12:05:00",
-                "error": None,
-            },
-        },
+        lambda: _pending_gmail_status(port, started_at),
     )
 
-    client = TestClient(web_api.app)
-    res = client.post("/api/admin/automations/gmail/connect")
+    res = _client().post("/api/admin/automations/gmail/connect")
 
     assert res.status_code == 200
     payload = res.json()
     assert payload["credentialsPresent"] is True
-    assert payload["authUrl"] == "http://127.0.0.1:9998/auth"
+    assert payload["authUrl"] == f"http://127.0.0.1:{port}/auth"
+    assert payload["pendingAuth"]["active"] is True
 
 
 def test_gmail_automation_status_uses_safe_path_labels(monkeypatch, tmp_path) -> None:
@@ -858,8 +805,7 @@ def test_admin_run_observer_reports_idle_polling_automations(
     monkeypatch.setattr(web_api, "Database", _FakeDatabase)
     monkeypatch.setattr(web_api, "_build_observer", lambda db: _FakeObserver())
 
-    client = TestClient(web_api.app)
-    res = client.post("/api/admin/observer/run")
+    res = _client().post("/api/admin/observer/run")
     assert res.status_code == 200
     payload = res.json()
     assert payload["state"]["lastStatus"] == "ran"
