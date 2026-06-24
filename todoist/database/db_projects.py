@@ -119,7 +119,6 @@ class DatabaseProjects:
             return self.projects_cache
         logger.debug("Projects not fetched yet. Fetching now.")
 
-        result: list[Project] = []
         projects: list[ProjectEntry] = self._fetch_projects_data()
 
         if not include_tasks:
