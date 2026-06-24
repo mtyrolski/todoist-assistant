@@ -6,17 +6,16 @@ import asyncio
 import contextlib
 import io
 import os
-import re
 import signal
 import subprocess
 import threading
-from uuid import uuid4
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 import hydra
 from google.oauth2.credentials import Credentials
@@ -86,6 +85,39 @@ _JOBS: dict[str, _AdminJob] = {}
 _GMAIL_AUTH_LOCK = threading.Lock()
 _GMAIL_AUTH_SESSION: _PendingGmailAuthSession | None = None
 _OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
+_SIGNAL_FIELDS = (
+    "attemptCount",
+    "successCount",
+    "failureCount",
+    "skipCount",
+    "lastStatus",
+    "lastStartedAt",
+    "lastFinishedAt",
+    "lastDurationSeconds",
+    "lastError",
+    "lastSuccessAt",
+)
+_OBSERVER_STATE_FIELDS = (
+    "refreshIntervalMinutes",
+    "refreshIntervalSeconds",
+    "updatedAt",
+    "lastRunAt",
+    "lastDurationSeconds",
+    "lastEvents",
+    "lastAutomationsRan",
+    "lastStatus",
+    "lastError",
+)
+_JOB_FIELDS = (
+    ("id", "id"),
+    ("kind", "kind"),
+    ("status", "status"),
+    ("createdAt", "created_at"),
+    ("startedAt", "started_at"),
+    ("finishedAt", "finished_at"),
+    ("result", "result"),
+    ("error", "error"),
+)
 
 
 def _now_iso() -> str:
@@ -110,6 +142,11 @@ def _safe_display_path(path: Path, *, root: Path | None = None) -> str:
     return name or str(path)
 
 
+def _env_path(name: str, default: Path) -> Path:
+    override = os.getenv(name)
+    return Path(override).expanduser().resolve() if override else default
+
+
 def _read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
     if not path.exists():
         if required:
@@ -124,17 +161,13 @@ def _save_yaml_config(path: Path, config: DictConfig) -> None:
 
 
 def _dashboard_state_dir() -> Path:
-    override = os.getenv("DASHBOARD_STATE_DIR")
-    if override:
-        return Path(override).expanduser().resolve()
-    return _REPO_ROOT / ".cache" / "todoist-assistant" / "dashboard"
+    return _env_path(
+        "DASHBOARD_STATE_DIR", _REPO_ROOT / ".cache" / "todoist-assistant" / "dashboard"
+    )
 
 
 def _dashboard_pid_dir() -> Path:
-    override = os.getenv("DASHBOARD_PID_DIR")
-    if override:
-        return Path(override).expanduser().resolve()
-    return _dashboard_state_dir() / "pids"
+    return _env_path("DASHBOARD_PID_DIR", _dashboard_state_dir() / "pids")
 
 
 def _clear_gmail_auth_session() -> None:
@@ -191,6 +224,15 @@ def _automation_ref(key: str) -> str:
     return f"${{{key}}}"
 
 
+def _automation_ref_key(value: Any) -> str | None:
+    item = str(value).strip()
+    if item.startswith("${") and item.endswith("}"):
+        key = item[2:-1]
+        if key and all(char.isalnum() or char in "_-" for char in key):
+            return key
+    return None
+
+
 def _automation_requires_auth(key: str) -> bool:
     return key in {"gmail_tasks"}
 
@@ -207,27 +249,22 @@ def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
     raw = config.get("automations")
     if not isinstance(raw, Sequence):
         return []
+
     target_to_keys: dict[str, list[str]] = {}
     for key in _available_automation_keys(config):
-        section = config.get(key)
-        if isinstance(section, Mapping):
-            target = section.get("_target_")
-            if isinstance(target, str) and target:
-                target_to_keys.setdefault(target, []).append(key)
+        if isinstance(section := config.get(key), Mapping) and isinstance(
+            target := section.get("_target_"), str
+        ):
+            target_to_keys.setdefault(target, []).append(key)
+
     keys: list[str] = []
     for item in raw:
         if isinstance(item, Mapping):
-            target = item.get("_target_")
-            if isinstance(target, str):
-                matched_keys = target_to_keys.get(target, [])
-                if len(matched_keys) == 1:
-                    keys.append(matched_keys[0])
-                    continue
-            continue
-        item_str = str(item).strip()
-        match = re.fullmatch(r"\$\{([a-zA-Z0-9_-]+)\}", item_str)
-        if match:
-            keys.append(match.group(1))
+            matched = target_to_keys.get(str(item.get("_target_")), [])
+            if len(matched) == 1:
+                keys.append(matched[0])
+        elif (key := _automation_ref_key(item)) is not None:
+            keys.append(key)
     return keys
 
 
@@ -244,18 +281,7 @@ def _automation_run_signal_metadata(automation_name: str) -> dict[str, Any]:
     signal_payload = signals.get(automation_name)
     if not isinstance(signal_payload, Mapping):
         return {}
-    return {
-        "attemptCount": signal_payload.get("attemptCount"),
-        "successCount": signal_payload.get("successCount"),
-        "failureCount": signal_payload.get("failureCount"),
-        "skipCount": signal_payload.get("skipCount"),
-        "lastStatus": signal_payload.get("lastStatus"),
-        "lastStartedAt": signal_payload.get("lastStartedAt"),
-        "lastFinishedAt": signal_payload.get("lastFinishedAt"),
-        "lastDurationSeconds": signal_payload.get("lastDurationSeconds"),
-        "lastError": signal_payload.get("lastError"),
-        "lastSuccessAt": signal_payload.get("lastSuccessAt"),
-    }
+    return {field: signal_payload.get(field) for field in _SIGNAL_FIELDS}
 
 
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
@@ -307,12 +333,15 @@ def _load_automation_inventory(
     return inventory
 
 
+def _enabled_refs(config: Mapping[str, Any], keys: Sequence[str]) -> list[str]:
+    key_set = set(keys)
+    return [_automation_ref(key) for key in _available_automation_keys(config) if key in key_set]
+
+
 def _save_enabled_automations(keys: Sequence[str], *, path: Path | None = None) -> None:
     config_path = path or AUTOMATIONS_PATH
     config = _read_yaml_config(config_path)
-    available_keys = _available_automation_keys(config)
-    normalized = [key for key in available_keys if key in set(keys)]
-    config["automations"] = [_automation_ref(key) for key in normalized]
+    config["automations"] = _enabled_refs(config, keys)
     _save_yaml_config(config_path, config)
 
 
@@ -328,16 +357,12 @@ def _set_automation_enabled(
     if key not in available_keys:
         return False
 
-    enabled_keys = _enabled_automation_keys(config)
-    next_keys = [item for item in enabled_keys if item != key]
+    next_keys = [item for item in _enabled_automation_keys(config) if item != key]
     if enabled:
-        insert_at = max(0, available_keys.index(key))
-        ordered = [item for item in available_keys if item in next_keys]
-        if key not in ordered:
-            ordered.insert(insert_at, key)
-        next_keys = ordered
-
-    config["automations"] = [_automation_ref(item) for item in next_keys]
+        next_keys = [item for item in available_keys if item in next_keys]
+        if key not in next_keys:
+            next_keys.insert(max(0, available_keys.index(key)), key)
+    config["automations"] = _enabled_refs(config, next_keys)
     _save_yaml_config(config_path, config)
     return True
 
@@ -428,26 +453,7 @@ def _gmail_automation_status(
                 token_detail = "Token present but invalid"
         except Exception as exc:  # pragma: no cover - defensive
             token_detail = f"Token unreadable ({type(exc).__name__})"
-    session = _current_gmail_auth_session()
-    pending_auth: dict[str, Any] | None = None
-    if session is not None and not session.completed:
-        pending_auth = {
-            "active": True,
-            "authUrl": session.auth_url,
-            "redirectUri": session.redirect_uri,
-            "startedAt": session.started_at,
-            "error": session.error,
-        }
-    elif session is not None and session.error:
-        pending_auth = {
-            "active": False,
-            "authUrl": session.auth_url,
-            "redirectUri": session.redirect_uri,
-            "startedAt": session.started_at,
-            "error": session.error,
-        }
-        if token_present:
-            _clear_gmail_auth_session()
+    pending_auth = _pending_gmail_auth_payload(token_present=token_present)
 
     status = {
         "credentialsPresent": credentials_present,
@@ -467,6 +473,21 @@ def _gmail_automation_status(
     if pending_auth is not None:
         status["pendingAuth"] = pending_auth
     return status
+
+
+def _pending_gmail_auth_payload(*, token_present: bool) -> dict[str, Any] | None:
+    session = _current_gmail_auth_session()
+    if session is None or (session.completed and not session.error):
+        return None
+    if token_present and session.error:
+        _clear_gmail_auth_session()
+    return {
+        "active": not session.completed,
+        "authUrl": session.auth_url,
+        "redirectUri": session.redirect_uri,
+        "startedAt": session.started_at,
+        "error": session.error,
+    }
 
 
 def _start_gmail_manual_auth_session(
@@ -573,18 +594,8 @@ def _load_observer_state(*, cache: Cache | None = None) -> dict[str, Any]:
 
 
 def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
-    enabled = bool(payload.get("enabled", True))
-    return {
-        "enabled": enabled,
-        "refreshIntervalMinutes": payload.get("refreshIntervalMinutes"),
-        "refreshIntervalSeconds": payload.get("refreshIntervalSeconds"),
-        "updatedAt": payload.get("updatedAt"),
-        "lastRunAt": payload.get("lastRunAt"),
-        "lastDurationSeconds": payload.get("lastDurationSeconds"),
-        "lastEvents": payload.get("lastEvents"),
-        "lastAutomationsRan": payload.get("lastAutomationsRan"),
-        "lastStatus": payload.get("lastStatus"),
-        "lastError": payload.get("lastError"),
+    return {"enabled": bool(payload.get("enabled", True))} | {
+        field: payload.get(field) for field in _OBSERVER_STATE_FIELDS
     }
 
 
@@ -643,6 +654,10 @@ async def _update_job(job_id: str, **fields: Any) -> None:
             setattr(job, key, value)
 
 
+async def _finish_job(job_id: str, status: str, **fields: Any) -> None:
+    await _update_job(job_id, status=status, finished_at=_now_iso(), **fields)
+
+
 def _run_automation_sync(
     automation: Automation,
     *,
@@ -688,8 +703,6 @@ def _run_automation_sync(
 
 def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
-    completed = 0
-    failed = 0
 
     for automation in _load_automations():
         result = _run_automation_sync(
@@ -698,78 +711,51 @@ def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
             continue_on_error=True,
         )
         results.append(result)
-        if result["status"] == "failed":
-            failed += 1
-        else:
-            completed += 1
         dbio.reset()
 
+    failed = sum(item["status"] == "failed" for item in results)
     return {
         "results": results,
-        "summary": {
-            "completed": completed,
-            "failed": failed,
-            "skipped": 0,
-        },
+        "summary": {"completed": len(results) - failed, "failed": failed, "skipped": 0},
     }
+
+
+async def _run_with_db(func: Any, *args: Any) -> Any:
+    dbio = Database(".env")
+    dbio.pull()
+    try:
+        return await asyncio.to_thread(func, *args, dbio=dbio)
+    finally:
+        dbio.reset()
+
+
+async def _run_job(job_id: str, func: Any, *args: Any) -> None:
+    await _update_job(job_id, status="running", started_at=_now_iso())
+    try:
+        async with ADMIN_AUTOMATIONS_LOCK:
+            result = await func(*args)
+        await _finish_job(job_id, "done", result=result)
+    except Exception as exc:  # pragma: no cover - defensive
+        await _finish_job(job_id, "failed", error=f"{type(exc).__name__}: {exc}")
+
+
+async def _run_named_automation(name: str) -> dict[str, Any]:
+    automations = {a.name: a for a in _load_automations()}
+    if name not in automations:
+        raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
+    return cast(dict[str, Any], await _run_with_db(_run_automation_sync, automations[name]))
 
 
 async def _run_automation_job(*, job_id: str, name: str) -> None:
-    await _update_job(job_id, status="running", started_at=_now_iso())
-    try:
-        async with ADMIN_AUTOMATIONS_LOCK:
-            automations = {a.name: a for a in _load_automations()}
-            if name not in automations:
-                raise HTTPException(
-                    status_code=404, detail=f"Unknown automation: {name}"
-                )
-
-            dbio = Database(".env")
-            dbio.pull()
-            result = await asyncio.to_thread(
-                _run_automation_sync, automations[name], dbio=dbio
-            )
-            dbio.reset()
-
-        await _update_job(job_id, status="done", finished_at=_now_iso(), result=result)
-    except Exception as exc:  # pragma: no cover - defensive
-        await _update_job(
-            job_id,
-            status="failed",
-            finished_at=_now_iso(),
-            error=f"{type(exc).__name__}: {exc}",
-        )
+    await _run_job(job_id, _run_named_automation, name)
 
 
 async def _run_all_automations_job(*, job_id: str) -> None:
-    await _update_job(job_id, status="running", started_at=_now_iso())
-    try:
-        async with ADMIN_AUTOMATIONS_LOCK:
-            dbio = Database(".env")
-            dbio.pull()
-            result = await asyncio.to_thread(_run_all_automations_sync, dbio=dbio)
-
-        await _update_job(job_id, status="done", finished_at=_now_iso(), result=result)
-    except Exception as exc:  # pragma: no cover - defensive
-        await _update_job(
-            job_id,
-            status="failed",
-            finished_at=_now_iso(),
-            error=f"{type(exc).__name__}: {exc}",
-        )
+    await _run_job(job_id, _run_with_db, _run_all_automations_sync)
 
 
 def _serialize_job(job: _AdminJob) -> dict[str, Any]:
-    return {
-        "id": job.id,
-        "kind": job.kind,
-        "status": job.status,
-        "createdAt": job.created_at,
-        "startedAt": job.started_at,
-        "finishedAt": job.finished_at,
-        "result": job.result,
-        "error": job.error,
-    }
+    return {payload_key: getattr(job, attr) for payload_key, attr in _JOB_FIELDS}
 
 
 def _admin_observer_payload(
@@ -923,32 +909,15 @@ async def admin_run_observer(*, force: bool = False) -> dict[str, Any]:
 
 
 async def admin_run_automation(name: str, *, refresh: bool = False) -> dict[str, Any]:
+    _ = refresh
     async with ADMIN_AUTOMATIONS_LOCK:
-        automations = {a.name: a for a in _load_automations()}
-        if name not in automations:
-            raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
-
-        dbio = Database(".env")
-        dbio.pull()
-        result = await asyncio.to_thread(
-            _run_automation_sync, automations[name], dbio=dbio
-        )
-        dbio.reset()
-
-        if refresh:
-            return result
-        return result
+        return await _run_named_automation(name)
 
 
 async def admin_run_all_automations(*, refresh: bool = False) -> dict[str, Any]:
+    _ = refresh
     async with ADMIN_AUTOMATIONS_LOCK:
-        dbio = Database(".env")
-        dbio.pull()
-        result = await asyncio.to_thread(_run_all_automations_sync, dbio=dbio)
-
-        if refresh:
-            return result
-        return result
+        return cast(dict[str, Any], await _run_with_db(_run_all_automations_sync))
 
 
 async def admin_job(job_id: str) -> dict[str, Any]:

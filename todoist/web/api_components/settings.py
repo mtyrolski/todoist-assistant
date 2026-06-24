@@ -1,7 +1,8 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from fastapi import HTTPException
 from omegaconf import DictConfig, OmegaConf
 
 from todoist.automations.multiplicate.automation import MultiplyConfig
@@ -10,6 +11,52 @@ from todoist.web.dashboard_payload import (
     DEFAULT_URGENCY_SETTINGS,
     normalize_plot_events,
 )
+
+
+def body_object(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    return payload
+
+
+def coerce_int(value: Any, field: str, *, minimum: int | None = None) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        suffix = "non-negative integer" if minimum == 0 else "integer"
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be a {suffix}"
+        ) from exc
+    return max(minimum, result) if minimum is not None else result
+
+
+def required_non_negative(payload: Mapping[str, Any], key: str) -> int:
+    if payload.get(key) is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{key} must be a non-negative integer",
+        )
+    return coerce_int(payload[key], key, minimum=0)
+
+
+def as_sequence(value: Any, field: str, *, allow_str: bool = False) -> Sequence[Any]:
+    if not isinstance(value, Sequence) or (isinstance(value, str) and not allow_str):
+        raise HTTPException(status_code=400, detail=f"{field} must be a list")
+    return value
+
+
+def plain_dict(value: Any) -> dict[str, Any]:
+    data = OmegaConf.to_container(value, resolve=False) if value else {}
+    return cast(dict[str, Any], data) if isinstance(data, dict) else {}
+
+
+def nested_config(config: Any, key: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    existing = plain_dict(config.get(key) or {})
+    config_data = (
+        existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+    )
+    existing["config"] = dict(config_data) if isinstance(config_data, Mapping) else {}
+    return existing, existing["config"]
 
 
 def llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
