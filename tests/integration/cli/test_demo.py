@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime, timedelta
+from collections.abc import Mapping
 from typing import cast
 
 import pytest
@@ -13,6 +14,8 @@ from todoist.database.demo import (
 )
 from todoist.web.dashboard_payload import normalize_activity_df
 
+BASE = datetime(2024, 1, 1, 9)
+
 
 def _duration(index: pd.Index) -> pd.Timedelta:
     if not isinstance(index, pd.DatetimeIndex) or index.empty:
@@ -24,8 +27,27 @@ def _duration(index: pd.Index) -> pd.Timedelta:
     return cast(pd.Timedelta, end - start)
 
 
+def _activity_df(rows: list[Mapping[str, object]]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
+def _completed_row(
+    days: int, event_id: str, project: str, task_id: str, root: str = "Alpha"
+) -> dict[str, object]:
+    date = BASE + timedelta(days=days)
+    return {
+        "date": date,
+        "id": event_id,
+        "type": "completed",
+        "parent_project_name": project,
+        "root_project_name": root,
+        "task_id": task_id,
+    }
+
+
 def test_anonymize_activity_dates_preserves_task_durations():
-    base = datetime(2024, 1, 1, 9, 0, 0)
     data = {
         "task_id": ["task1", "task1", "task2", "task2"],
         "type": ["added", "completed", "added", "completed"],
@@ -38,10 +60,10 @@ def test_anonymize_activity_dates_preserves_task_durations():
         "parent_item_id": ["task1", "task1", "task2", "task2"],
     }
     dates = [
-        base,
-        base + timedelta(hours=2),
-        base + timedelta(days=1),
-        base + timedelta(days=3),
+        BASE,
+        BASE + timedelta(hours=2),
+        BASE + timedelta(days=1),
+        BASE + timedelta(days=3),
     ]
     df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
     df.index.name = "date"
@@ -55,16 +77,15 @@ def test_anonymize_activity_dates_preserves_task_durations():
 
 
 def test_anonymize_activity_dates_keeps_date_column_in_sync_after_normalization():
-    base = datetime(2024, 1, 1, 9, 0, 0)
     df = pd.DataFrame(
         {
             "task_id": ["task1", "task1"],
             "type": ["added", "completed"],
             "id": ["e1", "e2"],
-            "date": [base, base + timedelta(hours=1)],
+            "date": [BASE, BASE + timedelta(hours=1)],
             "parent_item_id": ["task1", "task1"],
         },
-        index=pd.DatetimeIndex([base, base + timedelta(hours=1)]),
+        index=pd.DatetimeIndex([BASE, BASE + timedelta(hours=1)]),
     )
     df.index.name = "date"
 
@@ -76,7 +97,6 @@ def test_anonymize_activity_dates_keeps_date_column_in_sync_after_normalization(
 
 
 def test_anonymize_project_names_uses_stable_hierarchy_themes():
-    base = datetime(2024, 1, 1, 9, 0, 0)
     active_projects = [
         make_project(
             project_id="root-alpha",
@@ -122,60 +142,16 @@ def test_anonymize_project_names_uses_stable_hierarchy_themes():
             ),
         ),
     ]
-    df = pd.DataFrame(
+    df = _activity_df(
         [
-            {
-                "date": base,
-                "id": "e1",
-                "type": "completed",
-                "parent_project_name": "Alpha",
-                "root_project_name": "Alpha",
-                "task_id": "t1",
-            },
-            {
-                "date": base + timedelta(days=1),
-                "id": "e2",
-                "type": "completed",
-                "parent_project_name": "Alpha Child One",
-                "root_project_name": "Alpha",
-                "task_id": "t2",
-            },
-            {
-                "date": base + timedelta(days=2),
-                "id": "e3",
-                "type": "completed",
-                "parent_project_name": "Alpha Grandchild",
-                "root_project_name": "Alpha",
-                "task_id": "t3",
-            },
-            {
-                "date": base + timedelta(days=3),
-                "id": "e4",
-                "type": "completed",
-                "parent_project_name": "Alpha Child Two",
-                "root_project_name": "Alpha",
-                "task_id": "t4",
-            },
-            {
-                "date": base + timedelta(days=4),
-                "id": "e5",
-                "type": "completed",
-                "parent_project_name": "Beta",
-                "root_project_name": "Beta",
-                "task_id": "t5",
-            },
-            {
-                "date": base + timedelta(days=5),
-                "id": "e6",
-                "type": "completed",
-                "parent_project_name": "Legacy Project",
-                "root_project_name": "Legacy Project",
-                "task_id": "t6",
-            },
+            _completed_row(0, "e1", "Alpha", "t1"),
+            _completed_row(1, "e2", "Alpha Child One", "t2"),
+            _completed_row(2, "e3", "Alpha Grandchild", "t3"),
+            _completed_row(3, "e4", "Alpha Child Two", "t4"),
+            _completed_row(4, "e5", "Beta", "t5", "Beta"),
+            _completed_row(5, "e6", "Legacy Project", "t6", "Legacy Project"),
         ]
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.set_index("date")
 
     anonymized_df = df.copy()
     result = anonymize_project_names(anonymized_df, active_projects)

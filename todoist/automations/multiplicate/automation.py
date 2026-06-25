@@ -153,32 +153,17 @@ def _depth_sort_children_first(tasks: list[Task]) -> list[Task]:
     return sorted(tasks, key=depth, reverse=True)
 
 
-def _flat_factor_from_labels(
-    labels: Iterable[str], flat_label_pattern: re.Pattern[str]
+def _factor_from_labels(
+    labels: Iterable[str], label_pattern: re.Pattern[str], *, kind: str
 ) -> int | None:
-    matched = [label for label in labels if flat_label_pattern.match(label) is not None]
+    matched = [label for label in labels if label_pattern.match(label) is not None]
     if not matched:
         return None
     if len(matched) != 1:
         raise ValueError(
-            f"Expected exactly one flat multiplication label, found: {matched}"
+            f"Expected exactly one {kind} multiplication label, found: {matched}"
         )
-    match = flat_label_pattern.match(matched[0])
-    assert match is not None
-    return int(match.group("n"))
-
-
-def _deep_factor_from_labels(
-    labels: Iterable[str], deep_label_pattern: re.Pattern[str]
-) -> int | None:
-    matched = [label for label in labels if deep_label_pattern.match(label) is not None]
-    if not matched:
-        return None
-    if len(matched) != 1:
-        raise ValueError(
-            f"Expected exactly one deep multiplication label, found: {matched}"
-        )
-    match = deep_label_pattern.match(matched[0])
+    match = label_pattern.match(matched[0])
     assert match is not None
     return int(match.group("n"))
 
@@ -380,11 +365,11 @@ class Multiply(Automation):
         task: Task,
     ) -> None:
         try:
-            flat_n = _flat_factor_from_labels(
-                task.task_entry.labels, self._flat_label_pattern
+            flat_n = _factor_from_labels(
+                task.task_entry.labels, self._flat_label_pattern, kind="flat"
             )
-            deep_n = _deep_factor_from_labels(
-                task.task_entry.labels, self._deep_label_pattern
+            deep_n = _factor_from_labels(
+                task.task_entry.labels, self._deep_label_pattern, kind="deep"
             )
         except ValueError as e:
             logger.error(f"Task {task.id}: {e}")

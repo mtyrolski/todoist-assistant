@@ -150,6 +150,34 @@ class _PeriodicForecastContext:
     show_forecast: bool
 
 
+@dataclass(frozen=True)
+class _PeriodicPlotConfig:
+    cumulative: bool
+    total_name: str
+    title_prefix: str
+    yaxis_title: str
+    line_shape: str
+    hover_total_suffix: str
+
+
+_PERIODIC_CONFIG = _PeriodicPlotConfig(
+    cumulative=False,
+    total_name="All Projects (total)",
+    title_prefix="",
+    yaxis_title="Completed Tasks per Project",
+    line_shape="spline",
+    hover_total_suffix=" tasks",
+)
+_CUMULATIVE_CONFIG = _PeriodicPlotConfig(
+    cumulative=True,
+    total_name="All Projects (total cumulative)",
+    title_prefix="Cumulative ",
+    yaxis_title="Cumulative Tasks per Project",
+    line_shape="linear",
+    hover_total_suffix=" cumulative tasks",
+)
+
+
 def _prepare_completed_periodic_frame(
     df: pd.DataFrame,
     *,
@@ -311,12 +339,46 @@ def _series_at_positive_activity_periods(
     return cast(pd.Series, series.loc[active_periods.index])
 
 
-def _add_total_overlay_periodic_traces(
+def _forecast_marker_trace(
+    *,
+    x: datetime,
+    y: float | int,
+    color: str,
+    name: str,
+    legendgroup: str,
+    hovertemplate: str,
+    forecast: bool,
+    marker_size: int | None = None,
+    marker_opacity: float | None = None,
+) -> go.Scatter:
+    return go.Scatter(
+        x=[x],
+        y=[y],
+        mode="markers",
+        marker=(
+            dict(
+                symbol="circle",
+                size=marker_size or 16,
+                color=color,
+                opacity=marker_opacity or 0.92,
+            )
+            if forecast
+            else dict(symbol="circle-open", size=10, line=dict(width=2, color=color))
+        ),
+        name=name,
+        legendgroup=legendgroup,
+        showlegend=False,
+        hovertemplate=hovertemplate,
+    )
+
+
+def _add_total_overlay_traces(
     fig: go.Figure,
     *,
     total_series: pd.Series,
     context: _PeriodicForecastContext,
     total_actual_so_far: int,
+    config: _PeriodicPlotConfig,
 ) -> None:
     if total_series.empty:
         return
@@ -334,13 +396,13 @@ def _add_total_overlay_periodic_traces(
             go.Scatter(
                 x=historical.index,
                 y=historical.astype(float).tolist(),
-                name="All Projects (total)",
+                name=config.total_name,
                 legendgroup="all-projects-total",
-                line_shape="spline",
+                line_shape=config.line_shape,
                 mode="lines+markers",
                 line=dict(color=_ALL_TASKS_TOTAL_COLOR, width=3),
                 marker=dict(size=8, symbol="diamond", color=_ALL_TASKS_TOTAL_COLOR),
-                hovertemplate="<b>All projects</b><br>%{x}: %{y:.0f} tasks<extra></extra>",
+                hovertemplate=f"<b>All projects</b><br>%{{x}}: %{{y:.0f}}{config.hover_total_suffix}<extra></extra>",
             )
         )
 
@@ -352,15 +414,23 @@ def _add_total_overlay_periodic_traces(
     ):
         return
 
-    history_values = (
-        cast(
-            pd.Series,
-            total_series[total_series.index < pd.Timestamp(context.current_label)],
-        )
-        .fillna(0)
-        .astype(float)
-        .tolist()
+    history_source = cast(
+        pd.Series,
+        total_series[total_series.index < pd.Timestamp(context.current_label)],
     )
+    history_values = history_source.fillna(0).astype(float).tolist()
+    if config.cumulative:
+        period_totals = total_series.diff().fillna(total_series).fillna(0)
+        history_values = (
+            cast(
+                pd.Series,
+                period_totals[
+                    period_totals.index < pd.Timestamp(context.current_label)
+                ],
+            )
+            .astype(float)
+            .tolist()
+        )
     recently_active = total_actual_so_far > 0 or any(v > 0 for v in history_values[-4:])
     if not recently_active:
         return
@@ -372,12 +442,22 @@ def _add_total_overlay_periodic_traces(
         period_end=context.current_end,
         as_of=context.as_of,
     )
+    base_total = (
+        float(historical.iloc[-1])
+        if config.cumulative and not historical.empty
+        else 0.0
+    )
+    actual_value = float(base_total + total_actual_so_far)
+    forecast_value = float(base_total + forecast_total)
+    if not config.cumulative:
+        actual_value = float(total_actual_so_far)
+        forecast_value = float(forecast_total)
 
     if not historical.empty:
         fig.add_trace(
             go.Scatter(
                 x=[historical.index[-1], context.current_label],
-                y=[float(historical.iloc[-1]), float(forecast_total)],
+                y=[float(historical.iloc[-1]), forecast_value],
                 mode="lines",
                 line=dict(color=_ALL_TASKS_TOTAL_COLOR, dash="dash", width=2),
                 name="All Projects (forecast line)",
@@ -387,157 +467,292 @@ def _add_total_overlay_periodic_traces(
             )
         )
 
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[float(total_actual_so_far)],
-            mode="markers",
-            marker=dict(
-                symbol="circle-open",
-                size=10,
-                line=dict(width=2, color=_ALL_TASKS_TOTAL_COLOR),
-            ),
-            name="All Projects (so far)",
+    total_suffix = " (cumulative)" if config.cumulative else ""
+    task_suffix = "" if config.cumulative else " tasks"
+    for label, value, forecast in (
+        ("So far", actual_value, False),
+        ("Forecast", forecast_value, True),
+    ):
+        marker_trace = _forecast_marker_trace(
+            x=context.current_label,
+            y=value,
+            color=_ALL_TASKS_TOTAL_COLOR,
+            name=f"All Projects ({'forecast' if forecast else 'so far'})",
             legendgroup="all-projects-total",
-            showlegend=False,
-            hovertemplate="<b>All projects</b><br>So far: %{y:.0f} tasks<extra></extra>",
+            hovertemplate=(
+                f"<b>All projects</b><br>{label}{total_suffix}: "
+                f"%{{y:.0f}}{task_suffix}<extra></extra>"
+            ),
+            forecast=forecast,
+            marker_size=14,
+            marker_opacity=0.82,
         )
+        fig.add_trace(marker_trace)
+
+
+def _project_series_for_mode(
+    *,
+    root_project: str,
+    counts: pd.Series,
+    values: pd.Series,
+    archived_project_names: set[str],
+    config: _PeriodicPlotConfig,
+) -> pd.Series:
+    is_archived_project = root_project in archived_project_names
+    if is_archived_project:
+        if config.cumulative:
+            return _series_at_positive_activity_periods(values, counts)
+        return _positive_activity_periods(counts)
+    return _trim_to_activity_span(values.fillna(0), counts)
+
+
+def _historical_part(
+    series: pd.Series,
+    *,
+    context: _PeriodicForecastContext,
+    is_archived_project: bool,
+) -> pd.Series:
+    if (
+        is_archived_project
+        or not context.show_forecast
+        or context.current_label is None
+    ):
+        return cast(pd.Series, series)
+    return cast(pd.Series, series[series.index < pd.Timestamp(context.current_label)])
+
+
+def _history_totals_for_project(
+    *,
+    values: pd.Series,
+    series: pd.Series,
+    context: _PeriodicForecastContext,
+    config: _PeriodicPlotConfig,
+) -> list[float]:
+    if context.current_label is None:
+        return []
+    source = (
+        values.diff().fillna(values).fillna(0)
+        if config.cumulative
+        else series.fillna(0)
     )
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[float(forecast_total)],
-            mode="markers",
-            marker=dict(
-                symbol="circle",
-                size=14,
-                color=_ALL_TASKS_TOTAL_COLOR,
-                opacity=0.82,
-            ),
-            name="All Projects (forecast)",
-            legendgroup="all-projects-total",
-            showlegend=False,
-            hovertemplate="<b>All projects</b><br>Forecast: %{y:.0f} tasks<extra></extra>",
-        )
+    return (
+        cast(pd.Series, source[source.index < pd.Timestamp(context.current_label)])
+        .astype(float)
+        .tolist()
     )
 
 
-def _add_total_overlay_cumulative_traces(
+def _add_project_forecast_traces(
     fig: go.Figure,
     *,
-    total_cumulative_series: pd.Series,
+    project_name: str,
+    color: str,
+    historical: pd.Series,
+    values: pd.Series,
+    project_series: pd.Series,
+    actual_so_far: int,
     context: _PeriodicForecastContext,
-    total_actual_so_far: int,
+    config: _PeriodicPlotConfig,
 ) -> None:
-    if total_cumulative_series.empty:
-        return
-
-    if context.show_forecast and context.current_label is not None:
-        historical = cast(
-            pd.Series,
-            total_cumulative_series[
-                total_cumulative_series.index < pd.Timestamp(context.current_label)
-            ],
-        )
-    else:
-        historical = cast(pd.Series, total_cumulative_series)
-
-    if not historical.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=historical.index,
-                y=historical.astype(float).tolist(),
-                name="All Projects (total cumulative)",
-                legendgroup="all-projects-total",
-                line_shape="linear",
-                mode="lines+markers",
-                line=dict(color=_ALL_TASKS_TOTAL_COLOR, width=3),
-                marker=dict(size=8, symbol="diamond", color=_ALL_TASKS_TOTAL_COLOR),
-                hovertemplate="<b>All projects</b><br>%{x}: %{y:.0f} cumulative tasks<extra></extra>",
-            )
-        )
-
     if (
         not context.show_forecast
         or context.current_label is None
-        or context.current_start is None
-        or context.current_end is None
+        or not context.current_start
+        or not context.current_end
     ):
         return
 
-    period_totals = (
-        total_cumulative_series.diff().fillna(total_cumulative_series).fillna(0)
+    history_totals = _history_totals_for_project(
+        values=values,
+        series=project_series,
+        context=context,
+        config=config,
     )
-    history_values = (
-        cast(
-            pd.Series,
-            period_totals[period_totals.index < pd.Timestamp(context.current_label)],
-        )
-        .astype(float)
-        .tolist()
-    )
-    recently_active = total_actual_so_far > 0 or any(v > 0 for v in history_values[-4:])
-    if not recently_active:
+    if actual_so_far <= 0 and not any(v > 0 for v in history_totals[-4:]):
         return
 
     forecast_total = forecast_period_total(
-        actual_so_far=int(total_actual_so_far),
-        history_totals=history_values,
+        actual_so_far=actual_so_far,
+        history_totals=history_totals,
         period_start=context.current_start,
         period_end=context.current_end,
         as_of=context.as_of,
     )
-    base_total = float(historical.iloc[-1]) if not historical.empty else 0.0
-    actual_cumulative = float(base_total + total_actual_so_far)
-    forecast_cumulative = float(base_total + forecast_total)
+    base = (
+        float(historical.iloc[-1])
+        if config.cumulative and not historical.empty
+        else 0.0
+    )
+    actual_value = (
+        int(round(base + actual_so_far)) if config.cumulative else actual_so_far
+    )
+    forecast_value = (
+        int(round(base + forecast_total)) if config.cumulative else forecast_total
+    )
 
     if not historical.empty:
         fig.add_trace(
             go.Scatter(
                 x=[historical.index[-1], context.current_label],
-                y=[float(base_total), float(forecast_cumulative)],
+                y=[float(historical.iloc[-1]), float(forecast_value)],
                 mode="lines",
-                line=dict(color=_ALL_TASKS_TOTAL_COLOR, dash="dash", width=2),
-                name="All Projects (forecast line)",
-                legendgroup="all-projects-total",
+                line=dict(color=color, dash="dash", width=2),
+                name=f"{project_name} (forecast line)",
+                legendgroup=project_name,
                 showlegend=False,
                 hoverinfo="skip",
             )
         )
 
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[float(actual_cumulative)],
-            mode="markers",
-            marker=dict(
-                symbol="circle-open",
-                size=10,
-                line=dict(width=2, color=_ALL_TASKS_TOTAL_COLOR),
-            ),
-            name="All Projects (so far)",
-            legendgroup="all-projects-total",
-            showlegend=False,
-            hovertemplate="<b>All projects</b><br>So far (cumulative): %{y:.0f}<extra></extra>",
+    label_suffix = " (cumulative)" if config.cumulative else ""
+    task_suffix = "" if config.cumulative else " tasks"
+    for label, value, forecast in (
+        ("So far", actual_value, False),
+        ("Forecast", forecast_value, True),
+    ):
+        fig.add_trace(
+            _forecast_marker_trace(
+                x=context.current_label,
+                y=value,
+                color=color,
+                name=f"{project_name} ({'forecast' if forecast else 'so far'})",
+                legendgroup=project_name,
+                hovertemplate=(
+                    f"<b>{project_name}</b><br>{label}{label_suffix}: "
+                    f"%{{y}}{task_suffix}<extra></extra>"
+                ),
+                forecast=forecast,
+            )
         )
+
+
+def _completed_tasks_periodically_figure(
+    df: pd.DataFrame,
+    beg_date: datetime,
+    end_date: datetime,
+    granularity: str,
+    project_colors: dict[str, str],
+    include_total_overlay: bool = True,
+    visibility_beg_date: datetime | None = None,
+    visibility_end_date: datetime | None = None,
+    always_visible_projects: set[str] | None = None,
+    config: _PeriodicPlotConfig = _PERIODIC_CONFIG,
+) -> go.Figure:
+    df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
+        df,
+        beg_date=beg_date,
+        end_date=end_date,
+        granularity=granularity,
+        visibility_beg_date=visibility_beg_date,
+        visibility_end_date=visibility_end_date,
+        always_visible_projects=always_visible_projects,
     )
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[float(forecast_cumulative)],
-            mode="markers",
-            marker=dict(
-                symbol="circle",
-                size=14,
-                color=_ALL_TASKS_TOTAL_COLOR,
-                opacity=0.82,
-            ),
-            name="All Projects (forecast)",
-            legendgroup="all-projects-total",
-            showlegend=False,
-            hovertemplate="<b>All projects</b><br>Forecast (cumulative): %{y:.0f}<extra></extra>",
+    df_periodic_counts = cast(pd.DataFrame, df_weekly_per_project.copy())
+    df_values = df_weekly_per_project
+    if config.cumulative:
+        df_values = cast(pd.DataFrame, df_values.cumsum().ffill().fillna(0))
+    if config.cumulative and not df_values.empty and len(df_values.columns):
+        min_date = cast(pd.Timestamp, df_values.index.min()) - pd.Timedelta(
+            days=7 if "W" in granularity else 14
         )
+        df_values.loc[min_date] = 0
+        df_values = df_values.sort_index()
+
+    forecast_context = _build_periodic_forecast_context(
+        end_date=end_date,
+        granularity=granularity,
+        period_index=df_values.index,
     )
+    current_counts = _current_period_project_counts(
+        df_completed, context=forecast_context
+    )
+    fig = go.Figure()
+    archived_project_names = always_visible_projects or set()
+
+    for root_project in df_values.columns:
+        root_project_name = str(root_project)
+        project_counts = cast(pd.Series, df_periodic_counts[root_project])
+        is_archived_project = root_project_name in archived_project_names
+        project_values = cast(pd.Series, df_values[root_project]).ffill().fillna(0)
+        project_series = _project_series_for_mode(
+            root_project=root_project_name,
+            counts=project_counts,
+            values=project_values,
+            archived_project_names=archived_project_names,
+            config=config,
+        )
+        if project_series.empty:
+            continue
+        color = project_colors.get(root_project_name, "#808080")
+        historical = _historical_part(
+            project_series,
+            context=forecast_context,
+            is_archived_project=is_archived_project,
+        )
+
+        if not historical.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=historical.index,
+                    y=historical,
+                    name=root_project_name,
+                    legendgroup=root_project_name,
+                    line_shape=config.line_shape,
+                    mode="lines+markers",
+                    line=dict(color=color),
+                )
+            )
+
+        if not is_archived_project:
+            _add_project_forecast_traces(
+                fig,
+                project_name=root_project_name,
+                color=color,
+                historical=historical,
+                values=project_values,
+                project_series=project_series,
+                actual_so_far=int(current_counts.get(root_project_name, 0)),
+                context=forecast_context,
+                config=config,
+            )
+
+    if include_total_overlay:
+        _add_total_overlay_traces(
+            fig,
+            total_series=_total_tasks_series(df_values),
+            context=forecast_context,
+            total_actual_so_far=sum(current_counts.values()),
+            config=config,
+        )
+
+    fig.update_xaxes(
+        title_text="Date",
+        title_standoff=14,
+        type="date",
+        showline=True,
+        showgrid=True,
+    )
+    fig.update_layout(
+        title_text=f"{config.title_prefix}{granularity} Completed Tasks Per Project",
+        yaxis=dict(
+            title=dict(text=config.yaxis_title, standoff=16),
+            autorange=True,
+            fixedrange=False,
+            rangemode="tozero",
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="left",
+            x=0.0,
+            tracegroupgap=12,
+            bgcolor="rgba(17,19,24,0.72)",
+            font=dict(size=11, color="#e6e6e6"),
+        ),
+        margin=dict(l=56, r=86, t=84, b=60),
+    )
+    return apply_dashboard_axes(fig)
 
 
 def plot_completed_tasks_periodically(
@@ -551,174 +766,18 @@ def plot_completed_tasks_periodically(
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
 ) -> go.Figure:
-    df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
+    return _completed_tasks_periodically_figure(
         df,
-        beg_date=beg_date,
-        end_date=end_date,
-        granularity=granularity,
-        visibility_beg_date=visibility_beg_date,
-        visibility_end_date=visibility_end_date,
-        always_visible_projects=always_visible_projects,
+        beg_date,
+        end_date,
+        granularity,
+        project_colors,
+        include_total_overlay,
+        visibility_beg_date,
+        visibility_end_date,
+        always_visible_projects,
+        config=_PERIODIC_CONFIG,
     )
-    forecast_context = _build_periodic_forecast_context(
-        end_date=end_date,
-        granularity=granularity,
-        period_index=df_weekly_per_project.index,
-    )
-    current_counts = _current_period_project_counts(
-        df_completed, context=forecast_context
-    )
-    fig = go.Figure()
-    archived_project_names = always_visible_projects or set()
-
-    for root_project in df_weekly_per_project.columns:
-        root_project_name = str(root_project)
-        project_counts = cast(pd.Series, df_weekly_per_project[root_project])
-        is_archived_project = root_project_name in archived_project_names
-        if is_archived_project:
-            project_series = _positive_activity_periods(project_counts)
-        else:
-            project_series = _trim_to_activity_span(
-                project_counts.fillna(0),
-                project_counts,
-            )
-        if project_series.empty:
-            continue
-        color = project_colors.get(root_project_name, "#808080")
-
-        if (
-            not is_archived_project
-            and forecast_context.show_forecast
-            and forecast_context.current_label is not None
-        ):
-            historical = cast(
-                pd.Series,
-                project_series[
-                    project_series.index < pd.Timestamp(forecast_context.current_label)
-                ],
-            )
-        else:
-            historical = cast(pd.Series, project_series)
-
-        if not historical.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=historical.index,
-                    y=historical,
-                    name=root_project_name,
-                    legendgroup=root_project_name,
-                    line_shape="spline",
-                    mode="lines+markers",
-                    line=dict(color=color),
-                )
-            )
-
-        if (
-            not is_archived_project
-            and forecast_context.show_forecast
-            and forecast_context.current_label is not None
-            and forecast_context.current_start
-            and forecast_context.current_end
-        ):
-            history_source = cast(
-                pd.Series,
-                project_series[
-                    project_series.index < pd.Timestamp(forecast_context.current_label)
-                ],
-            )
-            history_totals = history_source.fillna(0).astype(float).tolist()
-            actual_so_far = int(current_counts.get(root_project_name, 0))
-            recently_active = actual_so_far > 0 or any(
-                v > 0 for v in history_totals[-4:]
-            )
-            if not recently_active:
-                continue
-
-            forecast_total = forecast_period_total(
-                actual_so_far=actual_so_far,
-                history_totals=history_totals,
-                period_start=forecast_context.current_start,
-                period_end=forecast_context.current_end,
-                as_of=forecast_context.as_of,
-            )
-
-            if not historical.empty:
-                fig.add_trace(
-                    go.Scatter(
-                        x=[historical.index[-1], forecast_context.current_label],
-                        y=[float(historical.iloc[-1]), float(forecast_total)],
-                        mode="lines",
-                        line=dict(color=color, dash="dash", width=2),
-                        name=f"{root_project_name} (forecast line)",
-                        legendgroup=root_project_name,
-                        showlegend=False,
-                        hoverinfo="skip",
-                    )
-                )
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[forecast_context.current_label],
-                    y=[actual_so_far],
-                    mode="markers",
-                    marker=dict(
-                        symbol="circle-open", size=10, line=dict(width=2, color=color)
-                    ),
-                    name=f"{root_project_name} (so far)",
-                    legendgroup=root_project_name,
-                    showlegend=False,
-                    hovertemplate=f"<b>{root_project_name}</b><br>So far: %{{y}} tasks<extra></extra>",
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=[forecast_context.current_label],
-                    y=[forecast_total],
-                    mode="markers",
-                    marker=dict(symbol="circle", size=16, color=color, opacity=0.92),
-                    name=f"{root_project_name} (forecast)",
-                    legendgroup=root_project_name,
-                    showlegend=False,
-                    hovertemplate=f"<b>{root_project_name}</b><br>Forecast: %{{y}} tasks<extra></extra>",
-                )
-            )
-
-    if include_total_overlay:
-        _add_total_overlay_periodic_traces(
-            fig,
-            total_series=_total_tasks_series(df_weekly_per_project),
-            context=forecast_context,
-            total_actual_so_far=sum(current_counts.values()),
-        )
-
-    fig.update_xaxes(
-        title_text="Date",
-        title_standoff=14,
-        type="date",
-        showline=True,
-        showgrid=True,
-    )
-    fig.update_layout(
-        title_text=f"{granularity} Completed Tasks Per Project",
-        yaxis=dict(
-            title=dict(text="Completed Tasks per Project", standoff=16),
-            autorange=True,
-            fixedrange=False,
-            rangemode="tozero",
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.03,
-            xanchor="left",
-            x=0.0,
-            tracegroupgap=12,
-            bgcolor="rgba(17,19,24,0.72)",
-            font=dict(size=11, color="#e6e6e6"),
-        ),
-        margin=dict(l=56, r=86, t=84, b=60),
-    )
-    return apply_dashboard_axes(fig)
 
 
 def cumsum_completed_tasks_periodically(
@@ -732,199 +791,15 @@ def cumsum_completed_tasks_periodically(
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
 ) -> go.Figure:
-    df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
+    return _completed_tasks_periodically_figure(
         df,
-        beg_date=beg_date,
-        end_date=end_date,
-        granularity=granularity,
-        visibility_beg_date=visibility_beg_date,
-        visibility_end_date=visibility_end_date,
-        always_visible_projects=always_visible_projects,
+        beg_date,
+        end_date,
+        granularity,
+        project_colors,
+        include_total_overlay,
+        visibility_beg_date,
+        visibility_end_date,
+        always_visible_projects,
+        config=_CUMULATIVE_CONFIG,
     )
-    df_periodic_counts = df_weekly_per_project.copy()
-    df_weekly_per_project = cast(
-        pd.DataFrame,
-        df_weekly_per_project.cumsum().ffill().fillna(0),
-    )
-    if not df_weekly_per_project.empty and len(df_weekly_per_project.columns):
-        min_date = cast(pd.Timestamp, df_weekly_per_project.index.min()) - pd.Timedelta(
-            days=7 if "W" in granularity else 14
-        )
-        df_weekly_per_project.loc[min_date] = 0
-        df_weekly_per_project = df_weekly_per_project.sort_index()
-
-    forecast_context = _build_periodic_forecast_context(
-        end_date=end_date,
-        granularity=granularity,
-        period_index=df_weekly_per_project.index,
-    )
-    current_counts = _current_period_project_counts(
-        df_completed, context=forecast_context
-    )
-    fig = go.Figure()
-    archived_project_names = always_visible_projects or set()
-
-    for root_project in df_weekly_per_project.columns:
-        root_project_name = str(root_project)
-        project_counts = cast(pd.Series, df_periodic_counts[root_project])
-        is_archived_project = root_project_name in archived_project_names
-        project_cumulative = (
-            cast(
-                pd.Series,
-                df_weekly_per_project[root_project],
-            )
-            .ffill()
-            .fillna(0)
-        )
-        if is_archived_project:
-            project_series = _series_at_positive_activity_periods(
-                project_cumulative,
-                project_counts,
-            )
-        else:
-            project_series = _trim_to_activity_span(
-                project_cumulative,
-                project_counts,
-            )
-        if project_series.empty:
-            continue
-        color = project_colors.get(root_project_name, "#808080")
-
-        if (
-            not is_archived_project
-            and forecast_context.show_forecast
-            and forecast_context.current_label is not None
-        ):
-            historical = cast(
-                pd.Series,
-                project_series[
-                    project_series.index < pd.Timestamp(forecast_context.current_label)
-                ],
-            )
-        else:
-            historical = cast(pd.Series, project_series)
-
-        if not historical.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=historical.index,
-                    y=historical,
-                    name=root_project_name,
-                    legendgroup=root_project_name,
-                    line_shape="linear",
-                    mode="lines+markers",
-                    line=dict(color=color),
-                )
-            )
-
-        if (
-            not is_archived_project
-            and forecast_context.show_forecast
-            and forecast_context.current_label is not None
-            and forecast_context.current_start
-            and forecast_context.current_end
-        ):
-            base_series = cast(pd.Series, df_weekly_per_project[root_project])
-            history_totals = base_series.diff().fillna(base_series).fillna(0)
-            history_totals = (
-                history_totals[
-                    history_totals.index < pd.Timestamp(forecast_context.current_label)
-                ]
-                .astype(float)
-                .tolist()
-            )
-            actual_so_far = int(current_counts.get(root_project_name, 0))
-            recently_active = actual_so_far > 0 or any(
-                v > 0 for v in history_totals[-4:]
-            )
-            if not recently_active:
-                continue
-
-            forecast_total = forecast_period_total(
-                actual_so_far=actual_so_far,
-                history_totals=history_totals,
-                period_start=forecast_context.current_start,
-                period_end=forecast_context.current_end,
-                as_of=forecast_context.as_of,
-            )
-            base = float(historical.iloc[-1]) if not historical.empty else 0.0
-            actual_cumsum = int(round(base + actual_so_far))
-            forecast_cumsum = int(round(base + forecast_total))
-
-            if not historical.empty:
-                fig.add_trace(
-                    go.Scatter(
-                        x=[historical.index[-1], forecast_context.current_label],
-                        y=[float(base), float(forecast_cumsum)],
-                        mode="lines",
-                        line=dict(color=color, dash="dash", width=2),
-                        name=f"{root_project_name} (forecast line)",
-                        legendgroup=root_project_name,
-                        showlegend=False,
-                        hoverinfo="skip",
-                    )
-                )
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[forecast_context.current_label],
-                    y=[actual_cumsum],
-                    mode="markers",
-                    marker=dict(
-                        symbol="circle-open", size=10, line=dict(width=2, color=color)
-                    ),
-                    name=f"{root_project_name} (so far)",
-                    legendgroup=root_project_name,
-                    showlegend=False,
-                    hovertemplate=f"<b>{root_project_name}</b><br>So far (cumulative): %{{y}}<extra></extra>",
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=[forecast_context.current_label],
-                    y=[forecast_cumsum],
-                    mode="markers",
-                    marker=dict(symbol="circle", size=16, color=color, opacity=0.92),
-                    name=f"{root_project_name} (forecast)",
-                    legendgroup=root_project_name,
-                    showlegend=False,
-                    hovertemplate=f"<b>{root_project_name}</b><br>Forecast (cumulative): %{{y}}<extra></extra>",
-                )
-            )
-
-    if include_total_overlay:
-        _add_total_overlay_cumulative_traces(
-            fig,
-            total_cumulative_series=_total_tasks_series(df_weekly_per_project),
-            context=forecast_context,
-            total_actual_so_far=sum(current_counts.values()),
-        )
-
-    fig.update_xaxes(
-        title_text="Date",
-        title_standoff=14,
-        type="date",
-        showline=True,
-        showgrid=True,
-    )
-    fig.update_layout(
-        title_text=f"Cumulative {granularity} Completed Tasks Per Project",
-        yaxis=dict(
-            title=dict(text="Cumulative Tasks per Project", standoff=16),
-            autorange=True,
-            fixedrange=False,
-            rangemode="tozero",
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.03,
-            xanchor="left",
-            x=0.0,
-            tracegroupgap=12,
-            bgcolor="rgba(17,19,24,0.72)",
-            font=dict(size=11, color="#e6e6e6"),
-        ),
-        margin=dict(l=56, r=86, t=84, b=60),
-    )
-    return apply_dashboard_axes(fig)

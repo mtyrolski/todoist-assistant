@@ -28,6 +28,7 @@ class _HierarchyNode:
     kind: str
     color: str
     hidden_projects: int = 0
+    parent_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ class _BubblePoint:
     size: float
 
 
-def _empty_project_hierarchy_figure(message: str) -> go.Figure:
+def _empty_project_hierarchy_figure(
+    message: str, *, height: int = 520, font_color: str = "#cfd8e3"
+) -> go.Figure:
     fig = go.Figure()
     fig.add_annotation(
         text=message,
@@ -47,12 +50,12 @@ def _empty_project_hierarchy_figure(message: str) -> go.Figure:
         xref="paper",
         yref="paper",
         showarrow=False,
-        font=dict(size=16, color="#cfd8e3"),
+        font=dict(size=16, color=font_color),
     )
     fig.update_layout(
         template="plotly_dark",
         title=None,
-        height=520,
+        height=height,
         margin=dict(l=24, r=24, t=18, b=24),
         paper_bgcolor=_BACKGROUND_COLOR,
         plot_bgcolor=_BACKGROUND_COLOR,
@@ -122,6 +125,28 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
             )
         except ValueError:
             pass
+    if normalized.startswith("rgba(") and normalized.endswith(")"):
+        channels = [part.strip() for part in normalized[5:-1].split(",")]
+        if len(channels) == 4:
+            try:
+                return (
+                    int(float(channels[0])),
+                    int(float(channels[1])),
+                    int(float(channels[2])),
+                )
+            except ValueError:
+                pass
+    if normalized.startswith("rgb(") and normalized.endswith(")"):
+        channels = [part.strip() for part in normalized[4:-1].split(",")]
+        if len(channels) == 3:
+            try:
+                return (
+                    int(float(channels[0])),
+                    int(float(channels[1])),
+                    int(float(channels[2])),
+                )
+            except ValueError:
+                pass
     fallback = _EMPTY_COLOR
     return (
         int(fallback[1:3], 16),
@@ -210,6 +235,53 @@ def _select_visible_nodes(
             return nodes, []
 
     return visible, nodes[len(visible) :]
+
+
+def _active_project_tree(
+    df_completed: pd.DataFrame,
+    active_projects: list[Project],
+) -> tuple[
+    dict[str, Project],
+    dict[str, list[str]],
+    list[str],
+    dict[str, int],
+    Callable[[str], int],
+]:
+    projects_by_id = {str(project.id): project for project in active_projects}
+    children_by_parent: dict[str, list[str]] = defaultdict(list)
+    root_ids: list[str] = []
+    for project in active_projects:
+        project_id = str(project.id)
+        parent_id = project.project_entry.parent_id
+        if parent_id is None or str(parent_id) not in projects_by_id:
+            root_ids.append(project_id)
+            continue
+        children_by_parent[str(parent_id)].append(project_id)
+
+    for child_ids in children_by_parent.values():
+        child_ids.sort(
+            key=lambda project_id: projects_by_id[project_id].project_entry.name.lower()
+        )
+    root_ids.sort(
+        key=lambda project_id: projects_by_id[project_id].project_entry.name.lower()
+    )
+
+    direct_counts = {
+        project_id: count
+        for project_id, count in _direct_completed_counts(
+            df_completed, active_projects=active_projects
+        ).items()
+        if project_id in projects_by_id
+    }
+
+    @lru_cache(maxsize=None)
+    def subtree_total(project_id: str) -> int:
+        return int(direct_counts.get(project_id, 0)) + sum(
+            subtree_total(child_id)
+            for child_id in children_by_parent.get(project_id, [])
+        )
+
+    return projects_by_id, children_by_parent, root_ids, direct_counts, subtree_total
 
 
 def _cluster_x_positions(count: int) -> list[float]:
@@ -439,39 +511,9 @@ def plot_active_project_hierarchy(
             "No completed tasks in the selected range"
         )
 
-    projects_by_id = {str(project.id): project for project in active_projects}
-    children_by_parent: dict[str, list[str]] = defaultdict(list)
-    root_ids: list[str] = []
-    for project in active_projects:
-        project_id = str(project.id)
-        parent_id = project.project_entry.parent_id
-        if parent_id is None or str(parent_id) not in projects_by_id:
-            root_ids.append(project_id)
-            continue
-        children_by_parent[str(parent_id)].append(project_id)
-
-    for child_ids in children_by_parent.values():
-        child_ids.sort(
-            key=lambda project_id: projects_by_id[project_id].project_entry.name.lower()
-        )
-    root_ids.sort(
-        key=lambda project_id: projects_by_id[project_id].project_entry.name.lower()
+    projects_by_id, children_by_parent, root_ids, direct_counts, subtree_total = (
+        _active_project_tree(df_completed, active_projects)
     )
-
-    direct_counts = {
-        project_id: count
-        for project_id, count in _direct_completed_counts(
-            df_completed, active_projects=active_projects
-        ).items()
-        if project_id in projects_by_id
-    }
-
-    @lru_cache(maxsize=None)
-    def subtree_total(project_id: str) -> int:
-        return int(direct_counts.get(project_id, 0)) + sum(
-            subtree_total(child_id)
-            for child_id in children_by_parent.get(project_id, [])
-        )
 
     active_root_ids = [
         project_id for project_id in root_ids if subtree_total(project_id) > 0

@@ -1,9 +1,10 @@
 import inspect
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import Any, TypeVar
 
 from loguru import logger
 from tqdm import tqdm
@@ -18,6 +19,8 @@ from todoist.core.utils import (
     with_retry,
     get_max_concurrent_requests,
 )
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,81 @@ class DatabaseTasks:
         """Expose metadata about the most recent API call."""
 
         return self._api_client.last_call_result
+
+    @staticmethod
+    def _json_object_response(
+        result: object, *, empty_error: str | None
+    ) -> dict[str, Any]:
+        if result is None:
+            if empty_error is not None:
+                logger.error(empty_error)
+            return {}
+        return result if isinstance(result, dict) else {"result": result}
+
+    @staticmethod
+    def _json_headers(*, request_id: bool = True) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if request_id:
+            headers["X-Request-Id"] = str(uuid.uuid4())
+        return headers
+
+    @staticmethod
+    def _drop_none(payload: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in payload.items() if value is not None}
+
+    def _run_ordered_insert_batch(
+        self,
+        items: list[T],
+        *,
+        desc: str,
+        operation_name: Callable[[T, int], str],
+        insert_one: Callable[[T, int], dict[str, Any]],
+        failure_label: str,
+    ) -> list[dict[str, Any]]:
+        logger.info(f"Inserting {len(items)} {desc.lower()} with thread pool")
+        ordered_results: list[dict[str, Any] | None] = [None] * len(items)
+
+        def insert_with_retry(item: T, index: int) -> dict[str, Any]:
+            return with_retry(
+                partial(insert_one, item, index),
+                operation_name=operation_name(item, index),
+                max_attempts=RETRY_MAX_ATTEMPTS,
+            )
+
+        with ThreadPoolExecutor(
+            max_workers=min(get_max_concurrent_requests(), len(items))
+        ) as executor:
+            future_to_index = {
+                executor.submit(insert_with_retry, item, idx): idx
+                for idx, item in enumerate(items)
+            }
+            for future in tqdm(
+                as_completed(future_to_index),
+                total=len(items),
+                desc=f"Inserting {desc}",
+                unit="task",
+                position=0,
+                leave=True,
+            ):
+                idx = future_to_index[future]
+                try:
+                    result = future.result(timeout=60)
+                except (
+                    MaxRetriesExceeded,
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    OSError,
+                ) as exc:  # pragma: no cover - defensive
+                    logger.error(
+                        f"Failed inserting {failure_label} at index {idx}: "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
+                    result = {}
+                ordered_results[idx] = result
+                logger.debug(f"Inserted {failure_label} {idx + 1}/{len(items)}")
+
+        return [result or {} for result in ordered_results]
 
     def insert_task_from_template(
         self, task: Task, **overrrides: Any
@@ -95,92 +173,41 @@ class DatabaseTasks:
         deadline_date: str | None = None,
         deadline_lang: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Inserts a new task into the Todoist API.
-
-        Parameters:
-        - content (str): Task content. This value may contain markdown-formatted text and hyperlinks.
-        - description (str): A description for the task.
-        - project_id (str): Task project ID. If not set, task is put to user's Inbox.
-        - section_id (str): ID of section to put task into.
-        - parent_id (str): Parent task ID.
-        - order (int): Non-zero integer value used by clients to sort tasks under the same parent.
-        - labels (list[str]): The task's labels (a list of names that may represent either personal or shared labels).
-        - priority (int): Task priority from 1 (normal) to 4 (urgent).
-        - due_string (str): Human defined task due date (ex.: "next Monday", "Tomorrow").
-        - due_date (str): Specific date in YYYY-MM-DD format relative to user’s timezone.
-        - due_datetime (str): Specific date and time in RFC3339 format in UTC.
-        - due_lang (str): 2-letter code specifying language in case due_string is not written in English.
-        - assignee_id (str): The responsible user ID (only applies to shared tasks).
-        - duration (int): A positive integer for the amount of duration_unit the task will take.
-        - duration_unit (str): The unit of time that the duration field above represents. Must be either minute or day.
-        - deadline_date (str): Specific date in YYYY-MM-DD format relative to user’s timezone.
-        - deadline_lang (str): 2-letter code specifying language of deadline.
-
-        Returns:
-        - dict: Response from the Todoist API.
-        Example response:
-            {'id': '3501',
-            'assigner_id': None,
-            'assignee_id': None,
-            'project_id': '226095',
-            'section_id': None,
-            'parent_id': None,
-            'order': 3,
-            'content': 'Buy milk',
-            'description': '',
-            'is_completed': False,
-            'labels': [],
-            'priority': 1,
-            'comment_count': 0,
-            'creator_id': '381',
-            'created_at': '2025-03-13T21:16:27.284770Z',
-            'due': None,
-            'duration': None,
-            'deadline': None}
-        """
-        payload = {
-            TaskField.CONTENT.value: content,
-            TaskField.DESCRIPTION.value: description,
-            TaskField.PROJECT_ID.value: project_id,
-            TaskField.SECTION_ID.value: section_id,
-            TaskField.PARENT_ID.value: parent_id,
-            TaskField.ORDER.value: order,
-            TaskField.LABELS.value: labels,
-            TaskField.PRIORITY.value: priority,
-            TaskField.DUE_STRING.value: due_string,
-            TaskField.DUE_DATE.value: due_date,
-            TaskField.DUE_DATETIME.value: due_datetime,
-            TaskField.DUE_LANG.value: due_lang,
-            TaskField.ASSIGNEE_ID.value: assignee_id,
-            TaskField.DURATION.value: duration,
-            TaskField.DURATION_UNIT.value: duration_unit,
-            TaskField.DEADLINE_DATE.value: deadline_date,
-            TaskField.DEADLINE_LANG.value: deadline_lang,
-        }
-
-        payload = {k: v for k, v in payload.items() if v is not None}
+        """Create a task via Todoist and return the decoded JSON payload."""
+        payload = self._drop_none(
+            {
+                TaskField.CONTENT.value: content,
+                TaskField.DESCRIPTION.value: description,
+                TaskField.PROJECT_ID.value: project_id,
+                TaskField.SECTION_ID.value: section_id,
+                TaskField.PARENT_ID.value: parent_id,
+                TaskField.ORDER.value: order,
+                TaskField.LABELS.value: labels,
+                TaskField.PRIORITY.value: priority,
+                TaskField.DUE_STRING.value: due_string,
+                TaskField.DUE_DATE.value: due_date,
+                TaskField.DUE_DATETIME.value: due_datetime,
+                TaskField.DUE_LANG.value: due_lang,
+                TaskField.ASSIGNEE_ID.value: assignee_id,
+                TaskField.DURATION.value: duration,
+                TaskField.DURATION_UNIT.value: duration_unit,
+                TaskField.DEADLINE_DATE.value: deadline_date,
+                TaskField.DEADLINE_LANG.value: deadline_lang,
+            }
+        )
 
         spec = RequestSpec(
             endpoint=TodoistEndpoints.CREATE_TASK,
-            headers={
-                "Content-Type": "application/json",
-                "X-Request-Id": str(uuid.uuid4()),
-            },
+            headers=self._json_headers(),
             json_body=payload,
             rate_limited=True,
         )
 
         logger.debug("Creating task via Todoist API", payload=payload)
-        result: Any | None = self._api_client.request_json(
-            spec, operation_name="create task"
+        result = self._api_client.request_json(spec, operation_name="create task")
+        return self._json_object_response(
+            result, empty_error="Todoist API returned empty response for task creation"
         )
-        if result is None:
-            logger.error("Todoist API returned empty response for task creation")
-            return {}
-        if isinstance(result, dict):
-            return result
-        return {"result": result}
 
     def remove_task(self, task_id: str) -> bool:
         """
@@ -192,10 +219,7 @@ class DatabaseTasks:
         """
         spec = RequestSpec(
             endpoint=TodoistEndpoints.DELETE_TASK.format(task_id=task_id),
-            headers={
-                "Content-Type": "application/json",
-                "X-Request-Id": str(uuid.uuid4()),
-            },
+            headers=self._json_headers(),
         )
 
         logger.debug("Deleting task", task_id=task_id)
@@ -233,28 +257,26 @@ class DatabaseTasks:
         This method returns the JSON payload when present, otherwise `{}`.
         """
 
-        payload = {
-            TaskField.CONTENT.value: content,
-            TaskField.DESCRIPTION.value: description,
-            TaskField.LABELS.value: labels,
-            TaskField.PRIORITY.value: priority,
-            TaskField.DUE_STRING.value: due_string,
-            TaskField.DUE_DATE.value: due_date,
-            TaskField.DUE_DATETIME.value: due_datetime,
-            TaskField.DUE_LANG.value: due_lang,
-            TaskField.DURATION.value: duration,
-            TaskField.DURATION_UNIT.value: duration_unit,
-        }
-        payload = {k: v for k, v in payload.items() if v is not None}
+        payload = self._drop_none(
+            {
+                TaskField.CONTENT.value: content,
+                TaskField.DESCRIPTION.value: description,
+                TaskField.LABELS.value: labels,
+                TaskField.PRIORITY.value: priority,
+                TaskField.DUE_STRING.value: due_string,
+                TaskField.DUE_DATE.value: due_date,
+                TaskField.DUE_DATETIME.value: due_datetime,
+                TaskField.DUE_LANG.value: due_lang,
+                TaskField.DURATION.value: duration,
+                TaskField.DURATION_UNIT.value: duration_unit,
+            }
+        )
         if not payload:
             return {}
 
         spec = RequestSpec(
             endpoint=TodoistEndpoints.UPDATE_TASK.format(task_id=task_id),
-            headers={
-                "Content-Type": "application/json",
-                "X-Request-Id": str(uuid.uuid4()),
-            },
+            headers=self._json_headers(),
             json_body=payload,
             rate_limited=True,
         )
@@ -265,11 +287,7 @@ class DatabaseTasks:
             expect_json=True,
             operation_name=f"update task {task_id}",
         )
-        if call_result.json is None:
-            return {}
-        if isinstance(call_result.json, dict):
-            return call_result.json
-        return {"result": call_result.json}
+        return self._json_object_response(call_result.json, empty_error=None)
 
     def update_task_content(self, task_id: str, content: str) -> dict[str, Any]:
         """Convenience helper to update task content only."""
@@ -296,24 +314,17 @@ class DatabaseTasks:
 
         spec = RequestSpec(
             endpoint=TodoistEndpoints.CREATE_COMMENT,
-            headers={
-                "Content-Type": "application/json",
-                "X-Request-Id": str(uuid.uuid4()),
-            },
+            headers=self._json_headers(),
             json_body=payload,
             rate_limited=True,
         )
 
         logger.debug("Creating Todoist comment", payload=payload)
-        result: Any | None = self._api_client.request_json(
-            spec, operation_name="create comment"
+        result = self._api_client.request_json(spec, operation_name="create comment")
+        return self._json_object_response(
+            result,
+            empty_error="Todoist API returned empty response for comment creation",
         )
-        if result is None:
-            logger.error("Todoist API returned empty response for comment creation")
-            return {}
-        if isinstance(result, dict):
-            return result
-        return {"result": result}
 
     def fetch_task_comments(self, task_id: str) -> list[dict[str, Any]]:
         """Fetch all comments attached to a task."""
@@ -345,54 +356,19 @@ class DatabaseTasks:
         return comments
 
     def fetch_task_by_id(self, task_id: str) -> dict[str, Any]:
-        """
-        Fetches a task by its ID from the Todoist API.
-
-        Parameters:
-        - task_id (str): The ID of the task to fetch.
-
-        Returns:
-        - dict: Response from the Todoist API containing task details.
-        Example response:
-            {
-                "id": "2995104339",
-                "content": "Buy Milk",
-                "description": "",
-                "project_id": "2203306141",
-                "section_id": "7025",
-                "parent_id": "2995104589",
-                "order": 1,
-                "labels": ["Food", "Shopping"],
-                "priority": 1,
-                "due": {
-                    "date": "2016-09-01",
-                    "is_recurring": false,
-                    "datetime": "2016-09-01T12:00:00.000000Z",
-                    "string": "tomorrow at 12",
-                    "timezone": "Europe/Moscow"
-                },
-                "deadline": {
-                    "date": "2016-09-04"
-                },
-                "duration": null,
-                "is_completed": false,
-                "url": "https://todoist.com/showTask?id=2995104339"
-            }
-        """
+        """Fetch a task by ID from Todoist."""
         spec = RequestSpec(
             endpoint=TodoistEndpoints.GET_TASK.format(task_id=task_id),
-            headers={"Content-Type": "application/json"},
+            headers=self._json_headers(request_id=False),
         )
 
-        result: Any | None = self._api_client.request_json(
+        result = self._api_client.request_json(
             spec, operation_name=f"fetch task {task_id}"
         )
-        if result is None:
-            logger.error("Todoist API returned empty response for fetch_task_by_id")
-            return {}
-        if isinstance(result, dict):
-            return result
-        return {"result": result}
+        return self._json_object_response(
+            result,
+            empty_error="Todoist API returned empty response for fetch_task_by_id",
+        )
 
     @staticmethod
     def _extract_comments_page(
@@ -464,57 +440,16 @@ class DatabaseTasks:
                 )
                 return {}
 
-        def insert_single_task_with_retry(
-            task_data: dict[str, Any], index: int
-        ) -> dict[str, Any]:
-            """Insert a single task with built-in retry logic."""
-            return with_retry(
-                partial(insert_single_task, task_data, index),
-                operation_name=(
-                    f"insert task {index} (content: {task_data.get(TaskField.CONTENT.value, 'N/A')})"
-                ),
-                max_attempts=RETRY_MAX_ATTEMPTS,
-            )
-
-        logger.info(f"Inserting {len(tasks_data)} tasks with thread pool")
-        max_workers = min(get_max_concurrent_requests(), len(tasks_data))
-        ordered_results: list[dict[str, Any] | None] = [None] * len(tasks_data)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {
-                executor.submit(insert_single_task_with_retry, task_data, idx): idx
-                for idx, task_data in enumerate(tasks_data)
-            }
-            for future in tqdm(
-                as_completed(future_to_index),
-                total=len(tasks_data),
-                desc="Inserting tasks",
-                unit="task",
-                position=0,
-                leave=True,
-            ):
-                idx = future_to_index[future]
-                try:
-                    result = future.result(timeout=60)
-                except (
-                    MaxRetriesExceeded,
-                    RuntimeError,
-                    ValueError,
-                    TypeError,
-                    OSError,
-                ) as e:  # pragma: no cover - defensive
-                    logger.error(
-                        f"Failed inserting task at index {idx}: {e.__class__.__name__}: {e}"
-                    )
-                    result = {}
-                ordered_results[idx] = result
-                logger.debug(f"Inserted task {idx + 1}/{len(tasks_data)}")
-
-        # Replace any remaining None with empty dicts (should be rare)
-        for i in range(len(ordered_results)):
-            if ordered_results[i] is None:
-                ordered_results[i] = {}
-
-        return [result or {} for result in ordered_results]
+        return self._run_ordered_insert_batch(
+            tasks_data,
+            desc="tasks",
+            operation_name=lambda task_data, index: (
+                f"insert task {index} "
+                f"(content: {task_data.get(TaskField.CONTENT.value, 'N/A')})"
+            ),
+            insert_one=insert_single_task,
+            failure_label="task",
+        )
 
     def insert_tasks_from_templates(
         self,
@@ -545,58 +480,13 @@ class DatabaseTasks:
                 )
                 return {}
 
-        def insert_single_request_with_retry(
-            request: TaskTemplateInsertRequest,
-            index: int,
-        ) -> dict[str, Any]:
-            content = str(
-                request.overrides.get(
-                    TaskField.CONTENT.value,
-                    request.template.task_entry.content,
-                )
-            )
-            return with_retry(
-                partial(insert_single_request, request, index),
-                operation_name=f"insert template task {index} (content: {content})",
-                max_attempts=RETRY_MAX_ATTEMPTS,
-            )
-
-        logger.info(f"Inserting {len(requests)} template tasks with thread pool")
-        max_workers = min(get_max_concurrent_requests(), len(requests))
-        ordered_results: list[dict[str, Any] | None] = [None] * len(requests)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {
-                executor.submit(insert_single_request_with_retry, request, idx): idx
-                for idx, request in enumerate(requests)
-            }
-            for future in tqdm(
-                as_completed(future_to_index),
-                total=len(requests),
-                desc="Inserting template tasks",
-                unit="task",
-                position=0,
-                leave=True,
-            ):
-                idx = future_to_index[future]
-                try:
-                    result = future.result(timeout=60)
-                except (
-                    MaxRetriesExceeded,
-                    RuntimeError,
-                    ValueError,
-                    TypeError,
-                    OSError,
-                ) as exc:  # pragma: no cover - defensive
-                    logger.error(
-                        f"Failed inserting template task at index {idx}: "
-                        f"{exc.__class__.__name__}: {exc}"
-                    )
-                    result = {}
-                ordered_results[idx] = result
-                logger.debug(f"Inserted template task {idx + 1}/{len(requests)}")
-
-        for index, result in enumerate(ordered_results):
-            if result is None:
-                ordered_results[index] = {}
-
-        return [result or {} for result in ordered_results]
+        return self._run_ordered_insert_batch(
+            requests,
+            desc="template tasks",
+            operation_name=lambda request, index: (
+                f"insert template task {index} "
+                f"(content: {request.overrides.get(TaskField.CONTENT.value, request.template.task_entry.content)})"
+            ),
+            insert_one=insert_single_request,
+            failure_label="template task",
+        )

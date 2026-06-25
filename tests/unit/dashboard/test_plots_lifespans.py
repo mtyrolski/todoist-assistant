@@ -1,4 +1,4 @@
-"""Tests for Todoist dashboard plotting helpers."""
+"""Tests for Todoist dashboard lifespan plots."""
 
 from datetime import datetime, timedelta
 from typing import Any, cast
@@ -9,355 +9,197 @@ import pytest
 
 from todoist.dashboard.plots import plot_task_lifespans
 
+BASE_DATE = datetime(2024, 1, 1, 12, 0, 0)
 
-@pytest.fixture
-def sample_task_events_df():
-    """Create a sample DataFrame with task events for testing."""
-    # Create tasks with various lifespans
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
 
-    data = {
-        "parent_item_id": [
-            # Task 1: completed in 1 hour
-            "task1",
-            "task1",
-            # Task 2: completed in 1 day
-            "task2",
-            "task2",
-            # Task 3: completed in 7 days
-            "task3",
-            "task3",
-            # Task 4: only added (no completion)
-            "task4",
-            # Task 5: only completed (no added event)
-            "task5",
-            # Task 6: completed in 5 minutes
-            "task6",
-            "task6",
+def _events_df(events: list[tuple[str, str, datetime, object | None]]) -> pd.DataFrame:
+    df = pd.DataFrame(
+        [
+            {
+                "parent_item_id": task_id,
+                "type": event_type,
+                "title": title,
+                "root_project_name": "Project A",
+                "root_project_id": "proj_a",
+            }
+            for task_id, event_type, _, title in events
         ],
-        "type": [
-            "added",
-            "completed",
-            "added",
-            "completed",
-            "added",
-            "completed",
-            "added",
-            "completed",
-            "added",
-            "completed",
-        ],
-        "title": [
-            "Task 1",
-            "Task 1",
-            "Task 2",
-            "Task 2",
-            "Task 3",
-            "Task 3",
-            "Task 4",
-            "Task 5",
-            "Task 6",
-            "Task 6",
-        ],
-        "root_project_name": ["Project A"] * 10,
-        "root_project_id": ["proj_a"] * 10,
-    }
+        index=pd.DatetimeIndex([date for _, _, date, _ in events]),
+    )
+    df.index.name = "date"
+    return df
 
-    dates = [
-        base_date,
-        base_date + timedelta(hours=1),
-        base_date,
-        base_date + timedelta(days=1),
-        base_date,
-        base_date + timedelta(days=7),
-        base_date,
-        base_date,
-        base_date,
-        base_date + timedelta(minutes=5),
+
+def _task_pair(
+    task_id: str,
+    duration: timedelta,
+    *,
+    start: datetime = BASE_DATE,
+    title: object | None = None,
+) -> list[tuple[str, str, datetime, object | None]]:
+    name = task_id if title is None else title
+    return [
+        (task_id, "added", start, name),
+        (task_id, "completed", start + duration, name),
     ]
 
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-    return df
-
 
 @pytest.fixture
-def empty_events_df():
-    """Create an empty DataFrame with correct structure."""
-    df = pd.DataFrame(
-        {
-            "parent_item_id": [],
-            "type": [],
-            "title": [],
-            "root_project_name": [],
-            "root_project_id": [],
-        }
+def sample_task_events_df() -> pd.DataFrame:
+    return _events_df(
+        [
+            *_task_pair("task1", timedelta(hours=1), title="Task 1"),
+            *_task_pair("task2", timedelta(days=1), title="Task 2"),
+            *_task_pair("task3", timedelta(days=7), title="Task 3"),
+            ("task4", "added", BASE_DATE, "Task 4"),
+            ("task5", "completed", BASE_DATE, "Task 5"),
+            *_task_pair("task6", timedelta(minutes=5), title="Task 6"),
+        ]
     )
-    df.index = pd.DatetimeIndex([])
+
+
+def _empty_events_df() -> pd.DataFrame:
+    df = pd.DataFrame(
+        columns=[
+            "parent_item_id",
+            "type",
+            "title",
+            "root_project_name",
+            "root_project_id",
+        ],
+        index=pd.DatetimeIndex([]),
+    )
     df.index.name = "date"
     return df
 
 
-def test_plot_task_lifespans_returns_figure(sample_task_events_df):
-    """Test that plot_task_lifespans returns a Plotly Figure object."""
+def _traces(fig: go.Figure) -> tuple[Any, ...]:
+    return cast(tuple[Any, ...], fig.data)
+
+
+def test_plot_task_lifespans_with_valid_data(
+    sample_task_events_df: pd.DataFrame,
+) -> None:
     fig = plot_task_lifespans(sample_task_events_df)
 
     assert isinstance(fig, go.Figure)
-    assert fig.data is not None
-    traces = cast(tuple[Any, ...], fig.data)
-    assert len(traces) > 0
-
-
-def test_plot_task_lifespans_with_valid_data(sample_task_events_df):
-    """Test plot_task_lifespans with valid task data."""
-    fig = plot_task_lifespans(sample_task_events_df)
-
-    # Should have data traces (histogram and scatter)
-    traces = cast(tuple[Any, ...], fig.data)
-    assert len(traces) >= 1
-
-    # Check layout properties
-    assert fig.layout.title is not None
+    assert _traces(fig)
     assert "Task Lifespans" in fig.layout.title.text
-
-    # Check x-axis is logarithmic
     assert fig.layout.xaxis.type == "log"
-
-    # Check axis labels exist
-    assert fig.layout.xaxis.title is not None
-    assert fig.layout.yaxis.title is not None
     assert fig.layout.xaxis.title.text == ""
     assert "Frequency" in fig.layout.yaxis.title.text
-
-
-def test_plot_task_lifespans_empty_data(empty_events_df):
-    """Test plot_task_lifespans handles empty data gracefully."""
-    fig = plot_task_lifespans(empty_events_df)
-
-    assert isinstance(fig, go.Figure)
-    # Changed to check for the specific error message
-    assert "Task Lifespans" in fig.layout.title.text
-    assert (
-        "No Data" in fig.layout.title.text or "No Task Events" in fig.layout.title.text
-    )
-
-
-def test_plot_task_lifespans_only_added_events():
-    """Test plot_task_lifespans with only 'added' events (no completions)."""
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
-
-    data = {
-        "parent_item_id": ["task1", "task2", "task3"],
-        "type": ["added", "added", "added"],
-        "title": ["Task 1", "Task 2", "Task 3"],
-        "root_project_name": ["Project A"] * 3,
-        "root_project_id": ["proj_a"] * 3,
-    }
-
-    dates = [base_date, base_date + timedelta(days=1), base_date + timedelta(days=2)]
-
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-
-    fig = plot_task_lifespans(df)
-
-    # Should handle this gracefully with specific error message
-    assert isinstance(fig, go.Figure)
-    assert "Task Lifespans" in fig.layout.title.text
-    assert "No Tasks with Both Added and Completed Events" in fig.layout.title.text
-
-
-def test_plot_task_lifespans_only_completed_events():
-    """Test plot_task_lifespans with only 'completed' events (no added events)."""
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
-
-    data = {
-        "parent_item_id": ["task1", "task2", "task3"],
-        "type": ["completed", "completed", "completed"],
-        "title": ["Task 1", "Task 2", "Task 3"],
-        "root_project_name": ["Project A"] * 3,
-        "root_project_id": ["proj_a"] * 3,
-    }
-
-    dates = [base_date, base_date + timedelta(days=1), base_date + timedelta(days=2)]
-
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-
-    fig = plot_task_lifespans(df)
-
-    # Should handle this gracefully with specific error message
-    assert isinstance(fig, go.Figure)
-    assert "Task Lifespans" in fig.layout.title.text
-    assert "No Tasks with Both Added and Completed Events" in fig.layout.title.text
-
-
-def test_plot_task_lifespans_negative_duration():
-    """Test plot_task_lifespans handles negative durations (completed before added)."""
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
-
-    data = {
-        "parent_item_id": ["task1", "task1"],
-        "type": ["added", "completed"],
-        "title": ["Task 1", "Task 1"],
-        "root_project_name": ["Project A"] * 2,
-        "root_project_id": ["proj_a"] * 2,
-    }
-
-    # Completed before added (invalid)
-    dates = [base_date + timedelta(hours=1), base_date]
-
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-
-    fig = plot_task_lifespans(df)
-
-    # Should skip invalid duration and show no data
-    assert isinstance(fig, go.Figure)
-
-
-def test_plot_task_lifespans_dark_mode_styling(sample_task_events_df):
-    """Test plot_task_lifespans has dark mode styling."""
-    fig = plot_task_lifespans(sample_task_events_df)
-
-    # Check for dark theme properties by verifying dark background colors
     assert fig.layout.plot_bgcolor == "#111318"
     assert fig.layout.paper_bgcolor == "#111318"
-    # Check that template is set (it's a Template object, not a simple string)
     assert fig.layout.template is not None
-
-
-def test_plot_task_lifespans_responsive_layout(sample_task_events_df):
-    """Test plot_task_lifespans has responsive layout properties."""
-    fig = plot_task_lifespans(sample_task_events_df)
-
-    # Check autosize is enabled for responsiveness
     assert fig.layout.autosize is True
-
-
-def test_plot_task_lifespans_has_gridlines(sample_task_events_df):
-    """Task lifespans plot should keep the dashboard gridlines subtle/disabled."""
-    fig = plot_task_lifespans(sample_task_events_df)
-
     assert fig.layout.xaxis.showgrid is False
     assert fig.layout.yaxis.showgrid is False
-
-
-def test_plot_task_lifespans_has_legend(sample_task_events_df):
-    """Test plot_task_lifespans includes a legend."""
-    fig = plot_task_lifespans(sample_task_events_df)
-
-    # Check legend configuration
     assert fig.layout.legend is not None
 
 
-def test_plot_task_lifespans_time_unit_selection():
-    """Test plot_task_lifespans selects appropriate time units."""
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
-
-    # Test with very short durations (minutes)
-    data_minutes = {
-        "parent_item_id": ["task1", "task1", "task2", "task2"],
-        "type": ["added", "completed", "added", "completed"],
-        "title": ["Task 1", "Task 1", "Task 2", "Task 2"],
-        "root_project_name": ["Project A"] * 4,
-        "root_project_id": ["proj_a"] * 4,
-    }
-    dates_minutes = [
-        base_date,
-        base_date + timedelta(minutes=10),
-        base_date,
-        base_date + timedelta(minutes=30),
-    ]
-    df_minutes = pd.DataFrame(data_minutes, index=pd.DatetimeIndex(dates_minutes))
-    df_minutes.index.name = "date"
-
-    fig = plot_task_lifespans(df_minutes)
-    assert isinstance(fig, go.Figure)
-    # Should show minute or hour units in the tick labels
-    ticktext_minutes = fig.layout.xaxis.ticktext or []
-    joined_minutes = " ".join(str(item) for item in ticktext_minutes)
-    assert any(unit in joined_minutes for unit in ("m", "h"))
-
-    # Test with longer durations (days)
-    data_days = {
-        "parent_item_id": ["task3", "task3", "task4", "task4"],
-        "type": ["added", "completed", "added", "completed"],
-        "title": ["Task 3", "Task 3", "Task 4", "Task 4"],
-        "root_project_name": ["Project A"] * 4,
-        "root_project_id": ["proj_a"] * 4,
-    }
-    dates_days = [
-        base_date,
-        base_date + timedelta(days=5),
-        base_date,
-        base_date + timedelta(days=10),
-    ]
-    df_days = pd.DataFrame(data_days, index=pd.DatetimeIndex(dates_days))
-    df_days.index.name = "date"
-
-    fig = plot_task_lifespans(df_days)
-    assert isinstance(fig, go.Figure)
-    # Should show day/week units in the tick labels
-    ticktext_days = fig.layout.xaxis.ticktext or []
-    joined_days = " ".join(str(item) for item in ticktext_days)
-    assert any(unit in joined_days for unit in ("d", "w"))
-
-
-def test_plot_task_lifespans_handles_missing_task_names():
-    """Test plot_task_lifespans handles missing task names gracefully."""
-    base_date = datetime(2024, 1, 1, 12, 0, 0)
-
-    data = {
-        "parent_item_id": ["task1", "task1"],
-        "type": ["added", "completed"],
-        "title": [None, None],  # Missing task names
-        "root_project_name": ["Project A"] * 2,
-        "root_project_id": ["proj_a"] * 2,
-    }
-
-    dates = [base_date, base_date + timedelta(hours=1)]
-
-    df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
-
+@pytest.mark.parametrize(
+    ("df", "title_fragment"),
+    [
+        pytest.param(_empty_events_df(), "No Task Events", id="empty"),
+        pytest.param(
+            _events_df(
+                [
+                    ("task1", "added", BASE_DATE, "Task 1"),
+                    ("task2", "added", BASE_DATE + timedelta(days=1), "Task 2"),
+                ]
+            ),
+            "No Tasks with Both Added and Completed Events",
+            id="only-added",
+        ),
+        pytest.param(
+            _events_df(
+                [
+                    ("task1", "completed", BASE_DATE, "Task 1"),
+                    ("task2", "completed", BASE_DATE + timedelta(days=1), "Task 2"),
+                ]
+            ),
+            "No Tasks with Both Added and Completed Events",
+            id="only-completed",
+        ),
+    ],
+)
+def test_plot_task_lifespans_handles_missing_duration_inputs(
+    df: pd.DataFrame, title_fragment: str
+) -> None:
     fig = plot_task_lifespans(df)
 
-    # Should handle missing names and still create the figure
     assert isinstance(fig, go.Figure)
+    assert "Task Lifespans" in fig.layout.title.text
+    assert title_fragment in fig.layout.title.text
 
 
-def test_plot_task_lifespans_weights_recent_completions_more():
-    """Recent completions should influence percentile guides more than old tasks."""
-    rows: list[dict[str, str]] = []
-    dates: list[datetime] = []
+@pytest.mark.parametrize(
+    "df",
+    [
+        pytest.param(
+            _events_df(
+                [
+                    ("task1", "added", BASE_DATE + timedelta(hours=1), "Task 1"),
+                    ("task1", "completed", BASE_DATE, "Task 1"),
+                ]
+            ),
+            id="negative-duration",
+        ),
+        pytest.param(
+            _events_df(_task_pair("task1", timedelta(hours=1), title=None)),
+            id="missing-title",
+        ),
+    ],
+)
+def test_plot_task_lifespans_tolerates_edge_rows(df: pd.DataFrame) -> None:
+    assert isinstance(plot_task_lifespans(df), go.Figure)
 
-    for index in range(100):
-        task_id = f"old-{index}"
-        rows.extend(
+
+@pytest.mark.parametrize(
+    ("durations", "expected_units"),
+    [
+        pytest.param(
+            [timedelta(minutes=10), timedelta(minutes=30)], ("m", "h"), id="minutes"
+        ),
+        pytest.param([timedelta(days=5), timedelta(days=10)], ("d", "w"), id="days"),
+    ],
+)
+def test_plot_task_lifespans_time_unit_selection(
+    durations: list[timedelta], expected_units: tuple[str, ...]
+) -> None:
+    fig = plot_task_lifespans(
+        _events_df(
             [
-                {"parent_item_id": task_id, "type": "added", "title": task_id},
-                {"parent_item_id": task_id, "type": "completed", "title": task_id},
+                event
+                for index, duration in enumerate(durations, start=1)
+                for event in _task_pair(f"task{index}", duration)
             ]
         )
-        dates.extend([datetime(2020, 1, 1), datetime(2020, 1, 2)])
+    )
 
-    for index in range(5):
-        task_id = f"recent-{index}"
-        rows.extend(
-            [
-                {"parent_item_id": task_id, "type": "added", "title": task_id},
-                {"parent_item_id": task_id, "type": "completed", "title": task_id},
-            ]
+    tick_labels = " ".join(str(item) for item in (fig.layout.xaxis.ticktext or []))
+    assert any(unit in tick_labels for unit in expected_units)
+
+
+def test_plot_task_lifespans_weights_recent_completions_more() -> None:
+    old_events = [
+        event
+        for index in range(100)
+        for event in _task_pair(
+            f"old-{index}", timedelta(days=1), start=datetime(2020, 1, 1)
         )
-        dates.extend([datetime(2025, 1, 1), datetime(2025, 1, 31)])
+    ]
+    recent_events = [
+        event
+        for index in range(5)
+        for event in _task_pair(
+            f"recent-{index}", timedelta(days=30), start=datetime(2025, 1, 1)
+        )
+    ]
 
-    df = pd.DataFrame(rows, index=pd.DatetimeIndex(dates))
-    df.index.name = "date"
+    fig = plot_task_lifespans(_events_df([*old_events, *recent_events]))
 
-    fig = plot_task_lifespans(df)
-    guide_positions = sorted(float(shape.x0) for shape in fig.layout.shapes)
-    trace_names = [str(trace.name) for trace in cast(tuple[Any, ...], fig.data)]
-
-    assert guide_positions[-1] == pytest.approx(30.0)
-    assert "Recency-weighted frequency" in trace_names
+    assert sorted(float(shape.x0) for shape in fig.layout.shapes)[-1] == pytest.approx(
+        30.0
+    )
+    assert "Recency-weighted frequency" in [str(trace.name) for trace in _traces(fig)]

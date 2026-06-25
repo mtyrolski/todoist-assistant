@@ -134,14 +134,39 @@ def extract_name(event: Event) -> str | None:
     return None
 
 
-def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
-    """
-    Loads mapping adjustments from Python scripts in the 'personal' directory.
+def _adjustment_paths(personal_dir: Path, specific_file: str | None) -> list[Path]:
+    if specific_file:
+        safe_specific = normalize_adjustment_filename(specific_file)
+        logger.info(f"Loading specific mapping file: {safe_specific}")
+        path = personal_dir / safe_specific
+        return [path] if path.exists() else []
+    paths = [
+        path
+        for path in sorted(personal_dir.iterdir())
+        if path.is_file() and path.suffix == ".py"
+    ]
+    logger.info(f"Found {len(paths)} scripts in personal directory")
+    return paths
 
-    Args:
-        specific_file: Optional specific filename to load. If None, loads all Python files.
-                      If provided, only loads from that specific file.
-    """
+
+def _load_adjustments(
+    specific_file: str | None = None,
+) -> tuple[dict[str, str], set[str]]:
+    personal_dir = resolve_personal_dir()
+    if not personal_dir.exists():
+        return {}, set()
+
+    mapping: dict[str, str] = {}
+    archived_parent_projects: set[str] = set()
+    for path in _adjustment_paths(personal_dir, specific_file):
+        link_adjustements, archived_parents = load_adjustments_file(path)
+        mapping.update(link_adjustements)
+        archived_parent_projects.update(archived_parents)
+    return mapping, archived_parent_projects
+
+
+def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
+    """Loads mapping adjustments from Python scripts in the personal directory."""
     personal_dir = resolve_personal_dir()
 
     if not personal_dir.exists():
@@ -155,29 +180,7 @@ def get_adjusting_mapping(specific_file: str | None = None) -> dict[str, str]:
         )
         logger.info(f"Created empty adjustments file in {personal_dir}")
         return {}
-
-    # Determine which files to load.
-    if specific_file:
-        safe_specific = normalize_adjustment_filename(specific_file)
-        scripts = [safe_specific] if (personal_dir / safe_specific).exists() else []
-        logger.info(f"Loading specific mapping file: {safe_specific}")
-    else:
-        scripts = [
-            path.name
-            for path in sorted(personal_dir.iterdir())
-            if path.is_file() and path.suffix == ".py"
-        ]
-        logger.info(f"Found {len(scripts)} scripts in personal directory")
-
-    final_mapping: dict[str, str] = {}
-    for script in scripts:
-        script_path = personal_dir / normalize_adjustment_filename(script)
-        link_adjustements, _archived_parent_projects = load_adjustments_file(
-            script_path
-        )
-        final_mapping.update(link_adjustements)
-
-    return final_mapping
+    return _load_adjustments(specific_file)[0]
 
 
 def get_adjusting_archived_parent_projects(
@@ -188,23 +191,7 @@ def get_adjusting_archived_parent_projects(
     personal_dir = resolve_personal_dir()
     if not personal_dir.exists():
         return set()
-
-    if specific_file:
-        safe_specific = normalize_adjustment_filename(specific_file)
-        scripts = [safe_specific] if (personal_dir / safe_specific).exists() else []
-    else:
-        scripts = [
-            path.name
-            for path in sorted(personal_dir.iterdir())
-            if path.is_file() and path.suffix == ".py"
-        ]
-
-    archived_parent_projects: set[str] = set()
-    for script in scripts:
-        script_path = personal_dir / normalize_adjustment_filename(script)
-        _link_adjustements, archived_parents = load_adjustments_file(script_path)
-        archived_parent_projects.update(archived_parents)
-    return archived_parent_projects
+    return _load_adjustments(specific_file)[1]
 
 
 def _find_duplicate_project_names(
@@ -271,13 +258,13 @@ def _resolve_root_project_name_to_id(
 
 
 def _load_projects_by_id(_dbio: Database) -> dict[str, Project]:
-    projects_by_id = {
-        project.id: project for project in _dbio.fetch_projects(include_tasks=False)
+    return {
+        project.id: project
+        for project in (
+            *_dbio.fetch_projects(include_tasks=False),
+            *_dbio.fetch_archived_projects(),
+        )
     }
-    projects_by_id.update(
-        {project.id: project for project in _dbio.fetch_archived_projects()}
-    )
-    return projects_by_id
 
 
 def _project_ancestor_names(
@@ -311,13 +298,12 @@ def _project_ancestor_names(
 
 
 def _first_matching_project_name(
-    project_id: str,
+    project_names: list[tuple[str, bool]],
     *,
-    ancestor_names_by_project_id: dict[str, list[tuple[str, bool]]],
     candidates: set[str],
     require_archived: bool = True,
 ) -> str | None:
-    for name, is_archived in ancestor_names_by_project_id.get(project_id, []):
+    for name, is_archived in project_names:
         if name in candidates and (is_archived or not require_archived):
             return name
     return None
@@ -330,9 +316,9 @@ def _first_adjustment_source(
     ancestor_names_by_project_id: dict[str, list[tuple[str, bool]]],
     link_mapping: dict[str, str],
 ) -> str | None:
+    project_names = ancestor_names_by_project_id.get(project_id, [])
     source = _first_matching_project_name(
-        project_id,
-        ancestor_names_by_project_id=ancestor_names_by_project_id,
+        project_names,
         candidates=set(link_mapping),
     )
     if source:
@@ -444,39 +430,23 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     )
 
     parent_project_id = cast(pd.Series, df["parent_project_id"].astype(str).copy())
-    promoted_parent_mask = cast(
+    promoted_parent_names = cast(
         pd.Series,
         parent_project_id.map(
-            lambda project_id: (
-                _first_matching_project_name(
-                    str(project_id),
-                    ancestor_names_by_project_id=ancestor_names_by_project_id,
-                    candidates=archived_parent_projects,
-                    require_archived=True,
-                )
-                is not None
+            lambda project_id: _first_matching_project_name(
+                ancestor_names_by_project_id.get(str(project_id), []),
+                candidates=archived_parent_projects,
+                require_archived=True,
             )
         ),
     )
+    promoted_parent_mask = cast(pd.Series, promoted_parent_names.notna())
     if bool(promoted_parent_mask.any()):
-        promoted_parent_names = cast(
-            pd.Series,
-            cast(pd.Series, parent_project_id[promoted_parent_mask]).map(
-                lambda project_id: (
-                    _first_matching_project_name(
-                        str(project_id),
-                        ancestor_names_by_project_id=ancestor_names_by_project_id,
-                        candidates=archived_parent_projects,
-                        require_archived=True,
-                    )
-                    or ""
-                )
-            ),
-        )
-        df.loc[promoted_parent_mask, "root_project_name"] = promoted_parent_names
+        promoted_names = cast(pd.Series, promoted_parent_names[promoted_parent_mask])
+        df.loc[promoted_parent_mask, "root_project_name"] = promoted_names
         promoted_parent_ids = cast(
             pd.Series,
-            promoted_parent_names.map(lambda name: root_name_to_id.get(str(name))),
+            promoted_names.map(lambda name: root_name_to_id.get(str(name))),
         )
         df.loc[promoted_parent_mask, "root_project_id"] = promoted_parent_ids.fillna(
             cast(pd.Series, parent_project_id[promoted_parent_mask])
@@ -496,45 +466,26 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
         len(link_mapping) - len(effective_link_mapping),
     )
     logger.info("Adjusting root project names...")
-    adjustment_sources = cast(
-        pd.Series,
-        pd.Series(
+
+    def source_series(mapping: dict[str, str]) -> pd.Series:
+        return pd.Series(
             [
-                source
-                for source in (
-                    _first_adjustment_source(
-                        str(project_id),
-                        str(root_name),
-                        ancestor_names_by_project_id=ancestor_names_by_project_id,
-                        link_mapping=link_mapping,
-                    )
-                    for project_id, root_name in zip(
-                        parent_project_id, original_root_name
-                    )
+                _first_adjustment_source(
+                    str(project_id),
+                    str(root_name),
+                    ancestor_names_by_project_id=ancestor_names_by_project_id,
+                    link_mapping=mapping,
                 )
-                if source is not None
-            ]
-        ),
-    )
+                for project_id, root_name in zip(parent_project_id, original_root_name)
+            ],
+            index=df.index,
+            dtype="object",
+        )
+
+    root_adjustment_sources = source_series(link_mapping)
+    adjustment_sources = cast(pd.Series, root_adjustment_sources.dropna())
     effective_adjustment_sources = cast(
-        pd.Series,
-        pd.Series(
-            [
-                source
-                for source in (
-                    _first_adjustment_source(
-                        str(project_id),
-                        str(root_name),
-                        ancestor_names_by_project_id=ancestor_names_by_project_id,
-                        link_mapping=effective_link_mapping,
-                    )
-                    for project_id, root_name in zip(
-                        parent_project_id, original_root_name
-                    )
-                )
-                if source is not None
-            ]
-        ),
+        pd.Series, source_series(effective_link_mapping).dropna()
     )
     logger.info(
         "Adjustment rules matched {} rows across {} source root names",
@@ -575,18 +526,7 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
         else link_mapping.get(source, root_name)
         if source
         else root_name
-        for root_name, source in zip(
-            original_root_name,
-            (
-                _first_adjustment_source(
-                    str(project_id),
-                    str(root_name),
-                    ancestor_names_by_project_id=ancestor_names_by_project_id,
-                    link_mapping=link_mapping,
-                )
-                for project_id, root_name in zip(parent_project_id, original_root_name)
-            ),
-        )
+        for root_name, source in zip(original_root_name, root_adjustment_sources)
     ]
     mapped_ids = cast(
         pd.Series,

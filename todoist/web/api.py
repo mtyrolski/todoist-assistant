@@ -347,133 +347,42 @@ def _call_dashboard_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
     return getattr(_dashboard_runtime_component, name)(*args, **kwargs)
 
 
-def _env_demo_mode() -> bool:
-    return bool(_call_dashboard_runtime("_env_demo_mode"))
+def _make_dashboard_runtime_wrapper(name: str):
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _call_dashboard_runtime(name, *args, **kwargs)
 
-
-def _run_async_in_main_loop(coro: Any) -> Any:
-    return _call_dashboard_runtime("_run_async_in_main_loop", coro)
-
-
-async def _progress_snapshot() -> dict[str, Any]:
-    return await _call_dashboard_runtime("_progress_snapshot")
-
-
-async def _set_progress(
-    stage: str, step: int, total_steps: int = _PROGRESS_TOTAL_STEPS
-) -> None:
-    await _call_dashboard_runtime("_set_progress", stage, step, total_steps)
-
-
-async def _finish_progress(error: str | None = None) -> None:
-    await _call_dashboard_runtime("_finish_progress", error)
-
-
-def _build_tqdm_progress_callback():
-    return _call_dashboard_runtime("_build_tqdm_progress_callback")
-
-
-def _activity_cache_signature() -> dict[str, int] | None:
-    return _call_dashboard_runtime("_activity_cache_signature")
-
-
-def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
-    _call_dashboard_runtime("_persist_state_to_disk_cache", demo_mode=demo_mode)
-
-
-def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
-    return bool(
-        _call_dashboard_runtime("_load_state_from_disk_cache", demo_mode=demo_mode)
-    )
-
-
-def _refresh_state_sync(*, demo_mode: bool) -> None:
-    _call_dashboard_runtime("_refresh_state_sync", demo_mode=demo_mode)
-
-
-async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
-    await _call_dashboard_runtime("_ensure_state", refresh, demo_mode=demo_mode)
-
-
-def _cache_runtime_path(filename: str) -> Path:
-    return _call_dashboard_runtime("_cache_runtime_path", filename)
-
-
-def _stat_file(path: str | Path) -> dict[str, Any] | None:
-    return _call_dashboard_runtime("_stat_file", path)
-
-
-def _service_statuses() -> list[dict[str, Any]]:
-    return _call_dashboard_runtime("_service_statuses")
-
-
-def _llm_breakdown_snapshot() -> dict[str, Any]:
-    return _call_dashboard_runtime("_llm_breakdown_snapshot")
+    _wrapper.__name__ = name
+    _wrapper._component_wrapper_for = name
+    return _wrapper
 
 
 for _component_wrapper_name in _dashboard_runtime_component._COMPONENT_EXPORTS:
-    globals()[_component_wrapper_name]._component_wrapper_for = _component_wrapper_name
-del _component_wrapper_name
-
-
-def _normalize_chat_message(raw: Any) -> dict[str, Any] | None:
-    return _llm_chat_component._normalize_chat_message(raw)
-
-
-def _normalize_chat_conversation(raw: Any) -> dict[str, Any] | None:
-    return _llm_chat_component._normalize_chat_conversation(raw)
-
-
-def _load_llm_chat_conversations() -> list[dict[str, Any]]:
-    return _llm_chat_component._load_llm_chat_conversations()
-
-
-def _save_llm_chat_conversations(conversations: list[dict[str, Any]]) -> None:
-    return _llm_chat_component._save_llm_chat_conversations(conversations)
-
-
-def _load_custom_assistant_instructions() -> str:
-    return _llm_chat_component._load_custom_assistant_instructions()
-
-
-def _save_custom_assistant_instructions(value: str) -> str:
-    return _llm_chat_component._save_custom_assistant_instructions(value)
-
-
-def _truncate_text(value: str, limit: int = 120) -> str:
-    return _llm_chat_component._truncate_text(value, limit)
-
-
-def _conversation_summary(conv: dict[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._conversation_summary(conv)
-
-
-def _available_llm_chat_devices() -> list[str]:
-    return _llm_chat_component._available_llm_chat_devices()
-
-
-def _llm_model_options_payload(
-    options: Sequence[Mapping[str, str]], selected: str
-) -> list[dict[str, Any]]:
-    return _llm_chat_component._llm_model_options_payload(options, selected)
-
-
-def _normalize_llm_chat_backend(raw: Any) -> str:
-    return _llm_chat_component._normalize_llm_chat_backend(raw)
-
-
-def _normalize_llm_chat_device(raw: Any, *, available_devices: Sequence[str]) -> str:
-    return _llm_chat_component._normalize_llm_chat_device(
-        raw, available_devices=available_devices
+    globals()[_component_wrapper_name] = _make_dashboard_runtime_wrapper(
+        _component_wrapper_name
     )
+del _component_wrapper_name
+_ensure_state = _make_dashboard_runtime_wrapper("_ensure_state")
+_progress_snapshot = _make_dashboard_runtime_wrapper("_progress_snapshot")
+_service_statuses = _make_dashboard_runtime_wrapper("_service_statuses")
 
 
-def _resolve_codex_settings(file_values: Mapping[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._resolve_codex_settings(file_values)
+def _make_llm_chat_wrapper(name: str):
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        return getattr(_llm_chat_component, name)(*args, **kwargs)
+
+    _wrapper.__name__ = name
+    _wrapper._component_wrapper_for = name
+    return _wrapper
 
 
-def _resolve_llm_chat_settings() -> dict[str, Any]:
-    return _llm_chat_component._resolve_llm_chat_settings()
+for _component_wrapper_name in _llm_chat_component._COMPONENT_EXPORTS:
+    globals()[_component_wrapper_name] = _make_llm_chat_wrapper(_component_wrapper_name)
+del _component_wrapper_name
+_build_llm_from_settings = _llm_chat_component._build_llm_from_settings
+_load_custom_assistant_instructions = (
+    _llm_chat_component._load_custom_assistant_instructions
+)
+_resolve_llm_chat_settings = _llm_chat_component._resolve_llm_chat_settings
 
 
 async def _reset_llm_chat_runtime() -> None:
@@ -483,14 +392,6 @@ async def _reset_llm_chat_runtime() -> None:
         _LLM_CHAT_MODEL_LOADING = False
     async with _LLM_CHAT_AGENT_LOCK:
         _LLM_CHAT_AGENT = None
-
-
-def _public_llm_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    return _llm_chat_component._public_llm_chat_settings(settings)
-
-
-def _build_llm_from_settings(settings: Mapping[str, Any]) -> _LlmChatModel:
-    return _llm_chat_component._build_llm_from_settings(settings)
 
 
 async def _llm_chat_model_status() -> tuple[bool, bool]:
@@ -523,12 +424,6 @@ async def _load_llm_chat_model_task() -> None:
     finally:
         async with _LLM_CHAT_MODEL_LOCK:
             _LLM_CHAT_MODEL_LOADING = False
-
-
-def _build_chat_messages(
-    conversation: dict[str, Any], user_content: str
-) -> list[dict[str, str]]:
-    return _llm_chat_component._build_chat_messages(conversation, user_content)
 
 
 def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
@@ -657,18 +552,6 @@ async def _run_llm_chat_turn(
     if len(messages) >= len(base_messages):
         return messages[len(base_messages) :]
     return messages
-
-
-async def _llm_chat_snapshot() -> dict[str, Any]:
-    return await _llm_chat_component._llm_chat_snapshot()
-
-
-for _component_wrapper_name in _llm_chat_component._COMPONENT_EXPORTS:
-    if _component_wrapper_name in globals():
-        globals()[
-            _component_wrapper_name
-        ]._component_wrapper_for = _component_wrapper_name
-del _component_wrapper_name
 
 
 def _call_automation_runtime(name: str, *args: Any, **kwargs: Any) -> Any:

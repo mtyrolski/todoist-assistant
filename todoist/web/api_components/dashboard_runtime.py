@@ -42,6 +42,26 @@ def _run_async_in_main_loop(coro: Any) -> Any:
         return asyncio.run(coro)
 
 
+def _set_progress_sync(
+    stage: str,
+    *,
+    step: int,
+    detail: str,
+    sub_current: int | None = None,
+    sub_total: int | None = None,
+) -> None:
+    _run_async_in_main_loop(
+        _set_progress(
+            stage,
+            step=step,
+            total_steps=_PROGRESS_TOTAL_STEPS,
+            detail=detail,
+            sub_current=sub_current,
+            sub_total=sub_total,
+        )
+    )
+
+
 async def _progress_snapshot() -> dict[str, Any]:
     async with _PROGRESS_LOCK:
         return {
@@ -127,15 +147,12 @@ def _build_tqdm_progress_callback():
         step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
         unit_suffix = f" {unit}" if unit else ""
         detail = detail_override or f"{desc}: {current}/{total}{unit_suffix}"
-        _run_async_in_main_loop(
-            _set_progress(
-                desc or "Working",
-                step=step,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail=detail,
-                sub_current=current,
-                sub_total=total,
-            )
+        _set_progress_sync(
+            desc or "Working",
+            step=step,
+            detail=detail,
+            sub_current=current,
+            sub_total=total,
         )
 
     return _callback
@@ -297,57 +314,67 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         logger.warning(f"Failed to persist dashboard state cache: {exc}")
 
 
+def _dashboard_cache_payload_is_current(
+    payload: dict[str, Any], *, demo_mode: bool
+) -> bool:
+    if payload.get("version") != _DASHBOARD_STATE_SCHEMA_VERSION:
+        return False
+    if bool(payload.get("demo_mode", False)) != demo_mode:
+        return False
+    if (
+        demo_mode
+        and payload.get("demo_state_version") != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION
+    ):
+        return False
+    return (
+        payload.get("activity_cache_signature") == _activity_cache_signature()
+        and payload.get("adjustments_cache_signature") == _adjustments_cache_signature()
+    )
+
+
 def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
-    loaded = False
     try:
         payload = Cache().dashboard_state.load()
     except LocalStorageError:
-        payload = None
+        return False
+    if not isinstance(payload, dict) or not _dashboard_cache_payload_is_current(
+        payload, demo_mode=demo_mode
+    ):
+        return False
 
-    if isinstance(payload, dict):
-        if payload.get("version") == _DASHBOARD_STATE_SCHEMA_VERSION:
-            if bool(payload.get("demo_mode", False)) == demo_mode:
-                if (
-                    demo_mode
-                    and payload.get("demo_state_version")
-                    != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION
-                ):
-                    return False
-                payload_signature = payload.get("activity_cache_signature")
-                current_signature = _activity_cache_signature()
-                payload_adjustments_signature = payload.get(
-                    "adjustments_cache_signature"
-                )
-                current_adjustments_signature = _adjustments_cache_signature()
-                if (
-                    payload_signature == current_signature
-                    and payload_adjustments_signature == current_adjustments_signature
-                ):
-                    df_activity = payload.get("df_activity")
-                    active_projects = payload.get("active_projects")
-                    project_colors = payload.get("project_colors")
-                    if isinstance(df_activity, pd.DataFrame):
-                        if isinstance(active_projects, list):
-                            if isinstance(project_colors, dict):
-                                _state.db = None
-                                _state.df_activity = _normalize_activity_df(df_activity)
-                                _state.active_projects = active_projects
-                                _state.project_colors = {
-                                    str(k): str(v) for k, v in project_colors.items()
-                                }
-                                _state.last_refresh_s = float(
-                                    payload.get("last_refresh_s") or time.time()
-                                )
-                                _state.home_payload_cache = {}
-                                _state.demo_mode = demo_mode
-                                logger.info(
-                                    "Loaded dashboard state cache from disk "
-                                    f"(events={len(df_activity)}, "
-                                    f"projects={len(active_projects)})"
-                                )
-                                loaded = True
+    df_activity = payload.get("df_activity")
+    active_projects = payload.get("active_projects")
+    project_colors = payload.get("project_colors")
+    if not (
+        isinstance(df_activity, pd.DataFrame)
+        and isinstance(active_projects, list)
+        and isinstance(project_colors, dict)
+    ):
+        return False
 
-    return loaded
+    _state.db = None
+    _state.df_activity = _normalize_activity_df(df_activity)
+    _state.active_projects = active_projects
+    _state.project_colors = {str(k): str(v) for k, v in project_colors.items()}
+    _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
+    _state.home_payload_cache = {}
+    _state.demo_mode = demo_mode
+    logger.info(
+        "Loaded dashboard state cache from disk "
+        f"(events={len(df_activity)}, projects={len(active_projects)})"
+    )
+    return True
+
+
+def _activity_fetch_window_config() -> tuple[int, int]:
+    cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
+    activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
+    if not isinstance(activity_cfg, Mapping):
+        return 10, 2
+    return (
+        int(activity_cfg.get("nweeks_window_size", 10)),
+        int(activity_cfg.get("early_stop_after_n_windows", 2)),
+    )
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
@@ -360,13 +387,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
     error: str | None = None
     try:
-        _run_async_in_main_loop(
-            _set_progress(
-                "Checking Todoist updates",
-                step=1,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Refreshing project and task data from Todoist",
-            )
+        _set_progress_sync(
+            "Checking Todoist updates",
+            step=1,
+            detail="Refreshing project and task data from Todoist",
         )
         dbio = Database(".env")
         dbio.pull()
@@ -375,13 +399,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             cached_events = Cache().activity.load()
         except LocalStorageError:
             cached_events = set()
-        _run_async_in_main_loop(
-            _set_progress(
-                "Checking activity cache",
-                step=1,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail=f"Loaded {len(cached_events)} cached activity event(s)",
-            )
+        _set_progress_sync(
+            "Checking activity cache",
+            step=1,
+            detail=f"Loaded {len(cached_events)} cached activity event(s)",
         )
 
         def _should_backfill(events: set[Event]) -> bool:
@@ -396,31 +417,18 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         if cached_events and _resolve_api_key() and not _activity_backfill_attempted:
             if _should_backfill(cached_events):
                 try:
-                    cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-                    activity_cfg = (
-                        cfg.get("activity") if isinstance(cfg, DictConfig) else None
-                    )
-                    nweeks = 10
-                    early_stop = 2
-                    if isinstance(activity_cfg, Mapping):
-                        nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
-                        early_stop = int(
-                            activity_cfg.get("early_stop_after_n_windows", early_stop)
-                        )
+                    nweeks, early_stop = _activity_fetch_window_config()
                     logger.info(
                         f"Activity cache looks short; backfilling history "
                         f"(window={nweeks}w, stop={early_stop})."
                     )
-                    _run_async_in_main_loop(
-                        _set_progress(
-                            "Backfilling activity history",
-                            step=1,
-                            total_steps=_PROGRESS_TOTAL_STEPS,
-                            detail=(
-                                f"Cache has {len(cached_events)} event(s); "
-                                f"fetching older {nweeks}-week windows"
-                            ),
-                        )
+                    _set_progress_sync(
+                        "Backfilling activity history",
+                        step=1,
+                        detail=(
+                            f"Cache has {len(cached_events)} event(s); "
+                            f"fetching older {nweeks}-week windows"
+                        ),
                     )
                     events = dbio.fetch_activity_adaptively(
                         nweeks_window_size=nweeks,
@@ -434,44 +442,28 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 finally:
                     _activity_backfill_attempted = True
             else:
-                _run_async_in_main_loop(
-                    _set_progress(
-                        "Checking activity cache",
-                        step=1,
-                        total_steps=_PROGRESS_TOTAL_STEPS,
-                        detail=(
-                            f"Cache has {len(cached_events)} event(s); "
-                            "no history backfill needed"
-                        ),
-                    )
+                _set_progress_sync(
+                    "Checking activity cache",
+                    step=1,
+                    detail=(
+                        f"Cache has {len(cached_events)} event(s); "
+                        "no history backfill needed"
+                    ),
                 )
 
         if not cached_events and _resolve_api_key():
             try:
-                cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-                activity_cfg = (
-                    cfg.get("activity") if isinstance(cfg, DictConfig) else None
-                )
-                nweeks = 10
-                early_stop = 2
-                if isinstance(activity_cfg, Mapping):
-                    nweeks = int(activity_cfg.get("nweeks_window_size", nweeks))
-                    early_stop = int(
-                        activity_cfg.get("early_stop_after_n_windows", early_stop)
-                    )
+                nweeks, early_stop = _activity_fetch_window_config()
                 logger.info(
                     f"Activity cache empty; fetching full history (window={nweeks}w, stop={early_stop})."
                 )
-                _run_async_in_main_loop(
-                    _set_progress(
-                        "Fetching activity history",
-                        step=1,
-                        total_steps=_PROGRESS_TOTAL_STEPS,
-                        detail=(
-                            "Activity cache is empty; fetching Todoist "
-                            f"activity in {nweeks}-week windows"
-                        ),
-                    )
+                _set_progress_sync(
+                    "Fetching activity history",
+                    step=1,
+                    detail=(
+                        "Activity cache is empty; fetching Todoist "
+                        f"activity in {nweeks}-week windows"
+                    ),
                 )
                 events = dbio.fetch_activity_adaptively(
                     nweeks_window_size=nweeks,
@@ -483,13 +475,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     logger.info(
                         "Adaptive fetch returned no events; attempting recent activity pages."
                     )
-                    _run_async_in_main_loop(
-                        _set_progress(
-                            "Fetching recent activity",
-                            step=1,
-                            total_steps=_PROGRESS_TOTAL_STEPS,
-                            detail="No history events found yet; checking recent activity pages",
-                        )
+                    _set_progress_sync(
+                        "Fetching recent activity",
+                        step=1,
+                        detail="No history events found yet; checking recent activity pages",
                     )
                     events = dbio.fetch_activity(max_pages=2)
                 Cache().activity.save(set(events))
@@ -521,13 +510,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     f"Failed to fetch scoped archived-parent activity: {exc}"
                 )
 
-        _run_async_in_main_loop(
-            _set_progress(
-                "Resolving project hierarchy",
-                step=2,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Resolving roots across active and archived projects",
-            )
+        _set_progress_sync(
+            "Resolving project hierarchy",
+            step=2,
+            detail="Resolving roots across active and archived projects",
         )
         try:
             df_activity = _normalize_activity_df(load_activity_data(dbio))
@@ -535,13 +521,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             logger.warning(f"Failed to load activity data; using empty dataset: {exc}")
             df_activity = _empty_activity_df()
 
-        _run_async_in_main_loop(
-            _set_progress(
-                "Preparing dashboard data",
-                step=3,
-                total_steps=_PROGRESS_TOTAL_STEPS,
-                detail="Loading metadata and caches",
-            )
+        _set_progress_sync(
+            "Preparing dashboard data",
+            step=3,
+            detail="Loading metadata and caches",
         )
         active_projects = dbio.fetch_projects(include_tasks=True)
 
@@ -651,24 +634,19 @@ def _service_statuses() -> list[dict[str, Any]]:
         observer_status = "neutral"
         observer_detail = "enabled, waiting for first tick"
 
+    service_specs = (
+        ("Todoist token", api_key_set, "API_KEY set", "API_KEY missing"),
+        ("Activity cache", cache_activity, cache_activity, "activity.joblib missing"),
+        ("Automation log", automation_log, automation_log, "automation.log missing"),
+    )
     return [
         {
-            "name": "Todoist token",
-            "status": "ok" if api_key_set else "warn",
-            "detail": "API_KEY set" if api_key_set else "API_KEY missing",
-        },
-        {
-            "name": "Activity cache",
-            "status": "ok" if cache_activity else "warn",
-            "detail": cache_activity or "activity.joblib missing",
-        },
-        {
-            "name": "Automation log",
-            "status": "ok" if automation_log else "warn",
-            "detail": automation_log or "automation.log missing",
-        },
-        {"name": "Observer", "status": observer_status, "detail": observer_detail},
-    ]
+            "name": name,
+            "status": "ok" if available else "warn",
+            "detail": ok_detail if available else missing_detail,
+        }
+        for name, available, ok_detail, missing_detail in service_specs
+    ] + [{"name": "Observer", "status": observer_status, "detail": observer_detail}]
 
 
 def _llm_breakdown_snapshot() -> dict[str, Any]:

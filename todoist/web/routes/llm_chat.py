@@ -6,11 +6,16 @@
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from todoist.web.routes.common import _sync_api_globals
 
-router = APIRouter()
+
+def _sync_llm_globals() -> None:
+    _sync_api_globals(globals())
+
+
+router = APIRouter(dependencies=[Depends(_sync_llm_globals)])
 _MAX_CUSTOM_INSTRUCTIONS_CHARS = 12_000
 
 
@@ -44,9 +49,33 @@ def _conversation_response(conversation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _find_conversation(
+    conversations: list[dict[str, Any]], conversation_id: str
+) -> dict[str, Any] | None:
+    return next(
+        (item for item in conversations if item.get("id") == conversation_id), None
+    )
+
+
+def _append_turn_messages(
+    conversation: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    created_at: str,
+) -> None:
+    conversation.setdefault("messages", [])
+    for msg in messages:
+        role = str(msg.get("role") or "")
+        content = _sanitize_text(msg.get("content"))
+        if role and content:
+            conversation["messages"].append(
+                {"role": role, "content": content, "created_at": created_at}
+            )
+    conversation["updated_at"] = created_at
+
+
 @router.get("/api/dashboard/llm_chat", tags=["dashboard"])
 async def dashboard_llm_chat() -> dict[str, Any]:
-    _sync_api_globals(globals())
     """Return LLM chat runtime status and conversation summaries."""
 
     try:
@@ -57,7 +86,6 @@ async def dashboard_llm_chat() -> dict[str, Any]:
 
 @router.get("/api/llm_chat/settings", tags=["llm"])
 async def llm_chat_settings() -> dict[str, Any]:
-    _sync_api_globals(globals())
     try:
         return _public_llm_chat_settings(_resolve_llm_chat_settings())
     except ValueError as exc:
@@ -68,7 +96,6 @@ async def llm_chat_settings() -> dict[str, Any]:
 async def llm_chat_update_settings(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    _sync_api_globals(globals())
     settings = _resolve_llm_chat_settings()
     requested_backend = str(payload.get("backend") or "").strip().lower()
     if requested_backend not in {item["id"] for item in settings["availableBackends"]}:
@@ -128,7 +155,6 @@ async def llm_chat_update_settings(
 
 @router.post("/api/llm_chat/enable", tags=["llm"])
 async def llm_chat_enable() -> dict[str, Any]:
-    _sync_api_globals(globals())
     """Start loading the local LLM model used for chat."""
 
     settings = _resolve_llm_chat_settings()
@@ -148,7 +174,6 @@ async def llm_chat_enable() -> dict[str, Any]:
 async def llm_chat_send(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    _sync_api_globals(globals())
     """Run an interactive Codex assistant turn and return the updated conversation."""
 
     message = _sanitize_text(payload.get("message"))
@@ -172,10 +197,7 @@ async def llm_chat_send(
         conversations = _load_llm_chat_conversations()
         conversation = None
         if conversation_id:
-            conversation = next(
-                (item for item in conversations if item.get("id") == conversation_id),
-                None,
-            )
+            conversation = _find_conversation(conversations, conversation_id)
             if conversation is None:
                 raise HTTPException(status_code=404, detail="Conversation not found")
         else:
@@ -228,29 +250,11 @@ async def llm_chat_send(
             if item.get("id") != conversation_id:
                 continue
             found_conversation = True
-            item.setdefault("messages", [])
-            for msg in new_messages:
-                role = str(msg.get("role") or "")
-                content = _sanitize_text(msg.get("content"))
-                if not role or not content:
-                    continue
-                item["messages"].append(
-                    {"role": role, "content": content, "created_at": finished_at}
-                )
-            item["updated_at"] = finished_at
+            _append_turn_messages(item, new_messages, created_at=finished_at)
             conversation = item
             break
         if not found_conversation:
-            conversation.setdefault("messages", [])
-            for msg in new_messages:
-                role = str(msg.get("role") or "")
-                content = _sanitize_text(msg.get("content"))
-                if not role or not content:
-                    continue
-                conversation["messages"].append(
-                    {"role": role, "content": content, "created_at": finished_at}
-                )
-            conversation["updated_at"] = finished_at
+            _append_turn_messages(conversation, new_messages, created_at=finished_at)
             conversations.append(conversation)
         _save_llm_chat_conversations(conversations)
 
@@ -267,7 +271,6 @@ async def llm_chat_send(
 async def llm_chat_update_instructions(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, str]:
-    _sync_api_globals(globals())
     raw = payload.get("instructions", "")
     if not isinstance(raw, str):
         raise HTTPException(status_code=400, detail="instructions must be text")
@@ -287,32 +290,16 @@ async def llm_chat_update_instructions(
 
 @router.get("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
 async def llm_chat_conversation(conversation_id: str) -> dict[str, Any]:
-    _sync_api_globals(globals())
     """Fetch a conversation transcript."""
 
     _validate_conversation_id(conversation_id)
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
-    conversation = next(
-        (item for item in conversations if item.get("id") == conversation_id), None
-    )
+    conversation = _find_conversation(conversations, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return {
-        "id": conversation.get("id"),
-        "title": conversation.get("title"),
-        "createdAt": conversation.get("created_at"),
-        "updatedAt": conversation.get("updated_at"),
-        "messages": [
-            {
-                "role": msg.get("role"),
-                "content": msg.get("content"),
-                "createdAt": msg.get("created_at"),
-            }
-            for msg in conversation.get("messages") or []
-        ],
-    }
+    return _conversation_response(conversation)
 
 
 @router.patch("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
@@ -320,7 +307,6 @@ async def llm_chat_rename_conversation(
     conversation_id: str,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    _sync_api_globals(globals())
     _validate_conversation_id(conversation_id)
     title = _sanitize_text(payload.get("title"))
     if not title:
@@ -329,10 +315,7 @@ async def llm_chat_rename_conversation(
 
     async with _LLM_CHAT_STORAGE_LOCK:
         conversations = _load_llm_chat_conversations()
-        conversation = next(
-            (item for item in conversations if item.get("id") == conversation_id),
-            None,
-        )
+        conversation = _find_conversation(conversations, conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         conversation["title"] = title
@@ -343,7 +326,6 @@ async def llm_chat_rename_conversation(
 
 @router.delete("/api/llm_chat/conversations/{conversation_id}", tags=["llm"])
 async def llm_chat_delete_conversation(conversation_id: str) -> dict[str, Any]:
-    _sync_api_globals(globals())
     _validate_conversation_id(conversation_id)
 
     async with _LLM_CHAT_STORAGE_LOCK:

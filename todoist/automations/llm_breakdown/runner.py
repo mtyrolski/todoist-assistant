@@ -142,6 +142,22 @@ def _failure_action_for_task(
     return f"Label kept for retry ({failure_count}/{max_failures})."
 
 
+def _progress_current(task: Task, *, label: str, depth: int) -> dict[str, Any]:
+    return {
+        CurrentKey.TASK_ID.value: task.id,
+        CurrentKey.CONTENT.value: task.task_entry.content,
+        CurrentKey.LABEL.value: label,
+        CurrentKey.DEPTH.value: depth,
+    }
+
+
+def _queue_without(
+    queue_items: list[QueueItem], *task_id_sets: set[str]
+) -> list[QueueItem]:
+    drop_ids = set().union(*task_id_sets)
+    return [item for item in queue_items if item["task_id"] not in drop_ids]
+
+
 def run_breakdown(automation: Any, db: Database) -> None:
     logger.info("Running AI Breakdown automation")
     projects = db.fetch_projects(include_tasks=True)
@@ -212,10 +228,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
 
     if not candidates:
         if drop_queue_ids:
-            remaining = [
-                item for item in queue_items if item["task_id"] not in drop_queue_ids
-            ]
-            automation.queue_save(remaining)
+            automation.queue_save(_queue_without(queue_items, drop_queue_ids))
         if automation.track_progress:
             idle_progress = build_idle_progress(
                 now=now,
@@ -259,10 +272,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
         )
         automation.progress_save(progress)
         if drop_queue_ids:
-            remaining = [
-                item for item in queue_items if item["task_id"] not in drop_queue_ids
-            ]
-            automation.queue_save(remaining)
+            automation.queue_save(_queue_without(queue_items, drop_queue_ids))
         return
 
     prepared_requests = [
@@ -300,17 +310,22 @@ def run_breakdown(automation: Any, db: Database) -> None:
         depth = request.depth
         source = request.source
 
-        progress[ProgressKey.CURRENT.value] = {
-            CurrentKey.TASK_ID.value: task.id,
-            CurrentKey.CONTENT.value: task.task_entry.content,
-            CurrentKey.LABEL.value: label,
-            CurrentKey.DEPTH.value: depth,
-        }
+        progress[ProgressKey.CURRENT.value] = _progress_current(
+            task, label=label, depth=depth
+        )
         progress[ProgressKey.UPDATED_AT.value] = automation.now_iso()
         automation.progress_save(progress)
 
-        if result.error is not None or result.breakdown is None:
-            error_message = result.error or "unknown error"
+        def record_failure(
+            error_message: str,
+            *,
+            created_count: int = 0,
+            task=task,
+            label=label,
+            source=source,
+            depth=depth,
+        ) -> None:
+            nonlocal failed
             logger.error("AI breakdown failed for task {}: {}", task.id, error_message)
             action = _failure_action_for_task(
                 automation,
@@ -333,16 +348,15 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 progress,
                 task=task,
                 status="failed",
-                created_count=0,
+                created_count=created_count,
                 error=error_message,
                 depth=depth,
             )
-            pending = tasks_total - (completed + failed)
             set_progress_counts(
                 progress,
                 completed=completed,
                 failed=failed,
-                pending=pending,
+                pending=tasks_total - (completed + failed),
                 total=tasks_total,
                 now=automation.now_iso(),
                 processed_ids=processed_ids,
@@ -350,49 +364,13 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 current=None,
             )
             automation.progress_save(progress)
+
+        if result.error is not None or result.breakdown is None:
+            record_failure(result.error or "unknown error")
             continue
         nodes = result.breakdown.children
         if not nodes:
-            error_message = "LLM returned an empty breakdown."
-            logger.error("AI breakdown failed for task {}: {}", task.id, error_message)
-            action = _failure_action_for_task(
-                automation,
-                db,
-                task=task,
-                label=label,
-                source=source,
-            )
-            _post_task_comment(
-                db,
-                task.id,
-                _failure_comment_with_action(
-                    run_id=run_id,
-                    error_message=error_message,
-                    action=action,
-                ),
-            )
-            failed += 1
-            append_progress_result(
-                progress,
-                task=task,
-                status="failed",
-                created_count=0,
-                error=error_message,
-                depth=depth,
-            )
-            pending = tasks_total - (completed + failed)
-            set_progress_counts(
-                progress,
-                completed=completed,
-                failed=failed,
-                pending=pending,
-                total=tasks_total,
-                now=automation.now_iso(),
-                processed_ids=processed_ids,
-                track_processed=track_processed,
-                current=None,
-            )
-            automation.progress_save(progress)
+            record_failure("LLM returned an empty breakdown.")
             continue
 
         created_count = 0
@@ -438,26 +416,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
             error_message = "; ".join(context.errors[:3])
             if len(context.errors) > 3:
                 error_message = f"{error_message}; and {len(context.errors) - 3} more"
-            logger.error(
-                "AI breakdown insert failed for task {}: {}", task.id, error_message
-            )
-            action = _failure_action_for_task(
-                automation,
-                db,
-                task=task,
-                label=label,
-                source=source,
-            )
-            _post_task_comment(
-                db,
-                task.id,
-                _failure_comment_with_action(
-                    run_id=run_id,
-                    error_message=error_message,
-                    action=action,
-                ),
-            )
-            failed += 1
             processed_ids.add(task.id)
             if created_count > 0 and source == "queue":
                 processed_queue_ids.add(task.id)
@@ -467,27 +425,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 and source == "label"
             ):
                 automation.update_root_labels(db, task, label)
-            append_progress_result(
-                progress,
-                task=task,
-                status="failed",
-                created_count=created_count,
-                error=error_message,
-                depth=depth,
-            )
-            pending = tasks_total - (completed + failed)
-            set_progress_counts(
-                progress,
-                completed=completed,
-                failed=failed,
-                pending=pending,
-                total=tasks_total,
-                now=automation.now_iso(),
-                processed_ids=processed_ids,
-                track_processed=track_processed,
-                current=None,
-            )
-            automation.progress_save(progress)
+            record_failure(error_message, created_count=created_count)
             continue
         if automation.remove_label_after_processing and source == "label":
             automation.update_root_labels(db, task, label)
@@ -536,12 +474,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
         )
 
     if queue_additions or drop_queue_ids or processed_queue_ids:
-        queue_remaining = [
-            item
-            for item in queue_items
-            if item["task_id"] not in drop_queue_ids
-            and item["task_id"] not in processed_queue_ids
-        ]
+        queue_remaining = _queue_without(
+            queue_items, drop_queue_ids, processed_queue_ids
+        )
         queue_remaining.extend(queue_additions)
         automation.queue_save(queue_remaining)
 

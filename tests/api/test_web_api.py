@@ -3,7 +3,6 @@
 from datetime import date
 
 import pandas as pd
-from fastapi.testclient import TestClient
 
 from tests.factories import make_project, make_project_entry, make_task
 from tests.web_api_helpers import (
@@ -17,26 +16,70 @@ import todoist.web.api as web_api
 # pylint: disable=protected-access
 
 
-def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> None:
+async def _noop_ensure_state(*, refresh: bool) -> None:
+    _ = refresh
+
+
+def _event_df(rows: list[dict[str, str]]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
+def _empty_event_df() -> pd.DataFrame:
+    return _event_df(
+        [
+            {
+                "date": "2025-01-15",
+                "id": "anchor",
+                "title": "anchor",
+                "type": "added",
+                "parent_project_name": "A",
+                "root_project_name": "A",
+                "task_id": "anchor",
+            }
+        ]
+    ).iloc[:0]
+
+
+def _set_dashboard_df(monkeypatch, df: pd.DataFrame) -> None:
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _stub_all_figures(monkeypatch)
+    _set_state_with_df(df)
+
+
+def _home(api_client, query: str = "weeks=12&granularity=W"):
+    return api_client.get(f"/api/dashboard/home?{query}")
+
+
+def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-
     cache = web_api.Cache()
     cache.activity.save(set())
+    return cache
+
+
+def _save_dashboard_snapshot(cache: web_api.Cache, **overrides) -> None:
+    payload = {
+        "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
+        "created_at": "2025-01-01T00:00:00",
+        "last_refresh_s": 123.0,
+        "demo_mode": False,
+        "activity_cache_signature": web_api._activity_cache_signature(),
+        "adjustments_cache_signature": [],
+        "df_activity": _single_event_df(),
+        "active_projects": [],
+        "project_colors": {},
+    }
+    payload.update(overrides)
+    cache.dashboard_state.save(payload)
+
+
+def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> None:
+    cache = _dashboard_cache(monkeypatch, tmp_path)
     df = _single_event_df()
-    cache.dashboard_state.save(
-        {
-            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
-            "created_at": "2025-01-01T00:00:00",
-            "last_refresh_s": 123.0,
-            "demo_mode": False,
-            "activity_cache_signature": web_api._activity_cache_signature(),
-            "adjustments_cache_signature": [],
-            "df_activity": df,
-            "active_projects": [],
-            "project_colors": {"A": "#123456"},
-        }
-    )
+    _save_dashboard_snapshot(cache, df_activity=df, project_colors={"A": "#123456"})
 
     _clear_dashboard_state()
     loaded = web_api._load_state_from_disk_cache(demo_mode=False)
@@ -50,25 +93,8 @@ def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> N
 def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    cache = web_api.Cache()
-    cache.activity.save(set())
-    original_signature = web_api._activity_cache_signature()
-    cache.dashboard_state.save(
-        {
-            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
-            "created_at": "2025-01-01T00:00:00",
-            "last_refresh_s": 123.0,
-            "demo_mode": False,
-            "activity_cache_signature": original_signature,
-            "adjustments_cache_signature": [],
-            "df_activity": _single_event_df(),
-            "active_projects": [],
-            "project_colors": {},
-        }
-    )
+    cache = _dashboard_cache(monkeypatch, tmp_path)
+    _save_dashboard_snapshot(cache)
 
     # Mutate activity cache so signature no longer matches cached dashboard snapshot.
     cache.activity.save({"new-event"})
@@ -81,24 +107,8 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
 def test_load_state_from_disk_cache_rejects_stale_adjustment_signature(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    cache = web_api.Cache()
-    cache.activity.save(set())
-    cache.dashboard_state.save(
-        {
-            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
-            "created_at": "2025-01-01T00:00:00",
-            "last_refresh_s": 123.0,
-            "demo_mode": False,
-            "activity_cache_signature": web_api._activity_cache_signature(),
-            "adjustments_cache_signature": [],
-            "df_activity": _single_event_df(),
-            "active_projects": [],
-            "project_colors": {},
-        }
-    )
+    cache = _dashboard_cache(monkeypatch, tmp_path)
+    _save_dashboard_snapshot(cache)
 
     personal_dir = tmp_path / "personal"
     personal_dir.mkdir()
@@ -115,24 +125,11 @@ def test_load_state_from_disk_cache_rejects_stale_adjustment_signature(
 def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    cache = web_api.Cache()
-    cache.activity.save(set())
-    cache.dashboard_state.save(
-        {
-            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
-            "created_at": "2025-01-01T00:00:00",
-            "last_refresh_s": 123.0,
-            "demo_mode": True,
-            "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION - 1,
-            "activity_cache_signature": web_api._activity_cache_signature(),
-            "adjustments_cache_signature": [],
-            "df_activity": _single_event_df(),
-            "active_projects": [],
-            "project_colors": {"A": "#123456"},
-        }
+    _save_dashboard_snapshot(
+        _dashboard_cache(monkeypatch, tmp_path),
+        demo_mode=True,
+        demo_state_version=web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION - 1,
+        project_colors={"A": "#123456"},
     )
 
     _clear_dashboard_state()
@@ -143,25 +140,14 @@ def test_load_state_from_disk_cache_rejects_legacy_demo_snapshot(
 def test_load_state_from_disk_cache_restores_current_demo_snapshot(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    cache = web_api.Cache()
-    cache.activity.save(set())
+    cache = _dashboard_cache(monkeypatch, tmp_path)
     df = _single_event_df()
-    cache.dashboard_state.save(
-        {
-            "version": web_api._DASHBOARD_STATE_SCHEMA_VERSION,
-            "created_at": "2025-01-01T00:00:00",
-            "last_refresh_s": 123.0,
-            "demo_mode": True,
-            "demo_state_version": web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION,
-            "activity_cache_signature": web_api._activity_cache_signature(),
-            "adjustments_cache_signature": [],
-            "df_activity": df,
-            "active_projects": [],
-            "project_colors": {"A": "#123456"},
-        }
+    _save_dashboard_snapshot(
+        cache,
+        demo_mode=True,
+        demo_state_version=web_api._DEMO_DASHBOARD_STATE_SCHEMA_VERSION,
+        df_activity=df,
+        project_colors={"A": "#123456"},
     )
 
     _clear_dashboard_state()
@@ -174,7 +160,9 @@ def test_load_state_from_disk_cache_restores_current_demo_snapshot(
     assert web_api._state.demo_mode is True
 
 
-def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) -> None:
+def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(
+    monkeypatch, api_client
+) -> None:
     _stub_all_figures(monkeypatch)
     _clear_dashboard_state()
 
@@ -196,83 +184,59 @@ def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) 
     monkeypatch.setattr(web_api, "_refresh_state_sync", _unexpected_refresh)
     monkeypatch.setattr(web_api, "_env_demo_mode", lambda: False)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
 
 
-def test_dashboard_home_validates_weeks(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-15",
-                "id": "e1",
-                "title": "t1",
-                "type": "completed",
-                "parent_project_name": "A",
-                "root_project_name": "A",
-                "task_id": "1",
-            }
-        ]
+def test_dashboard_home_validates_weeks(monkeypatch, api_client) -> None:
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
+            [
+                {
+                    "date": "2025-01-15",
+                    "id": "e1",
+                    "title": "t1",
+                    "type": "completed",
+                    "parent_project_name": "A",
+                    "root_project_name": "A",
+                    "task_id": "1",
+                }
+            ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=10000")
+    res = _home(api_client, "weeks=10000")
     assert res.status_code == 400
 
 
-def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-15",
-                "id": "e1",
-                "title": "t1",
-                "type": "completed",
-                "parent_project_name": "A",
-                "root_project_name": "A",
-                "task_id": "1",
-            }
-        ]
+def test_dashboard_home_requires_beg_and_end(monkeypatch, api_client) -> None:
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
+            [
+                {
+                    "date": "2025-01-15",
+                    "id": "e1",
+                    "title": "t1",
+                    "type": "completed",
+                    "parent_project_name": "A",
+                    "root_project_name": "A",
+                    "task_id": "1",
+                }
+            ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?beg=2025-01-01")
+    res = _home(api_client, "beg=2025-01-01")
     assert res.status_code == 400
 
 
-def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    # Anchor date is 2025-01-15 (Wed). Last completed ISO week is 2025-01-06..2025-01-12.
-    df = pd.DataFrame(
+def test_dashboard_home_last_completed_week_parent_share(monkeypatch, api_client) -> None:
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
         [
-            # In last completed week:
             {
                 "date": "2025-01-06",
                 "id": "c1",
@@ -321,13 +285,10 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
                 "task_id": "t5",
             },
         ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
     payload = res.json()
 
@@ -346,33 +307,10 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     assert abs(by_name["Parent B"]["percentOfCompleted"] - 33.33) < 0.02
 
 
-def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
+def test_dashboard_home_handles_empty_activity(monkeypatch, api_client) -> None:
+    _set_dashboard_df(monkeypatch, _empty_event_df())
 
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        columns=pd.Index(
-            [
-                "date",
-                "id",
-                "title",
-                "type",
-                "parent_project_name",
-                "root_project_name",
-                "task_id",
-            ]
-        )
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
-
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12")
+    res = _home(api_client, "weeks=12")
     assert res.status_code == 200
     payload = res.json()
     assert payload["range"]["weeks"] == 12
@@ -380,48 +318,41 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     assert payload.get("noData") is True
 
 
-def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-07",
-                "id": "c1",
-                "title": "Morning walk",
-                "type": "completed",
-                "parent_project_name": "Health",
-                "root_project_name": "Health",
-                "task_id": "habit-1",
-            },
-            {
-                "date": "2025-01-08",
-                "id": "r1",
-                "title": "Morning walk",
-                "type": "rescheduled",
-                "parent_project_name": "Health",
-                "root_project_name": "Health",
-                "task_id": "habit-1",
-            },
-            {
-                "date": "2025-01-15",
-                "id": "anchor-1",
-                "title": "Another task",
-                "type": "completed",
-                "parent_project_name": "Health",
-                "root_project_name": "Health",
-                "task_id": "anchor-task",
-            },
-        ]
+def test_dashboard_home_includes_habit_tracker_summary(monkeypatch, api_client) -> None:
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
+            [
+                {
+                    "date": "2025-01-07",
+                    "id": "c1",
+                    "title": "Morning walk",
+                    "type": "completed",
+                    "parent_project_name": "Health",
+                    "root_project_name": "Health",
+                    "task_id": "habit-1",
+                },
+                {
+                    "date": "2025-01-08",
+                    "id": "r1",
+                    "title": "Morning walk",
+                    "type": "rescheduled",
+                    "parent_project_name": "Health",
+                    "root_project_name": "Health",
+                    "task_id": "habit-1",
+                },
+                {
+                    "date": "2025-01-15",
+                    "id": "anchor-1",
+                    "title": "Another task",
+                    "type": "completed",
+                    "parent_project_name": "Health",
+                    "root_project_name": "Health",
+                    "task_id": "anchor-task",
+                },
+            ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    web_api._state.df_activity = df
     web_api._state.active_projects = [
         make_project(
             project_id="project-1",
@@ -444,8 +375,7 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
     web_api._state.db = None
     web_api._state.home_payload_cache = {}
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
     payload = res.json()
 
@@ -457,14 +387,7 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
     assert habit_tracker["figure"]["data"]
 
 
-def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
+def test_dashboard_home_normalizes_integer_activity_index(monkeypatch, api_client) -> None:
     df = pd.DataFrame(
         [
             {
@@ -488,22 +411,17 @@ def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
         ]
     )
     df.index = [0, 1]
-    web_api._state.df_activity = df
-    web_api._state.active_projects = []
+    _set_dashboard_df(monkeypatch, df)
     web_api._state.project_colors = {"Health": "#00aa88"}
-    web_api._state.db = None
-    web_api._state.home_payload_cache = {}
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
     payload = res.json()
     assert payload["metrics"]["items"]
 
 
-def test_dashboard_status_returns_services() -> None:
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/status")
+def test_dashboard_status_returns_services(api_client) -> None:
+    res = api_client.get("/api/dashboard/status")
     assert res.status_code == 200
     payload = res.json()
     assert isinstance(payload.get("services"), list)
@@ -511,21 +429,14 @@ def test_dashboard_status_returns_services() -> None:
     assert payload["configurableItems"][0]["icon"] == "wrench"
 
 
-def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+def test_dashboard_home_includes_urgency_status(monkeypatch, api_client) -> None:
+    _set_dashboard_df(monkeypatch, _single_event_df())
     monkeypatch.setattr(
         web_api,
         "_DASHBOARD_CONFIG_PATH",
         web_api._REPO_ROOT / "configs" / "dashboard.yaml",
     )
-    _stub_all_figures(monkeypatch)
 
-    df = _single_event_df()
-    web_api._state.df_activity = df
     web_api._state.active_projects = [
         make_project(
             project_id="proj-urgency",
@@ -541,11 +452,8 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
         )
     ]
     web_api._state.project_colors = {"Urgency": "#44aa66"}
-    web_api._state.db = None
-    web_api._state.home_payload_cache = {}
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
 
     assert res.status_code == 200
     payload = res.json()

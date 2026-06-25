@@ -12,6 +12,34 @@ from todoist.dashboard._plot_common import (
 
 _RECENCY_WEIGHT_HALFLIFE_DAYS = 180.0
 _MIN_RECENCY_WEIGHT = 0.2
+_TIME_TICKS = (
+    (1, "1s"),
+    (10, "10s"),
+    (60, "1m"),
+    (10 * 60, "10m"),
+    (60 * 60, "1h"),
+    (3 * 60 * 60, "3h"),
+    (12 * 60 * 60, "12h"),
+    (24 * 60 * 60, "1d"),
+    (3 * 24 * 60 * 60, "3d"),
+    (7 * 24 * 60 * 60, "1w"),
+    (3 * 7 * 24 * 60 * 60, "3w"),
+    (28 * 24 * 60 * 60, "4w"),
+    (6 * 7 * 24 * 60 * 60, "6w"),
+    (12 * 7 * 24 * 60 * 60, "12w"),
+)
+_DURATION_UNITS = (
+    ("w", 7 * 24 * 60 * 60),
+    ("d", 24 * 60 * 60),
+    ("h", 60 * 60),
+    ("m", 60),
+    ("s", 1),
+)
+_AXIS_UNITS = ((60, 1.0, "sec"), (3600, 60.0, "min"), (86400, 3600.0, "hr"))
+_HIGHLIGHT_SPECS = (
+    ("Fastest 15%", "#00E5FF"),
+    ("Slowest 15%", "#FF4F9A"),
+)
 
 
 def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
@@ -89,35 +117,19 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     ) -> tuple[list[float], list[str]]:
         import math
 
-        candidates = [
-            (1, "1s"),
-            (10, "10s"),
-            (60, "1m"),
-            (10 * 60, "10m"),
-            (60 * 60, "1h"),
-            (3 * 60 * 60, "3h"),
-            (12 * 60 * 60, "12h"),
-            (24 * 60 * 60, "1d"),
-            (3 * 24 * 60 * 60, "3d"),
-            (7 * 24 * 60 * 60, "1w"),
-            (3 * 7 * 24 * 60 * 60, "3w"),
-            (28 * 24 * 60 * 60, "4w"),
-            (6 * 7 * 24 * 60 * 60, "6w"),
-            (12 * 7 * 24 * 60 * 60, "12w"),
-        ]
         max_ticks = 9
         lower = min_seconds / 2.0
         upper = max_seconds * 1.5
-        selected = [(sec, label) for sec, label in candidates if lower <= sec <= upper]
+        selected = [(sec, label) for sec, label in _TIME_TICKS if lower <= sec <= upper]
         if not selected:
-            selected = [(sec, label) for sec, label in candidates if sec <= upper]
+            selected = [(sec, label) for sec, label in _TIME_TICKS if sec <= upper]
             if selected:
                 selected = selected[-max_ticks:]
         if not selected:
             target = max(min_seconds, 1e-6)
             selected = [
                 min(
-                    candidates,
+                    _TIME_TICKS,
                     key=lambda item: abs(math.log10(item[0]) - math.log10(target)),
                 )
             ]
@@ -231,15 +243,8 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
 
     def _format_duration_compact(seconds: float) -> str:
         total = int(round(max(0.0, seconds)))
-        units = [
-            ("w", 7 * 24 * 60 * 60),
-            ("d", 24 * 60 * 60),
-            ("h", 60 * 60),
-            ("m", 60),
-            ("s", 1),
-        ]
         parts: list[str] = []
-        for suffix, unit_seconds in units:
+        for suffix, unit_seconds in _DURATION_UNITS:
             if total >= unit_seconds or (suffix == "s" and not parts):
                 value = total // unit_seconds
                 total = total % unit_seconds
@@ -328,18 +333,14 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
     )
 
     max_duration = float(durations.max())
-    if max_duration < 60:
-        axis_unit_seconds = 1.0
-        unit_label = "sec"
-    elif max_duration < 3600:
-        axis_unit_seconds = 60.0
-        unit_label = "min"
-    elif max_duration < 86400:
-        axis_unit_seconds = 3600.0
-        unit_label = "hr"
-    else:
-        axis_unit_seconds = 86400.0
-        unit_label = "days"
+    axis_unit_seconds, unit_label = next(
+        (
+            (unit_seconds, label)
+            for limit_seconds, unit_seconds, label in _AXIS_UNITS
+            if max_duration < limit_seconds
+        ),
+        (86400.0, "days"),
+    )
     durations_converted = durations / axis_unit_seconds
     log_durations = np.log10(durations_converted)
     total_count = int(durations_converted.size)
@@ -377,10 +378,12 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
             x_max = float(x_values.max())
             highlight_low = float(np.clip(highlight_low, x_min, x_max))
             highlight_high = float(np.clip(highlight_high, x_min, x_max))
-            for name, low, high, color in [
-                ("Fastest 15%", None, highlight_low, "#00E5FF"),
-                ("Slowest 15%", highlight_high, None, "#FF4F9A"),
-            ]:
+            for (name, color), low, high in zip(
+                _HIGHLIGHT_SPECS,
+                (None, highlight_high),
+                (highlight_low, None),
+                strict=True,
+            ):
                 segment = _slice_density(x_values, densities, low=low, high=high)
                 if segment is None:
                     continue
@@ -411,10 +414,9 @@ def plot_task_lifespans(df: pd.DataFrame) -> go.Figure:
                         ),
                     )
                 )
-            for x_value, color in [
-                (highlight_low, "#00E5FF"),
-                (highlight_high, "#FF4F9A"),
-            ]:
+            for x_value, (_, color) in zip(
+                (highlight_low, highlight_high), _HIGHLIGHT_SPECS, strict=True
+            ):
                 if not np.isfinite(x_value):
                     continue
                 fig.add_shape(

@@ -60,6 +60,13 @@ def _copy_tree_merge(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
+def _require_existing(paths: list[Path], label: str) -> None:
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        missing_str = ", ".join(str(path) for path in missing)
+        raise RuntimeError(f"{label} missing: {missing_str}")
+
+
 def _download_node(dist_root: Path, node_version: str, *, target_dir: Path) -> None:
     node_zip_name = f"node-v{node_version}-win-x64.zip"
     node_zip = dist_root / node_zip_name
@@ -233,6 +240,15 @@ def _sign_with_signtool(
             str(target),
         ]
     )
+
+
+def _sign_if_configured(
+    signtool_path: str | None,
+    signing_config: tuple[Path, str, str] | None,
+    target: Path,
+) -> None:
+    if signtool_path and signing_config:
+        _sign_with_signtool(signtool_path, target, *signing_config)
 
 
 def _python_has_module(python_path: Path, module: str) -> bool:
@@ -446,71 +462,46 @@ def _build_msi(
     wixobj_dir = dist_root / "wixobj"
     wixobj_dir.mkdir(parents=True, exist_ok=True)
 
-    heat = wix_tools["heat"]
-    candle = wix_tools["candle"]
-    light = wix_tools["light"]
-
     app_wxs = dist_root / "app_files.wxs"
     config_wxs = dist_root / "config_files.wxs"
 
-    _run(
-        [
-            heat,
-            "dir",
-            str(app_root),
-            "-cg",
-            "AppFiles",
-            "-dr",
-            "INSTALLFOLDER",
-            "-var",
-            "var.AppSource",
-            "-ag",
-            "-srd",
-            "-sfrag",
-            "-sreg",
-            "-out",
-            str(app_wxs),
-        ]
-    )
-    _force_win64_components(app_wxs)
-    _run(
-        [
-            heat,
-            "dir",
-            str(config_stage),
-            "-cg",
-            "ConfigFiles",
-            "-dr",
-            "CONFIGDIR",
-            "-var",
-            "var.ConfigSource",
-            "-gg",
-            "-srd",
-            "-sfrag",
-            "-sreg",
-            "-out",
-            str(config_wxs),
-        ]
-    )
-    _force_win64_components(config_wxs)
+    for source, component_group, directory_ref, var_name, out_path, guid_flag in (
+        (app_root, "AppFiles", "INSTALLFOLDER", "AppSource", app_wxs, "-ag"),
+        (config_stage, "ConfigFiles", "CONFIGDIR", "ConfigSource", config_wxs, "-gg"),
+    ):
+        _run(
+            [
+                wix_tools["heat"],
+                "dir",
+                str(source),
+                "-cg",
+                component_group,
+                "-dr",
+                directory_ref,
+                "-var",
+                f"var.{var_name}",
+                guid_flag,
+                "-srd",
+                "-sfrag",
+                "-sreg",
+                "-out",
+                str(out_path),
+            ]
+        )
+        _force_win64_components(out_path)
 
     installer_dir = repo_root / "windows" / "installer"
-    product_wxs = installer_dir / "product.wxs"
-    components_wxs = installer_dir / "components.wxs"
-    ui_wxs = installer_dir / "ui.wxs"
-    missing = [
-        path for path in (product_wxs, components_wxs, ui_wxs) if not path.exists()
-    ]
-    if missing:
-        missing_str = ", ".join(str(path) for path in missing)
-        raise RuntimeError(f"WiX installer files missing: {missing_str}")
+    product_wxs, components_wxs, ui_wxs = (
+        installer_dir / name for name in ("product.wxs", "components.wxs", "ui.wxs")
+    )
+    _require_existing([product_wxs, components_wxs, ui_wxs], "WiX installer files")
     legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "todoist-assistant.wxs"
     _assert_no_localized_accounts([product_wxs, components_wxs, legacy_wxs])
 
     wix_out_dir = str(wixobj_dir) + os.sep
     _run(
         [
-            candle,
+            wix_tools["candle"],
             "-nologo",
             "-arch",
             "x64",
@@ -540,7 +531,7 @@ def _build_msi(
     msi_path = dist_root / f"todoist-assistant-{msi_version}.msi"
     _run(
         [
-            light,
+            wix_tools["light"],
             "-nologo",
             "-ext",
             "WixUtilExtension",
@@ -568,25 +559,17 @@ def _build_bundle(
     icon_path = bootstrapper_dir / "todoist-assistant.ico"
     license_path = bootstrapper_dir / "license.rtf"
 
-    missing = [
-        path
-        for path in (bundle_wxs, icon_path, license_path, vc_redist_path)
-        if not path.exists()
-    ]
-    if missing:
-        missing_str = ", ".join(str(path) for path in missing)
-        raise RuntimeError(f"Bootstrapper files missing: {missing_str}")
+    _require_existing(
+        [bundle_wxs, icon_path, license_path, vc_redist_path], "Bootstrapper files"
+    )
 
     wixobj_dir = dist_root / "wixobj" / "bundle"
     wixobj_dir.mkdir(parents=True, exist_ok=True)
     wix_out_dir = str(wixobj_dir) + os.sep
 
-    candle = wix_tools["candle"]
-    light = wix_tools["light"]
-
     _run(
         [
-            candle,
+            wix_tools["candle"],
             "-nologo",
             "-ext",
             "WixBalExtension",
@@ -612,7 +595,7 @@ def _build_bundle(
     setup_path = dist_root / "TodoistAssistantSetup.exe"
     _run(
         [
-            light,
+            wix_tools["light"],
             "-nologo",
             "-ext",
             "WixBalExtension",
@@ -731,16 +714,10 @@ def main() -> int:
             "PyInstaller output not found; expected onedir build under dist/windows/pyinstaller"
         )
 
-    if signtool_path and signing_config:
-        cert_path, cert_password, timestamp_url = signing_config
+    if signtool_path:
         payload_exe = app_root / "todoist-assistant.exe"
-        if not payload_exe.exists():
-            raise RuntimeError(
-                f"Expected PyInstaller executable not found for signing: {payload_exe}"
-            )
-        _sign_with_signtool(
-            signtool_path, payload_exe, cert_path, cert_password, timestamp_url
-        )
+        _require_existing([payload_exe], "Expected PyInstaller executable for signing")
+        _sign_if_configured(signtool_path, signing_config, payload_exe)
 
     print("Staging runtime assets...")
     _stage_assets(
@@ -756,11 +733,7 @@ def main() -> int:
     msi_path = _build_msi(
         repo_root, dist_root, app_root, dist_root / "config", msi_version, wix_tools
     )
-    if signtool_path and signing_config:
-        cert_path, cert_password, timestamp_url = signing_config
-        _sign_with_signtool(
-            signtool_path, msi_path, cert_path, cert_password, timestamp_url
-        )
+    _sign_if_configured(signtool_path, signing_config, msi_path)
     print(f"MSI created: {msi_path}")
 
     print("Building setup.exe bootstrapper...")
@@ -768,11 +741,7 @@ def main() -> int:
     setup_path = _build_bundle(
         repo_root, dist_root, msi_path, msi_version, vc_redist_path, wix_tools
     )
-    if signtool_path and signing_config:
-        cert_path, cert_password, timestamp_url = signing_config
-        _sign_with_signtool(
-            signtool_path, setup_path, cert_path, cert_password, timestamp_url
-        )
+    _sign_if_configured(signtool_path, signing_config, setup_path)
     print(f"Bootstrapper created: {setup_path}")
     return 0
 

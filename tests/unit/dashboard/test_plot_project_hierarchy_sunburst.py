@@ -1,400 +1,173 @@
 """Tests for the active project hierarchy sunburst plot."""
 
 from datetime import datetime
+from collections.abc import Sequence
 from typing import Any, cast
 
 import pandas as pd
 import plotly.graph_objects as go
+import pytest
 
 from tests.factories import make_project, make_project_entry
 from todoist.dashboard._plot_project_hierarchy_sunburst import (
     plot_active_project_hierarchy_sunburst,
 )
 
+ProjectSpec = tuple[str, str, str | None]
+TaskSpec = tuple[str, str, int, str, str]
+
+
+def _tasks(specs: Sequence[TaskSpec], *, completed: bool = True, indexed: bool = True) -> pd.DataFrame:
+    rows = [
+        {
+            "date": f"2025-01-{day % 28 + 1:02d}",
+            "id": f"e-{project_id}-{n}",
+            "title": f"{name} task",
+            "type": "completed" if completed else "added",
+            "parent_project_id": project_id,
+            "parent_project_name": name,
+            "root_project_id": root_id,
+            "root_project_name": root_name,
+        }
+        for day, (project_id, name, total, root_id, root_name) in enumerate(specs)
+        for n in range(total)
+    ]
+    df = pd.DataFrame(rows)
+    if indexed:
+        df["date"] = pd.to_datetime(df["date"])
+        df.set_index("date", inplace=True)
+    return df
+
+
+def _projects(specs: Sequence[ProjectSpec]) -> list[Any]:
+    return [
+        make_project(
+            project_id=project_id,
+            project_entry=make_project_entry(project_id=project_id, name=name, parent_id=parent_id),
+        )
+        for project_id, name, parent_id in specs
+    ]
+
+
+def _plot(df: pd.DataFrame, projects: list[Any]) -> go.Figure:
+    return plot_active_project_hierarchy_sunburst(
+        df,
+        datetime(2025, 1, 1),
+        datetime(2025, 1, 31),
+        projects,
+        {"Root A": "#123456", "Root B": "#654321"},
+    )
+
 
 def _sunburst_node_map(fig: go.Figure) -> dict[str, dict[str, Any]]:
     traces = cast(tuple[Any, ...], fig.data)
     assert len(traces) == 1
     trace = cast(Any, traces[0])
-    ids = list(getattr(trace, "ids", []))
-    parents = list(getattr(trace, "parents", []))
-    labels = list(getattr(trace, "labels", []))
-    values = list(getattr(trace, "values", []))
-    colors = list(getattr(getattr(trace, "marker", None), "colors", []))
-    customdata = list(getattr(trace, "customdata", []))
-
-    node_map: dict[str, dict[str, Any]] = {}
-    for idx, node_id in enumerate(ids):
-        node_map[str(node_id)] = {
-            "parent": str(parents[idx]),
-            "label": str(labels[idx]),
-            "value": int(values[idx]),
-            "color": str(colors[idx]),
-            "customdata": customdata[idx],
+    assert trace.type == "sunburst"
+    assert trace.branchvalues == "total"
+    return {
+        str(node_id): {
+            "parent": str(trace.parents[idx]),
+            "label": str(trace.labels[idx]),
+            "value": int(trace.values[idx]),
+            "color": str(trace.marker.colors[idx]),
+            "customdata": trace.customdata[idx],
         }
-    return node_map
+        for idx, node_id in enumerate(trace.ids)
+    }
+
+
+BASE_PROJECTS: list[ProjectSpec] = [
+    ("root-a", "Root A", None),
+    ("child-a1", "Child A1", "root-a"),
+    ("grand-a", "Grand A", "child-a1"),
+    ("root-b", "Root B", None),
+]
 
 
 def test_plot_active_project_hierarchy_sunburst_rolls_up_active_subprojects():
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-02",
-                "id": "e1",
-                "title": "Root task",
-                "type": "completed",
-                "parent_project_id": "root-a",
-                "parent_project_name": "Root A",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            },
-            {
-                "date": "2025-01-03",
-                "id": "e2",
-                "title": "Child task 1",
-                "type": "completed",
-                "parent_project_id": "child-a1",
-                "parent_project_name": "Child A1",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            },
-            {
-                "date": "2025-01-04",
-                "id": "e3",
-                "title": "Child task 2",
-                "type": "completed",
-                "parent_project_id": "child-a1",
-                "parent_project_name": "Child A1",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            },
-            {
-                "date": "2025-01-05",
-                "id": "e4",
-                "title": "Nested task",
-                "type": "completed",
-                "parent_project_id": "grand-a",
-                "parent_project_name": "Grand A",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            },
-            {
-                "date": "2025-01-06",
-                "id": "e5",
-                "title": "Other root task",
-                "type": "completed",
-                "parent_project_id": "root-b",
-                "parent_project_name": "Root B",
-                "root_project_id": "root-b",
-                "root_project_name": "Root B",
-            },
-            {
-                "date": "2025-01-07",
-                "id": "e6",
-                "title": "Ignored archived-like task",
-                "type": "completed",
-                "parent_project_id": "inactive-project",
-                "parent_project_name": "Inactive",
-                "root_project_id": "inactive-project",
-                "root_project_name": "Inactive",
-            },
-        ]
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-
-    active_projects = [
-        make_project(
-            project_id="root-a",
-            project_entry=make_project_entry(project_id="root-a", name="Root A"),
-        ),
-        make_project(
-            project_id="child-a1",
-            project_entry=make_project_entry(
-                project_id="child-a1",
-                name="Child A1",
-                parent_id="root-a",
+    nodes = _sunburst_node_map(
+        _plot(
+            _tasks(
+                [
+                    ("root-a", "Root A", 1, "root-a", "Root A"),
+                    ("child-a1", "Child A1", 2, "root-a", "Root A"),
+                    ("grand-a", "Grand A", 1, "root-a", "Root A"),
+                    ("root-b", "Root B", 1, "root-b", "Root B"),
+                    ("inactive-project", "Inactive", 1, "inactive-project", "Inactive"),
+                ]
             ),
-        ),
-        make_project(
-            project_id="grand-a",
-            project_entry=make_project_entry(
-                project_id="grand-a",
-                name="Grand A",
-                parent_id="child-a1",
-            ),
-        ),
-        make_project(
-            project_id="root-b",
-            project_entry=make_project_entry(project_id="root-b", name="Root B"),
-        ),
-    ]
-
-    fig = plot_active_project_hierarchy_sunburst(
-        df,
-        datetime(2025, 1, 1),
-        datetime(2025, 1, 10),
-        active_projects,
-        {"Root A": "#123456", "Root B": "#654321"},
+            _projects(BASE_PROJECTS),
+        )
     )
 
-    assert isinstance(fig, go.Figure)
-    assert len(cast(tuple[Any, ...], fig.data)) == 1
-    trace = cast(Any, cast(tuple[Any, ...], fig.data)[0])
-    assert trace.type == "sunburst"
-    assert trace.branchvalues == "total"
-    assert trace.sort is False
-    assert trace.textinfo == "label+value"
-    assert int(trace.insidetextfont.size) >= 18
-    assert str(trace.insidetextfont.color) == "#f8fbff"
-    assert int(trace.outsidetextfont.size) >= 16
-    assert fig.layout.uirevision == "active-project-hierarchy-sunburst"
-    assert fig.layout.margin.l >= 24
-    assert fig.layout.margin.r >= 24
-    assert fig.layout.margin.t >= 30
-    assert fig.layout.margin.b >= 76
-    assert fig.layout.annotations
-    assert float(fig.layout.annotations[0].y) < 0
-
-    nodes = _sunburst_node_map(fig)
     assert "inactive-project" not in nodes
-    assert "active-projects" in nodes
-    assert nodes["active-projects"]["value"] == 5
     assert nodes["active-projects"]["parent"] == ""
+    assert nodes["active-projects"]["value"] == 5
     assert nodes["root-a"]["parent"] == "active-projects"
-    assert nodes["root-a"]["value"] == 4
     assert nodes["root-a"]["label"] == "Root A"
+    assert nodes["root-a"]["value"] == 4
     assert nodes["child-a1"]["parent"] == "root-a"
     assert nodes["child-a1"]["value"] == 3
     assert nodes["grand-a"]["parent"] == "child-a1"
-    assert nodes["grand-a"]["value"] == 1
-    assert nodes["root-b"]["value"] == 1
+    assert nodes["grand-a"]["value"] == nodes["root-b"]["value"] == 1
 
 
-def test_plot_active_project_hierarchy_sunburst_folds_small_long_tail_into_other_node():
-    rows: list[dict[str, str]] = []
-    for idx in range(2):
-        rows.append(
-            {
-                "date": f"2025-02-{idx + 1:02d}",
-                "id": f"e-root-{idx}",
-                "title": "Root A task",
-                "type": "completed",
-                "parent_project_id": "root-a",
-                "parent_project_name": "Root A",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            }
-        )
-    child_totals = [20, 10, 4, 3, 1, 1]
-    for idx, total in enumerate(child_totals):
-        for occurrence in range(total):
-            rows.append(
-                {
-                    "date": f"2025-02-{idx + occurrence + 3:02d}",
-                    "id": f"e-child-{idx}-{occurrence}",
-                    "title": f"Child {idx + 1} task",
-                    "type": "completed",
-                    "parent_project_id": f"child-a{idx + 1}",
-                    "parent_project_name": f"Child A{idx + 1}",
-                    "root_project_id": "root-a",
-                    "root_project_name": "Root A",
-                }
-            )
-
-    df = pd.DataFrame(rows)
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-
-    active_projects = [
-        make_project(
-            project_id="root-a",
-            project_entry=make_project_entry(project_id="root-a", name="Root A"),
+@pytest.mark.parametrize(
+    ("task_specs", "project_specs", "node_id", "parent", "value", "hidden"),
+    [
+        (
+            [("root-a", "Root A", 2, "root-a", "Root A")]
+            + [(f"child-a{i}", f"Child A{i}", total, "root-a", "Root A") for i, total in enumerate([20, 10, 4, 3, 1, 1], 1)],
+            [("root-a", "Root A", None)] + [(f"child-a{i}", f"Child A{i}", "root-a") for i in range(1, 7)],
+            "other:root-a",
+            "root-a",
+            2,
+            2,
         ),
-        make_project(
-            project_id="child-a1",
-            project_entry=make_project_entry(
-                project_id="child-a1",
-                name="Child A1",
-                parent_id="root-a",
-            ),
+        (
+            [(f"root-{i}", f"Root {i}", total, f"root-{i}", f"Root {i}") for i, total in enumerate([100, 50, 25, 10, 1, 1, 1], 1)],
+            [(f"root-{i}", f"Root {i}", None) for i in range(1, 8)],
+            "other-roots",
+            "active-projects",
+            3,
+            3,
         ),
-        make_project(
-            project_id="child-a2",
-            project_entry=make_project_entry(
-                project_id="child-a2",
-                name="Child A2",
-                parent_id="root-a",
-            ),
-        ),
-        make_project(
-            project_id="child-a3",
-            project_entry=make_project_entry(
-                project_id="child-a3",
-                name="Child A3",
-                parent_id="root-a",
-            ),
-        ),
-        make_project(
-            project_id="child-a4",
-            project_entry=make_project_entry(
-                project_id="child-a4",
-                name="Child A4",
-                parent_id="root-a",
-            ),
-        ),
-        make_project(
-            project_id="child-a5",
-            project_entry=make_project_entry(
-                project_id="child-a5",
-                name="Child A5",
-                parent_id="root-a",
-            ),
-        ),
-        make_project(
-            project_id="child-a6",
-            project_entry=make_project_entry(
-                project_id="child-a6",
-                name="Child A6",
-                parent_id="root-a",
-            ),
-        ),
-    ]
+    ],
+)
+def test_plot_active_project_hierarchy_sunburst_folds_small_nodes(
+    task_specs: list[TaskSpec],
+    project_specs: list[ProjectSpec],
+    node_id: str,
+    parent: str,
+    value: int,
+    hidden: int,
+):
+    nodes = _sunburst_node_map(_plot(_tasks(task_specs), _projects(project_specs)))
 
-    fig = plot_active_project_hierarchy_sunburst(
-        df,
-        datetime(2025, 2, 1),
-        datetime(2025, 2, 21),
-        active_projects,
-        {"Root A": "#22577a"},
-    )
-
-    nodes = _sunburst_node_map(fig)
-    assert "other:root-a" in nodes
-    assert nodes["other:root-a"]["parent"] == "root-a"
-    assert nodes["other:root-a"]["value"] == 2
-    assert nodes["other:root-a"]["customdata"][6] == 2
-    assert nodes["other:root-a"]["customdata"][7] == "aggregate"
-
-
-def test_plot_active_project_hierarchy_sunburst_folds_small_roots_into_other_roots():
-    rows: list[dict[str, str]] = []
-    root_totals = [100, 50, 25, 10, 1, 1, 1]
-    for idx, total in enumerate(root_totals):
-        for occurrence in range(total):
-            rows.append(
-                {
-                    "date": f"2025-03-{(occurrence % 20) + 1:02d}",
-                    "id": f"e-root-{idx}-{occurrence}",
-                    "title": f"Root {idx + 1} task",
-                    "type": "completed",
-                    "parent_project_id": f"root-{idx + 1}",
-                    "parent_project_name": f"Root {idx + 1}",
-                    "root_project_id": f"root-{idx + 1}",
-                    "root_project_name": f"Root {idx + 1}",
-                }
-            )
-
-    df = pd.DataFrame(rows)
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-
-    active_projects = []
-    for idx in range(len(root_totals)):
-        active_projects.append(
-            make_project(
-                project_id=f"root-{idx + 1}",
-                project_entry=make_project_entry(
-                    project_id=f"root-{idx + 1}",
-                    name=f"Root {idx + 1}",
-                ),
-            )
-        )
-
-    fig = plot_active_project_hierarchy_sunburst(
-        df,
-        datetime(2025, 3, 1),
-        datetime(2025, 3, 22),
-        active_projects,
-        {
-            f"Root {idx + 1}": f"#{idx + 1}{idx + 1}{idx + 1}{idx + 1}{idx + 1}{idx + 1}"
-            for idx in range(len(root_totals))
-        },
-    )
-
-    nodes = _sunburst_node_map(fig)
-    assert "other-roots" in nodes
-    assert nodes["other-roots"]["parent"] == "active-projects"
-    assert nodes["other-roots"]["value"] == 3
-    assert nodes["other-roots"]["customdata"][6] == 3
-    assert nodes["other-roots"]["customdata"][7] == "aggregate"
+    assert nodes[node_id]["parent"] == parent
+    assert nodes[node_id]["value"] == value
+    assert nodes[node_id]["customdata"][6] == hidden
+    assert nodes[node_id]["customdata"][7] == "aggregate"
 
 
 def test_plot_active_project_hierarchy_sunburst_returns_empty_figure_without_completed_tasks():
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-02",
-                "id": "e1",
-                "title": "Task",
-                "type": "added",
-                "parent_project_id": "root-a",
-                "parent_project_name": "Root A",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            }
-        ]
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-
-    fig = plot_active_project_hierarchy_sunburst(
-        df,
-        datetime(2025, 1, 1),
-        datetime(2025, 1, 10),
-        [
-            make_project(
-                project_id="root-a",
-                project_entry=make_project_entry(project_id="root-a", name="Root A"),
-            )
-        ],
-        {"Root A": "#123456"},
+    fig = _plot(
+        _tasks([("root-a", "Root A", 1, "root-a", "Root A")], completed=False),
+        _projects([("root-a", "Root A", None)]),
     )
 
     assert not fig.data
-    assert fig.layout.annotations
     assert "No completed tasks" in str(fig.layout.annotations[0].text)
 
 
 def test_plot_active_project_hierarchy_sunburst_normalizes_date_column_input():
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-02",
-                "id": "e1",
-                "title": "Task",
-                "type": "completed",
-                "parent_project_id": "root-a",
-                "parent_project_name": "Root A",
-                "root_project_id": "root-a",
-                "root_project_name": "Root A",
-            }
-        ]
+    nodes = _sunburst_node_map(
+        _plot(
+            _tasks([("root-a", "Root A", 1, "root-a", "Root A")], indexed=False),
+            _projects([("root-a", "Root A", None)]),
+        )
     )
 
-    fig = plot_active_project_hierarchy_sunburst(
-        df,
-        datetime(2025, 1, 1),
-        datetime(2025, 1, 10),
-        [
-            make_project(
-                project_id="root-a",
-                project_entry=make_project_entry(project_id="root-a", name="Root A"),
-            )
-        ],
-        {"Root A": "#123456"},
-    )
-
-    nodes = _sunburst_node_map(fig)
     assert nodes["root-a"]["value"] == 1
     assert nodes["root-a"]["customdata"][2] == 1

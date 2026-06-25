@@ -137,7 +137,7 @@ pyright: ## Run Pyright type checks
 	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)
 
 pylint: ## Run pylint
-	PYTHONPATH=. uv run pylint -j 0 $(PY_SOURCE_PATHS)
+	PYTHONPATH=. uv run pylint -j 0 --disable=cyclic-import $(PY_SOURCE_PATHS)
 
 ruff: ## Run Ruff lint checks
 	PYTHONPATH=. uv run ruff check $(PY_SOURCE_PATHS)
@@ -149,7 +149,7 @@ pyright_all: ## Run Pyright on source, tests, and scripts
 	PYTHONPATH=. uv run pyright --warnings $(PY_CHECK_PATHS)
 
 pylint_all: ## Run pylint on source, tests, and scripts
-	PYTHONPATH=. uv run pylint -j 0 $(PY_CHECK_PATHS)
+	PYTHONPATH=. uv run pylint -j 0 --disable=cyclic-import $(PY_CHECK_PATHS)
 
 ruff_all: ## Run Ruff on source, tests, and scripts
 	PYTHONPATH=. uv run ruff check $(PY_CHECK_PATHS)

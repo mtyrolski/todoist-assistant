@@ -63,15 +63,14 @@ def prepare_breakdown_request(
     if variant_cfg is None:
         variant_key, variant_cfg = automation.resolve_variant(label)
     resolved_variant_cfg = dict(variant_cfg)
-    max_depth = int(resolved_variant_cfg.get("max_depth", automation.max_depth))
-    max_children = int(
-        resolved_variant_cfg.get("max_children", automation.max_children)
-    )
-    max_total_tasks = int(
-        resolved_variant_cfg.get("max_total_tasks", automation.max_total_tasks)
-    )
-    queue_depth_limit = int(
-        resolved_variant_cfg.get("queue_depth", automation.max_queue_depth)
+    max_depth, max_children, max_total_tasks, queue_depth_limit = (
+        int(resolved_variant_cfg.get(key, default))
+        for key, default in (
+            ("max_depth", automation.max_depth),
+            ("max_children", automation.max_children),
+            ("max_total_tasks", automation.max_total_tasks),
+            ("queue_depth", automation.max_queue_depth),
+        )
     )
     instruction = resolved_variant_cfg.get("instruction")
     if queue_depth_limit > 0:
@@ -116,7 +115,7 @@ def collect_candidates(
     processed_ids: set[str],
     fetch_task: TaskFetcher,
 ) -> CandidateSelection:
-    queued_ids = {item["task_id"] for item in queue_items}
+    queued_ids = {str(item["task_id"]) for item in queue_items}
     drop_queue_ids: set[str] = set()
     candidates: list[BreakdownCandidate] = []
     cleanup_label_tasks: list[BreakdownCandidate] = []
@@ -134,13 +133,7 @@ def collect_candidates(
             drop_queue_ids.add(task_id)
             continue
         candidates.append(
-            BreakdownCandidate(
-                task=task,
-                label=item["label"],
-                variant=item["variant"],
-                depth=item["depth"],
-                source="queue",
-            )
+            _candidate(task, item["label"], item["variant"], item["depth"], "queue")
         )
 
     queued_ids -= drop_queue_ids
@@ -158,15 +151,7 @@ def collect_candidates(
         if task.id in processed_ids:
             continue
         variant_key, _ = automation.resolve_variant(llm_label)
-        candidates.append(
-            BreakdownCandidate(
-                task=task,
-                label=llm_label,
-                variant=variant_key,
-                depth=1,
-                source="label",
-            )
-        )
+        candidates.append(_candidate(task, llm_label, variant_key, 1, "label"))
 
     return CandidateSelection(
         candidates=candidates,
@@ -211,6 +196,18 @@ def build_messages(
         {"role": MessageRole.SYSTEM, "content": system_prompt},
         {"role": MessageRole.USER, "content": json.dumps(payload, ensure_ascii=False)},
     ]
+
+
+def _candidate(
+    task: Task, label: str, variant: str, depth: int, source: str
+) -> BreakdownCandidate:
+    return BreakdownCandidate(
+        task=task,
+        label=label,
+        variant=variant,
+        depth=depth,
+        source=source,
+    )
 
 
 def build_children_by_parent(tasks: Iterable[Task]) -> dict[str, list[Task]]:

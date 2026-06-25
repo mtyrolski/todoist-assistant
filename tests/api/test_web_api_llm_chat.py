@@ -1,6 +1,6 @@
 """Tests for FastAPI LLM chat endpoints."""
 
-from fastapi.testclient import TestClient
+import pytest
 
 import todoist.web.api as web_api
 from todoist.core.env import EnvVar
@@ -8,10 +8,28 @@ from todoist.core.env import EnvVar
 # pylint: disable=protected-access
 
 
-# LLM Chat endpoint tests
+def _capture_saved_conversations(monkeypatch, conversations=None):
+    saved_conversations = []
+    monkeypatch.setattr(
+        web_api, "_load_llm_chat_conversations", lambda: list(conversations or [])
+    )
+    monkeypatch.setattr(
+        web_api,
+        "_save_llm_chat_conversations",
+        lambda items: saved_conversations.extend(items),
+    )
+    return saved_conversations
 
 
-def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
+def _stub_llm_settings(monkeypatch, env_path, devices=("cpu", "cuda")) -> None:
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: list(devices))
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+
+
+def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path, api_client) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_DEVICE), raising=False)
@@ -37,8 +55,7 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
         },
     )
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/llm_chat")
+    res = api_client.get("/api/dashboard/llm_chat")
     assert res.status_code == 200
     payload = res.json()
 
@@ -79,32 +96,26 @@ def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path) -> None:
 
 
 def test_dashboard_llm_chat_reports_invalid_backend_as_json(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text("TODOIST_AGENT_BACKEND='unsupported'", encoding="utf-8")
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/llm_chat")
+    res = api_client.get("/api/dashboard/llm_chat")
 
     assert res.status_code == 409
     assert res.json() == {"detail": "Unsupported LLM backend: unsupported"}
 
 
 def test_llm_chat_update_settings_persists_env_and_resets_runtime(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    _stub_llm_settings(monkeypatch, env_path)
 
-    client = TestClient(web_api.app)
-    res = client.put(
+    res = api_client.put(
         "/api/llm_chat/settings",
         json={
             "backend": "codex",
@@ -129,7 +140,7 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
 
 
 def test_llm_chat_settings_response_exposes_codex_options(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
@@ -143,8 +154,7 @@ def test_llm_chat_settings_response_exposes_codex_options(
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/llm_chat/settings")
+    res = api_client.get("/api/llm_chat/settings")
 
     assert res.status_code == 200
     payload = res.json()
@@ -153,44 +163,30 @@ def test_llm_chat_settings_response_exposes_codex_options(
     assert "gpt-5.5" in {option["id"] for option in payload["codex"]["modelOptions"]}
 
 
-def test_llm_chat_update_settings_rejects_unavailable_device(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"backend": "codex", "device": "cuda"},
+        {"backend": "codex", "device": "cpu", "codexModel": "not-a-codex-model"},
+        {"backend": "unknown", "device": "cpu"},
+        {"backend": "disabled", "device": "cpu"},
+    ],
+)
+def test_llm_chat_update_settings_rejects_invalid_values(
+    monkeypatch, tmp_path, payload, api_client
+) -> None:
+    _stub_llm_settings(monkeypatch, tmp_path / ".env", devices=("cpu",))
 
-    client = TestClient(web_api.app)
-    res = client.put(
-        "/api/llm_chat/settings",
-        json={"backend": "codex", "device": "cuda"},
-    )
-
-    assert res.status_code == 400
-
-
-def test_llm_chat_update_settings_rejects_unsupported_codex_model(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
-
-    client = TestClient(web_api.app)
-    res = client.put(
-        "/api/llm_chat/settings",
-        json={
-            "backend": "codex",
-            "device": "cpu",
-            "codexModel": "not-a-codex-model",
-        },
-    )
+    res = api_client.put("/api/llm_chat/settings", json=payload)
 
     assert res.status_code == 400
 
 
-def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path) -> None:
+def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path, api_client) -> None:
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    _stub_llm_settings(monkeypatch, env_path)
 
-    client = TestClient(web_api.app)
-    res = client.put(
+    res = api_client.put(
         "/api/llm_chat/settings",
         json={"backend": "codex", "device": "cpu", "codexModel": "gpt-5.5"},
     )
@@ -203,60 +199,17 @@ def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path) 
     assert web_api._LLM_CHAT_MODEL is None
     assert web_api._LLM_CHAT_AGENT is None
 
-
-def test_llm_chat_update_settings_rejects_unknown_backend(monkeypatch) -> None:
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-
-    client = TestClient(web_api.app)
-    res = client.put(
-        "/api/llm_chat/settings",
-        json={
-            "backend": "unknown",
-            "device": "cpu",
-        },
-    )
-
-    assert res.status_code == 400
-    assert res.json()["detail"] == "Unsupported LLM backend."
-
-
-def test_llm_chat_update_settings_rejects_disabled_backend(
-    monkeypatch, tmp_path
-) -> None:
-    env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
-
-    client = TestClient(web_api.app)
-    res = client.put(
-        "/api/llm_chat/settings",
-        json={
-            "backend": "disabled",
-            "device": "cpu",
-        },
-    )
-
-    assert res.status_code == 400
-    assert res.json()["detail"] == "Unsupported LLM backend."
-
-
-def test_llm_chat_send_requires_message() -> None:
+def test_llm_chat_send_requires_message(api_client) -> None:
     """Test /api/llm_chat/send validates message is required."""
-    client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={})
+    res = api_client.post("/api/llm_chat/send", json={})
     assert res.status_code == 400
     payload = res.json()
     assert "message is required" in payload["detail"]
 
 
-def test_llm_chat_instructions_are_persisted(monkeypatch, tmp_path) -> None:
+def test_llm_chat_instructions_are_persisted(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
-    client = TestClient(web_api.app)
-
-    res = client.put(
+    res = api_client.put(
         "/api/llm_chat/instructions",
         json={"instructions": "  Prefer weekly comparisons.\nBe concise.  "},
     )
@@ -271,16 +224,14 @@ def test_llm_chat_instructions_are_persisted(monkeypatch, tmp_path) -> None:
     )
 
 
-def test_llm_chat_instructions_reject_oversized_value() -> None:
-    client = TestClient(web_api.app)
-
-    res = client.put("/api/llm_chat/instructions", json={"instructions": "x" * 12_001})
+def test_llm_chat_instructions_reject_oversized_value(api_client) -> None:
+    res = api_client.put("/api/llm_chat/instructions", json={"instructions": "x" * 12_001})
 
     assert res.status_code == 400
     assert "at most 12000 characters" in res.json()["detail"]
 
 
-def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
+def test_llm_chat_send_creates_new_conversation(monkeypatch, api_client) -> None:
     """Test /api/llm_chat/send runs a direct turn for a new conversation."""
 
     saved_conversations = []
@@ -303,7 +254,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     )
     monkeypatch.setattr(web_api, "_run_llm_chat_turn", _mock_turn)
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.post("/api/llm_chat/send", json={"message": "Hello, world!"})
     assert res.status_code == 200
     payload = res.json()
@@ -325,7 +276,7 @@ def test_llm_chat_send_creates_new_conversation(monkeypatch) -> None:
     ]
 
 
-def test_llm_chat_send_removes_empty_thread_after_failed_new_turn(monkeypatch) -> None:
+def test_llm_chat_send_removes_empty_thread_after_failed_new_turn(monkeypatch, api_client) -> None:
     stored: list[dict[str, object]] = []
 
     def _load():
@@ -342,7 +293,7 @@ def test_llm_chat_send_removes_empty_thread_after_failed_new_turn(monkeypatch) -
     monkeypatch.setattr(web_api, "_save_llm_chat_conversations", _save)
     monkeypatch.setattr(web_api, "_run_llm_chat_turn", _failed_turn)
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.post("/api/llm_chat/send", json={"message": "New question"})
 
     assert res.status_code == 500
@@ -351,7 +302,7 @@ def test_llm_chat_send_removes_empty_thread_after_failed_new_turn(monkeypatch) -
     assert web_api._LLM_CHAT_ACTIVE_TURNS == {}
 
 
-def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
+def test_llm_chat_send_uses_existing_conversation(monkeypatch, api_client) -> None:
     """Test /api/llm_chat/send appends to an existing conversation directly."""
 
     existing_conv_id = "550e8400-e29b-41d4-a716-446655440000"
@@ -392,7 +343,7 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     )
     monkeypatch.setattr(web_api, "_run_llm_chat_turn", _mock_turn)
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.post(
         "/api/llm_chat/send",
         json={"message": "Follow up", "conversationId": existing_conv_id},
@@ -411,157 +362,99 @@ def test_llm_chat_send_uses_existing_conversation(monkeypatch) -> None:
     ]
 
 
-def test_llm_chat_send_handles_task_proposals_from_pasted_content(
-    monkeypatch,
+@pytest.mark.parametrize(
+    ("message", "turn_messages", "expected_fragments", "expected_roles"),
+    [
+        (
+            "notes: ship chat, simplify old flow",
+            [
+                {"role": web_api.MessageRole.USER.value, "content": "notes: ship chat, simplify old flow"},
+                {"role": web_api.MessageRole.ASSISTANT.value, "content": "Proposed tasks:\n- Ship direct chat\n- Remove old staging UI\nNo tasks created."},
+            ],
+            ["Proposed tasks:", "No tasks created."],
+            None,
+        ),
+        (
+            "status update?",
+            [
+                {"role": web_api.MessageRole.USER.value, "content": "status update?"},
+                {"role": web_api.MessageRole.ASSISTANT.value, "content": "Status update: direct chat is running and the old staging UI is gone."},
+            ],
+            ["Status update:"],
+            None,
+        ),
+        (
+            "check scripts",
+            [
+                {"role": web_api.MessageRole.USER.value, "content": "check scripts"},
+                {"role": "operation", "content": "Calling python_repl with code:\n```python\nscript_catalog()\n```"},
+                {"role": "tool", "content": "python_repl output:\n[{'name': 'status'}]"},
+                {"role": web_api.MessageRole.ASSISTANT.value, "content": "The status script is available."},
+            ],
+            [],
+            ["user", "operation", "tool", "assistant"],
+        ),
+    ],
+)
+def test_llm_chat_send_preserves_direct_turn_outputs(
+    monkeypatch, api_client, message, turn_messages, expected_fragments, expected_roles
 ) -> None:
-    saved_conversations = []
-
-    def _mock_save_conversations(items):
-        saved_conversations.clear()
-        saved_conversations.extend(items)
+    saved_conversations = _capture_saved_conversations(monkeypatch)
 
     async def _mock_turn(_conversation, _message):
-        return [
-            {
-                "role": web_api.MessageRole.USER.value,
-                "content": "notes: ship chat, simplify old flow",
-            },
-            {
-                "role": web_api.MessageRole.ASSISTANT.value,
-                "content": "Proposed tasks:\n- Ship direct chat\n- Remove old staging UI\nNo tasks created.",
-            },
-        ]
+        return turn_messages
 
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
-    monkeypatch.setattr(
-        web_api, "_save_llm_chat_conversations", _mock_save_conversations
-    )
     monkeypatch.setattr(web_api, "_run_llm_chat_turn", _mock_turn)
 
-    client = TestClient(web_api.app)
-    res = client.post(
-        "/api/llm_chat/send",
-        json={"message": "notes: ship chat, simplify old flow"},
-    )
+    res = api_client.post("/api/llm_chat/send", json={"message": message})
 
     assert res.status_code == 200
-    assistant_message = res.json()["conversation"]["messages"][-1]["content"]
-    assert "Proposed tasks:" in assistant_message
-    assert "No tasks created." in assistant_message
-    assert saved_conversations[0]["messages"][-1]["content"] == assistant_message
+    messages = res.json()["conversation"]["messages"]
+    assistant_message = messages[-1]["content"]
+    for fragment in expected_fragments:
+        assert fragment in assistant_message
+    if expected_roles is not None:
+        roles = [msg["role"] for msg in messages]
+        assert roles == expected_roles
+        assert [msg["role"] for msg in saved_conversations[0]["messages"]] == roles
+    else:
+        assert saved_conversations[0]["messages"][-1]["content"] == assistant_message
 
 
-def test_llm_chat_send_handles_status_update_questions(monkeypatch) -> None:
-    async def _mock_turn(_conversation, message):
-        return [
-            {"role": web_api.MessageRole.USER.value, "content": message},
+@pytest.mark.parametrize(
+    ("method", "path", "body", "status", "detail"),
+    [
+        (
+            "post",
+            "/api/llm_chat/send",
             {
-                "role": web_api.MessageRole.ASSISTANT.value,
-                "content": "Status update: direct chat is running and the old staging UI is gone.",
+                "message": "Test",
+                "conversationId": "550e8400-e29b-41d4-a716-446655440000",
             },
-        ]
-
-    saved_conversations = []
-
-    def _mock_save_conversations(items):
-        saved_conversations.clear()
-        saved_conversations.extend(items)
-
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
-    monkeypatch.setattr(
-        web_api, "_save_llm_chat_conversations", _mock_save_conversations
-    )
-    monkeypatch.setattr(web_api, "_run_llm_chat_turn", _mock_turn)
-
-    client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={"message": "status update?"})
-
-    assert res.status_code == 200
-    assert "Status update:" in res.json()["conversation"]["messages"][-1]["content"]
-
-
-def test_llm_chat_send_preserves_operation_events(monkeypatch) -> None:
-    saved_conversations = []
-
-    def _mock_save_conversations(items):
-        saved_conversations.clear()
-        saved_conversations.extend(items)
-
-    async def _mock_turn(_conversation, _message):
-        return [
-            {
-                "role": web_api.MessageRole.USER.value,
-                "content": "check scripts",
-            },
-            {
-                "role": "operation",
-                "content": "Calling python_repl with code:\n```python\nscript_catalog()\n```",
-            },
-            {
-                "role": "tool",
-                "content": "python_repl output:\n[{'name': 'status'}]",
-            },
-            {
-                "role": web_api.MessageRole.ASSISTANT.value,
-                "content": "The status script is available.",
-            },
-        ]
-
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
-    monkeypatch.setattr(
-        web_api, "_save_llm_chat_conversations", _mock_save_conversations
-    )
-    monkeypatch.setattr(web_api, "_run_llm_chat_turn", _mock_turn)
-
-    client = TestClient(web_api.app)
-    res = client.post("/api/llm_chat/send", json={"message": "check scripts"})
-
-    assert res.status_code == 200
-    roles = [msg["role"] for msg in res.json()["conversation"]["messages"]]
-    assert roles == ["user", "operation", "tool", "assistant"]
-    assert [msg["role"] for msg in saved_conversations[0]["messages"]] == roles
-
-
-def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch) -> None:
-    """Test /api/llm_chat/send returns 404 for non-existent conversation_id."""
-
+            404,
+            "Conversation not found",
+        ),
+        ("get", "/api/llm_chat/conversations/not-a-uuid", None, 400, "Invalid conversation ID format"),
+        (
+            "get",
+            "/api/llm_chat/conversations/550e8400-e29b-41d4-a716-446655440000",
+            None,
+            404,
+            "Conversation not found",
+        ),
+    ],
+)
+def test_llm_chat_conversation_errors(
+    monkeypatch, api_client, method, path, body, status, detail
+) -> None:
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
 
-    client = TestClient(web_api.app)
-    res = client.post(
-        "/api/llm_chat/send",
-        json={
-            "message": "Test",
-            "conversationId": "550e8400-e29b-41d4-a716-446655440000",  # Valid UUID format but doesn't exist
-        },
-    )
-    assert res.status_code == 404
-    payload = res.json()
-    assert "Conversation not found" in payload["detail"]
+    res = getattr(api_client, method)(path, json=body) if body else getattr(api_client, method)(path)
+    assert res.status_code == status
+    assert detail in res.json()["detail"]
 
 
-def test_llm_chat_conversation_validates_uuid_format() -> None:
-    """Test /api/llm_chat/conversations/{id} validates UUID format."""
-    client = TestClient(web_api.app)
-    res = client.get("/api/llm_chat/conversations/not-a-uuid")
-    assert res.status_code == 400
-    payload = res.json()
-    assert "Invalid conversation ID format" in payload["detail"]
-
-
-def test_llm_chat_conversation_returns_404_for_missing(monkeypatch) -> None:
-    """Test /api/llm_chat/conversations/{id} returns 404 for non-existent conversation."""
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
-
-    client = TestClient(web_api.app)
-    valid_uuid = "550e8400-e29b-41d4-a716-446655440000"
-    res = client.get(f"/api/llm_chat/conversations/{valid_uuid}")
-    assert res.status_code == 404
-    payload = res.json()
-    assert "Conversation not found" in payload["detail"]
-
-
-def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
+def test_llm_chat_conversation_returns_conversation_data(monkeypatch, api_client) -> None:
     """Test /api/llm_chat/conversations/{id} returns conversation with messages."""
     conv_id = "550e8400-e29b-41d4-a716-446655440000"
     mock_conversations = [
@@ -589,29 +482,26 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch) -> None:
         web_api, "_load_llm_chat_conversations", lambda: mock_conversations
     )
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.get(f"/api/llm_chat/conversations/{conv_id}")
     assert res.status_code == 200
     payload = res.json()
 
-    # Verify conversation data
-    assert payload["id"] == conv_id
-    assert payload["title"] == "Test Chat"
-    assert payload["createdAt"] == "2025-01-01T10:00:00"
-    assert payload["updatedAt"] == "2025-01-01T10:05:00"
+    assert payload | {"messages": []} == {
+        "id": conv_id,
+        "title": "Test Chat",
+        "createdAt": "2025-01-01T10:00:00",
+        "updatedAt": "2025-01-01T10:05:00",
+        "messages": [],
+    }
     assert len(payload["messages"]) == 2
-
-    # Verify messages
-    assert payload["messages"][0]["role"] == "user"
-    assert payload["messages"][0]["content"] == "Hello"
-    assert payload["messages"][0]["createdAt"] == "2025-01-01T10:00:00"
-
-    assert payload["messages"][1]["role"] == "assistant"
-    assert payload["messages"][1]["content"] == "Hi there!"
-    assert payload["messages"][1]["createdAt"] == "2025-01-01T10:00:05"
+    assert [(msg["role"], msg["content"], msg["createdAt"]) for msg in payload["messages"]] == [
+        ("user", "Hello", "2025-01-01T10:00:00"),
+        ("assistant", "Hi there!", "2025-01-01T10:00:05"),
+    ]
 
 
-def test_llm_chat_conversation_can_be_renamed(monkeypatch) -> None:
+def test_llm_chat_conversation_can_be_renamed(monkeypatch, api_client) -> None:
     conv_id = "550e8400-e29b-41d4-a716-446655440000"
     conversations = [
         {
@@ -630,7 +520,7 @@ def test_llm_chat_conversation_can_be_renamed(monkeypatch) -> None:
         lambda items: saved.extend(items),
     )
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.patch(
         f"/api/llm_chat/conversations/{conv_id}", json={"title": "Weekly review"}
     )
@@ -640,7 +530,7 @@ def test_llm_chat_conversation_can_be_renamed(monkeypatch) -> None:
     assert saved[0]["title"] == "Weekly review"
 
 
-def test_llm_chat_conversation_can_be_deleted(monkeypatch) -> None:
+def test_llm_chat_conversation_can_be_deleted(monkeypatch, api_client) -> None:
     conv_id = "550e8400-e29b-41d4-a716-446655440000"
     conversations = [{"id": conv_id, "title": "Delete me", "messages": []}]
     saved: list[list[dict[str, object]]] = []
@@ -651,7 +541,7 @@ def test_llm_chat_conversation_can_be_deleted(monkeypatch) -> None:
         lambda items: saved.append(items),
     )
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.delete(f"/api/llm_chat/conversations/{conv_id}")
 
     assert res.status_code == 200
@@ -659,7 +549,7 @@ def test_llm_chat_conversation_can_be_deleted(monkeypatch) -> None:
     assert saved == [[]]
 
 
-def test_llm_chat_enable_returns_status(monkeypatch) -> None:
+def test_llm_chat_enable_returns_status(monkeypatch, api_client) -> None:
     """Test /api/llm_chat/enable returns model status."""
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
     monkeypatch.setenv(str(EnvVar.AGENT_CODEX_MODEL), "gpt-5.5")
@@ -675,7 +565,7 @@ def test_llm_chat_enable_returns_status(monkeypatch) -> None:
     monkeypatch.setattr(web_api, "_start_llm_chat_model_load", _mock_start_load)
     monkeypatch.setattr(web_api, "_llm_chat_model_status", _mock_model_status)
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.post("/api/llm_chat/enable")
     assert res.status_code == 200
     payload = res.json()
@@ -703,20 +593,13 @@ def test_build_chat_messages_filters_system_messages(monkeypatch) -> None:
 
     messages = web_api._build_chat_messages(conversation, "New user message")
 
-    # Verify system prompt is at the start
     assert messages[0]["role"] == "system"
     assert messages[0]["content"] == "System instructions"
-
-    # Verify old system message is filtered out
-    system_count = sum(1 for msg in messages if msg["role"] == "system")
-    assert system_count == 1
-
-    # Verify other messages are included
+    assert sum(1 for msg in messages if msg["role"] == "system") == 1
     assert len(messages) == 5  # system + 2 user + 1 assistant + new user
-    assert messages[1]["role"] == "user"
-    assert messages[1]["content"] == "User message 1"
-    assert messages[2]["role"] == "assistant"
-    assert messages[3]["role"] == "user"
-    assert messages[3]["content"] == "User message 2"
-    assert messages[4]["role"] == "user"
-    assert messages[4]["content"] == "New user message"
+    assert [(msg["role"], msg["content"]) for msg in messages[1:]] == [
+        ("user", "User message 1"),
+        ("assistant", "Assistant response 1"),
+        ("user", "User message 2"),
+        ("user", "New user message"),
+    ]

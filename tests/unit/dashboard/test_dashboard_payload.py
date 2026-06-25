@@ -16,6 +16,12 @@ from todoist.web.dashboard_payload import (
 )
 
 
+def _assert_counts_include(status: dict[str, object], **expected: int) -> None:
+    counts = status["counts"]
+    assert isinstance(counts, dict)
+    assert {key: counts[key] for key in expected} == expected
+
+
 def test_count_labeled_tasks_matches_fire_label_case_insensitively() -> None:
     projects = [
         make_project(
@@ -188,7 +194,7 @@ def test_evaluate_urgency_status_returns_danger_for_fire_tasks() -> None:
     assert status["badgeLabel"] == "Urgent"
     assert status["title"] == "Urgent attention needed"
     assert status["total"] == 1
-    assert status["counts"]["fireTasks"] == 1
+    _assert_counts_include(status, fireTasks=1)
 
 
 def test_evaluate_urgency_status_respects_custom_settings() -> None:
@@ -221,10 +227,9 @@ def test_evaluate_urgency_status_respects_custom_settings() -> None:
     assert status["state"] == "warn"
     assert status["badgeLabel"] == "Heads up"
     assert status["total"] == 2
-    assert status["counts"]["fireTasks"] == 0
-    assert status["counts"]["p1Tasks"] == 1
-    assert status["counts"]["priorityTasks"] == 1
-    assert status["counts"]["dueTasks"] == 1
+    _assert_counts_include(
+        status, fireTasks=0, p1Tasks=1, priorityTasks=1, dueTasks=1
+    )
     assert status["visibleChips"] == ["p1Tasks", "dueTasks"]
     assert (
         status["summary"]
@@ -263,9 +268,12 @@ def test_evaluate_urgency_status_supports_multi_labels_and_minimum_thresholds() 
     )
 
     assert status["state"] == "danger"
-    assert status["counts"]["fireTasks"] == 2
-    assert status["counts"]["p2Tasks"] == 1
-    assert status["counts"]["p3Tasks"] == 1
-    assert status["counts"]["priorityTasks"] == 2
-    assert status["counts"]["dueTasks"] == 1
-    assert status["counts"]["deadlineTasks"] == 1
+    _assert_counts_include(
+        status,
+        fireTasks=2,
+        p2Tasks=1,
+        p3Tasks=1,
+        priorityTasks=2,
+        dueTasks=1,
+        deadlineTasks=1,
+    )

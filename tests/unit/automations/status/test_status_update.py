@@ -8,6 +8,17 @@ from tests.factories import make_project, make_project_entry
 from todoist.database.db_tasks import DatabaseTasks
 from todoist.features.status_update import build_status_update_report
 
+BEG = datetime(2025, 2, 1)
+END = datetime(2025, 2, 6)
+EMPTY_COUNTS = {
+    "completedEventCount": 0,
+    "completedTaskCount": 0,
+    "commentedTaskCount": 0,
+    "commentCount": 0,
+    "storyPointCount": 0,
+    "estimatedTaskCount": 0,
+}
+
 
 def _status_update_df() -> pd.DataFrame:
     df = pd.DataFrame(
@@ -102,14 +113,28 @@ class _FakeDb:
         return []
 
 
+def _patch_activity(monkeypatch, df: pd.DataFrame | None = None) -> pd.DataFrame:
+    activity = _status_update_df() if df is None else df
+    monkeypatch.setattr(
+        "todoist.features.status_update.load_activity_data", lambda db: activity
+    )
+    return activity
+
+
+def _build_report(monkeypatch, df: pd.DataFrame | None = None, **overrides: Any):
+    _patch_activity(monkeypatch, df)
+    params: dict[str, Any] = {
+        "project_ids": ["root-work"],
+        "beg": BEG,
+        "end": END,
+    }
+    params.update(overrides)
+    return build_status_update_report(_FakeDb(), **params)
+
+
 def test_build_status_update_report_filters_projects_dates_and_comments(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data",
-        lambda db: _status_update_df(),
-    )
-
     comments_seen: list[str] = []
 
     def _fetch_comments(task_id: str) -> list[dict[str, Any]]:
@@ -121,11 +146,8 @@ def test_build_status_update_report_filters_projects_dates_and_comments(
             ]
         return []
 
-    report = build_status_update_report(
-        _FakeDb(),
-        project_ids=["root-work"],
-        beg=datetime(2025, 2, 1, 0, 0, 0),
-        end=datetime(2025, 2, 6, 0, 0, 0),
+    report = _build_report(
+        monkeypatch,
         sync_label="Weekly sync",
         comment_fetcher=_fetch_comments,
     )
@@ -157,20 +179,14 @@ def test_build_status_update_report_filters_projects_dates_and_comments(
 
 
 def test_build_status_update_report_handles_empty_range(monkeypatch) -> None:
-    df = _status_update_df()
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data", lambda db: df
-    )
-
     calls: list[str] = []
 
     def _fetch_comments(task_id: str) -> list[dict[str, Any]]:
         calls.append(task_id)
         return []
 
-    report = build_status_update_report(
-        _FakeDb(),
-        project_ids=["root-work"],
+    report = _build_report(
+        monkeypatch,
         beg=datetime(2025, 2, 10, 0, 0, 0),
         end=datetime(2025, 2, 11, 0, 0, 0),
         comment_fetcher=_fetch_comments,
@@ -179,12 +195,7 @@ def test_build_status_update_report_handles_empty_range(monkeypatch) -> None:
     assert report["summary"] == {
         "selectedProjectCount": 1,
         "expandedProjectCount": 2,
-        "completedEventCount": 0,
-        "completedTaskCount": 0,
-        "commentedTaskCount": 0,
-        "commentCount": 0,
-        "storyPointCount": 0,
-        "estimatedTaskCount": 0,
+        **EMPTY_COUNTS,
     }
     assert report["completedTasks"] == []
     assert report["warnings"] == []
@@ -195,16 +206,8 @@ def test_build_status_update_report_handles_empty_range(monkeypatch) -> None:
 def test_build_status_update_report_aggregates_story_points(monkeypatch) -> None:
     df = _status_update_df().iloc[[0, 1]].copy()
     df.loc[:, "title"] = "Ship release - 5/10"
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data", lambda db: df
-    )
 
-    report = build_status_update_report(
-        _FakeDb(),
-        project_ids=["root-work"],
-        beg=datetime(2025, 2, 1, 0, 0, 0),
-        end=datetime(2025, 2, 6, 0, 0, 0),
-    )
+    report = _build_report(monkeypatch, df)
 
     assert report["summary"]["storyPointCount"] == 10
     assert report["summary"]["estimatedTaskCount"] == 1
@@ -220,18 +223,13 @@ def test_build_status_update_report_degrades_when_comment_fetch_fails(
     monkeypatch,
 ) -> None:
     df = _status_update_df().iloc[[0]].copy()
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data", lambda db: df
-    )
 
     def _fetch_comments(task_id: str) -> list[dict[str, Any]]:
         raise RuntimeError("comment API unavailable")
 
-    report = build_status_update_report(
-        _FakeDb(),
-        project_ids=["root-work"],
-        beg=datetime(2025, 2, 1, 0, 0, 0),
-        end=datetime(2025, 2, 6, 0, 0, 0),
+    report = _build_report(
+        monkeypatch,
+        df,
         comment_fetcher=_fetch_comments,
     )
 
@@ -245,15 +243,11 @@ def test_build_status_update_report_dedupes_scope_and_reports_missing_projects(
     monkeypatch,
 ) -> None:
     df = _status_update_df().iloc[[0]].copy()
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data", lambda db: df
-    )
 
-    report = build_status_update_report(
-        _FakeDb(),
+    report = _build_report(
+        monkeypatch,
+        df,
         project_ids=["root-work", "missing-project", "root-work"],
-        beg=datetime(2025, 2, 1, 0, 0, 0),
-        end=datetime(2025, 2, 6, 0, 0, 0),
     )
 
     assert report["selection"]["requestedProjectIds"] == [
@@ -269,15 +263,10 @@ def test_build_status_update_report_limits_comments_and_accepts_body_alias(
     monkeypatch,
 ) -> None:
     df = _status_update_df().iloc[[0]].copy()
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data", lambda db: df
-    )
 
-    report = build_status_update_report(
-        _FakeDb(),
-        project_ids=["root-work"],
-        beg=datetime(2025, 2, 1, 0, 0, 0),
-        end=datetime(2025, 2, 6, 0, 0, 0),
+    report = _build_report(
+        monkeypatch,
+        df,
         comment_limit_per_task=1,
         comment_fetcher=lambda _task_id: [
             {"id": "c1", "body": "First body comment"},
@@ -301,15 +290,9 @@ def test_build_status_update_report_limits_comments_and_accepts_body_alias(
 
 
 def test_build_status_update_report_rejects_invalid_date_range(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "todoist.features.status_update.load_activity_data",
-        lambda db: _status_update_df(),
-    )
-
     with pytest.raises(ValueError, match="beg must be before end"):
-        build_status_update_report(
-            _FakeDb(),
-            project_ids=["root-work"],
+        _build_report(
+            monkeypatch,
             beg=datetime(2025, 2, 6, 0, 0, 0),
             end=datetime(2025, 2, 6, 0, 0, 0),
         )

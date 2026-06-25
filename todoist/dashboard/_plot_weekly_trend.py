@@ -7,6 +7,19 @@ import plotly.graph_objects as go
 
 from todoist.dashboard._plot_common import apply_dashboard_axes
 
+_BACKGROUND_COLOR = "#111318"
+_TEXT_COLOR = "#ffffff"
+_MUTED_TEXT_COLOR = "#e6e6e6"
+_AXIS_LINE_COLOR = "rgba(255,255,255,0.24)"
+_TITLE_FONT = {"size": 18, "family": "Arial, sans-serif", "color": _TEXT_COLOR}
+_WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+_WINDOW_COLORS = {
+    3: "rgb(108, 207, 246)",
+    6: "rgb(144, 190, 109)",
+    12: "rgb(249, 132, 74)",
+    24: "rgb(168, 104, 255)",
+}
+
 
 @dataclass(frozen=True)
 class _WeeklyTrendWindowStats:
@@ -37,10 +50,10 @@ def _weekly_trend_empty_figure(message: str) -> go.Figure:
             "text": "Weekly Completion Trend",
             "x": 0.5,
             "xanchor": "center",
-            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
+            "font": _TITLE_FONT,
         },
-        plot_bgcolor="#111318",
-        paper_bgcolor="#111318",
+        plot_bgcolor=_BACKGROUND_COLOR,
+        paper_bgcolor=_BACKGROUND_COLOR,
         margin=dict(l=56, r=32, t=84, b=56),
     )
     fig.update_xaxes(visible=False)
@@ -241,7 +254,6 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
         return _weekly_trend_empty_figure(message)
 
     weekly_counts, current_week_start = prepared
-    weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     historical_weeks = cast(
         pd.DataFrame, weekly_counts[weekly_counts.index < current_week_start]
     )
@@ -277,33 +289,27 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
     )
 
     fig = go.Figure()
-    color_map = {
-        3: "rgb(108, 207, 246)",
-        6: "rgb(144, 190, 109)",
-        12: "rgb(249, 132, 74)",
-        24: "rgb(168, 104, 255)",
-    }
     _weekly_trend_add_window_traces(
         fig,
-        weekday_labels=weekday_labels,
+        weekday_labels=_WEEKDAY_LABELS,
         stats=fixed_baseline,
-        color=color_map[3],
+        color=_WINDOW_COLORS[3],
         visible=True,
         show_in_legend=False,
     )
     for stats in optional_stats:
         _weekly_trend_add_window_traces(
             fig,
-            weekday_labels=weekday_labels,
+            weekday_labels=_WEEKDAY_LABELS,
             stats=stats,
-            color=color_map.get(stats.lookback_weeks, "rgb(190, 190, 190)"),
+            color=_WINDOW_COLORS.get(stats.lookback_weeks, "rgb(190, 190, 190)"),
             visible="legendonly",
             show_in_legend=True,
         )
 
     fig.add_trace(
         go.Scatter(
-            x=weekday_labels,
+            x=_WEEKDAY_LABELS,
             y=current_curve.values,
             customdata=current_hover_raw,
             mode="lines+markers",
@@ -337,27 +343,30 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
             ),
             "x": 0.5,
             "xanchor": "center",
-            "font": {"size": 18, "family": "Arial, sans-serif", "color": "#ffffff"},
+            "font": _TITLE_FONT,
         },
         xaxis={
-            "title": {"text": "Day of week", "font": {"size": 14, "color": "#ffffff"}},
+            "title": {
+                "text": "Day of week",
+                "font": {"size": 14, "color": _TEXT_COLOR},
+            },
             "categoryorder": "array",
-            "categoryarray": weekday_labels,
-            "tickfont": {"size": 12, "color": "#e6e6e6"},
+            "categoryarray": _WEEKDAY_LABELS,
+            "tickfont": {"size": 12, "color": _MUTED_TEXT_COLOR},
             "showline": True,
             "linewidth": 1,
-            "linecolor": "rgba(255,255,255,0.24)",
+            "linecolor": _AXIS_LINE_COLOR,
         },
         yaxis={
             "title": {
                 "text": "Cumulative completions (% progression)",
-                "font": {"size": 14, "color": "#ffffff"},
+                "font": {"size": 14, "color": _TEXT_COLOR},
             },
-            "tickfont": {"size": 12, "color": "#e6e6e6"},
+            "tickfont": {"size": 12, "color": _MUTED_TEXT_COLOR},
             "ticksuffix": "%",
             "showline": True,
             "linewidth": 1,
-            "linecolor": "rgba(255,255,255,0.24)",
+            "linecolor": _AXIS_LINE_COLOR,
             "rangemode": "tozero",
         },
         legend={
@@ -367,16 +376,16 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
             "xanchor": "left",
             "x": 0.01,
             "groupclick": "togglegroup",
-            "font": {"size": 11, "color": "#e6e6e6"},
+            "font": {"size": 11, "color": _MUTED_TEXT_COLOR},
             "bgcolor": "rgba(17,19,24,0.75)",
             "title": {"text": "Optional windows"},
         },
-        plot_bgcolor="#111318",
-        paper_bgcolor="#111318",
+        plot_bgcolor=_BACKGROUND_COLOR,
+        paper_bgcolor=_BACKGROUND_COLOR,
         margin=dict(l=56, r=32, t=106, b=56),
         hovermode="x unified",
         hoverlabel=dict(
-            bgcolor="#1e1e1e", bordercolor="#444", font=dict(color="#ffffff")
+            bgcolor="#1e1e1e", bordercolor="#444", font=dict(color=_TEXT_COLOR)
         ),
     )
     return apply_dashboard_axes(fig)
