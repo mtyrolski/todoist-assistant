@@ -3,7 +3,6 @@
 import os
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 import pytest
 
 import todoist
@@ -11,10 +10,6 @@ import todoist.web.api_components.runtime as runtime_component
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
-
-
-def _client() -> TestClient:
-    return TestClient(web_api.app)
 
 
 def _dashboard_log_dir(root: Path) -> Path:
@@ -41,7 +36,7 @@ def _set_progress_state(**overrides) -> None:
         setattr(web_api._progress_state, name, value)
 
 
-def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> None:
+def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path, api_client) -> None:
     cache_dir = tmp_path / "cache"
     dashboard_dir = _dashboard_log_dir(cache_dir)
     (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
@@ -51,7 +46,7 @@ def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> N
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
 
-    res = _client().get("/api/runtime/logs")
+    res = api_client.get("/api/runtime/logs")
     assert res.status_code == 200
     payload = res.json()
 
@@ -67,7 +62,7 @@ def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path) -> N
 
 
 def test_runtime_log_read_accepts_allowlisted_source_only(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     cache_dir = tmp_path / "cache"
     dashboard_dir = _dashboard_log_dir(cache_dir)
@@ -78,7 +73,7 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
 
-    client = _client()
+    client = api_client
     ok = client.get("/api/runtime/logs/read?source=observer&tail_lines=2&page=1")
     assert ok.status_code == 200
     payload = ok.json()
@@ -90,7 +85,7 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
     assert missing.status_code == 404
 
 
-def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> None:
+def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
@@ -101,7 +96,7 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> Non
         "should not be listed\n", encoding="utf-8"
     )
 
-    res = _client().get("/api/admin/logs")
+    res = api_client.get("/api/admin/logs")
     assert res.status_code == 200
     payload = res.json()
 
@@ -118,14 +113,14 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path) -> Non
     assert all(item["path"] != "dashboard/unexpected.log" for item in payload["logs"])
 
 
-def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path) -> None:
+def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "observer.log").write_text("line-a\nline-b\n", encoding="utf-8")
 
-    client = _client()
+    client = api_client
     res = client.get(
         "/api/admin/logs/read",
         params={"source": "observer", "tail_lines": 20, "page": 1},
@@ -144,7 +139,7 @@ def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path) -> None
     assert "not available yet" in missing.json()["detail"]
 
 
-def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None:
+def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
@@ -153,7 +148,7 @@ def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None
     (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
     (tmp_path / "automation.log").write_text("automation line\n", encoding="utf-8")
 
-    res = _client().get("/api/runtime/logs")
+    res = api_client.get("/api/runtime/logs")
     assert res.status_code == 200
     payload = res.json()
     assert payload["inspectOnly"] is True
@@ -166,7 +161,7 @@ def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path) -> None
 
 
 def test_runtime_read_log_rejects_removed_triton_source(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, api_client
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -177,7 +172,7 @@ def test_runtime_read_log_rejects_removed_triton_source(
         "line 1\nline 2\nline 3\n", encoding="utf-8"
     )
 
-    res = _client().get(
+    res = api_client.get(
         "/api/runtime/logs/read",
         params={"source": "triton", "tail_lines": 2, "page": 1},
     )
@@ -185,7 +180,7 @@ def test_runtime_read_log_rejects_removed_triton_source(
 
 
 def test_admin_timezone_status_uses_system_timezone_when_not_configured(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -193,7 +188,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
-    res = _client().get("/api/admin/timezone")
+    res = api_client.get("/api/admin/timezone")
     assert res.status_code == 200
     payload = res.json()
     assert payload["configured"] is False
@@ -204,13 +199,13 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     assert payload["overrideValid"] is True
 
 
-def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
+def test_admin_timezone_set_and_clear(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
-    client = _client()
+    client = api_client
     set_response = client.post(
         "/api/admin/timezone",
         json={"timezone": "Europe/Warsaw"},
@@ -245,13 +240,13 @@ def test_admin_timezone_set_and_clear(monkeypatch, tmp_path) -> None:
     assert "TODOIST_TIMEZONE" not in env_text_after_clear
 
 
-def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
+def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
-    response = _client().post(
+    response = api_client.post(
         "/api/admin/timezone",
         json={"timezone": "Invalid/Timezone"},
     )
@@ -260,12 +255,12 @@ def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
     assert "Invalid timezone" in payload["detail"]
 
 
-def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path) -> None:
+def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path, api_client) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setenv("API_KEY", "test_api_key_12345")
 
-    res = _client().get("/api/admin/api_token")
+    res = api_client.get("/api/admin/api_token")
 
     assert res.status_code == 200
     payload = res.json()
@@ -274,14 +269,14 @@ def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path) -> No
     assert payload["envPath"] == ".env"
 
 
-def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path) -> None:
+def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path, api_client) -> None:
     env_path = tmp_path / ".env"
     token = "a" * 32
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.setattr(web_api, "_validate_api_token", lambda _token: (True, None, 3))
 
-    client = _client()
+    client = api_client
 
     save = client.post("/api/admin/api_token", json={"token": token, "validate": True})
     assert save.status_code == 200
@@ -308,16 +303,16 @@ def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path) -> N
     assert "API_KEY" not in env_path.read_text(encoding="utf-8")
 
 
-def test_openapi_includes_app_version() -> None:
-    res = _client().get("/openapi.json")
+def test_openapi_includes_app_version(api_client) -> None:
+    res = api_client.get("/openapi.json")
     assert res.status_code == 200
     payload = res.json()
     assert payload["info"]["version"] == web_api.app.version == todoist.__version__
 
 
-def test_dashboard_progress_inactive_state() -> None:
+def test_dashboard_progress_inactive_state(api_client) -> None:
     _set_progress_state(updated_at="2025-01-01T00:00:00")
-    res = _client().get("/api/dashboard/progress")
+    res = api_client.get("/api/dashboard/progress")
     assert res.status_code == 200
     payload = res.json()
 
@@ -330,7 +325,7 @@ def test_dashboard_progress_inactive_state() -> None:
     assert payload["error"] is None
 
 
-def test_dashboard_progress_active_state() -> None:
+def test_dashboard_progress_active_state(api_client) -> None:
     _set_progress_state(
         active=True,
         stage="Loading data",
@@ -340,7 +335,7 @@ def test_dashboard_progress_active_state() -> None:
         updated_at="2025-01-01T10:00:30",
         detail="Fetching projects",
     )
-    res = _client().get("/api/dashboard/progress")
+    res = api_client.get("/api/dashboard/progress")
     assert res.status_code == 200
     payload = res.json()
 
@@ -355,12 +350,12 @@ def test_dashboard_progress_active_state() -> None:
     assert payload["error"] is None
 
 
-def test_dashboard_progress_with_error() -> None:
+def test_dashboard_progress_with_error(api_client) -> None:
     _set_progress_state(
         updated_at="2025-01-01T10:05:00",
         error="Failed to connect to API",
     )
-    res = _client().get("/api/dashboard/progress")
+    res = api_client.get("/api/dashboard/progress")
     assert res.status_code == 200
     payload = res.json()
 
@@ -370,7 +365,7 @@ def test_dashboard_progress_with_error() -> None:
     assert payload["updatedAt"] == "2025-01-01T10:05:00"
 
 
-def test_dashboard_progress_without_error() -> None:
+def test_dashboard_progress_without_error(api_client) -> None:
     _set_progress_state(
         active=True,
         stage="Processing",
@@ -379,7 +374,7 @@ def test_dashboard_progress_without_error() -> None:
         started_at="2025-01-01T12:00:00",
         updated_at="2025-01-01T12:00:15",
     )
-    res = _client().get("/api/dashboard/progress")
+    res = api_client.get("/api/dashboard/progress")
     assert res.status_code == 200
     payload = res.json()
 
@@ -397,13 +392,13 @@ def test_dashboard_progress_without_error() -> None:
     ],
 )
 def test_dashboard_progress_ignores_activity_page_counts(
-    stage, page_current, page_total, window_current, window_total
+    stage, page_current, page_total, window_current, window_total, api_client
 ) -> None:
     _set_progress_state()
     callback = web_api._build_tqdm_progress_callback()
     callback(stage, page_current, page_total, "page")
 
-    client = _client()
+    client = api_client
     payload = client.get("/api/dashboard/progress").json()
     assert payload["active"] is False
     assert payload["subCurrent"] is None
@@ -418,7 +413,7 @@ def test_dashboard_progress_ignores_activity_page_counts(
     assert payload["subTotal"] == window_total
 
 
-def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
+def test_dashboard_progress_uses_verbose_tqdm_detail(api_client) -> None:
     _set_progress_state()
     callback = web_api._build_tqdm_progress_callback()
     callback(
@@ -429,7 +424,7 @@ def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
         "Fetching activity history: window 1 scanning 2026-03-05 to 2026-05-14 UTC; workers=1",
     )
 
-    payload = _client().get("/api/dashboard/progress").json()
+    payload = api_client.get("/api/dashboard/progress").json()
     assert payload["detail"] == (
         "Fetching activity history: window 1 scanning 2026-03-05 to 2026-05-14 UTC; workers=1"
     )
@@ -437,8 +432,8 @@ def test_dashboard_progress_uses_verbose_tqdm_detail() -> None:
     assert payload["subTotal"] == 3
 
 
-def test_dashboard_status_excludes_triton_service() -> None:
-    res = _client().get("/api/dashboard/status")
+def test_dashboard_status_excludes_triton_service(api_client) -> None:
+    res = api_client.get("/api/dashboard/status")
 
     assert res.status_code == 200
     payload = res.json()

@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import cast
 from unittest.mock import Mock
 
-from fastapi.testclient import TestClient
 import pytest
 
 import todoist.database.dataframe as dataframe_module
@@ -13,10 +12,6 @@ from todoist.core.utils import MaxRetriesExceeded
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
-
-
-def _client() -> TestClient:
-    return TestClient(web_api.app)
 
 
 def _pending_gmail_status(port: int, started_at: str) -> dict[str, object]:
@@ -40,7 +35,7 @@ def _pending_gmail_status(port: int, started_at: str) -> dict[str, object]:
     }
 
 
-def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) -> None:
+def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch, api_client) -> None:
     monkeypatch.setattr(web_api, "_available_mapping_files", lambda: ["adj_private.py"])
     monkeypatch.setattr(
         web_api,
@@ -61,7 +56,7 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) 
         web_api, "_load_projects_for_adjustments_sync", _fake_projects_for_adjustments
     )
 
-    res = _client().get("/api/admin/project_adjustments")
+    res = api_client.get("/api/admin/project_adjustments")
     assert res.status_code == 200
     payload = res.json()
 
@@ -75,11 +70,10 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch) 
 
 
 def test_admin_project_adjustments_rejects_path_traversal(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(tmp_path / "personal"))
-    client = TestClient(web_api.app)
-
+    client = api_client
     invalid = client.get(
         "/api/admin/project_adjustments", params={"file": "../evil.py"}
     )
@@ -96,7 +90,7 @@ def test_admin_project_adjustments_rejects_path_traversal(
 
 
 def test_admin_save_project_adjustments_roundtrips_safe_literals(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     personal_dir = tmp_path / "personal"
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
@@ -110,7 +104,7 @@ def test_admin_save_project_adjustments_roundtrips_safe_literals(
             ["Inbox"],
         ),
     )
-    response = _client().put(
+    response = api_client.put(
         "/api/admin/project_adjustments",
         params={"file": "adj_private.py", "refresh": "false"},
         json={
@@ -133,7 +127,7 @@ def test_admin_save_project_adjustments_roundtrips_safe_literals(
 
 
 def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     personal_dir = tmp_path / "personal"
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
@@ -154,7 +148,7 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
 
     monkeypatch.setattr(web_api, "_ensure_state", _boom)
 
-    response = _client().put(
+    response = api_client.put(
         "/api/admin/project_adjustments",
         params={"file": "adj_private.py", "refresh": "true"},
         json={"mappings": {"Archived Research": "Academy"}},
@@ -188,7 +182,7 @@ def test_admin_save_project_adjustments_succeeds_when_refresh_fails(
     ],
 )
 def test_admin_save_project_adjustments_rejects_active_project_inputs(
-    monkeypatch, tmp_path, body, expected_detail
+    monkeypatch, tmp_path, body, expected_detail, api_client
 ) -> None:
     personal_dir = tmp_path / "personal"
     monkeypatch.setenv("TODOIST_PERSONAL_DIR", str(personal_dir))
@@ -203,7 +197,7 @@ def test_admin_save_project_adjustments_rejects_active_project_inputs(
         ),
     )
 
-    response = _client().put(
+    response = api_client.put(
         "/api/admin/project_adjustments",
         params={"file": "adj_private.py", "refresh": "false"},
         json=body,
@@ -213,7 +207,7 @@ def test_admin_save_project_adjustments_rejects_active_project_inputs(
     assert expected_detail in response.json()["detail"]
 
 
-def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
+def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "dashboard.yaml").write_text(
@@ -224,7 +218,7 @@ def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
         web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml"
     )
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.get("/api/admin/dashboard/settings")
     assert res.status_code == 200
     payload = res.json()
@@ -276,7 +270,7 @@ def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path) -> None:
     assert "label: Kickoff" in saved_text
 
 
-def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None:
+def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch, api_client) -> None:
     class _FakeDatabase:
         def __init__(self, dotenv_path: str) -> None:
             _ = dotenv_path
@@ -293,7 +287,7 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None
 
     monkeypatch.setattr(web_api, "Database", _FakeDatabase)
 
-    res = _client().get("/api/admin/dashboard/labels")
+    res = api_client.get("/api/admin/dashboard/labels")
     assert res.status_code == 200
     payload = res.json()
     assert payload["labels"] == [
@@ -303,7 +297,7 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch) -> None
     ]
 
 
-def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
+def test_admin_automations_returns_enabled_and_connection(monkeypatch, api_client) -> None:
     monkeypatch.setattr(
         web_api,
         "_load_automation_inventory",
@@ -332,7 +326,7 @@ def test_admin_automations_returns_enabled_and_connection(monkeypatch) -> None:
         ],
     )
 
-    res = _client().get("/api/admin/automations")
+    res = api_client.get("/api/admin/automations")
 
     assert res.status_code == 200
     payload = res.json()
@@ -462,7 +456,7 @@ def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(
     ]
 
 
-def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> None:
+def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path, api_client) -> None:
     config_path = tmp_path / "automations.yaml"
     config_path.write_text(
         "\n".join(
@@ -487,7 +481,7 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
     monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
 
-    res = _client().post(
+    res = api_client.post(
         "/api/admin/automations/gmail_tasks/enabled", json={"enabled": True}
     )
 
@@ -496,7 +490,7 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path) -> N
     assert "- ${gmail_tasks}" in saved
 
 
-def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path) -> None:
+def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
     config_path = tmp_path / "automations.yaml"
     config_path.write_text(
         "\n".join(
@@ -522,7 +516,7 @@ def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path) -> None:
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
-    res = _client().put(
+    res = api_client.put(
         "/api/admin/stale_tasks",
         json={
             "oldAfterDays": 14,
@@ -545,7 +539,7 @@ def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path) -> None:
     assert "dry_run: false" in saved
 
 
-def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path) -> None:
+def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path, api_client) -> None:
     config_path = tmp_path / "automations.yaml"
     config_path.write_text(
         "\n".join(
@@ -563,7 +557,7 @@ def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path) 
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
-    res = _client().put(
+    res = api_client.put(
         "/api/admin/multiplication",
         json={
             "flatLeafTemplate": "{base} #{i}",
@@ -635,11 +629,11 @@ def test_set_automation_enabled_returns_false_for_unknown_key(
     assert changed is False
 
 
-def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None:
+def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
 
-    res = _client().post("/api/admin/automations/gmail/connect")
+    res = api_client.post("/api/admin/automations/gmail/connect")
 
     assert res.status_code == 400
     assert "gmail_credentials.json is required" in res.json()["detail"]
@@ -653,7 +647,7 @@ def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path) -> None
     ],
 )
 def test_admin_gmail_connect_reports_pending_auth(
-    monkeypatch, tmp_path, port, state, started_at, use_config_dir
+    monkeypatch, tmp_path, port, state, started_at, use_config_dir, api_client
 ) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
     if use_config_dir:
@@ -678,7 +672,7 @@ def test_admin_gmail_connect_reports_pending_auth(
         lambda: _pending_gmail_status(port, started_at),
     )
 
-    res = _client().post("/api/admin/automations/gmail/connect")
+    res = api_client.post("/api/admin/automations/gmail/connect")
 
     assert res.status_code == 200
     payload = res.json()
@@ -731,7 +725,7 @@ def test_start_gmail_manual_auth_session_enables_insecure_transport_temporarily(
 
 
 
-def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
+def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "dashboard.yaml").write_text(
@@ -742,7 +736,7 @@ def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
         web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml"
     )
 
-    client = TestClient(web_api.app)
+    client = api_client
     res = client.get("/api/admin/observer")
     assert res.status_code == 200
     payload = res.json()
@@ -768,7 +762,7 @@ def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path) -> None:
 
 
 def test_admin_run_observer_reports_idle_polling_automations(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, api_client
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -805,7 +799,7 @@ def test_admin_run_observer_reports_idle_polling_automations(
     monkeypatch.setattr(web_api, "Database", _FakeDatabase)
     monkeypatch.setattr(web_api, "_build_observer", lambda db: _FakeObserver())
 
-    res = _client().post("/api/admin/observer/run")
+    res = api_client.post("/api/admin/observer/run")
     assert res.status_code == 200
     payload = res.json()
     assert payload["state"]["lastStatus"] == "ran"

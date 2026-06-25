@@ -17,6 +17,38 @@ import todoist.web.api as web_api
 # pylint: disable=protected-access
 
 
+async def _noop_ensure_state(*, refresh: bool) -> None:
+    _ = refresh
+
+
+def _event_df(rows: list[dict[str, str]]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
+
+
+def _empty_event_df() -> pd.DataFrame:
+    return _event_df(
+        [
+            {
+                "date": "2025-01-15",
+                "id": "anchor",
+                "title": "anchor",
+                "type": "added",
+                "parent_project_name": "A",
+                "root_project_name": "A",
+                "task_id": "anchor",
+            }
+        ]
+    ).iloc[:0]
+
+
+def _set_dashboard_df(monkeypatch, df: pd.DataFrame) -> None:
+    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _stub_all_figures(monkeypatch)
+    _set_state_with_df(df)
+
+
 def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -202,29 +234,22 @@ def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) 
 
 
 def test_dashboard_home_validates_weeks(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-15",
-                "id": "e1",
-                "title": "t1",
-                "type": "completed",
-                "parent_project_name": "A",
-                "root_project_name": "A",
-                "task_id": "1",
-            }
-        ]
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
+            [
+                {
+                    "date": "2025-01-15",
+                    "id": "e1",
+                    "title": "t1",
+                    "type": "completed",
+                    "parent_project_name": "A",
+                    "root_project_name": "A",
+                    "task_id": "1",
+                }
+            ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?weeks=10000")
@@ -232,29 +257,22 @@ def test_dashboard_home_validates_weeks(monkeypatch) -> None:
 
 
 def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-15",
-                "id": "e1",
-                "title": "t1",
-                "type": "completed",
-                "parent_project_name": "A",
-                "root_project_name": "A",
-                "task_id": "1",
-            }
-        ]
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
+            [
+                {
+                    "date": "2025-01-15",
+                    "id": "e1",
+                    "title": "t1",
+                    "type": "completed",
+                    "parent_project_name": "A",
+                    "root_project_name": "A",
+                    "task_id": "1",
+                }
+            ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?beg=2025-01-01")
@@ -262,17 +280,10 @@ def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
 
 
 def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    # Anchor date is 2025-01-15 (Wed). Last completed ISO week is 2025-01-06..2025-01-12.
-    df = pd.DataFrame(
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
         [
-            # In last completed week:
             {
                 "date": "2025-01-06",
                 "id": "c1",
@@ -321,10 +332,8 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
                 "task_id": "t5",
             },
         ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?weeks=12&granularity=W")
@@ -347,29 +356,7 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
 
 
 def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        columns=pd.Index(
-            [
-                "date",
-                "id",
-                "title",
-                "type",
-                "parent_project_name",
-                "root_project_name",
-                "task_id",
-            ]
-        )
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    _set_state_with_df(df)
+    _set_dashboard_df(monkeypatch, _empty_event_df())
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?weeks=12")
@@ -381,47 +368,40 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
 
 
 def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
-    df = pd.DataFrame(
-        [
-            {
-                "date": "2025-01-07",
-                "id": "c1",
-                "title": "Morning walk",
-                "type": "completed",
-                "parent_project_name": "Health",
-                "root_project_name": "Health",
-                "task_id": "habit-1",
-            },
-            {
-                "date": "2025-01-08",
-                "id": "r1",
-                "title": "Morning walk",
-                "type": "rescheduled",
-                "parent_project_name": "Health",
-                "root_project_name": "Health",
-                "task_id": "habit-1",
-            },
-            {
-                "date": "2025-01-15",
-                "id": "anchor-1",
-                "title": "Another task",
-                "type": "completed",
-                "parent_project_name": "Health",
-                "root_project_name": "Health",
-                "task_id": "anchor-task",
-            },
-        ]
+    _set_dashboard_df(
+        monkeypatch,
+        _event_df(
+            [
+                {
+                    "date": "2025-01-07",
+                    "id": "c1",
+                    "title": "Morning walk",
+                    "type": "completed",
+                    "parent_project_name": "Health",
+                    "root_project_name": "Health",
+                    "task_id": "habit-1",
+                },
+                {
+                    "date": "2025-01-08",
+                    "id": "r1",
+                    "title": "Morning walk",
+                    "type": "rescheduled",
+                    "parent_project_name": "Health",
+                    "root_project_name": "Health",
+                    "task_id": "habit-1",
+                },
+                {
+                    "date": "2025-01-15",
+                    "id": "anchor-1",
+                    "title": "Another task",
+                    "type": "completed",
+                    "parent_project_name": "Health",
+                    "root_project_name": "Health",
+                    "task_id": "anchor-task",
+                },
+            ]
+        ),
     )
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-    web_api._state.df_activity = df
     web_api._state.active_projects = [
         make_project(
             project_id="project-1",
@@ -458,13 +438,6 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
 
 
 def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
-    _stub_all_figures(monkeypatch)
-
     df = pd.DataFrame(
         [
             {
@@ -488,11 +461,8 @@ def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
         ]
     )
     df.index = [0, 1]
-    web_api._state.df_activity = df
-    web_api._state.active_projects = []
+    _set_dashboard_df(monkeypatch, df)
     web_api._state.project_colors = {"Health": "#00aa88"}
-    web_api._state.db = None
-    web_api._state.home_payload_cache = {}
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?weeks=12&granularity=W")
@@ -512,20 +482,13 @@ def test_dashboard_status_returns_services() -> None:
 
 
 def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
-    async def _noop_ensure_state(*, refresh: bool) -> None:
-        _ = refresh
-        return None
-
-    monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
+    _set_dashboard_df(monkeypatch, _single_event_df())
     monkeypatch.setattr(
         web_api,
         "_DASHBOARD_CONFIG_PATH",
         web_api._REPO_ROOT / "configs" / "dashboard.yaml",
     )
-    _stub_all_figures(monkeypatch)
 
-    df = _single_event_df()
-    web_api._state.df_activity = df
     web_api._state.active_projects = [
         make_project(
             project_id="proj-urgency",
@@ -541,8 +504,6 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
         )
     ]
     web_api._state.project_colors = {"Urgency": "#44aa66"}
-    web_api._state.db = None
-    web_api._state.home_payload_cache = {}
 
     client = TestClient(web_api.app)
     res = client.get("/api/dashboard/home?weeks=12&granularity=W")
