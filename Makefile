@@ -81,9 +81,6 @@ stop_dashboard:
 status: ## Show local dashboard/API/frontend runtime status
 	@PYTHONPATH=. uv run python3 -m scripts.status
 
-loc_audit: ## Count tracked Python and source lines
-	@PYTHONPATH=. uv run python3 -m scripts.loc_audit
-
 run_demo: ensure_frontend_deps
 	@bash -c '\
 		set -euo pipefail; \
