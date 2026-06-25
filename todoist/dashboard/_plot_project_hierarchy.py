@@ -39,7 +39,9 @@ class _BubblePoint:
     size: float
 
 
-def _empty_project_hierarchy_figure(message: str) -> go.Figure:
+def _empty_project_hierarchy_figure(
+    message: str, *, height: int = 520, font_color: str = "#cfd8e3"
+) -> go.Figure:
     fig = go.Figure()
     fig.add_annotation(
         text=message,
@@ -48,12 +50,12 @@ def _empty_project_hierarchy_figure(message: str) -> go.Figure:
         xref="paper",
         yref="paper",
         showarrow=False,
-        font=dict(size=16, color="#cfd8e3"),
+        font=dict(size=16, color=font_color),
     )
     fig.update_layout(
         template="plotly_dark",
         title=None,
-        height=520,
+        height=height,
         margin=dict(l=24, r=24, t=18, b=24),
         paper_bgcolor=_BACKGROUND_COLOR,
         plot_bgcolor=_BACKGROUND_COLOR,

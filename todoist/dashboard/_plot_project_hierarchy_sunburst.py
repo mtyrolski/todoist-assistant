@@ -6,8 +6,12 @@ import plotly.graph_objects as go
 
 from todoist.core.types import Project
 from todoist.dashboard._plot_project_hierarchy import (
+    _BACKGROUND_COLOR,
     _HierarchyNode,
+    _MUTED_TEXT_COLOR,
+    _TEXT_COLOR,
     _active_project_tree,
+    _empty_project_hierarchy_figure,
     _mix_color,
     _normalize_activity_frame,
     _rgba,
@@ -15,35 +19,15 @@ from todoist.dashboard._plot_project_hierarchy import (
     _wrap_label,
 )
 
-_BACKGROUND_COLOR = "#111318"
-_BORDER_COLOR = "rgba(17,19,24,0.92)"
 _EMPTY_COLOR = "#8ea3ff"
-_TEXT_COLOR = "#e7edf5"
-_MUTED_TEXT_COLOR = "#9fb0c2"
 _CENTER_COLOR = "#151a2b"
 _PANEL_GLOW = "#71dfff"
 
 
-def _empty_project_hierarchy_figure(message: str) -> go.Figure:
-    fig = go.Figure()
-    fig.add_annotation(
-        text=message,
-        x=0.5,
-        y=0.5,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        font=dict(size=16, color=_TEXT_COLOR),
+def _empty_sunburst_figure(message: str) -> go.Figure:
+    return _empty_project_hierarchy_figure(
+        message, height=560, font_color=_TEXT_COLOR
     )
-    fig.update_layout(
-        template="plotly_dark",
-        title=None,
-        height=560,
-        margin=dict(l=24, r=24, t=18, b=24),
-        paper_bgcolor=_BACKGROUND_COLOR,
-        plot_bgcolor=_BACKGROUND_COLOR,
-    )
-    return fig
 
 
 def _build_nodes_for_parent(
@@ -151,15 +135,13 @@ def plot_active_project_hierarchy_sunburst(
     elif "type" not in df.columns:
         empty_message = "Activity data is missing project event types"
     if empty_message is not None:
-        return _empty_project_hierarchy_figure(empty_message)
+        return _empty_sunburst_figure(empty_message)
 
     df = _normalize_activity_frame(df)
     df_period = cast(pd.DataFrame, df[(df.index >= beg_date) & (df.index < end_date)])
     df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
     if df_completed.empty:
-        return _empty_project_hierarchy_figure(
-            "No completed tasks in the selected range"
-        )
+        return _empty_sunburst_figure("No completed tasks in the selected range")
 
     projects_by_id, children_by_parent, root_ids, direct_counts, subtree_total = (
         _active_project_tree(df_completed, active_projects)
@@ -169,7 +151,7 @@ def plot_active_project_hierarchy_sunburst(
         project_id for project_id in root_ids if subtree_total(project_id) > 0
     ]
     if not active_root_ids:
-        return _empty_project_hierarchy_figure(
+        return _empty_sunburst_figure(
             "No active project completions in the selected range"
         )
 

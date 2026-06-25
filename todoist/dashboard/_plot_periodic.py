@@ -339,6 +339,39 @@ def _series_at_positive_activity_periods(
     return cast(pd.Series, series.loc[active_periods.index])
 
 
+def _forecast_marker_trace(
+    *,
+    x: datetime,
+    y: float | int,
+    color: str,
+    name: str,
+    legendgroup: str,
+    hovertemplate: str,
+    forecast: bool,
+    marker_size: int | None = None,
+    marker_opacity: float | None = None,
+) -> go.Scatter:
+    return go.Scatter(
+        x=[x],
+        y=[y],
+        mode="markers",
+        marker=(
+            dict(
+                symbol="circle",
+                size=marker_size or 16,
+                color=color,
+                opacity=marker_opacity or 0.92,
+            )
+            if forecast
+            else dict(symbol="circle-open", size=10, line=dict(width=2, color=color))
+        ),
+        name=name,
+        legendgroup=legendgroup,
+        showlegend=False,
+        hovertemplate=hovertemplate,
+    )
+
+
 def _add_total_overlay_traces(
     fig: go.Figure,
     *,
@@ -428,39 +461,27 @@ def _add_total_overlay_traces(
             )
         )
 
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[actual_value],
-            mode="markers",
-            marker=dict(
-                symbol="circle-open",
-                size=10,
-                line=dict(width=2, color=_ALL_TASKS_TOTAL_COLOR),
-            ),
-            name="All Projects (so far)",
+    total_suffix = " (cumulative)" if config.cumulative else ""
+    task_suffix = "" if config.cumulative else " tasks"
+    for label, value, forecast in (
+        ("So far", actual_value, False),
+        ("Forecast", forecast_value, True),
+    ):
+        marker_trace = _forecast_marker_trace(
+            x=context.current_label,
+            y=value,
+            color=_ALL_TASKS_TOTAL_COLOR,
+            name=f"All Projects ({'forecast' if forecast else 'so far'})",
             legendgroup="all-projects-total",
-            showlegend=False,
-            hovertemplate=f"<b>All projects</b><br>So far{' (cumulative)' if config.cumulative else ''}: %{{y:.0f}}{' tasks' if not config.cumulative else ''}<extra></extra>",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[forecast_value],
-            mode="markers",
-            marker=dict(
-                symbol="circle",
-                size=14,
-                color=_ALL_TASKS_TOTAL_COLOR,
-                opacity=0.82,
+            hovertemplate=(
+                f"<b>All projects</b><br>{label}{total_suffix}: "
+                f"%{{y:.0f}}{task_suffix}<extra></extra>"
             ),
-            name="All Projects (forecast)",
-            legendgroup="all-projects-total",
-            showlegend=False,
-            hovertemplate=f"<b>All projects</b><br>Forecast{' (cumulative)' if config.cumulative else ''}: %{{y:.0f}}{' tasks' if not config.cumulative else ''}<extra></extra>",
+            forecast=forecast,
+            marker_size=14,
+            marker_opacity=0.82,
         )
-    )
+        fig.add_trace(marker_trace)
 
 
 def _project_series_for_mode(
@@ -563,30 +584,24 @@ def _add_project_forecast_traces(
 
     label_suffix = " (cumulative)" if config.cumulative else ""
     task_suffix = "" if config.cumulative else " tasks"
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[actual_value],
-            mode="markers",
-            marker=dict(symbol="circle-open", size=10, line=dict(width=2, color=color)),
-            name=f"{project_name} (so far)",
-            legendgroup=project_name,
-            showlegend=False,
-            hovertemplate=f"<b>{project_name}</b><br>So far{label_suffix}: %{{y}}{task_suffix}<extra></extra>",
+    for label, value, forecast in (
+        ("So far", actual_value, False),
+        ("Forecast", forecast_value, True),
+    ):
+        fig.add_trace(
+            _forecast_marker_trace(
+                x=context.current_label,
+                y=value,
+                color=color,
+                name=f"{project_name} ({'forecast' if forecast else 'so far'})",
+                legendgroup=project_name,
+                hovertemplate=(
+                    f"<b>{project_name}</b><br>{label}{label_suffix}: "
+                    f"%{{y}}{task_suffix}<extra></extra>"
+                ),
+                forecast=forecast,
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[context.current_label],
-            y=[forecast_value],
-            mode="markers",
-            marker=dict(symbol="circle", size=16, color=color, opacity=0.92),
-            name=f"{project_name} (forecast)",
-            legendgroup=project_name,
-            showlegend=False,
-            hovertemplate=f"<b>{project_name}</b><br>Forecast{label_suffix}: %{{y}}{task_suffix}<extra></extra>",
-        )
-    )
 
 
 def _completed_tasks_periodically_figure(
