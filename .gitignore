@@ -17,7 +17,6 @@ scripts/*
 !scripts/build_macos_pkg.sh
 !scripts/build_macos_dmg.sh
 !scripts/get_version.py
-!scripts/loc_audit.py
 !scripts/check_llm_activity_prompt.py
 !scripts/check_versions.py
 !scripts/check_explicit_any.py
