@@ -4,6 +4,7 @@ from threading import Lock
 import time
 from typing import cast
 
+import pytest
 from tests.factories import make_project, make_task
 from todoist.automations.llm_breakdown.automation import LLMBreakdown
 from todoist.automations.llm_breakdown.models import (
@@ -14,6 +15,55 @@ from todoist.automations.llm_breakdown.models import (
 from todoist.automations.llm_breakdown.runner import run_breakdown
 from todoist.database.base import Database
 from todoist.core.env import EnvVar
+
+
+@pytest.fixture(autouse=True)
+def _runner_env(monkeypatch, tmp_path):
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+
+def _task(task_id="task-1", *, labels=None, parent_id=None):
+    return make_task(
+        task_id,
+        content=task_id.replace("-", " ").title(),
+        labels=["ai-breakdown"] if labels is None else labels,
+        project_id="project-1",
+        parent_id=parent_id,
+    )
+
+
+def _breakdown(content="Draft metrics"):
+    return TaskBreakdown(children=[BreakdownNode(content=content)])
+
+
+class _FakeLlm:
+    class config:
+        model_id = "test-model"
+
+    def __init__(self, responses=None, *, error: Exception | None = None):
+        self.responses = list(responses or [_breakdown()])
+        self._last_response = self.responses[-1]
+        self.error = error
+        self.calls = 0
+        self.messages = []
+
+    def structured_chat(self, messages, schema):
+        assert schema is TaskBreakdown
+        assert messages
+        self.calls += 1
+        self.messages.append(messages)
+        if self.error is not None:
+            raise self.error
+        if self.responses:
+            self._last_response = self.responses.pop(0)
+        return self._last_response
+
+
+def _use_llm(monkeypatch, automation, llm=None):
+    llm = llm or _FakeLlm()
+    monkeypatch.setattr(automation, "get_llm", lambda: llm)
+    return llm
 
 
 class _FakeDb:
@@ -64,9 +114,7 @@ class _RefreshableFakeDb(_FakeDb):
         self.project = self.refreshed_project
 
 
-def test_run_breakdown_uses_serial_codex_requests(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
+def test_run_breakdown_uses_serial_codex_requests(monkeypatch) -> None:
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
     tasks = [
@@ -103,10 +151,8 @@ def test_run_breakdown_uses_serial_codex_requests(monkeypatch, tmp_path) -> None
 
 
 def test_llm_request_parallelism_uses_single_codex_worker(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
     automation = LLMBreakdown(max_tasks_per_tick=0)
@@ -114,23 +160,10 @@ def test_llm_request_parallelism_uses_single_codex_worker(
     assert automation.llm_request_parallelism(4) == 1
 
 
-def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    db = _FakeDb([task])
+def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch) -> None:
+    db = _FakeDb([_task()])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation)
 
     run_breakdown(automation, cast(Database, db))
 
@@ -140,31 +173,17 @@ def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch, tmp_path) -> N
 
 
 def test_run_breakdown_reports_insert_failure_without_fallback(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
     tasks = [
-        make_task(
-            f"task-{index}",
-            content=f"Task {index}",
-            labels=["ai-breakdown"],
-            project_id="project-1",
-        )
+        _task(f"task-{index}")
         for index in range(2)
     ]
     db = _FakeDb(tasks)
     db.fail_next_insert = True
     automation = LLMBreakdown()
 
-    class _FakeLlm:
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation)
 
     run_breakdown(automation, cast(Database, db))
 
@@ -190,24 +209,11 @@ def test_run_breakdown_reports_insert_failure_without_fallback(
 
 
 def test_run_breakdown_reports_empty_llm_breakdown_as_failure(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    db = _FakeDb([task])
+    db = _FakeDb([_task()])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[])
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation, _FakeLlm([TaskBreakdown(children=[])]))
 
     run_breakdown(automation, cast(Database, db))
 
@@ -223,60 +229,29 @@ def test_run_breakdown_reports_empty_llm_breakdown_as_failure(
 
 
 def test_run_breakdown_retries_empty_llm_breakdown_before_failure(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    db = _FakeDb([task])
+    db = _FakeDb([_task()])
     automation = LLMBreakdown()
-    calls = {"count": 0}
-
-    class _FakeLlm:
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            calls["count"] += 1
-            if calls["count"] == 1:
-                return TaskBreakdown(children=[])
-            assert "Do not return an empty list" in messages[0]["content"]
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    llm = _use_llm(
+        monkeypatch, automation, _FakeLlm([TaskBreakdown(children=[]), _breakdown()])
+    )
 
     run_breakdown(automation, cast(Database, db))
 
-    assert calls["count"] == 2
+    assert llm.calls == 2
+    assert "Do not return an empty list" in llm.messages[1][0]["content"]
     assert len(db.insert_calls) == 1
     assert db.insert_calls[0]["content"] == "Draft metrics"
     assert db.updated == [("task-1", [])]
 
 
 def test_run_breakdown_writes_todoist_comments_for_llm_interactions(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    db = _FakeDb([task])
+    db = _FakeDb([_task()])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        class config:
-            model_id = "test-model"
-
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation)
 
     run_breakdown(automation, cast(Database, db))
 
@@ -289,24 +264,11 @@ def test_run_breakdown_writes_todoist_comments_for_llm_interactions(
 
 
 def test_run_breakdown_keeps_task_labeled_when_llm_generation_fails(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    db = _FakeDb([task])
+    db = _FakeDb([_task()])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            raise RuntimeError("timed out")
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation, _FakeLlm(error=RuntimeError("timed out")))
 
     run_breakdown(automation, cast(Database, db))
 
@@ -327,15 +289,9 @@ def test_run_breakdown_keeps_task_labeled_when_llm_generation_fails(
 
 
 def test_run_breakdown_marks_task_failed_after_three_generation_failures(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    db = _FakeDb([task])
+    db = _FakeDb([_task()])
     db.comments.extend(
         [
             {
@@ -349,14 +305,7 @@ def test_run_breakdown_marks_task_failed_after_three_generation_failures(
         ]
     )
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def structured_chat(self, messages, schema):
-            assert schema is TaskBreakdown
-            assert messages
-            raise RuntimeError("timed out")
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation, _FakeLlm(error=RuntimeError("timed out")))
 
     run_breakdown(automation, cast(Database, db))
 
@@ -369,51 +318,11 @@ def test_run_breakdown_marks_task_failed_after_three_generation_failures(
     )
 
 
-def test_run_breakdown_ignores_failed_breakdown_label(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1",
-        content="Task 1",
-        labels=["ai-breakdown-failed"],
-        project_id="project-1",
-    )
-    db = _FakeDb([task])
+@pytest.mark.parametrize("label", ["ai-breakdown-failed", "ai-import"])
+def test_run_breakdown_ignores_non_breakdown_labels(monkeypatch, label) -> None:
+    db = _FakeDb([_task(labels=[label])])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def structured_chat(
-            self, messages, schema
-        ):  # pragma: no cover - should not be called
-            raise AssertionError("failed label should not be processed")
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
-
-    run_breakdown(automation, cast(Database, db))
-
-    assert db.insert_calls == []
-    assert db.updated == []
-    assert db.comments == []
-
-
-def test_run_breakdown_ignores_ai_import_label(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    task = make_task(
-        "task-1", content="Task 1", labels=["ai-import"], project_id="project-1"
-    )
-    db = _FakeDb([task])
-    automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def structured_chat(
-            self, messages, schema
-        ):  # pragma: no cover - should not be called
-            raise AssertionError("ai-import must not trigger breakdown")
-
-    monkeypatch.setattr(automation, "get_llm", lambda: _FakeLlm())
+    _use_llm(monkeypatch, automation, _FakeLlm(error=AssertionError(label)))
 
     run_breakdown(automation, cast(Database, db))
 
@@ -423,36 +332,11 @@ def test_run_breakdown_ignores_ai_import_label(monkeypatch, tmp_path) -> None:
 
 
 def test_run_breakdown_processes_tasks_even_when_children_already_exist(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    parent = make_task(
-        "task-1", content="Task 1", labels=["ai-breakdown"], project_id="project-1"
-    )
-    child = make_task(
-        "child-1",
-        content="Existing child",
-        labels=[],
-        project_id="project-1",
-        parent_id="task-1",
-    )
-    db = _FakeDb([parent, child])
+    db = _FakeDb([_task(), _task("child-1", labels=[], parent_id="task-1")])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def structured_chat(self, messages, schema):
-            self.calls += 1
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    fake_llm = _FakeLlm()
-    monkeypatch.setattr(automation, "get_llm", lambda: fake_llm)
+    fake_llm = _use_llm(monkeypatch, automation)
 
     run_breakdown(automation, cast(Database, db))
 
@@ -463,35 +347,16 @@ def test_run_breakdown_processes_tasks_even_when_children_already_exist(
     assert db.updated == [("task-1", [])]
 
 
-def test_run_breakdown_expands_labeled_subtask_in_place(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    root = make_task(
-        "task-root", content="Root task", labels=[], project_id="project-1"
-    )
-    child = make_task(
+def test_run_breakdown_expands_labeled_subtask_in_place(monkeypatch) -> None:
+    root = _task("task-root", labels=[])
+    child = _task(
         "task-child",
-        content="Child task",
         labels=["ai-breakdown"],
-        project_id="project-1",
         parent_id="task-root",
     )
     db = _FakeDb([root, child])
     automation = LLMBreakdown()
-
-    class _FakeLlm:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def structured_chat(self, messages, schema):
-            self.calls += 1
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    fake_llm = _FakeLlm()
-    monkeypatch.setattr(automation, "get_llm", lambda: fake_llm)
+    fake_llm = _use_llm(monkeypatch, automation)
 
     run_breakdown(automation, cast(Database, db))
 
@@ -502,36 +367,13 @@ def test_run_breakdown_expands_labeled_subtask_in_place(monkeypatch, tmp_path) -
 
 
 def test_llm_breakdown_tick_refreshes_active_tasks_before_selecting_labels(
-    monkeypatch, tmp_path
+    monkeypatch,
 ) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(str(EnvVar.AGENT_BACKEND), "codex")
 
-    stale_task = make_task(
-        "task-1", content="Task 1", labels=[], project_id="project-1"
-    )
-    refreshed_task = make_task(
-        "task-1",
-        content="Task 1",
-        labels=["ai-breakdown"],
-        project_id="project-1",
-    )
-    db = _RefreshableFakeDb([stale_task], [refreshed_task])
+    db = _RefreshableFakeDb([_task(labels=[])], [_task()])
     automation = LLMBreakdown(frequency_in_minutes=0)
-
-    class _FakeLlm:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def structured_chat(self, messages, schema):
-            self.calls += 1
-            assert schema is TaskBreakdown
-            assert messages
-            return TaskBreakdown(children=[BreakdownNode(content="Draft metrics")])
-
-    fake_llm = _FakeLlm()
-    monkeypatch.setattr(automation, "get_llm", lambda: fake_llm)
+    fake_llm = _use_llm(monkeypatch, automation)
 
     automation.tick(cast(Database, db))
 

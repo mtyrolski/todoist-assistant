@@ -3,6 +3,8 @@
 # pylint: disable=protected-access
 
 import os
+from collections.abc import Iterable
+from typing import cast
 from unittest.mock import Mock, patch
 
 from google.auth.exceptions import RefreshError
@@ -18,6 +20,57 @@ def _request(payload):
     req = Mock()
     req.execute.return_value = payload
     return req
+
+
+def _message(subject, sender, snippet):
+    return {
+        "payload": {
+            "headers": [
+                {"name": "Subject", "value": subject},
+                {"name": "From", "value": sender},
+            ],
+        },
+        "snippet": snippet,
+    }
+
+
+def _tick_with_message(
+    automation,
+    *,
+    message_id: str,
+    message=None,
+    existing_contents: Iterable[str] = (),
+    existing_message_ids: Iterable[str] = (),
+) -> tuple[Mock, Mock]:
+    automation._processed_message_ids = set()
+    automation._cache = Mock()
+    automation._cache.processed_gmail_messages.save = Mock()  # type: ignore[method-assign]
+
+    service = Mock()
+    if message is not None:
+        service.users.return_value.messages.return_value.get.return_value = _request(
+            message
+        )
+    db = Mock()
+    db.insert_task.return_value = {"id": "todoist-task-1"}
+
+    with (
+        patch.object(automation, "_authenticate_gmail", return_value=service),
+        patch.object(
+            automation, "_list_matching_messages", return_value=[{"id": message_id}]
+        ),
+        patch.object(
+            automation,
+            "_get_existing_task_dedup_index",
+            return_value=ExistingTaskDedupIndex(
+                contents=set(existing_contents),
+                gmail_message_ids=set(existing_message_ids),
+            ),
+        ),
+    ):
+        automation._tick(db)
+
+    return db, service
 
 
 def test_initialization():
@@ -424,40 +477,15 @@ def test_list_matching_messages_paginates_and_respects_cap():
 def test_tick_creates_todoist_task_for_non_actionable_inbox_email_and_marks_processed():
     """All inbox emails (even non-keyword emails) now create Todoist tasks."""
     automation = GmailTasksAutomation()
-    automation._processed_message_ids = set()
-    automation._cache = Mock()
-    automation._cache.processed_gmail_messages.save = Mock()
-
-    service = Mock()
-    service.users.return_value.messages.return_value.get.return_value = _request(
-        {
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Newsletter: Team updates"},
-                    {"name": "From", "value": "Alice <alice@example.com>"},
-                ],
-            },
-            "snippet": "Weekly roundup and release notes.",
-        }
+    db, _service = _tick_with_message(
+        automation,
+        message_id="gmail-msg-1",
+        message=_message(
+            "Newsletter: Team updates",
+            "Alice <alice@example.com>",
+            "Weekly roundup and release notes.",
+        ),
     )
-
-    db = Mock()
-    db.insert_task.return_value = {"id": "todoist-task-1"}
-
-    with (
-        patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(
-            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-1"}]
-        ),
-        patch.object(
-            automation,
-            "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(
-                contents=set(), gmail_message_ids=set()
-            ),
-        ),
-    ):
-        automation._tick(db)
 
     db.insert_task.assert_called_once()
     insert_kwargs = db.insert_task.call_args.kwargs
@@ -466,7 +494,7 @@ def test_tick_creates_todoist_task_for_non_actionable_inbox_email_and_marks_proc
     assert "alice@example.com" in insert_kwargs["description"].lower()
     assert "Gmail Message ID: gmail-msg-1" in insert_kwargs["description"]
     assert "gmail-msg-1" in automation._processed_message_ids
-    automation._cache.processed_gmail_messages.save.assert_called_once_with(
+    cast(Mock, automation._cache.processed_gmail_messages.save).assert_called_once_with(
         automation._processed_message_ids
     )
     assert automation.last_sync_stats["created"] == 1
@@ -476,42 +504,18 @@ def test_tick_creates_todoist_task_for_non_actionable_inbox_email_and_marks_proc
 def test_tick_dry_run_does_not_create_or_persist_processed_ids():
     """Dry-run mode exercises the sync path without writing to Todoist or cache."""
     automation = GmailTasksAutomation(dry_run=True)
-    automation._processed_message_ids = set()
-    automation._cache = Mock()
-    automation._cache.processed_gmail_messages.save = Mock()
-
-    service = Mock()
-    service.users.return_value.messages.return_value.get.return_value = _request(
-        {
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "TODO: Review sprint backlog"},
-                    {"name": "From", "value": "PM <pm@example.com>"},
-                ],
-            },
-            "snippet": "Please review before the standup.",
-        }
+    db, _service = _tick_with_message(
+        automation,
+        message_id="gmail-msg-2",
+        message=_message(
+            "TODO: Review sprint backlog",
+            "PM <pm@example.com>",
+            "Please review before the standup.",
+        ),
     )
 
-    db = Mock()
-
-    with (
-        patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(
-            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-2"}]
-        ),
-        patch.object(
-            automation,
-            "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(
-                contents=set(), gmail_message_ids=set()
-            ),
-        ),
-    ):
-        automation._tick(db)
-
     db.insert_task.assert_not_called()
-    automation._cache.processed_gmail_messages.save.assert_not_called()
+    cast(Mock, automation._cache.processed_gmail_messages.save).assert_not_called()
     assert "gmail-msg-2" not in automation._processed_message_ids
     assert automation.last_sync_stats["dry_run"] is True
     assert automation.last_sync_stats["created"] == 0
@@ -521,32 +525,16 @@ def test_tick_dry_run_does_not_create_or_persist_processed_ids():
 def test_tick_skips_email_already_added_via_gmail_message_id_marker():
     """If a Gmail message id is already present on an existing task, do not add it again."""
     automation = GmailTasksAutomation()
-    automation._processed_message_ids = set()
-    automation._cache = Mock()
-    automation._cache.processed_gmail_messages.save = Mock()
-
-    service = Mock()
-    db = Mock()
-
-    with (
-        patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(
-            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-9"}]
-        ),
-        patch.object(
-            automation,
-            "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(
-                contents=set(), gmail_message_ids={"gmail-msg-9"}
-            ),
-        ),
-    ):
-        automation._tick(db)
+    db, service = _tick_with_message(
+        automation,
+        message_id="gmail-msg-9",
+        existing_message_ids={"gmail-msg-9"},
+    )
 
     service.users.return_value.messages.return_value.get.assert_not_called()
     db.insert_task.assert_not_called()
     assert "gmail-msg-9" in automation._processed_message_ids
-    automation._cache.processed_gmail_messages.save.assert_called_once_with(
+    cast(Mock, automation._cache.processed_gmail_messages.save).assert_called_once_with(
         automation._processed_message_ids
     )
     assert automation.last_sync_stats["duplicates"] == 1
@@ -555,39 +543,16 @@ def test_tick_skips_email_already_added_via_gmail_message_id_marker():
 def test_tick_creates_email_even_if_same_content_exists_without_gmail_marker():
     """Dedup is based on Gmail message-id marker, not plain content collisions."""
     automation = GmailTasksAutomation()
-    automation._processed_message_ids = set()
-    automation._cache = Mock()
-    automation._cache.processed_gmail_messages.save = Mock()
-
-    service = Mock()
-    service.users.return_value.messages.return_value.get.return_value = _request(
-        {
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Status update"},
-                    {"name": "From", "value": "Ops <ops@example.com>"},
-                ],
-            },
-            "snippet": "Nightly status summary.",
-        }
+    db, _service = _tick_with_message(
+        automation,
+        message_id="gmail-msg-10",
+        message=_message(
+            "Status update",
+            "Ops <ops@example.com>",
+            "Nightly status summary.",
+        ),
+        existing_contents={"status update"},
     )
-    db = Mock()
-    db.insert_task.return_value = {"id": "todoist-task-2"}
-
-    with (
-        patch.object(automation, "_authenticate_gmail", return_value=service),
-        patch.object(
-            automation, "_list_matching_messages", return_value=[{"id": "gmail-msg-10"}]
-        ),
-        patch.object(
-            automation,
-            "_get_existing_task_dedup_index",
-            return_value=ExistingTaskDedupIndex(
-                contents={"status update"}, gmail_message_ids=set()
-            ),
-        ),
-    ):
-        automation._tick(db)
 
     db.insert_task.assert_called_once()
     assert "gmail-msg-10" in automation._processed_message_ids
