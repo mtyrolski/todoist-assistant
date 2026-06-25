@@ -347,73 +347,23 @@ def _call_dashboard_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
     return getattr(_dashboard_runtime_component, name)(*args, **kwargs)
 
 
-def _env_demo_mode() -> bool:
-    return bool(_call_dashboard_runtime("_env_demo_mode"))
+def _make_dashboard_runtime_wrapper(name: str):
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _call_dashboard_runtime(name, *args, **kwargs)
 
-
-def _run_async_in_main_loop(coro: Any) -> Any:
-    return _call_dashboard_runtime("_run_async_in_main_loop", coro)
-
-
-async def _progress_snapshot() -> dict[str, Any]:
-    return await _call_dashboard_runtime("_progress_snapshot")
-
-
-async def _set_progress(
-    stage: str, step: int, total_steps: int = _PROGRESS_TOTAL_STEPS
-) -> None:
-    await _call_dashboard_runtime("_set_progress", stage, step, total_steps)
-
-
-async def _finish_progress(error: str | None = None) -> None:
-    await _call_dashboard_runtime("_finish_progress", error)
-
-
-def _build_tqdm_progress_callback():
-    return _call_dashboard_runtime("_build_tqdm_progress_callback")
-
-
-def _activity_cache_signature() -> dict[str, int] | None:
-    return _call_dashboard_runtime("_activity_cache_signature")
-
-
-def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
-    _call_dashboard_runtime("_persist_state_to_disk_cache", demo_mode=demo_mode)
-
-
-def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
-    return bool(
-        _call_dashboard_runtime("_load_state_from_disk_cache", demo_mode=demo_mode)
-    )
-
-
-def _refresh_state_sync(*, demo_mode: bool) -> None:
-    _call_dashboard_runtime("_refresh_state_sync", demo_mode=demo_mode)
-
-
-async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
-    await _call_dashboard_runtime("_ensure_state", refresh, demo_mode=demo_mode)
-
-
-def _cache_runtime_path(filename: str) -> Path:
-    return _call_dashboard_runtime("_cache_runtime_path", filename)
-
-
-def _stat_file(path: str | Path) -> dict[str, Any] | None:
-    return _call_dashboard_runtime("_stat_file", path)
-
-
-def _service_statuses() -> list[dict[str, Any]]:
-    return _call_dashboard_runtime("_service_statuses")
-
-
-def _llm_breakdown_snapshot() -> dict[str, Any]:
-    return _call_dashboard_runtime("_llm_breakdown_snapshot")
+    _wrapper.__name__ = name
+    _wrapper._component_wrapper_for = name
+    return _wrapper
 
 
 for _component_wrapper_name in _dashboard_runtime_component._COMPONENT_EXPORTS:
-    globals()[_component_wrapper_name]._component_wrapper_for = _component_wrapper_name
+    globals()[_component_wrapper_name] = _make_dashboard_runtime_wrapper(
+        _component_wrapper_name
+    )
 del _component_wrapper_name
+_ensure_state = _make_dashboard_runtime_wrapper("_ensure_state")
+_progress_snapshot = _make_dashboard_runtime_wrapper("_progress_snapshot")
+_service_statuses = _make_dashboard_runtime_wrapper("_service_statuses")
 
 
 def _make_llm_chat_wrapper(name: str):
