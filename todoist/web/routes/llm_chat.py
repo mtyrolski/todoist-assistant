@@ -52,7 +52,9 @@ def _conversation_response(conversation: dict[str, Any]) -> dict[str, Any]:
 def _find_conversation(
     conversations: list[dict[str, Any]], conversation_id: str
 ) -> dict[str, Any] | None:
-    return next((item for item in conversations if item.get("id") == conversation_id), None)
+    return next(
+        (item for item in conversations if item.get("id") == conversation_id), None
+    )
 
 
 def _append_turn_messages(

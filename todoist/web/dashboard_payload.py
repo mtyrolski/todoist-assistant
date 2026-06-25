@@ -48,7 +48,12 @@ URGENCY_COUNT_KEYS = (
     "dueTasks",
     "deadlineTasks",
 )
-URGENCY_PRIORITY_CHIPS = ((4, "p1Tasks"), (3, "p2Tasks"), (2, "p3Tasks"), (1, "p4Tasks"))
+URGENCY_PRIORITY_CHIPS = (
+    (4, "p1Tasks"),
+    (3, "p2Tasks"),
+    (2, "p3Tasks"),
+    (1, "p4Tasks"),
+)
 URGENCY_PRIORITY_CHIP_BY_VALUE = dict(URGENCY_PRIORITY_CHIPS)
 URGENCY_MATCH_KEYS = ("fire", "priority", "due", "deadline")
 
@@ -124,7 +129,9 @@ def _normalize_urgency_settings(
     badge_labels = settings.get("badge_labels")
     if isinstance(badge_labels, dict):
         normalized["badge_labels"] = {
-            key: str(badge_labels.get(key) or DEFAULT_URGENCY_SETTINGS["badge_labels"][key])
+            key: str(
+                badge_labels.get(key) or DEFAULT_URGENCY_SETTINGS["badge_labels"][key]
+            )
             for key in ("good", "warn", "danger")
         }
     thresholds = settings.get("warn_priority_thresholds")
@@ -171,7 +178,18 @@ def _empty_urgency_counts() -> dict[str, int]:
     return dict.fromkeys(URGENCY_COUNT_KEYS, 0)
 
 
-def _urgency_payload(state: str, title: str, summary: str, reference_day: date, total: int, counts: dict[str, int], urgency_settings: dict[str, Any], visible_chips: list[str], *, use_configured_good: bool = False) -> dict[str, Any]:
+def _urgency_payload(
+    state: str,
+    title: str,
+    summary: str,
+    reference_day: date,
+    total: int,
+    counts: dict[str, int],
+    urgency_settings: dict[str, Any],
+    visible_chips: list[str],
+    *,
+    use_configured_good: bool = False,
+) -> dict[str, Any]:
     badge_labels = urgency_settings["badge_labels"]
     return {
         "state": state,
@@ -285,12 +303,12 @@ def evaluate_urgency_status(
 
             task_matches.append(
                 matches := {
-                "fire": fire,
-                "priority": priority,
-                "due": due,
-                "deadline": deadline,
-                "priority_chip": priority_chip,
-            }
+                    "fire": fire,
+                    "priority": priority,
+                    "due": due,
+                    "deadline": deadline,
+                    "priority_chip": priority_chip,
+                }
             )
             count_keys = (
                 ("fireTasks", "fire"),
@@ -305,9 +323,11 @@ def evaluate_urgency_status(
 
     trigger_specs = {
         "fire": counts["fireTasks"] > 0,
-        "priority": counts["priorityTasks"] >= int(urgency_settings["warn_priority_min_count"]),
+        "priority": counts["priorityTasks"]
+        >= int(urgency_settings["warn_priority_min_count"]),
         "due": counts["dueTasks"] >= int(urgency_settings["warn_due_min_count"]),
-        "deadline": counts["deadlineTasks"] >= int(urgency_settings["warn_deadline_min_count"]),
+        "deadline": counts["deadlineTasks"]
+        >= int(urgency_settings["warn_deadline_min_count"]),
     }
     active_match_count = sum(
         1

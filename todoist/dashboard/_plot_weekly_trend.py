@@ -346,7 +346,10 @@ def plot_weekly_completion_trend(df: pd.DataFrame, end_date: datetime) -> go.Fig
             "font": _TITLE_FONT,
         },
         xaxis={
-            "title": {"text": "Day of week", "font": {"size": 14, "color": _TEXT_COLOR}},
+            "title": {
+                "text": "Day of week",
+                "font": {"size": 14, "color": _TEXT_COLOR},
+            },
             "categoryorder": "array",
             "categoryarray": _WEEKDAY_LABELS,
             "tickfont": {"size": 12, "color": _MUTED_TEXT_COLOR},

@@ -42,7 +42,14 @@ def _run_async_in_main_loop(coro: Any) -> Any:
         return asyncio.run(coro)
 
 
-def _set_progress_sync(stage: str, *, step: int, detail: str, sub_current: int | None = None, sub_total: int | None = None) -> None:
+def _set_progress_sync(
+    stage: str,
+    *,
+    step: int,
+    detail: str,
+    sub_current: int | None = None,
+    sub_total: int | None = None,
+) -> None:
     _run_async_in_main_loop(
         _set_progress(
             stage,
@@ -307,7 +314,9 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         logger.warning(f"Failed to persist dashboard state cache: {exc}")
 
 
-def _dashboard_cache_payload_is_current(payload: dict[str, Any], *, demo_mode: bool) -> bool:
+def _dashboard_cache_payload_is_current(
+    payload: dict[str, Any], *, demo_mode: bool
+) -> bool:
     if payload.get("version") != _DASHBOARD_STATE_SCHEMA_VERSION:
         return False
     if bool(payload.get("demo_mode", False)) != demo_mode:

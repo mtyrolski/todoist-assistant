@@ -10,9 +10,7 @@ _BACKGROUND_COLOR = "#111318"
 _TEXT_COLOR = "#ffffff"
 _MUTED_TEXT_COLOR = "#e6e6e6"
 _AXIS_LINE_COLOR = "rgba(255,255,255,0.24)"
-_HOVER_LABEL = dict(
-    bgcolor="#1e1e1e", bordercolor="#444", font=dict(color=_TEXT_COLOR)
-)
+_HOVER_LABEL = dict(bgcolor="#1e1e1e", bordercolor="#444", font=dict(color=_TEXT_COLOR))
 _TITLE_FONT = dict(size=18, family="Arial, sans-serif", color=_TEXT_COLOR)
 _DAY_NAMES = [
     "Monday",

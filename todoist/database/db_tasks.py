@@ -174,25 +174,27 @@ class DatabaseTasks:
         deadline_lang: str | None = None,
     ) -> dict[str, Any]:
         """Create a task via Todoist and return the decoded JSON payload."""
-        payload = self._drop_none({
-            TaskField.CONTENT.value: content,
-            TaskField.DESCRIPTION.value: description,
-            TaskField.PROJECT_ID.value: project_id,
-            TaskField.SECTION_ID.value: section_id,
-            TaskField.PARENT_ID.value: parent_id,
-            TaskField.ORDER.value: order,
-            TaskField.LABELS.value: labels,
-            TaskField.PRIORITY.value: priority,
-            TaskField.DUE_STRING.value: due_string,
-            TaskField.DUE_DATE.value: due_date,
-            TaskField.DUE_DATETIME.value: due_datetime,
-            TaskField.DUE_LANG.value: due_lang,
-            TaskField.ASSIGNEE_ID.value: assignee_id,
-            TaskField.DURATION.value: duration,
-            TaskField.DURATION_UNIT.value: duration_unit,
-            TaskField.DEADLINE_DATE.value: deadline_date,
-            TaskField.DEADLINE_LANG.value: deadline_lang,
-        })
+        payload = self._drop_none(
+            {
+                TaskField.CONTENT.value: content,
+                TaskField.DESCRIPTION.value: description,
+                TaskField.PROJECT_ID.value: project_id,
+                TaskField.SECTION_ID.value: section_id,
+                TaskField.PARENT_ID.value: parent_id,
+                TaskField.ORDER.value: order,
+                TaskField.LABELS.value: labels,
+                TaskField.PRIORITY.value: priority,
+                TaskField.DUE_STRING.value: due_string,
+                TaskField.DUE_DATE.value: due_date,
+                TaskField.DUE_DATETIME.value: due_datetime,
+                TaskField.DUE_LANG.value: due_lang,
+                TaskField.ASSIGNEE_ID.value: assignee_id,
+                TaskField.DURATION.value: duration,
+                TaskField.DURATION_UNIT.value: duration_unit,
+                TaskField.DEADLINE_DATE.value: deadline_date,
+                TaskField.DEADLINE_LANG.value: deadline_lang,
+            }
+        )
 
         spec = RequestSpec(
             endpoint=TodoistEndpoints.CREATE_TASK,
@@ -202,9 +204,7 @@ class DatabaseTasks:
         )
 
         logger.debug("Creating task via Todoist API", payload=payload)
-        result = self._api_client.request_json(
-            spec, operation_name="create task"
-        )
+        result = self._api_client.request_json(spec, operation_name="create task")
         return self._json_object_response(
             result, empty_error="Todoist API returned empty response for task creation"
         )
@@ -257,18 +257,20 @@ class DatabaseTasks:
         This method returns the JSON payload when present, otherwise `{}`.
         """
 
-        payload = self._drop_none({
-            TaskField.CONTENT.value: content,
-            TaskField.DESCRIPTION.value: description,
-            TaskField.LABELS.value: labels,
-            TaskField.PRIORITY.value: priority,
-            TaskField.DUE_STRING.value: due_string,
-            TaskField.DUE_DATE.value: due_date,
-            TaskField.DUE_DATETIME.value: due_datetime,
-            TaskField.DUE_LANG.value: due_lang,
-            TaskField.DURATION.value: duration,
-            TaskField.DURATION_UNIT.value: duration_unit,
-        })
+        payload = self._drop_none(
+            {
+                TaskField.CONTENT.value: content,
+                TaskField.DESCRIPTION.value: description,
+                TaskField.LABELS.value: labels,
+                TaskField.PRIORITY.value: priority,
+                TaskField.DUE_STRING.value: due_string,
+                TaskField.DUE_DATE.value: due_date,
+                TaskField.DUE_DATETIME.value: due_datetime,
+                TaskField.DUE_LANG.value: due_lang,
+                TaskField.DURATION.value: duration,
+                TaskField.DURATION_UNIT.value: duration_unit,
+            }
+        )
         if not payload:
             return {}
 
@@ -318,11 +320,10 @@ class DatabaseTasks:
         )
 
         logger.debug("Creating Todoist comment", payload=payload)
-        result = self._api_client.request_json(
-            spec, operation_name="create comment"
-        )
+        result = self._api_client.request_json(spec, operation_name="create comment")
         return self._json_object_response(
-            result, empty_error="Todoist API returned empty response for comment creation"
+            result,
+            empty_error="Todoist API returned empty response for comment creation",
         )
 
     def fetch_task_comments(self, task_id: str) -> list[dict[str, Any]]:
@@ -365,7 +366,8 @@ class DatabaseTasks:
             spec, operation_name=f"fetch task {task_id}"
         )
         return self._json_object_response(
-            result, empty_error="Todoist API returned empty response for fetch_task_by_id"
+            result,
+            empty_error="Todoist API returned empty response for fetch_task_by_id",
         )
 
     @staticmethod

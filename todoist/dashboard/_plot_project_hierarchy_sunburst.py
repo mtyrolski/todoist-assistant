@@ -25,9 +25,7 @@ _PANEL_GLOW = "#71dfff"
 
 
 def _empty_sunburst_figure(message: str) -> go.Figure:
-    return _empty_project_hierarchy_figure(
-        message, height=560, font_color=_TEXT_COLOR
-    )
+    return _empty_project_hierarchy_figure(message, height=560, font_color=_TEXT_COLOR)
 
 
 def _build_nodes_for_parent(

@@ -316,7 +316,15 @@ def run_breakdown(automation: Any, db: Database) -> None:
         progress[ProgressKey.UPDATED_AT.value] = automation.now_iso()
         automation.progress_save(progress)
 
-        def record_failure(error_message: str, *, created_count: int = 0) -> None:
+        def record_failure(
+            error_message: str,
+            *,
+            created_count: int = 0,
+            task=task,
+            label=label,
+            source=source,
+            depth=depth,
+        ) -> None:
             nonlocal failed
             logger.error("AI breakdown failed for task {}: {}", task.id, error_message)
             action = _failure_action_for_task(

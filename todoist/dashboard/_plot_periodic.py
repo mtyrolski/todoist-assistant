@@ -424,7 +424,9 @@ def _add_total_overlay_traces(
         history_values = (
             cast(
                 pd.Series,
-                period_totals[period_totals.index < pd.Timestamp(context.current_label)],
+                period_totals[
+                    period_totals.index < pd.Timestamp(context.current_label)
+                ],
             )
             .astype(float)
             .tolist()
@@ -440,7 +442,11 @@ def _add_total_overlay_traces(
         period_end=context.current_end,
         as_of=context.as_of,
     )
-    base_total = float(historical.iloc[-1]) if config.cumulative and not historical.empty else 0.0
+    base_total = (
+        float(historical.iloc[-1])
+        if config.cumulative and not historical.empty
+        else 0.0
+    )
     actual_value = float(base_total + total_actual_so_far)
     forecast_value = float(base_total + forecast_total)
     if not config.cumulative:
@@ -506,7 +512,11 @@ def _historical_part(
     context: _PeriodicForecastContext,
     is_archived_project: bool,
 ) -> pd.Series:
-    if is_archived_project or not context.show_forecast or context.current_label is None:
+    if (
+        is_archived_project
+        or not context.show_forecast
+        or context.current_label is None
+    ):
         return cast(pd.Series, series)
     return cast(pd.Series, series[series.index < pd.Timestamp(context.current_label)])
 
@@ -520,7 +530,11 @@ def _history_totals_for_project(
 ) -> list[float]:
     if context.current_label is None:
         return []
-    source = values.diff().fillna(values).fillna(0) if config.cumulative else series.fillna(0)
+    source = (
+        values.diff().fillna(values).fillna(0)
+        if config.cumulative
+        else series.fillna(0)
+    )
     return (
         cast(pd.Series, source[source.index < pd.Timestamp(context.current_label)])
         .astype(float)
@@ -564,9 +578,17 @@ def _add_project_forecast_traces(
         period_end=context.current_end,
         as_of=context.as_of,
     )
-    base = float(historical.iloc[-1]) if config.cumulative and not historical.empty else 0.0
-    actual_value = int(round(base + actual_so_far)) if config.cumulative else actual_so_far
-    forecast_value = int(round(base + forecast_total)) if config.cumulative else forecast_total
+    base = (
+        float(historical.iloc[-1])
+        if config.cumulative and not historical.empty
+        else 0.0
+    )
+    actual_value = (
+        int(round(base + actual_so_far)) if config.cumulative else actual_so_far
+    )
+    forecast_value = (
+        int(round(base + forecast_total)) if config.cumulative else forecast_total
+    )
 
     if not historical.empty:
         fig.add_trace(

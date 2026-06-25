@@ -79,7 +79,9 @@ async def set_admin_automation_enabled(
     async with web_api._ADMIN_LOCK:
         config = web_api._read_yaml_config(web_api._AUTOMATIONS_PATH)
         if key not in web_api._available_automation_keys(config):
-            raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
+            raise HTTPException(
+                status_code=404, detail=f"Unknown automation key: {key}"
+            )
         web_api._set_automation_enabled(key, enabled=enabled)
         web_api._restart_dashboard_observer_if_managed()
     return await get_admin_automations()
@@ -156,7 +158,9 @@ async def run_admin_automations(refresh: bool = False) -> dict[str, Any]:
         dbio = web_api.Database(".env")
         try:
             dbio.pull()
-            result = await asyncio.to_thread(web_api._run_all_automations_sync, dbio=dbio)
+            result = await asyncio.to_thread(
+                web_api._run_all_automations_sync, dbio=dbio
+            )
         finally:
             dbio.reset()
 

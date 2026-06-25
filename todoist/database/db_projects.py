@@ -260,9 +260,14 @@ class DatabaseProjects:
         if self.mapping_project_id_to_root_cache is not None:
             return self.mapping_project_id_to_root_cache
 
-        all_projects = {project.id: project for project in self.fetch_archived_projects()}
+        all_projects = {
+            project.id: project for project in self.fetch_archived_projects()
+        }
         all_projects.update(
-            {project.id: project for project in self.fetch_projects(include_tasks=False)}
+            {
+                project.id: project
+                for project in self.fetch_projects(include_tasks=False)
+            }
         )
         mapping_project_id_to_root: dict[str, Project] = {}
 

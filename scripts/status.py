@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=cyclic-import
 
 """Pretty-print local app and service status for the dashboard stack."""
 

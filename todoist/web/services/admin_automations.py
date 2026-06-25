@@ -335,7 +335,11 @@ def _load_automation_inventory(
 
 def _enabled_refs(config: Mapping[str, Any], keys: Sequence[str]) -> list[str]:
     key_set = set(keys)
-    return [_automation_ref(key) for key in _available_automation_keys(config) if key in key_set]
+    return [
+        _automation_ref(key)
+        for key in _available_automation_keys(config)
+        if key in key_set
+    ]
 
 
 def _save_enabled_automations(keys: Sequence[str], *, path: Path | None = None) -> None:
@@ -743,7 +747,9 @@ async def _run_named_automation(name: str) -> dict[str, Any]:
     automations = {a.name: a for a in _load_automations()}
     if name not in automations:
         raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
-    return cast(dict[str, Any], await _run_with_db(_run_automation_sync, automations[name]))
+    return cast(
+        dict[str, Any], await _run_with_db(_run_automation_sync, automations[name])
+    )
 
 
 async def _run_automation_job(*, job_id: str, name: str) -> None:

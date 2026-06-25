@@ -1,8 +1,7 @@
 """Compatibility wrappers for automation runtime helpers exposed by web.api."""
 
+from dataclasses import dataclass
 from typing import Any
-
-from todoist.web.services import admin_automations as _service
 
 _COMPONENT_EXPORTS = (
     "_serialize_dt",
@@ -38,20 +37,37 @@ _PATH_ALIASES = {
 }
 
 
+@dataclass
+class _PendingGmailAuthSession:
+    state: str
+    auth_url: str
+    redirect_uri: str
+    started_at: str
+    completed: bool = False
+    error: str | None = None
+
+
+def _service_module():
+    from todoist.web.services import admin_automations
+
+    return admin_automations
+
+
 def _sync_api_globals() -> None:
     from todoist.web import api as web_api
 
+    service = _service_module()
     for name, value in vars(web_api).items():
         if getattr(value, "_component_wrapper_for", None) == name:
             continue
         target = _PATH_ALIASES.get(name, name)
-        if hasattr(_service, target):
-            setattr(_service, target, value)
+        if hasattr(service, target):
+            setattr(service, target, value)
 
 
 def _service_call(name: str, *args: Any, **kwargs: Any) -> Any:
     _sync_api_globals()
-    return getattr(_service, name)(*args, **kwargs)
+    return getattr(_service_module(), name)(*args, **kwargs)
 
 
 def _make_wrapper(name: str):
@@ -65,6 +81,3 @@ def _make_wrapper(name: str):
 
 for _name in _COMPONENT_EXPORTS:
     globals()[_name] = _make_wrapper(_name)
-
-_PendingGmailAuthSession = _service._PendingGmailAuthSession
-_ORIGINALS = {name: getattr(_service, name) for name in _COMPONENT_EXPORTS}

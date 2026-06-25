@@ -132,7 +132,9 @@ def collect_candidates(
         if task.id in processed_ids:
             drop_queue_ids.add(task_id)
             continue
-        candidates.append(_candidate(task, item["label"], item["variant"], item["depth"], "queue"))
+        candidates.append(
+            _candidate(task, item["label"], item["variant"], item["depth"], "queue")
+        )
 
     queued_ids -= drop_queue_ids
     for task in all_tasks:

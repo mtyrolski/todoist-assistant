@@ -243,7 +243,9 @@ def _sign_with_signtool(
 
 
 def _sign_if_configured(
-    signtool_path: str | None, signing_config: tuple[Path, str, str] | None, target: Path
+    signtool_path: str | None,
+    signing_config: tuple[Path, str, str] | None,
+    target: Path,
 ) -> None:
     if signtool_path and signing_config:
         _sign_with_signtool(signtool_path, target, *signing_config)

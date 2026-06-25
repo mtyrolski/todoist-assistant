@@ -115,7 +115,9 @@ def audit_paths(
 
     by_extension = tuple(
         ExtensionCount(extension, file_counts[extension], line_counts[extension])
-        for extension in sorted(line_counts, key=lambda item: (-line_counts[item], item))
+        for extension in sorted(
+            line_counts, key=lambda item: (-line_counts[item], item)
+        )
     )
     return LocAudit(
         python_lines=line_counts[".py"],
