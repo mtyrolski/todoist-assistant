@@ -62,15 +62,7 @@ def _coerce_settings(
     if isinstance(settings, BreakdownSettings) and not overrides:
         return settings
 
-    payload: dict[str, Any] = {}
-    if settings is not None:
-        if isinstance(settings, BreakdownSettings):
-            payload = {
-                field.name: getattr(settings, field.name)
-                for field in fields(BreakdownSettings)
-            }
-        else:
-            payload = dict(settings)
+    payload = _settings_payload(settings)
     payload.update(overrides)
 
     allowed = {field.name for field in fields(BreakdownSettings)}
@@ -79,19 +71,25 @@ def _coerce_settings(
         unknown_list = ", ".join(sorted(unknown))
         raise TypeError(f"Unexpected AI breakdown settings: {unknown_list}")
 
-    settings_obj = BreakdownSettings(**payload)
-    if not isinstance(settings_obj.model_config, dict):
-        return BreakdownSettings(
-            **{
-                field.name: (
-                    dict(settings_obj.model_config)
-                    if field.name == "model_config"
-                    else getattr(settings_obj, field.name)
-                )
-                for field in fields(BreakdownSettings)
-            }
-        )
-    return settings_obj
+    return _normalize_settings(BreakdownSettings(**payload))
+
+
+def _settings_payload(
+    settings: BreakdownSettings | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if settings is None:
+        return {}
+    if isinstance(settings, BreakdownSettings):
+        return {field.name: getattr(settings, field.name) for field in fields(settings)}
+    return dict(settings)
+
+
+def _normalize_settings(settings: BreakdownSettings) -> BreakdownSettings:
+    if isinstance(settings.model_config, dict):
+        return settings
+    payload = {field.name: getattr(settings, field.name) for field in fields(settings)}
+    payload["model_config"] = dict(settings.model_config)
+    return BreakdownSettings(**payload)
 
 
 class LLMBreakdown(Automation):

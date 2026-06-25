@@ -179,15 +179,10 @@ class StaleTasksAutomation(Automation):
                 tracked_at = self._tracked_warning_at(tracking.get(task.id))
                 if tracked_at is None:
                     tracked_at = now
-                    tracking[task.id] = {
-                        "warningLabel": warning_label,
-                        "warningLabelAddedAt": tracked_at,
-                    }
-                else:
-                    tracking[task.id] = {
-                        "warningLabel": warning_label,
-                        "warningLabelAddedAt": tracked_at,
-                    }
+                tracking[task.id] = {
+                    "warningLabel": warning_label,
+                    "warningLabelAddedAt": tracked_at,
+                }
 
                 should_remove = (
                     current_warning_label is not None
