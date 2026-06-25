@@ -50,6 +50,7 @@ URGENCY_COUNT_KEYS = (
 )
 URGENCY_PRIORITY_CHIPS = ((4, "p1Tasks"), (3, "p2Tasks"), (2, "p3Tasks"), (1, "p4Tasks"))
 URGENCY_PRIORITY_CHIP_BY_VALUE = dict(URGENCY_PRIORITY_CHIPS)
+URGENCY_MATCH_KEYS = ("fire", "priority", "due", "deadline")
 
 
 def _normalize_label_name(value: str) -> str:
@@ -123,18 +124,8 @@ def _normalize_urgency_settings(
     badge_labels = settings.get("badge_labels")
     if isinstance(badge_labels, dict):
         normalized["badge_labels"] = {
-            "good": str(
-                badge_labels.get("good")
-                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]
-            ),
-            "warn": str(
-                badge_labels.get("warn")
-                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]
-            ),
-            "danger": str(
-                badge_labels.get("danger")
-                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]
-            ),
+            key: str(badge_labels.get(key) or DEFAULT_URGENCY_SETTINGS["badge_labels"][key])
+            for key in ("good", "warn", "danger")
         }
     thresholds = settings.get("warn_priority_thresholds")
     if isinstance(thresholds, list):
@@ -180,6 +171,24 @@ def _empty_urgency_counts() -> dict[str, int]:
     return dict.fromkeys(URGENCY_COUNT_KEYS, 0)
 
 
+def _urgency_payload(state: str, title: str, summary: str, reference_day: date, total: int, counts: dict[str, int], urgency_settings: dict[str, Any], visible_chips: list[str], *, use_configured_good: bool = False) -> dict[str, Any]:
+    badge_labels = urgency_settings["badge_labels"]
+    return {
+        "state": state,
+        "title": title,
+        "summary": summary,
+        "todayLabel": reference_day.isoformat(),
+        "total": total,
+        "counts": counts,
+        "badgeLabel": str(badge_labels["good"] if use_configured_good else "OK")
+        if state == "good"
+        else str(badge_labels[state]),
+        "helpKey": "Urgency Status",
+        "configurable": True,
+        "visibleChips": visible_chips,
+    }
+
+
 def _dominant_counts(series: pd.Series, limit: int | None = None) -> pd.Series:
     counts = series.fillna("").replace("", "(unknown)").value_counts()
     return counts.head(limit) if limit is not None else counts
@@ -204,18 +213,17 @@ def evaluate_urgency_status(
     visible_chips: list[str] = []
     active_condition_labels: list[str] = []
     if not bool(urgency_settings["enabled"]):
-        return {
-            "state": "good",
-            "title": "Monitoring disabled",
-            "summary": "Urgency monitoring is disabled in dashboard settings.",
-            "todayLabel": reference_day.isoformat(),
-            "total": 0,
-            "counts": _empty_urgency_counts(),
-            "badgeLabel": str(urgency_settings["badge_labels"]["good"]),
-            "helpKey": "Urgency Status",
-            "configurable": True,
-            "visibleChips": visible_chips,
-        }
+        return _urgency_payload(
+            "good",
+            "Monitoring disabled",
+            "Urgency monitoring is disabled in dashboard settings.",
+            reference_day,
+            0,
+            _empty_urgency_counts(),
+            urgency_settings,
+            [],
+            use_configured_good=True,
+        )
     counts = _empty_urgency_counts()
     warn_priority_thresholds = set(
         int(value) for value in urgency_settings["warn_priority_thresholds"]
@@ -225,11 +233,17 @@ def evaluate_urgency_status(
     fire_labels = tuple(
         str(value) for value in urgency_settings["fire_labels"] if str(value).strip()
     )
-    task_matches: list[dict[str, bool]] = []
+    enabled_flags = {
+        "fire": bool(urgency_settings["danger_on_fire_label"]) and bool(fire_labels),
+        "priority": bool(urgency_settings["warn_on_priority"]),
+        "due": bool(urgency_settings["warn_on_due"]),
+        "deadline": bool(urgency_settings["warn_on_deadline"]),
+    }
+    task_matches: list[dict[str, bool | str | None]] = []
 
-    if bool(urgency_settings["danger_on_fire_label"]) and fire_labels:
+    if enabled_flags["fire"]:
         visible_chips.append("fireTasks")
-    if bool(urgency_settings["warn_on_priority"]):
+    if enabled_flags["priority"]:
         priority_chips = [
             chip_key
             for threshold, chip_key in URGENCY_PRIORITY_CHIPS
@@ -238,86 +252,79 @@ def evaluate_urgency_status(
         visible_chips.extend(priority_chips)
         if priority_chips:
             active_condition_labels.append("priority")
-    if bool(urgency_settings["warn_on_due"]):
+    if enabled_flags["due"]:
         visible_chips.append("dueTasks")
         active_condition_labels.append("due date")
-    if bool(urgency_settings["warn_on_deadline"]):
+    if enabled_flags["deadline"]:
         visible_chips.append("deadlineTasks")
         active_condition_labels.append("deadline")
 
     for project in active_projects or []:
         for task in project.tasks or []:
             task_entry = task.task_entry
-            fire = bool(
-                urgency_settings["danger_on_fire_label"]
-            ) and _task_matches_any_label(task, fire_labels)
+            fire = bool(enabled_flags["fire"]) and _task_matches_any_label(
+                task, fire_labels
+            )
             priority_chip = URGENCY_PRIORITY_CHIP_BY_VALUE.get(task_entry.priority)
             if (
                 task_entry.priority not in warn_priority_thresholds
-                or not bool(urgency_settings["warn_on_priority"])
+                or not enabled_flags["priority"]
             ):
                 priority_chip = None
             priority = priority_chip is not None
-            due = bool(urgency_settings["warn_on_due"]) and _task_due_within_days(
+            due = bool(enabled_flags["due"]) and _task_due_within_days(
                 task_entry.due,
                 reference_day,
                 warn_due_within_days,
             )
-            deadline = bool(
-                urgency_settings["warn_on_deadline"]
-            ) and _task_due_within_days(
+            deadline = bool(enabled_flags["deadline"]) and _task_due_within_days(
                 task_entry.deadline,
                 reference_day,
                 warn_deadline_within_days,
             )
 
-            matches = {
+            task_matches.append(
+                matches := {
                 "fire": fire,
                 "priority": priority,
                 "due": due,
                 "deadline": deadline,
+                "priority_chip": priority_chip,
             }
-            for key, matched in (
-                ("fireTasks", fire),
-                (priority_chip or "", priority),
-                ("priorityTasks", priority),
-                ("dueTasks", due),
-                ("deadlineTasks", deadline),
-            ):
-                if matched:
-                    counts[key] += 1
-            task_matches.append(matches)
+            )
+            count_keys = (
+                ("fireTasks", "fire"),
+                (priority_chip, "priority"),
+                ("priorityTasks", "priority"),
+                ("dueTasks", "due"),
+                ("deadlineTasks", "deadline"),
+            )
+            for count_key, match_key in count_keys:
+                if count_key and matches[match_key]:
+                    counts[count_key] += 1
 
-    fire_count = counts["fireTasks"]
-    priority_count = counts["priorityTasks"]
-    due_count = counts["dueTasks"]
-    deadline_count = counts["deadlineTasks"]
-    fire_triggered = fire_count > 0
-    priority_triggered = priority_count >= int(
-        urgency_settings["warn_priority_min_count"]
-    )
-    due_triggered = due_count >= int(urgency_settings["warn_due_min_count"])
-    deadline_triggered = deadline_count >= int(
-        urgency_settings["warn_deadline_min_count"]
-    )
+    trigger_specs = {
+        "fire": counts["fireTasks"] > 0,
+        "priority": counts["priorityTasks"] >= int(urgency_settings["warn_priority_min_count"]),
+        "due": counts["dueTasks"] >= int(urgency_settings["warn_due_min_count"]),
+        "deadline": counts["deadlineTasks"] >= int(urgency_settings["warn_deadline_min_count"]),
+    }
     active_match_count = sum(
         1
         for item in task_matches
-        if (fire_triggered and item["fire"])
-        or (priority_triggered and item["priority"])
-        or (due_triggered and item["due"])
-        or (deadline_triggered and item["deadline"])
+        if any(trigger_specs[key] and item[key] for key in URGENCY_MATCH_KEYS)
     )
 
-    if fire_triggered:
+    if trigger_specs["fire"]:
         state = "danger"
         title = str(urgency_settings["danger_summary_label"])
+        fire_count = counts["fireTasks"]
         summary = (
             f"{fire_count} fire task{'s' if fire_count != 1 else ''} are active."
             f" {active_match_count} task{'s' if active_match_count != 1 else ''} total"
             " need attention."
         )
-    elif priority_triggered or due_triggered or deadline_triggered:
+    elif any(trigger_specs[key] for key in ("priority", "due", "deadline")):
         state = "warn"
         title = str(urgency_settings["warn_summary_label"])
         condition_labels = _join_condition_labels(active_condition_labels)
@@ -335,22 +342,16 @@ def evaluate_urgency_status(
         title = "All clear"
         summary = "No configured urgency thresholds are currently met."
 
-    return {
-        "state": state,
-        "title": title,
-        "summary": summary,
-        "todayLabel": reference_day.isoformat(),
-        "total": active_match_count,
-        "counts": counts,
-        "badgeLabel": {
-            "good": "OK",
-            "warn": str(urgency_settings["badge_labels"]["warn"]),
-            "danger": str(urgency_settings["badge_labels"]["danger"]),
-        }[state],
-        "helpKey": "Urgency Status",
-        "configurable": True,
-        "visibleChips": visible_chips,
-    }
+    return _urgency_payload(
+        state,
+        title,
+        summary,
+        reference_day,
+        active_match_count,
+        counts,
+        urgency_settings,
+        visible_chips,
+    )
 
 
 def normalize_activity_df(df_activity) -> pd.DataFrame:
@@ -477,6 +478,19 @@ def fig_to_dict(fig) -> dict[str, Any]:
     return json.loads(payload or "{}")
 
 
+def _datetime_or_none(value: Any) -> datetime | None:
+    if value is None or bool(pd.isna(cast(Any, value))):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime(warn=False)
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 def compute_plot_history_beg(
     df_activity,
     *,
@@ -494,17 +508,9 @@ def compute_plot_history_beg(
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug(f"Failed to resolve activity history start; using fallback: {exc}")
         return fallback
-    if first_value is None or bool(pd.isna(cast(Any, first_value))):
+    first_dt = _datetime_or_none(first_value)
+    if first_dt is None:
         return fallback
-    if isinstance(first_value, pd.Timestamp):
-        first_dt = first_value.to_pydatetime(warn=False)
-    elif isinstance(first_value, datetime):
-        first_dt = first_value
-    else:
-        try:
-            first_dt = datetime.fromisoformat(str(first_value))
-        except ValueError:
-            return fallback
     return max(first_dt, fallback)
 
 
@@ -634,16 +640,7 @@ def safe_activity_anchor(df_activity) -> datetime:
             logger.debug(f"Failed to resolve activity anchor; defaulting to now: {exc}")
             max_value = None
 
-        if max_value is not None and not bool(pd.isna(cast(Any, max_value))):
-            if isinstance(max_value, pd.Timestamp):
-                anchor = max_value.to_pydatetime(warn=False)
-            elif isinstance(max_value, datetime):
-                anchor = max_value
-            else:
-                try:
-                    anchor = datetime.fromisoformat(str(max_value))
-                except ValueError:
-                    pass
+        anchor = _datetime_or_none(max_value) or anchor
     return anchor
 
 
