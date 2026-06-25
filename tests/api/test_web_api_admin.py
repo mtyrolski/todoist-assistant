@@ -35,6 +35,10 @@ def _pending_gmail_status(port: int, started_at: str) -> dict[str, object]:
     }
 
 
+def _write_yaml(path, *lines: str) -> None:
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch, api_client) -> None:
     monkeypatch.setattr(web_api, "_available_mapping_files", lambda: ["adj_private.py"])
     monkeypatch.setattr(
@@ -429,23 +433,19 @@ def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(
     tmp_path,
 ) -> None:
     config_path = tmp_path / "automations.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "defaults:",
-                "  - _self_",
-                "activity:",
-                "  _target_: todoist.automations.activity.Activity",
-                "gmail_tasks:",
-                "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
-                "habit_tracker:",
-                "  _target_: todoist.automations.habit_tracker.HabitTracker",
-                "automations:",
-                "  - ${activity}",
-                "  - ${gmail_tasks}",
-            ]
-        ),
-        encoding="utf-8",
+    _write_yaml(
+        config_path,
+        "defaults:",
+        "  - _self_",
+        "activity:",
+        "  _target_: todoist.automations.activity.Activity",
+        "gmail_tasks:",
+        "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+        "habit_tracker:",
+        "  _target_: todoist.automations.habit_tracker.HabitTracker",
+        "automations:",
+        "  - ${activity}",
+        "  - ${gmail_tasks}",
     )
 
     config = web_api._read_yaml_config(config_path)
@@ -458,25 +458,21 @@ def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(
 
 def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path, api_client) -> None:
     config_path = tmp_path / "automations.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "defaults:",
-                "  - _self_",
-                "activity:",
-                "  _target_: todoist.automations.activity.Activity",
-                "  name: Activity Fetching Automation",
-                "  early_stop_after_n_windows: 2",
-                "  nweeks_window_size: 4",
-                "gmail_tasks:",
-                "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
-                "  name: Gmail Tasks",
-                "  frequency_in_minutes: 60",
-                "automations:",
-                "  - ${activity}",
-            ]
-        ),
-        encoding="utf-8",
+    _write_yaml(
+        config_path,
+        "defaults:",
+        "  - _self_",
+        "activity:",
+        "  _target_: todoist.automations.activity.Activity",
+        "  name: Activity Fetching Automation",
+        "  early_stop_after_n_windows: 2",
+        "  nweeks_window_size: 4",
+        "gmail_tasks:",
+        "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+        "  name: Gmail Tasks",
+        "  frequency_in_minutes: 60",
+        "automations:",
+        "  - ${activity}",
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
     monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
@@ -492,27 +488,23 @@ def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path, api_
 
 def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
     config_path = tmp_path / "automations.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "defaults:",
-                "  - _self_",
-                "stale_tasks:",
-                "  _target_: todoist.automations.stale_tasks.StaleTasksAutomation",
-                "  name: Stale Tasks",
-                "  frequency_in_minutes: 1440",
-                "  config:",
-                "    old_after_days: 30",
-                "    very_old_after_days: 90",
-                "    old_label: old",
-                "    very_old_label: very-old",
-                "  dry_run: true",
-                "  max_updates_per_tick: 25",
-                "automations:",
-                "  - ${stale_tasks}",
-            ]
-        ),
-        encoding="utf-8",
+    _write_yaml(
+        config_path,
+        "defaults:",
+        "  - _self_",
+        "stale_tasks:",
+        "  _target_: todoist.automations.stale_tasks.StaleTasksAutomation",
+        "  name: Stale Tasks",
+        "  frequency_in_minutes: 1440",
+        "  config:",
+        "    old_after_days: 30",
+        "    very_old_after_days: 90",
+        "    old_label: old",
+        "    very_old_label: very-old",
+        "  dry_run: true",
+        "  max_updates_per_tick: 25",
+        "automations:",
+        "  - ${stale_tasks}",
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
@@ -541,19 +533,15 @@ def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path, api_client) 
 
 def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path, api_client) -> None:
     config_path = tmp_path / "automations.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "defaults:",
-                "  - _self_",
-                "multiply:",
-                "  _target_: todoist.automations.multiplicate.Multiply",
-                "  frequency_in_minutes: 0.1",
-                "automations:",
-                "  - ${multiply}",
-            ]
-        ),
-        encoding="utf-8",
+    _write_yaml(
+        config_path,
+        "defaults:",
+        "  - _self_",
+        "multiply:",
+        "  _target_: todoist.automations.multiplicate.Multiply",
+        "  frequency_in_minutes: 0.1",
+        "automations:",
+        "  - ${multiply}",
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
@@ -580,21 +568,17 @@ def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path, 
 
 def test_set_automation_enabled_disables_config_entry(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "automations.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "defaults:",
-                "  - _self_",
-                "activity:",
-                "  _target_: todoist.automations.activity.Activity",
-                "gmail_tasks:",
-                "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
-                "automations:",
-                "  - ${activity}",
-                "  - ${gmail_tasks}",
-            ]
-        ),
-        encoding="utf-8",
+    _write_yaml(
+        config_path,
+        "defaults:",
+        "  - _self_",
+        "activity:",
+        "  _target_: todoist.automations.activity.Activity",
+        "gmail_tasks:",
+        "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+        "automations:",
+        "  - ${activity}",
+        "  - ${gmail_tasks}",
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
@@ -609,18 +593,14 @@ def test_set_automation_enabled_returns_false_for_unknown_key(
     monkeypatch, tmp_path
 ) -> None:
     config_path = tmp_path / "automations.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "defaults:",
-                "  - _self_",
-                "activity:",
-                "  _target_: todoist.automations.activity.Activity",
-                "automations:",
-                "  - ${activity}",
-            ]
-        ),
-        encoding="utf-8",
+    _write_yaml(
+        config_path,
+        "defaults:",
+        "  - _self_",
+        "activity:",
+        "  _target_: todoist.automations.activity.Activity",
+        "automations:",
+        "  - ${activity}",
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 

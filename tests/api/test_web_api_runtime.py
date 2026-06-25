@@ -310,78 +310,82 @@ def test_openapi_includes_app_version(api_client) -> None:
     assert payload["info"]["version"] == web_api.app.version == todoist.__version__
 
 
-def test_dashboard_progress_inactive_state(api_client) -> None:
-    _set_progress_state(updated_at="2025-01-01T00:00:00")
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (
+            {"updated_at": "2025-01-01T00:00:00"},
+            {
+                "active": False,
+                "stage": None,
+                "step": 0,
+                "totalSteps": 0,
+                "startedAt": None,
+                "error": None,
+            },
+        ),
+        (
+            {
+                "active": True,
+                "stage": "Loading data",
+                "step": 2,
+                "total_steps": 5,
+                "started_at": "2025-01-01T10:00:00",
+                "updated_at": "2025-01-01T10:00:30",
+                "detail": "Fetching projects",
+            },
+            {
+                "active": True,
+                "stage": "Loading data",
+                "step": 2,
+                "totalSteps": 5,
+                "startedAt": "2025-01-01T10:00:00",
+                "updatedAt": "2025-01-01T10:00:30",
+                "detail": "Fetching projects",
+                "error": None,
+            },
+        ),
+        (
+            {
+                "updated_at": "2025-01-01T10:05:00",
+                "error": "Failed to connect to API",
+            },
+            {
+                "active": False,
+                "error": "Failed to connect to API",
+                "updatedAt": "2025-01-01T10:05:00",
+            },
+        ),
+        (
+            {
+                "active": True,
+                "stage": "Processing",
+                "step": 1,
+                "total_steps": 3,
+                "started_at": "2025-01-01T12:00:00",
+                "updated_at": "2025-01-01T12:00:15",
+            },
+            {"active": True, "error": None, "stage": "Processing"},
+        ),
+    ],
+)
+def test_dashboard_progress_states(state, expected, api_client) -> None:
+    _set_progress_state(**state)
     res = api_client.get("/api/dashboard/progress")
     assert res.status_code == 200
     payload = res.json()
 
-    assert {"active", "stage", "step", "totalSteps", "startedAt", "updatedAt", "detail", "error"} <= set(payload)
-    assert payload["active"] is False
-    assert payload["stage"] is None
-    assert payload["step"] == 0
-    assert payload["totalSteps"] == 0
-    assert payload["startedAt"] is None
-    assert payload["error"] is None
-
-
-def test_dashboard_progress_active_state(api_client) -> None:
-    _set_progress_state(
-        active=True,
-        stage="Loading data",
-        step=2,
-        total_steps=5,
-        started_at="2025-01-01T10:00:00",
-        updated_at="2025-01-01T10:00:30",
-        detail="Fetching projects",
-    )
-    res = api_client.get("/api/dashboard/progress")
-    assert res.status_code == 200
-    payload = res.json()
-
-    # Verify active state with all fields populated
-    assert payload["active"] is True
-    assert payload["stage"] == "Loading data"
-    assert payload["step"] == 2
-    assert payload["totalSteps"] == 5
-    assert payload["startedAt"] == "2025-01-01T10:00:00"
-    assert payload["updatedAt"] == "2025-01-01T10:00:30"
-    assert payload["detail"] == "Fetching projects"
-    assert payload["error"] is None
-
-
-def test_dashboard_progress_with_error(api_client) -> None:
-    _set_progress_state(
-        updated_at="2025-01-01T10:05:00",
-        error="Failed to connect to API",
-    )
-    res = api_client.get("/api/dashboard/progress")
-    assert res.status_code == 200
-    payload = res.json()
-
-    # Verify error is captured
-    assert payload["active"] is False
-    assert payload["error"] == "Failed to connect to API"
-    assert payload["updatedAt"] == "2025-01-01T10:05:00"
-
-
-def test_dashboard_progress_without_error(api_client) -> None:
-    _set_progress_state(
-        active=True,
-        stage="Processing",
-        step=1,
-        total_steps=3,
-        started_at="2025-01-01T12:00:00",
-        updated_at="2025-01-01T12:00:15",
-    )
-    res = api_client.get("/api/dashboard/progress")
-    assert res.status_code == 200
-    payload = res.json()
-
-    # Verify no error
-    assert payload["active"] is True
-    assert payload["error"] is None
-    assert payload["stage"] == "Processing"
+    assert {
+        "active",
+        "stage",
+        "step",
+        "totalSteps",
+        "startedAt",
+        "updatedAt",
+        "detail",
+        "error",
+    } <= set(payload)
+    assert {key: payload[key] for key in expected} == expected
 
 
 @pytest.mark.parametrize(

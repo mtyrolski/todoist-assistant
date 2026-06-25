@@ -3,7 +3,6 @@
 from datetime import date
 
 import pandas as pd
-from fastapi.testclient import TestClient
 
 from tests.factories import make_project, make_project_entry, make_task
 from tests.web_api_helpers import (
@@ -47,6 +46,10 @@ def _set_dashboard_df(monkeypatch, df: pd.DataFrame) -> None:
     monkeypatch.setattr(web_api, "_ensure_state", _noop_ensure_state)
     _stub_all_figures(monkeypatch)
     _set_state_with_df(df)
+
+
+def _home(api_client, query: str = "weeks=12&granularity=W"):
+    return api_client.get(f"/api/dashboard/home?{query}")
 
 
 def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
@@ -157,7 +160,9 @@ def test_load_state_from_disk_cache_restores_current_demo_snapshot(
     assert web_api._state.demo_mode is True
 
 
-def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) -> None:
+def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(
+    monkeypatch, api_client
+) -> None:
     _stub_all_figures(monkeypatch)
     _clear_dashboard_state()
 
@@ -179,12 +184,11 @@ def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(monkeypatch) 
     monkeypatch.setattr(web_api, "_refresh_state_sync", _unexpected_refresh)
     monkeypatch.setattr(web_api, "_env_demo_mode", lambda: False)
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
 
 
-def test_dashboard_home_validates_weeks(monkeypatch) -> None:
+def test_dashboard_home_validates_weeks(monkeypatch, api_client) -> None:
     _set_dashboard_df(
         monkeypatch,
         _event_df(
@@ -202,12 +206,11 @@ def test_dashboard_home_validates_weeks(monkeypatch) -> None:
         ),
     )
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=10000")
+    res = _home(api_client, "weeks=10000")
     assert res.status_code == 400
 
 
-def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
+def test_dashboard_home_requires_beg_and_end(monkeypatch, api_client) -> None:
     _set_dashboard_df(
         monkeypatch,
         _event_df(
@@ -225,12 +228,11 @@ def test_dashboard_home_requires_beg_and_end(monkeypatch) -> None:
         ),
     )
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?beg=2025-01-01")
+    res = _home(api_client, "beg=2025-01-01")
     assert res.status_code == 400
 
 
-def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
+def test_dashboard_home_last_completed_week_parent_share(monkeypatch, api_client) -> None:
     _set_dashboard_df(
         monkeypatch,
         _event_df(
@@ -286,8 +288,7 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
         ),
     )
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
     payload = res.json()
 
@@ -306,11 +307,10 @@ def test_dashboard_home_last_completed_week_parent_share(monkeypatch) -> None:
     assert abs(by_name["Parent B"]["percentOfCompleted"] - 33.33) < 0.02
 
 
-def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
+def test_dashboard_home_handles_empty_activity(monkeypatch, api_client) -> None:
     _set_dashboard_df(monkeypatch, _empty_event_df())
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12")
+    res = _home(api_client, "weeks=12")
     assert res.status_code == 200
     payload = res.json()
     assert payload["range"]["weeks"] == 12
@@ -318,7 +318,7 @@ def test_dashboard_home_handles_empty_activity(monkeypatch) -> None:
     assert payload.get("noData") is True
 
 
-def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
+def test_dashboard_home_includes_habit_tracker_summary(monkeypatch, api_client) -> None:
     _set_dashboard_df(
         monkeypatch,
         _event_df(
@@ -375,8 +375,7 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
     web_api._state.db = None
     web_api._state.home_payload_cache = {}
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
     payload = res.json()
 
@@ -388,7 +387,7 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch) -> None:
     assert habit_tracker["figure"]["data"]
 
 
-def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
+def test_dashboard_home_normalizes_integer_activity_index(monkeypatch, api_client) -> None:
     df = pd.DataFrame(
         [
             {
@@ -415,16 +414,14 @@ def test_dashboard_home_normalizes_integer_activity_index(monkeypatch) -> None:
     _set_dashboard_df(monkeypatch, df)
     web_api._state.project_colors = {"Health": "#00aa88"}
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
     assert res.status_code == 200
     payload = res.json()
     assert payload["metrics"]["items"]
 
 
-def test_dashboard_status_returns_services() -> None:
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/status")
+def test_dashboard_status_returns_services(api_client) -> None:
+    res = api_client.get("/api/dashboard/status")
     assert res.status_code == 200
     payload = res.json()
     assert isinstance(payload.get("services"), list)
@@ -432,7 +429,7 @@ def test_dashboard_status_returns_services() -> None:
     assert payload["configurableItems"][0]["icon"] == "wrench"
 
 
-def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
+def test_dashboard_home_includes_urgency_status(monkeypatch, api_client) -> None:
     _set_dashboard_df(monkeypatch, _single_event_df())
     monkeypatch.setattr(
         web_api,
@@ -456,8 +453,7 @@ def test_dashboard_home_includes_urgency_status(monkeypatch) -> None:
     ]
     web_api._state.project_colors = {"Urgency": "#44aa66"}
 
-    client = TestClient(web_api.app)
-    res = client.get("/api/dashboard/home?weeks=12&granularity=W")
+    res = _home(api_client)
 
     assert res.status_code == 200
     payload = res.json()

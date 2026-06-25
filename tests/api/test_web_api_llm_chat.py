@@ -21,6 +21,14 @@ def _capture_saved_conversations(monkeypatch, conversations=None):
     return saved_conversations
 
 
+def _stub_llm_settings(monkeypatch, env_path, devices=("cpu", "cuda")) -> None:
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: list(devices))
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
+    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+
+
 def test_dashboard_llm_chat_returns_structure(monkeypatch, tmp_path, api_client) -> None:
     """Test /api/dashboard/llm_chat returns expected structure when model not loaded."""
     monkeypatch.delenv(str(web_api.EnvVar.AGENT_BACKEND), raising=False)
@@ -105,11 +113,7 @@ def test_llm_chat_update_settings_persists_env_and_resets_runtime(
     monkeypatch, tmp_path, api_client
 ) -> None:
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    _stub_llm_settings(monkeypatch, env_path)
 
     res = api_client.put(
         "/api/llm_chat/settings",
@@ -171,11 +175,7 @@ def test_llm_chat_settings_response_exposes_codex_options(
 def test_llm_chat_update_settings_rejects_invalid_values(
     monkeypatch, tmp_path, payload, api_client
 ) -> None:
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: tmp_path / ".env")
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu"])
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    _stub_llm_settings(monkeypatch, tmp_path / ".env", devices=("cpu",))
 
     res = api_client.put("/api/llm_chat/settings", json=payload)
 
@@ -184,11 +184,7 @@ def test_llm_chat_update_settings_rejects_invalid_values(
 
 def test_llm_chat_update_settings_supports_codex_backend(monkeypatch, tmp_path, api_client) -> None:
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
-    monkeypatch.setattr(web_api, "_available_llm_chat_devices", lambda: ["cpu", "cuda"])
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_AGENT", object())
-    monkeypatch.setattr(web_api, "_LLM_CHAT_MODEL_LOADING", False)
+    _stub_llm_settings(monkeypatch, env_path)
 
     res = api_client.put(
         "/api/llm_chat/settings",
@@ -425,43 +421,37 @@ def test_llm_chat_send_preserves_direct_turn_outputs(
         assert saved_conversations[0]["messages"][-1]["content"] == assistant_message
 
 
-def test_llm_chat_send_rejects_invalid_conversation_id(monkeypatch, api_client) -> None:
-    """Test /api/llm_chat/send returns 404 for non-existent conversation_id."""
-
+@pytest.mark.parametrize(
+    ("method", "path", "body", "status", "detail"),
+    [
+        (
+            "post",
+            "/api/llm_chat/send",
+            {
+                "message": "Test",
+                "conversationId": "550e8400-e29b-41d4-a716-446655440000",
+            },
+            404,
+            "Conversation not found",
+        ),
+        ("get", "/api/llm_chat/conversations/not-a-uuid", None, 400, "Invalid conversation ID format"),
+        (
+            "get",
+            "/api/llm_chat/conversations/550e8400-e29b-41d4-a716-446655440000",
+            None,
+            404,
+            "Conversation not found",
+        ),
+    ],
+)
+def test_llm_chat_conversation_errors(
+    monkeypatch, api_client, method, path, body, status, detail
+) -> None:
     monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
 
-    client = api_client
-    res = client.post(
-        "/api/llm_chat/send",
-        json={
-            "message": "Test",
-            "conversationId": "550e8400-e29b-41d4-a716-446655440000",  # Valid UUID format but doesn't exist
-        },
-    )
-    assert res.status_code == 404
-    payload = res.json()
-    assert "Conversation not found" in payload["detail"]
-
-
-def test_llm_chat_conversation_validates_uuid_format(api_client) -> None:
-    """Test /api/llm_chat/conversations/{id} validates UUID format."""
-    client = api_client
-    res = client.get("/api/llm_chat/conversations/not-a-uuid")
-    assert res.status_code == 400
-    payload = res.json()
-    assert "Invalid conversation ID format" in payload["detail"]
-
-
-def test_llm_chat_conversation_returns_404_for_missing(monkeypatch, api_client) -> None:
-    """Test /api/llm_chat/conversations/{id} returns 404 for non-existent conversation."""
-    monkeypatch.setattr(web_api, "_load_llm_chat_conversations", lambda: [])
-
-    client = api_client
-    valid_uuid = "550e8400-e29b-41d4-a716-446655440000"
-    res = client.get(f"/api/llm_chat/conversations/{valid_uuid}")
-    assert res.status_code == 404
-    payload = res.json()
-    assert "Conversation not found" in payload["detail"]
+    res = getattr(api_client, method)(path, json=body) if body else getattr(api_client, method)(path)
+    assert res.status_code == status
+    assert detail in res.json()["detail"]
 
 
 def test_llm_chat_conversation_returns_conversation_data(monkeypatch, api_client) -> None:
@@ -497,21 +487,18 @@ def test_llm_chat_conversation_returns_conversation_data(monkeypatch, api_client
     assert res.status_code == 200
     payload = res.json()
 
-    # Verify conversation data
-    assert payload["id"] == conv_id
-    assert payload["title"] == "Test Chat"
-    assert payload["createdAt"] == "2025-01-01T10:00:00"
-    assert payload["updatedAt"] == "2025-01-01T10:05:00"
+    assert payload | {"messages": []} == {
+        "id": conv_id,
+        "title": "Test Chat",
+        "createdAt": "2025-01-01T10:00:00",
+        "updatedAt": "2025-01-01T10:05:00",
+        "messages": [],
+    }
     assert len(payload["messages"]) == 2
-
-    # Verify messages
-    assert payload["messages"][0]["role"] == "user"
-    assert payload["messages"][0]["content"] == "Hello"
-    assert payload["messages"][0]["createdAt"] == "2025-01-01T10:00:00"
-
-    assert payload["messages"][1]["role"] == "assistant"
-    assert payload["messages"][1]["content"] == "Hi there!"
-    assert payload["messages"][1]["createdAt"] == "2025-01-01T10:00:05"
+    assert [(msg["role"], msg["content"], msg["createdAt"]) for msg in payload["messages"]] == [
+        ("user", "Hello", "2025-01-01T10:00:00"),
+        ("assistant", "Hi there!", "2025-01-01T10:00:05"),
+    ]
 
 
 def test_llm_chat_conversation_can_be_renamed(monkeypatch, api_client) -> None:
@@ -606,20 +593,13 @@ def test_build_chat_messages_filters_system_messages(monkeypatch) -> None:
 
     messages = web_api._build_chat_messages(conversation, "New user message")
 
-    # Verify system prompt is at the start
     assert messages[0]["role"] == "system"
     assert messages[0]["content"] == "System instructions"
-
-    # Verify old system message is filtered out
-    system_count = sum(1 for msg in messages if msg["role"] == "system")
-    assert system_count == 1
-
-    # Verify other messages are included
+    assert sum(1 for msg in messages if msg["role"] == "system") == 1
     assert len(messages) == 5  # system + 2 user + 1 assistant + new user
-    assert messages[1]["role"] == "user"
-    assert messages[1]["content"] == "User message 1"
-    assert messages[2]["role"] == "assistant"
-    assert messages[3]["role"] == "user"
-    assert messages[3]["content"] == "User message 2"
-    assert messages[4]["role"] == "user"
-    assert messages[4]["content"] == "New user message"
+    assert [(msg["role"], msg["content"]) for msg in messages[1:]] == [
+        ("user", "User message 1"),
+        ("assistant", "Assistant response 1"),
+        ("user", "User message 2"),
+        ("user", "New user message"),
+    ]
