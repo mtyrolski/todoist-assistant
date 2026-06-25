@@ -88,8 +88,6 @@ def _run_automation_sync(
 
 def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
-    completed = 0
-    failed = 0
 
     for automation in _load_automations():
         result = _run_automation_sync(
@@ -98,19 +96,12 @@ def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
             continue_on_error=True,
         )
         results.append(result)
-        if result["status"] == "failed":
-            failed += 1
-        else:
-            completed += 1
         dbio.reset()
 
+    failed = sum(item["status"] == "failed" for item in results)
     return {
         "results": results,
-        "summary": {
-            "completed": completed,
-            "failed": failed,
-            "skipped": 0,
-        },
+        "summary": {"completed": len(results) - failed, "failed": failed, "skipped": 0},
     }
 
 
@@ -197,6 +188,29 @@ class _PendingGmailAuthSession:
 _GMAIL_AUTH_LOCK = threading.Lock()
 _GMAIL_AUTH_SESSION: _PendingGmailAuthSession | None = None
 _OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
+_SIGNAL_FIELDS = (
+    "attemptCount",
+    "successCount",
+    "failureCount",
+    "skipCount",
+    "lastStatus",
+    "lastStartedAt",
+    "lastFinishedAt",
+    "lastDurationSeconds",
+    "lastError",
+    "lastSuccessAt",
+)
+_OBSERVER_STATE_FIELDS = (
+    "refreshIntervalMinutes",
+    "refreshIntervalSeconds",
+    "updatedAt",
+    "lastRunAt",
+    "lastDurationSeconds",
+    "lastEvents",
+    "lastAutomationsRan",
+    "lastStatus",
+    "lastError",
+)
 
 
 def _clear_gmail_auth_session() -> None:
@@ -502,18 +516,7 @@ def _automation_run_signal_metadata(automation_name: str) -> dict[str, Any]:
     signal_payload = signals.get(automation_name)
     if not isinstance(signal_payload, Mapping):
         return {}
-    return {
-        "attemptCount": signal_payload.get("attemptCount"),
-        "successCount": signal_payload.get("successCount"),
-        "failureCount": signal_payload.get("failureCount"),
-        "skipCount": signal_payload.get("skipCount"),
-        "lastStatus": signal_payload.get("lastStatus"),
-        "lastStartedAt": signal_payload.get("lastStartedAt"),
-        "lastFinishedAt": signal_payload.get("lastFinishedAt"),
-        "lastDurationSeconds": signal_payload.get("lastDurationSeconds"),
-        "lastError": signal_payload.get("lastError"),
-        "lastSuccessAt": signal_payload.get("lastSuccessAt"),
-    }
+    return {field: signal_payload.get(field) for field in _SIGNAL_FIELDS}
 
 
 def _automation_launch_metadata(automation: Automation) -> dict[str, Any]:
@@ -541,18 +544,8 @@ def _load_observer_state() -> dict[str, Any]:
 
 
 def _serialize_observer_state(payload: Mapping[str, Any]) -> dict[str, Any]:
-    enabled = bool(payload.get("enabled", True))
-    return {
-        "enabled": enabled,
-        "refreshIntervalMinutes": payload.get("refreshIntervalMinutes"),
-        "refreshIntervalSeconds": payload.get("refreshIntervalSeconds"),
-        "updatedAt": payload.get("updatedAt"),
-        "lastRunAt": payload.get("lastRunAt"),
-        "lastDurationSeconds": payload.get("lastDurationSeconds"),
-        "lastEvents": payload.get("lastEvents"),
-        "lastAutomationsRan": payload.get("lastAutomationsRan"),
-        "lastStatus": payload.get("lastStatus"),
-        "lastError": payload.get("lastError"),
+    return {"enabled": bool(payload.get("enabled", True))} | {
+        field: payload.get(field) for field in _OBSERVER_STATE_FIELDS
     }
 
 

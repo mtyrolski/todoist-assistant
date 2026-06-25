@@ -5,7 +5,7 @@
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 from todoist.dashboard.settings import update_observer_settings
 
 from todoist.web.services.admin_automations import (
@@ -21,6 +21,41 @@ def _web_api():
     from todoist.web import api as web_api
 
     return web_api
+
+
+def _observer_context(web_api) -> tuple[dict[str, Any], dict[str, Any]]:
+    settings = web_api.observer_settings_payload(
+        web_api.load_dashboard_config(web_api._DASHBOARD_CONFIG_PATH),
+        path=web_api._DASHBOARD_CONFIG_PATH,
+    )
+    state = web_api._load_observer_state()
+    state["enabled"] = bool(settings["enabled"])
+    state["refreshIntervalMinutes"] = float(settings["refreshIntervalMinutes"])
+    state["refreshIntervalSeconds"] = float(settings["refreshIntervalMinutes"]) * 60.0
+    return state, settings
+
+
+def _observer_payload(
+    web_api, state: dict[str, Any], settings: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "state": web_api._serialize_observer_state(state),
+        "settings": settings,
+        "editTargets": [
+            {
+                "key": "observer",
+                "label": "Dashboard observer",
+                "icon": "wrench",
+                "configPath": settings["configPath"],
+                "anchor": "observer-control",
+            }
+        ],
+    }
+
+
+async def _refresh_if_requested(web_api, refresh: bool) -> None:
+    if refresh:
+        await web_api._ensure_state(refresh=True)
 
 
 @router.get("/automations")
@@ -43,13 +78,8 @@ async def set_admin_automation_enabled(
     web_api = _web_api()
     async with web_api._ADMIN_LOCK:
         config = web_api._read_yaml_config(web_api._AUTOMATIONS_PATH)
-        available_keys = web_api._available_automation_keys(config)
-        if key not in available_keys:
-            from fastapi import HTTPException
-
-            raise HTTPException(
-                status_code=404, detail=f"Unknown automation key: {key}"
-            )
+        if key not in web_api._available_automation_keys(config):
+            raise HTTPException(status_code=404, detail=f"Unknown automation key: {key}")
         web_api._set_automation_enabled(key, enabled=enabled)
         web_api._restart_dashboard_observer_if_managed()
     return await get_admin_automations()
@@ -65,8 +95,6 @@ async def gmail_connect() -> dict[str, Any]:
     web_api = _web_api()
     status = web_api._gmail_automation_status()
     if not status["credentialsPresent"]:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=400,
             detail="gmail_credentials.json is required before connecting Gmail.",
@@ -106,19 +134,18 @@ async def run_admin_automation(name: str, refresh: bool = False) -> dict[str, An
     async with web_api._ADMIN_LOCK:
         automations = {a.name: a for a in web_api._load_automations()}
         if name not in automations:
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=404, detail=f"Unknown automation: {name}")
 
         dbio = web_api.Database(".env")
-        dbio.pull()
-        result = await asyncio.to_thread(
-            web_api._run_automation_sync, automations[name], dbio=dbio
-        )
-        dbio.reset()
+        try:
+            dbio.pull()
+            result = await asyncio.to_thread(
+                web_api._run_automation_sync, automations[name], dbio=dbio
+            )
+        finally:
+            dbio.reset()
 
-    if refresh:
-        await web_api._ensure_state(refresh=True)
+    await _refresh_if_requested(web_api, refresh)
     return result
 
 
@@ -127,11 +154,13 @@ async def run_admin_automations(refresh: bool = False) -> dict[str, Any]:
     web_api = _web_api()
     async with web_api._ADMIN_LOCK:
         dbio = web_api.Database(".env")
-        dbio.pull()
-        result = await asyncio.to_thread(web_api._run_all_automations_sync, dbio=dbio)
+        try:
+            dbio.pull()
+            result = await asyncio.to_thread(web_api._run_all_automations_sync, dbio=dbio)
+        finally:
+            dbio.reset()
 
-    if refresh:
-        await web_api._ensure_state(refresh=True)
+    await _refresh_if_requested(web_api, refresh)
     return result
 
 
@@ -148,29 +177,7 @@ async def run_admin_automations_async() -> dict[str, Any]:
 @router.get("/observer")
 async def get_admin_observer_state() -> dict[str, Any]:
     web_api = _web_api()
-    config = web_api.load_dashboard_config(web_api._DASHBOARD_CONFIG_PATH)
-    state = web_api._load_observer_state()
-    observer_settings = web_api.observer_settings_payload(
-        config, path=web_api._DASHBOARD_CONFIG_PATH
-    )
-    state["enabled"] = bool(observer_settings["enabled"])
-    state["refreshIntervalMinutes"] = float(observer_settings["refreshIntervalMinutes"])
-    state["refreshIntervalSeconds"] = (
-        float(observer_settings["refreshIntervalMinutes"]) * 60.0
-    )
-    return {
-        "state": web_api._serialize_observer_state(state),
-        "settings": observer_settings,
-        "editTargets": [
-            {
-                "key": "observer",
-                "label": "Dashboard observer",
-                "icon": "wrench",
-                "configPath": observer_settings["configPath"],
-                "anchor": "observer-control",
-            }
-        ],
-    }
+    return _observer_payload(web_api, *_observer_context(web_api))
 
 
 @router.post("/observer")
@@ -181,8 +188,6 @@ async def set_admin_observer(payload: Any = Body(...)) -> dict[str, Any]:
     elif isinstance(payload, dict):
         update_payload = payload
     else:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=400, detail="Body must be a JSON object or boolean"
         )
@@ -192,8 +197,6 @@ async def set_admin_observer(payload: Any = Body(...)) -> dict[str, Any]:
         try:
             observer_settings = update_observer_settings(config, update_payload)
         except ValueError as exc:
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         cache_state = web_api._load_observer_state()
         cache_state["enabled"] = bool(observer_settings["enabled"])
@@ -206,41 +209,15 @@ async def set_admin_observer(payload: Any = Body(...)) -> dict[str, Any]:
         cache_state["updatedAt"] = web_api._now_iso()
         web_api.Cache().observer_state.save(cache_state)
         web_api._save_yaml_config(web_api._DASHBOARD_CONFIG_PATH, config)
-    return {
-        "state": web_api._serialize_observer_state(cache_state),
-        "settings": observer_settings,
-        "editTargets": [
-            {
-                "key": "observer",
-                "label": "Dashboard observer",
-                "icon": "wrench",
-                "configPath": observer_settings["configPath"],
-                "anchor": "observer-control",
-            }
-        ],
-    }
+    return _observer_payload(web_api, cache_state, observer_settings)
 
 
 @router.post("/observer/run")
 async def run_admin_observer(force: bool = False) -> dict[str, Any]:
     web_api = _web_api()
     async with web_api._ADMIN_LOCK:
-        state = web_api._load_observer_state()
-        observer_settings = web_api.observer_settings_payload(
-            web_api.load_dashboard_config(web_api._DASHBOARD_CONFIG_PATH),
-            path=web_api._DASHBOARD_CONFIG_PATH,
-        )
-        enabled = bool(observer_settings["enabled"])
-        state["enabled"] = enabled
-        state["refreshIntervalMinutes"] = float(
-            observer_settings["refreshIntervalMinutes"]
-        )
-        state["refreshIntervalSeconds"] = (
-            float(observer_settings["refreshIntervalMinutes"]) * 60.0
-        )
-        if not enabled and not force:
-            from fastapi import HTTPException
-
+        state, observer_settings = _observer_context(web_api)
+        if not observer_settings["enabled"] and not force:
             raise HTTPException(status_code=409, detail="Observer is disabled")
 
         started_at = web_api.datetime.now()
@@ -267,8 +244,6 @@ async def run_admin_observer(force: bool = False) -> dict[str, Any]:
                     "lastError": f"{type(exc).__name__}: {exc}",
                 }
             )
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=500, detail=state["lastError"]) from exc
         finally:
             dbio.reset()

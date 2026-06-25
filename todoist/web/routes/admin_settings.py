@@ -419,6 +419,31 @@ async def admin_update_dashboard_settings(
         ]
         if urgency["fire_labels"]:
             urgency["fire_label"] = urgency["fire_labels"][0]
+    int_updates = (
+        ("warnDueWithinDays", "warn_due_within_days", False),
+        ("warnDeadlineWithinDays", "warn_deadline_within_days", False),
+        ("warnPriorityMinCount", "warn_priority_min_count", True),
+        ("warnDueMinCount", "warn_due_min_count", True),
+        ("warnDeadlineMinCount", "warn_deadline_min_count", True),
+    )
+    for src, dst, minimum_one in int_updates:
+        if src in payload:
+            value = _coerce_int(payload[src], src)
+            urgency[dst] = max(1, value) if minimum_one else value
+    for src, dst in (
+        ("dangerOnFireLabel", "danger_on_fire_label"),
+        ("warnOnPriority", "warn_on_priority"),
+        ("warnOnDue", "warn_on_due"),
+        ("warnOnDeadline", "warn_on_deadline"),
+    ):
+        if src in payload:
+            urgency[dst] = bool(payload[src])
+    for src, dst in (
+        ("warnSummaryLabel", "warn_summary_label"),
+        ("dangerSummaryLabel", "danger_summary_label"),
+    ):
+        if src in payload:
+            urgency[dst] = str(payload[src]).strip()
     if "warnPriorityThresholds" in payload:
         urgency["warn_priority_thresholds"] = [
             _coerce_int(value, "warnPriorityThresholds")
@@ -428,38 +453,6 @@ async def admin_update_dashboard_settings(
                 allow_str=True,
             )
         ]
-    if "warnPriorityMinCount" in payload:
-        urgency["warn_priority_min_count"] = max(
-            1, _coerce_int(payload["warnPriorityMinCount"], "warnPriorityMinCount")
-        )
-    if "warnDueWithinDays" in payload:
-        urgency["warn_due_within_days"] = _coerce_int(
-            payload["warnDueWithinDays"], "warnDueWithinDays"
-        )
-    if "warnDueMinCount" in payload:
-        urgency["warn_due_min_count"] = max(
-            1, _coerce_int(payload["warnDueMinCount"], "warnDueMinCount")
-        )
-    if "warnDeadlineWithinDays" in payload:
-        urgency["warn_deadline_within_days"] = _coerce_int(
-            payload["warnDeadlineWithinDays"], "warnDeadlineWithinDays"
-        )
-    if "warnDeadlineMinCount" in payload:
-        urgency["warn_deadline_min_count"] = max(
-            1, _coerce_int(payload["warnDeadlineMinCount"], "warnDeadlineMinCount")
-        )
-    if "dangerOnFireLabel" in payload:
-        urgency["danger_on_fire_label"] = bool(payload["dangerOnFireLabel"])
-    if "warnOnPriority" in payload:
-        urgency["warn_on_priority"] = bool(payload["warnOnPriority"])
-    if "warnOnDue" in payload:
-        urgency["warn_on_due"] = bool(payload["warnOnDue"])
-    if "warnOnDeadline" in payload:
-        urgency["warn_on_deadline"] = bool(payload["warnOnDeadline"])
-    if "warnSummaryLabel" in payload:
-        urgency["warn_summary_label"] = str(payload["warnSummaryLabel"]).strip()
-    if "dangerSummaryLabel" in payload:
-        urgency["danger_summary_label"] = str(payload["dangerSummaryLabel"]).strip()
     if "badgeLabels" in payload:
         badge_labels = payload["badgeLabels"]
         if not isinstance(badge_labels, Mapping):
