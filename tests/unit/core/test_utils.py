@@ -140,6 +140,10 @@ def _event_payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
+def _env_value(name: str, value: str | None) -> dict[str, str]:
+    return {} if value is None else {name: value}
+
+
 def test_get_all_fields_of_dataclass_returns_all_fields():
     fields = get_all_fields_of_dataclass(SampleDataclass)
     assert isinstance(fields, KeysView)
@@ -323,23 +327,23 @@ def test_get_api_key(env_payload: dict[str, str], expected: str):
         assert get_api_key() == expected
 
 
-def test_get_log_level_defaults_to_info():
-    with patch.dict(os.environ, {}, clear=True):
-        assert get_log_level() == DEFAULT_LOG_LEVEL
-
-
-def test_get_log_level_normalizes_env_value():
-    with patch.dict(os.environ, {EnvVar.LOG_LEVEL: "debug"}, clear=True):
-        assert get_log_level() == "DEBUG"
-
-
-def test_get_log_level_falls_back_on_invalid_env_value():
+@pytest.mark.parametrize(
+    ("env_value", "expected", "warns"),
+    [
+        (None, DEFAULT_LOG_LEVEL, False),
+        ("debug", "DEBUG", False),
+        ("nope", DEFAULT_LOG_LEVEL, True),
+    ],
+)
+def test_get_log_level_parses_env_value(
+    env_value: str | None, expected: str, warns: bool
+):
     with (
-        patch.dict(os.environ, {EnvVar.LOG_LEVEL: "nope"}, clear=True),
+        patch.dict(os.environ, _env_value(EnvVar.LOG_LEVEL, env_value), clear=True),
         patch("todoist.core.utils.logger.warning") as mock_warning,
     ):
-        assert get_log_level() == DEFAULT_LOG_LEVEL
-    mock_warning.assert_called_once()
+        assert get_log_level() == expected
+    assert mock_warning.called is warns
 
 
 @pytest.mark.parametrize(
@@ -355,12 +359,10 @@ def test_get_log_level_falls_back_on_invalid_env_value():
 def test_get_max_concurrent_requests_parses_env_value(
     env_value: str | None, expected: int
 ):
-    if env_value is None:
-        payload: dict[str, str] = {}
-    else:
-        payload = {EnvVar.MAX_CONCURRENT_REQUESTS: env_value}
-        with patch.dict(os.environ, payload, clear=True):
-            assert get_max_concurrent_requests() == expected
+    with patch.dict(
+        os.environ, _env_value(EnvVar.MAX_CONCURRENT_REQUESTS, env_value), clear=True
+    ):
+        assert get_max_concurrent_requests() == expected
 
 
 @pytest.mark.parametrize(
@@ -377,11 +379,9 @@ def test_get_max_concurrent_requests_parses_env_value(
 def test_get_max_requests_per_minute_parses_env_value(
     env_value: str | None, expected: int
 ):
-    if env_value is None:
-        payload: dict[str, str] = {}
-    else:
-        payload = {EnvVar.MAX_REQUESTS_PER_MINUTE: env_value}
-    with patch.dict(os.environ, payload, clear=True):
+    with patch.dict(
+        os.environ, _env_value(EnvVar.MAX_REQUESTS_PER_MINUTE, env_value), clear=True
+    ):
         assert get_max_requests_per_minute() == expected
 
 
@@ -398,10 +398,11 @@ def test_get_max_requests_per_minute_parses_env_value(
 def test_get_rate_pacing_base_delay_seconds_parses_env_value(
     env_value: str | None, expected: float
 ):
-    payload = (
-        {} if env_value is None else {EnvVar.RATE_PACING_BASE_DELAY_SECONDS: env_value}
-    )
-    with patch.dict(os.environ, payload, clear=True):
+    with patch.dict(
+        os.environ,
+        _env_value(EnvVar.RATE_PACING_BASE_DELAY_SECONDS, env_value),
+        clear=True,
+    ):
         assert get_rate_pacing_base_delay_seconds() == expected
 
 
