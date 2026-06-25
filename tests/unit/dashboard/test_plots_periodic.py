@@ -225,6 +225,14 @@ def _trace_names(fig: go.Figure) -> list[str]:
     return [_trace_name(trace) for trace in _fig_traces(fig)]
 
 
+def _assert_trace_names(
+    fig: go.Figure, *, include: tuple[str, ...] = (), exclude: tuple[str, ...] = ()
+) -> None:
+    trace_names = _trace_names(fig)
+    assert all(name in trace_names for name in include)
+    assert all(name not in trace_names for name in exclude)
+
+
 def _trace_by_name(fig: go.Figure, name: str) -> Any:
     return next(trace for trace in _fig_traces(fig) if _trace_name(trace) == name)
 
@@ -336,10 +344,7 @@ def test_plot_completed_tasks_periodically_does_not_forecast_stale_history(
         project_colors={"Deepflare": "#ff8800", "OldOnly": "#111111"},
     )
 
-    trace_names = [
-        str(getattr(trace, "name", "")).lower()
-        for trace in cast(tuple[Any, ...], fig.data)
-    ]
+    trace_names = [name.lower() for name in _trace_names(fig)]
     assert not any("forecast" in name or "so far" in name for name in trace_names)
 
 
@@ -364,10 +369,7 @@ def test_completed_tasks_periodically_keeps_archived_points_sparse_without_forec
         always_visible_projects={"Archived"},
     )
 
-    traces = cast(tuple[Any, ...], fig.data)
-    archived_trace = next(
-        trace for trace in traces if str(getattr(trace, "name", "")) == "Archived"
-    )
+    archived_trace = _trace_by_name(fig, "Archived")
 
     assert _normalized_trace_x(archived_trace) == [
         pd.Timestamp("2024-05-26"),
@@ -376,7 +378,7 @@ def test_completed_tasks_periodically_keeps_archived_points_sparse_without_forec
     if expected_y is not None:
         assert [float(value) for value in cast(Any, archived_trace).y] == expected_y
     assert not any(
-        str(getattr(trace, "name", "")).startswith("Archived (") for trace in traces
+        _trace_name(trace).startswith("Archived (") for trace in _fig_traces(fig)
     )
 
 
@@ -421,10 +423,7 @@ def test_completed_tasks_periodically_keeps_projects_from_full_history_range(
         project_colors={"Deepflare": "#ff8800", "OldOnly": "#111111"},
     )
 
-    trace_names = _trace_names(fig)
-
-    assert "Deepflare" in trace_names
-    assert "OldOnly" in trace_names
+    _assert_trace_names(fig, include=("Deepflare", "OldOnly"))
     if check_color:
         deepflare_trace = _trace_by_name(fig, "Deepflare")
         assert (
@@ -446,9 +445,7 @@ def test_completed_tasks_periodically_uses_selected_range_for_root_visibility(
         visibility_end_date=datetime(2024, 6, 10),
     )
 
-    trace_names = _trace_names(fig)
-    assert "Deepflare" in trace_names
-    assert "OldOnly" not in trace_names
+    _assert_trace_names(fig, include=("Deepflare",), exclude=("OldOnly",))
 
 
 @pytest.mark.parametrize(("plot_func", "_total_name"), PLOT_FUNCTIONS)
@@ -466,11 +463,9 @@ def test_completed_tasks_periodically_keeps_archived_parent_history_outside_view
         always_visible_projects={"Deepflare"},
     )
 
-    trace_names = _trace_names(fig)
     deepflare_trace = _trace_by_name(fig, "Deepflare")
 
-    assert "Deepflare" in trace_names
-    assert "OldOnly" not in trace_names
+    _assert_trace_names(fig, include=("Deepflare",), exclude=("OldOnly",))
     assert pd.Timestamp("2023-03-19") in _normalized_trace_x(deepflare_trace)
 
 
@@ -486,11 +481,11 @@ def test_completed_tasks_periodically_groups_by_root_project_when_parent_exists(
         project_colors={"Academy": "#123456", "skynet": "#654321"},
     )
 
-    trace_names = _trace_names(fig)
-    assert "Academy" in trace_names
-    assert "skynet" in trace_names
-    assert "DeepMhcFlare" not in trace_names
-    assert "MSFT" not in trace_names
+    _assert_trace_names(
+        fig,
+        include=("Academy", "skynet"),
+        exclude=("DeepMhcFlare", "MSFT"),
+    )
 
 
 def test_cumsum_completed_tasks_periodically_keeps_sparse_project_totals_compact():
@@ -502,11 +497,7 @@ def test_cumsum_completed_tasks_periodically_keeps_sparse_project_totals_compact
         project_colors={"Large": "#123456", "Small": "#654321"},
     )
 
-    total_trace = next(
-        trace
-        for trace in cast(tuple[Any, ...], fig.data)
-        if str(getattr(trace, "name", "")).lower() == "all projects (total cumulative)"
-    )
+    total_trace = _trace_by_lower_name(fig, "all projects (total cumulative)")
     values = [float(value) for value in cast(Any, total_trace).y]
 
     assert values == sorted(values)
@@ -562,10 +553,7 @@ def test_plot_completed_tasks_periodically_can_disable_total_overlay():
 
     fig = _weekly_plot(plot_completed_tasks_periodically, include_total_overlay=False)
 
-    trace_names = [
-        str(getattr(trace, "name", "")) for trace in cast(tuple[Any, ...], fig.data)
-    ]
-    assert not any("all projects" in name.lower() for name in trace_names)
+    assert not any("all projects" in name.lower() for name in _trace_names(fig))
 
 
 def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows():
@@ -579,7 +567,7 @@ def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows()
 
     traces = cast(tuple[Any, ...], fig.data)
     legend_traces = [trace for trace in traces if getattr(trace, "showlegend", False)]
-    legend_labels = [str(getattr(trace, "name", "")) for trace in legend_traces]
+    legend_labels = [_trace_name(trace) for trace in legend_traces]
 
     assert any("6w baseline" in label for label in legend_labels)
     assert any("12w baseline" in label for label in legend_labels)
@@ -596,8 +584,8 @@ def test_plot_weekly_completion_trend_uses_legend_toggles_for_optional_windows()
         for trace in traces
         if not getattr(trace, "showlegend", False)
         and (
-            "current week" in str(getattr(trace, "name", "")).lower()
-            or "3w baseline" in str(getattr(trace, "name", "")).lower()
+            "current week" in _trace_name(trace).lower()
+            or "3w baseline" in _trace_name(trace).lower()
         )
     ]
     assert fixed_traces
@@ -617,7 +605,7 @@ def test_plot_weekly_completion_trend_hides_future_days_for_current_week():
     current_traces = [
         trace
         for trace in traces
-        if "current week" in str(getattr(trace, "name", "")).lower()
+        if "current week" in _trace_name(trace).lower()
         and getattr(trace, "visible", None) in (None, True)
     ]
     assert current_traces, "Expected a visible current-week trace."
@@ -635,8 +623,8 @@ def test_plot_weekly_completion_trend_skips_unavailable_long_window():
     fig = plot_weekly_completion_trend(df, end_date=datetime(2024, 4, 17))
 
     legend_labels = [
-        str(getattr(trace, "name", ""))
-        for trace in cast(tuple[Any, ...], fig.data)
+        _trace_name(trace)
+        for trace in _fig_traces(fig)
         if getattr(trace, "showlegend", False)
     ]
     assert any("6w baseline" in label for label in legend_labels)

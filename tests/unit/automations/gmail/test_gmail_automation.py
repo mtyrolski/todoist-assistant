@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import cast
 from unittest.mock import Mock, patch
 
+import pytest
 from google.auth.exceptions import RefreshError
 from todoist.automations.gmail_tasks import (
     GmailTasksAutomation,
@@ -83,24 +84,15 @@ def test_initialization():
     assert len(automation.TASK_KEYWORDS) > 0
 
 
-def test_build_gmail_query_default_targets_unread_inbox_with_last_week_window():
-    """Default sync query should target unread inbox email with date bounds."""
-    automation = GmailTasksAutomation()
+@pytest.mark.parametrize("lookback_days", [None, 7])
+def test_build_gmail_query_targets_unread_inbox_with_time_window(lookback_days):
+    """Sync query should target unread inbox email with date bounds."""
+    kwargs = {} if lookback_days is None else {"lookback_days": lookback_days}
+    automation = GmailTasksAutomation(**kwargs)
     query = automation._build_gmail_query()
-    assert "in:inbox" in query
-    assert "is:unread" in query
-    assert "after:" in query
-    assert "before:" in query
-
-
-def test_build_gmail_query_with_lookback_adds_time_window():
-    """When lookback_days is configured, date bounds are included."""
-    automation = GmailTasksAutomation(lookback_days=7)
-    query = automation._build_gmail_query()
-    assert "in:inbox" in query
-    assert "is:unread" in query
-    assert "after:" in query
-    assert "before:" in query
+    assert all(
+        token in query for token in ("in:inbox", "is:unread", "after:", "before:")
+    )
 
 
 def test_is_actionable_email_positive():
