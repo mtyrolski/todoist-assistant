@@ -62,6 +62,10 @@ class DatabaseTasks:
             headers["X-Request-Id"] = str(uuid.uuid4())
         return headers
 
+    @staticmethod
+    def _drop_none(payload: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in payload.items() if value is not None}
+
     def _run_ordered_insert_batch(
         self,
         items: list[T],
@@ -169,51 +173,8 @@ class DatabaseTasks:
         deadline_date: str | None = None,
         deadline_lang: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Inserts a new task into the Todoist API.
-
-        Parameters:
-        - content (str): Task content. This value may contain markdown-formatted text and hyperlinks.
-        - description (str): A description for the task.
-        - project_id (str): Task project ID. If not set, task is put to user's Inbox.
-        - section_id (str): ID of section to put task into.
-        - parent_id (str): Parent task ID.
-        - order (int): Non-zero integer value used by clients to sort tasks under the same parent.
-        - labels (list[str]): The task's labels (a list of names that may represent either personal or shared labels).
-        - priority (int): Task priority from 1 (normal) to 4 (urgent).
-        - due_string (str): Human defined task due date (ex.: "next Monday", "Tomorrow").
-        - due_date (str): Specific date in YYYY-MM-DD format relative to user’s timezone.
-        - due_datetime (str): Specific date and time in RFC3339 format in UTC.
-        - due_lang (str): 2-letter code specifying language in case due_string is not written in English.
-        - assignee_id (str): The responsible user ID (only applies to shared tasks).
-        - duration (int): A positive integer for the amount of duration_unit the task will take.
-        - duration_unit (str): The unit of time that the duration field above represents. Must be either minute or day.
-        - deadline_date (str): Specific date in YYYY-MM-DD format relative to user’s timezone.
-        - deadline_lang (str): 2-letter code specifying language of deadline.
-
-        Returns:
-        - dict: Response from the Todoist API.
-        Example response:
-            {'id': '3501',
-            'assigner_id': None,
-            'assignee_id': None,
-            'project_id': '226095',
-            'section_id': None,
-            'parent_id': None,
-            'order': 3,
-            'content': 'Buy milk',
-            'description': '',
-            'is_completed': False,
-            'labels': [],
-            'priority': 1,
-            'comment_count': 0,
-            'creator_id': '381',
-            'created_at': '2025-03-13T21:16:27.284770Z',
-            'due': None,
-            'duration': None,
-            'deadline': None}
-        """
-        payload = {
+        """Create a task via Todoist and return the decoded JSON payload."""
+        payload = self._drop_none({
             TaskField.CONTENT.value: content,
             TaskField.DESCRIPTION.value: description,
             TaskField.PROJECT_ID.value: project_id,
@@ -231,9 +192,7 @@ class DatabaseTasks:
             TaskField.DURATION_UNIT.value: duration_unit,
             TaskField.DEADLINE_DATE.value: deadline_date,
             TaskField.DEADLINE_LANG.value: deadline_lang,
-        }
-
-        payload = {k: v for k, v in payload.items() if v is not None}
+        })
 
         spec = RequestSpec(
             endpoint=TodoistEndpoints.CREATE_TASK,
@@ -298,7 +257,7 @@ class DatabaseTasks:
         This method returns the JSON payload when present, otherwise `{}`.
         """
 
-        payload = {
+        payload = self._drop_none({
             TaskField.CONTENT.value: content,
             TaskField.DESCRIPTION.value: description,
             TaskField.LABELS.value: labels,
@@ -309,8 +268,7 @@ class DatabaseTasks:
             TaskField.DUE_LANG.value: due_lang,
             TaskField.DURATION.value: duration,
             TaskField.DURATION_UNIT.value: duration_unit,
-        }
-        payload = {k: v for k, v in payload.items() if v is not None}
+        })
         if not payload:
             return {}
 
@@ -397,40 +355,7 @@ class DatabaseTasks:
         return comments
 
     def fetch_task_by_id(self, task_id: str) -> dict[str, Any]:
-        """
-        Fetches a task by its ID from the Todoist API.
-
-        Parameters:
-        - task_id (str): The ID of the task to fetch.
-
-        Returns:
-        - dict: Response from the Todoist API containing task details.
-        Example response:
-            {
-                "id": "2995104339",
-                "content": "Buy Milk",
-                "description": "",
-                "project_id": "2203306141",
-                "section_id": "7025",
-                "parent_id": "2995104589",
-                "order": 1,
-                "labels": ["Food", "Shopping"],
-                "priority": 1,
-                "due": {
-                    "date": "2016-09-01",
-                    "is_recurring": false,
-                    "datetime": "2016-09-01T12:00:00.000000Z",
-                    "string": "tomorrow at 12",
-                    "timezone": "Europe/Moscow"
-                },
-                "deadline": {
-                    "date": "2016-09-04"
-                },
-                "duration": null,
-                "is_completed": false,
-                "url": "https://todoist.com/showTask?id=2995104339"
-            }
-        """
+        """Fetch a task by ID from Todoist."""
         spec = RequestSpec(
             endpoint=TodoistEndpoints.GET_TASK.format(task_id=task_id),
             headers=self._json_headers(request_id=False),

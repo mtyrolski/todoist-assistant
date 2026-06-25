@@ -19,6 +19,10 @@ def _format_progress_date_range(date_from: datetime, date_to: datetime) -> str:
     )
 
 
+def _events_not_in(events: list[Event], seen: set[Event] | None) -> list[Event]:
+    return [event for event in events if event not in seen] if seen else events
+
+
 class DatabaseActivity:
     """Database class to fetch activity data from the Todoist API."""
 
@@ -97,14 +101,11 @@ class DatabaseActivity:
                 progress_desc=progress_desc,
             )
             iterated_weeks += nweeks_window_size
-            events_not_already_fetched = [
-                e for e in window_events if e not in events_already_fetched
-            ]
-            if len(events_not_already_fetched) == 0:
+            new_events = _events_not_in(window_events, events_already_fetched)
+            if len(new_events) == 0:
                 n_empty_weeks += 1
             else:
                 n_empty_weeks = 0
-            new_events = [e for e in window_events if e not in events_already_fetched]
             total_events.extend(new_events)
             events_already_fetched.update(new_events)
             remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
@@ -292,12 +293,8 @@ class DatabaseActivity:
                 max(estimated_total_pages, fetched_pages),
                 "page",
             )
+            page_new_events = _events_not_in(page_events, events_already_fetched)
             if events_already_fetched:
-                page_new_events = [
-                    event
-                    for event in page_events
-                    if event not in events_already_fetched
-                ]
                 skipped_events = len(page_events) - len(page_new_events)
                 if skipped_events:
                     logger.debug(
@@ -305,9 +302,6 @@ class DatabaseActivity:
                         skipped_events,
                         fetched_pages,
                     )
-            else:
-                page_new_events = page_events
-
             # Keep scanning older cursor pages even when the newest page is
             # already cached. Otherwise gaps in deeper pages can never be healed.
             events.extend(page_new_events)
@@ -409,9 +403,7 @@ class DatabaseActivity:
                     progress_desc=progress_desc,
                     parent_project_id=parent_project_id,
                 )
-                new_events = [
-                    event for event in window_events if event not in seen_events
-                ]
+                new_events = _events_not_in(window_events, seen_events)
                 fetched_events.extend(new_events)
                 seen_events.update(new_events)
                 consecutive_empty_windows = (

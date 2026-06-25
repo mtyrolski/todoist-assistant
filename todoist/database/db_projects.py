@@ -64,9 +64,7 @@ class DatabaseProjects:
             return []
         entries = [safe_instantiate_entry(ProjectEntry, **raw) for raw in data_dicts]
         self.archived_projects_cache = {
-            entry.id: Project(
-                id=entry.id, project_entry=entry, tasks=[], is_archived=True
-            )
+            entry.id: self._project_from_entry(entry, is_archived=True)
             for entry in entries
         }
         return list(self.archived_projects_cache.values())
@@ -107,9 +105,8 @@ class DatabaseProjects:
                 f"Todoist API returned invalid data for project {project_id}"
             )
 
-        project = safe_instantiate_entry(ProjectEntry, **result_dict)
-        return Project(
-            id=project.id, project_entry=project, tasks=[], is_archived=False
+        return self._project_from_entry(
+            safe_instantiate_entry(ProjectEntry, **result_dict)
         )
 
     def fetch_projects(self, include_tasks: bool = True) -> list[Project]:
@@ -129,9 +126,7 @@ class DatabaseProjects:
             tasks: list[Task] = [
                 Task(id=task.id, task_entry=task) for task in task_entries
             ]
-            return Project(
-                id=project.id, project_entry=project, tasks=tasks, is_archived=False
-            )
+            return self._project_from_entry(project, tasks=tasks)
 
         def process_project_with_retry(project: ProjectEntry) -> Project:
             """Process project with built-in retry logic."""
@@ -179,12 +174,7 @@ class DatabaseProjects:
                     logger.error(
                         f"Failed fetching project index {idx}: {e.__class__.__name__}: {e}"
                     )
-                    proj_result = Project(
-                        id=projects[idx].id,
-                        project_entry=projects[idx],
-                        tasks=[],
-                        is_archived=False,
-                    )
+                    proj_result = self._project_from_entry(projects[idx])
                 ordered_results[idx] = proj_result
                 logger.debug(
                     f"Fetched tasks for project {proj_result.project_entry.name} ({idx + 1}/{len(projects)})"
@@ -196,10 +186,7 @@ class DatabaseProjects:
         # Replace any remaining None with empty project shells (should be rare)
         for i, maybe_proj in enumerate(ordered_results):
             if maybe_proj is None:
-                pentry = projects[i]
-                ordered_results[i] = Project(
-                    id=pentry.id, project_entry=pentry, tasks=[], is_archived=False
-                )
+                ordered_results[i] = self._project_from_entry(projects[i])
 
         self.projects_cache = [project for project in ordered_results if project]
         return self.projects_cache
