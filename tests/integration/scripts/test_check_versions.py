@@ -9,7 +9,7 @@ def test_read_formula_version_extracts_version(tmp_path: Path) -> None:
         "\n".join(
             [
                 "class TodoistAssistant < Formula",
-                '  version "0.3.3"',
+                '  version "0.3.4"',
                 "end",
             ]
         ),
