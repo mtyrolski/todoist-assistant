@@ -58,6 +58,7 @@ Release assets live on GitHub Releases:
 - Windows: `TodoistAssistantSetup.exe` or the `.msi`
 - macOS: `.dmg` for the app, `.pkg` for CLI-only installs
 - Linux: source checkout or Docker
+- Android: native client APK for a reachable local API
 
 Releases: <https://github.com/mtyrolski/todoist-assistant/releases>
 
@@ -87,6 +88,18 @@ Full instructions: [docs/INSTALLATION.md](docs/INSTALLATION.md)
 - Or use Docker Compose
 
 Setup details: [docs/INSTALLATION.md](docs/INSTALLATION.md)
+
+#### Android
+
+Build the native Android client from source:
+
+```bash
+make android_apk
+```
+
+Run the local API on a reachable machine, then point the app at `http://10.0.2.2:8000` on an emulator or `http://<computer-lan-ip>:8000` on a physical device.
+
+Android details: [docs/ANDROID.md](docs/ANDROID.md)
 
 ### Docker
 
