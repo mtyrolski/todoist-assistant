@@ -1,0 +1,54 @@
+name: Android App
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - '*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Android build prerequisites
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/.android-sdk
+            android/.gradle/android-commandlinetools.zip
+            android/.gradle/gradle-*-bin.zip
+            android/.gradle/gradle-*
+            android/.gradle/jdk17.tar.gz
+            android/.jdk
+          key: ${{ runner.os }}-android-${{ hashFiles('android/**/*.gradle', 'android/gradle.properties', 'android/settings.gradle', 'scripts/android_*.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-android-
+
+      - name: Build debug APK
+        run: |
+          make android_apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-assistant-android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
