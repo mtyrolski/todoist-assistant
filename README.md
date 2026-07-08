@@ -91,7 +91,7 @@ Setup details: [docs/INSTALLATION.md](docs/INSTALLATION.md)
 
 #### Android
 
-Use the `todoist-assistant-android-installable-debug-apk` GitHub Actions artifact for branch and pull request testing, or build the native Android client from source:
+Use the `todoist-assistant-android-sideload-apk` GitHub Actions artifact for branch and pull request testing, or build the native Android client from source:
 
 ```bash
 make android_apk

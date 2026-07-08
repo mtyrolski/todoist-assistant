@@ -31,27 +31,45 @@ The debug APK is produced at:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+For real-device sideload testing, build the staging APK instead. It uses release-like settings, is non-debuggable, and is signed automatically for manual installation:
+
+```bash
+make android_staging_apk
+```
+
+The staging APK is produced at:
+
+```text
+android/app/build/outputs/apk/staging/app-staging.apk
+```
+
 Verify the debug APK before sharing it:
 
 ```bash
 make android_verify_debug_apk
 ```
 
+Verify the staging APK before sharing it:
+
+```bash
+make android_verify_staging_apk
+```
+
 With a device or emulator connected through `adb`, run an installation and launch smoke test:
 
 ```bash
-make android_install_smoke_debug
+make android_install_smoke_staging
 ```
 
 ## CI artifacts
 
-GitHub Actions builds, verifies, installs, and launches the debug APK on an emulator. The artifact named `todoist-assistant-android-installable-debug-apk` contains:
+GitHub Actions builds, verifies, installs, and launches the staging APK on an emulator. The artifact named `todoist-assistant-android-sideload-apk` contains:
 
 ```text
-app-debug.apk
+app-staging.apk
 ```
 
-Use that artifact for branch and pull request testing. It is signed with Android's debug signing key, so it can be installed manually on a phone after allowing installs from the source app.
+Use that artifact for branch and pull request testing. It is signed with Android's debug signing key, so it can be installed manually on a phone after allowing installs from the source app. Uninstall any previous Todoist Assistant APK before installing an artifact from a different workflow run or machine, because Android rejects updates signed by a different key.
 
 Do not use `app-release-unsigned.apk` for manual installation. Android rejects unsigned APKs and often shows only a generic "App not installed" dialog.
 
@@ -137,10 +155,12 @@ adb install -r path/to/app.apk
 
 Common causes:
 
-- `INSTALL_PARSE_FAILED_NO_CERTIFICATES`: the APK is unsigned. Use `app-debug.apk` or a signed `app-release.apk`.
+- `INSTALL_PARSE_FAILED_NO_CERTIFICATES`: the APK is unsigned. Use `app-staging.apk` or a signed `app-release.apk`.
 - `INSTALL_FAILED_UPDATE_INCOMPATIBLE`: a previous APK with the same package name was signed by a different key. Uninstall the existing app first, then install again.
 - `INSTALL_FAILED_OLDER_SDK`: the device is older than Android 8.0. The app requires `minSdkVersion 26`.
 - `INSTALL_FAILED_INVALID_APK`: the downloaded APK or artifact zip was not extracted correctly. Install the `.apk` file inside the artifact, not the artifact `.zip`.
+
+On Samsung devices, also check that the app you install from, such as Files, My Files, Telegram, or a browser, is allowed to install unknown apps. If Samsung Auto Blocker or a similar security setting is enabled, temporarily disable that protection or install through `adb` while testing.
 
 For the full install-and-launch smoke check:
 

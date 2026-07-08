@@ -18,8 +18,11 @@ case "${BUILD_VARIANT}" in
   Release|release)
     BUILD_VARIANT="Release"
     ;;
+  Staging|staging)
+    BUILD_VARIANT="Staging"
+    ;;
   *)
-    echo "Unsupported Android build variant: ${BUILD_VARIANT} (use Debug or Release)" >&2
+    echo "Unsupported Android build variant: ${BUILD_VARIANT} (use Debug, Staging, or Release)" >&2
     exit 2
     ;;
 esac

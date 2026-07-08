@@ -32,6 +32,12 @@ android {
     }
 
     buildTypes {
+        staging {
+            initWith release
+            signingConfig signingConfigs.debug
+            matchingFallbacks = ["release"]
+        }
+
         release {
             if (hasReleaseSigning) {
                 signingConfig signingConfigs.release

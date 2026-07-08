@@ -42,13 +42,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-
 
-      - name: Build installable debug APK
+      - name: Build installable staging APK
         run: |
-          make android_apk
+          make android_staging_apk
 
-      - name: Verify debug APK package and signature
+      - name: Verify staging APK package and signature
         run: |
-          make android_verify_debug_apk
+          make android_verify_staging_apk
 
       - name: Enable KVM for Android emulator
         if: runner.os == 'Linux'
@@ -62,7 +62,7 @@ jobs:
             echo "/dev/kvm is not available; Android emulator will use software acceleration."
           fi
 
-      - name: Install and launch debug APK on emulator
+      - name: Install and launch staging APK on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 33
@@ -70,13 +70,13 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: ./scripts/android_install_smoke.sh android/app/build/outputs/apk/debug/app-debug.apk
+          script: ./scripts/android_install_smoke.sh android/app/build/outputs/apk/staging/app-staging.apk
 
-      - name: Upload installable debug APK artifact
+      - name: Upload installable staging APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: todoist-assistant-android-installable-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: todoist-assistant-android-sideload-apk
+          path: android/app/build/outputs/apk/staging/app-staging.apk
           if-no-files-found: error
 
       - name: Prepare release signing configuration
