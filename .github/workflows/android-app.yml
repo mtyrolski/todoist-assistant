@@ -14,9 +14,9 @@ permissions:
 
 jobs:
   build-android-apk:
-    name: Build Android APK
+    name: Build and verify Android APKs
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -42,13 +42,90 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-
 
-      - name: Build release APK
+      - name: Build installable debug APK
+        run: |
+          make android_apk
+
+      - name: Verify debug APK package and signature
+        run: |
+          make android_verify_debug_apk
+
+      - name: Install and launch debug APK on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: ./scripts/android_install_smoke.sh android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload installable debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-assistant-android-installable-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Prepare release signing configuration
+        id: release-signing
+        shell: bash
+        env:
+          ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+            ANDROID_SIGNING_KEYSTORE_BASE64 \
+            ANDROID_SIGNING_STORE_PASSWORD \
+            ANDROID_SIGNING_KEY_ALIAS \
+            ANDROID_SIGNING_KEY_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              missing+=("${name}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Skipping signed release APK; missing secrets: ${missing[*]}"
+            if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+              echo "::error::Tagged Android releases require all signing secrets."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          echo "::add-mask::${ANDROID_SIGNING_STORE_PASSWORD}"
+          echo "::add-mask::${ANDROID_SIGNING_KEY_PASSWORD}"
+
+          keystore_path="${RUNNER_TEMP}/todoist-assistant-release.jks"
+          printf '%s' "${ANDROID_SIGNING_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+
+          echo "ANDROID_KEYSTORE_PATH=${keystore_path}" >> "${GITHUB_ENV}"
+          echo "ANDROID_KEYSTORE_PASSWORD=${ANDROID_SIGNING_STORE_PASSWORD}" >> "${GITHUB_ENV}"
+          echo "ANDROID_KEY_ALIAS=${ANDROID_SIGNING_KEY_ALIAS}" >> "${GITHUB_ENV}"
+          echo "ANDROID_KEY_PASSWORD=${ANDROID_SIGNING_KEY_PASSWORD}" >> "${GITHUB_ENV}"
+          echo "available=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Build signed release APK
+        if: steps.release-signing.outputs.available == 'true'
         run: |
           make android_release_apk
 
-      - name: Upload APK artifact
+      - name: Verify signed release APK package and signature
+        if: steps.release-signing.outputs.available == 'true'
+        run: |
+          make android_verify_release_apk
+
+      - name: Upload signed release APK artifact
+        if: steps.release-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: todoist-assistant-android-release-apk
-          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          name: todoist-assistant-android-signed-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
