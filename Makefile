@@ -1,4 +1,4 @@
-.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any android_bootstrap_sdk android_apk build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -132,6 +132,12 @@ coverage: ## Run full pytest coverage report
 
 check_explicit_any: ## Reject `: Any =` variable annotations used as typecheck escape hatches
 	PYTHONPATH=. uv run python3 -m scripts.check_explicit_any
+
+android_bootstrap_sdk: ## Install repo-local Android SDK/JDK prerequisites
+	./scripts/android_bootstrap_sdk.sh
+
+android_apk: ## Build the Android debug APK
+	./scripts/android_build_apk.sh
 
 pyright: ## Run Pyright type checks
 	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)
