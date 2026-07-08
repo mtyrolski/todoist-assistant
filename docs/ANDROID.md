@@ -31,6 +31,18 @@ The debug APK is produced at:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+CI builds the release variant:
+
+```bash
+make android_release_apk
+```
+
+Without a release signing config, Android produces an unsigned release APK at:
+
+```text
+android/app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
 ## App capabilities
 
 - Save Todoist API token and timezone through the existing admin API.

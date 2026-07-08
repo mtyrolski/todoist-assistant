@@ -42,13 +42,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-
 
-      - name: Build debug APK
+      - name: Build release APK
         run: |
-          make android_apk
+          make android_release_apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: todoist-assistant-android-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: todoist-assistant-android-release-apk
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error

@@ -10,5 +10,19 @@ if [ -f "${ROOT_DIR}/android/.java-home" ]; then
   export PATH="${JAVA_HOME}/bin:${PATH}"
 fi
 
+BUILD_VARIANT="${ANDROID_BUILD_VARIANT:-Debug}"
+case "${BUILD_VARIANT}" in
+  Debug|debug)
+    BUILD_VARIANT="Debug"
+    ;;
+  Release|release)
+    BUILD_VARIANT="Release"
+    ;;
+  *)
+    echo "Unsupported Android build variant: ${BUILD_VARIANT} (use Debug or Release)" >&2
+    exit 2
+    ;;
+esac
+
 cd "${ROOT_DIR}/android"
-./gradlew :app:assembleDebug
+./gradlew ":app:assemble${BUILD_VARIANT}"
