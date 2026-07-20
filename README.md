@@ -185,7 +185,7 @@ Automation setup lives in [`configs/automations.yaml`](configs/automations.yaml)
 
 - Local summaries over cached Todoist history
 - Read-only dashboard chat
-- AI task breakdown for labeled Todoist tasks
+- AI task breakdown for labeled Todoist tasks, with project-scoped durable context
 
 AI is opt-in. The user-facing commands are explicit:
 
@@ -194,7 +194,24 @@ AI is opt-in. The user-facing commands are explicit:
 
 Advanced users can still set `TODOIST_AGENT_BACKEND` in `.env`; supported values are `disabled` and `codex`.
 
-The project does not currently support arbitrary OpenAI-compatible HTTP endpoints, Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard, or write-capable AI agents.
+### Durable project AI context
+
+Use `@ai_context` on tasks whose title starts with the literal `* ` prefix. These
+tasks are treated as durable project memory:
+
+- Same-project context is included automatically in `@ai-breakdown` prompts.
+- Dashboard AI chat receives current context grouped by project.
+- Codex may create or update context after project analysis when it finds a stable,
+  reusable fact. It is instructed not to store transient metrics, guesses, secrets,
+  or routine summaries, and updates are constrained to existing context tasks in the
+  same project.
+- Titles beginning with `* ` are protected from plugin deletion and stale-task
+  cleanup. Todoist itself can still delete them when a user acts directly in Todoist.
+
+Ordinary task creation still requires explicit confirmation in dashboard chat. The
+project does not currently support arbitrary OpenAI-compatible HTTP endpoints,
+Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard,
+or general write-capable AI agents.
 
 Usage details: [docs/USAGE.md](docs/USAGE.md)
 

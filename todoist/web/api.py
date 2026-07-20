@@ -325,7 +325,8 @@ _CHAT_SYSTEM_PROMPT = (
     "You are a Codex-powered personal Todoist assistant. Use the assistant agent "
     "for productivity analysis, task proposal iteration, cache inspection, script "
     "execution, token usage, and telemetry questions. Never mutate Todoist data "
-    "unless the user explicitly confirms the exact creation action."
+    "unless the user explicitly confirms the exact creation action, except for the "
+    "strictly constrained ai_context memory helper."
 )
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
@@ -466,9 +467,11 @@ def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
         "llm_usage": productivity_ctx.llm_usage,
         "telemetry_status": productivity_ctx.telemetry_status,
         "projects": productivity_ctx.projects,
+        "ai_context": productivity_ctx.ai_context,
         "activity_dataframe": productivity_ctx.activity_dataframe,
         "project_comparison": productivity_ctx.project_comparison,
         "executive_summary": productivity_ctx.executive_summary,
+        "upsert_ai_context": productivity_ctx.upsert_ai_context,
         "create_tasks": productivity_ctx.create_tasks,
     }
     python_tool = SafePythonReplTool(tool_ctx)
@@ -531,6 +534,20 @@ async def _run_llm_chat_turn(
         for msg in (conversation.get("messages") or [])
         if msg.get("role") and msg.get("content")
     ]
+    from todoist.agent.productivity_context import build_productivity_context
+
+    productivity_ctx = build_productivity_context(
+        cache_path=os.getenv(str(EnvVar.AGENT_CACHE_PATH), None),
+        repo_root=_REPO_ROOT,
+        env_path=_resolve_env_path(),
+    )
+    try:
+        project_ai_context = await asyncio.to_thread(
+            productivity_ctx.rendered_ai_context
+        )
+    except Exception as exc:  # pragma: no cover - context must not block chat
+        logger.warning("Failed to load AI context for assistant turn: {}", exc)
+        project_ai_context = ""
     state = cast(
         "AgentState",
         {
@@ -542,6 +559,7 @@ async def _run_llm_chat_turn(
                 },
             ],
             "custom_instructions": _load_custom_assistant_instructions(),
+            "project_ai_context": project_ai_context,
         },
     )
     async with _LLM_CHAT_TURN_LOCK:
