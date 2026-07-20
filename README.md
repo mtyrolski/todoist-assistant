@@ -208,6 +208,10 @@ tasks are treated as durable project memory:
 - Titles beginning with `* ` are protected from plugin deletion and stale-task
   cleanup. Todoist itself can still delete them when a user acts directly in Todoist.
 
+See [Durable AI project context](docs/AI_CONTEXT.md) for the exact task contract,
+dynamic aggregation behavior, monotonic update guarantees, examples, helper APIs,
+and verification procedure.
+
 Ordinary task creation still requires explicit confirmation in dashboard chat. The
 project does not currently support arbitrary OpenAI-compatible HTTP endpoints,
 Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard,
@@ -228,6 +232,7 @@ Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
 
 ## Documentation
 
+- [docs/AI_CONTEXT.md](docs/AI_CONTEXT.md): durable project memory contract, aggregation, and safeguards
 - [docs/README.md](docs/README.md): docs index
 - [docs/INSTALLATION.md](docs/INSTALLATION.md): installation by platform
 - [docs/USAGE.md](docs/USAGE.md): commands, dashboard, and automations
