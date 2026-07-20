@@ -84,6 +84,25 @@ def test_evaluate_task_staleness_skips_exempt_label() -> None:
     assert decision.should_update is False
 
 
+def test_evaluate_task_staleness_skips_literal_star_space_title() -> None:
+    task = make_task(
+        "task-context",
+        content="* Durable project constraint",
+        labels=[],
+        added_at="2024-01-01T00:00:00Z",
+        updated_at="2024-01-01T00:00:00Z",
+    )
+
+    decision = evaluate_task_staleness(
+        task,
+        now=datetime(2025, 3, 20, 10, 0, 0),
+        config=StaleTaskConfig(),
+    )
+
+    assert decision.state == "skip"
+    assert decision.reason == "non_removable"
+
+
 def test_evaluate_task_staleness_skips_recurring_task() -> None:
     task = make_task(
         "task-recurring",
