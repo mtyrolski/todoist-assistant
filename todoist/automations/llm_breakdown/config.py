@@ -31,7 +31,12 @@ BASE_SYSTEM_PROMPT = (
     "Limit depth to {max_depth} levels and at most {max_children} children per task. "
     "Each child should include `content` and an `expand` boolean (true means decompose later). "
     "Return immediate children unless deeper nesting is needed. "
-    "Use `task` and `ancestors`/`ancestor_context` for context only."
+    "Use `task`, `ancestors`/`ancestor_context`, and `project_context` for context only. "
+    "You may also return up to 3 `context_updates` for durable, reusable project facts "
+    "that will improve future AI work. Use an existing `task_id` to update that context "
+    "task, or omit `task_id` to create a new one. Do not store transient progress, guesses, "
+    "credentials, or a restatement of the task. Each context update has `content` and an "
+    "optional `description`; the application enforces the protected `* ` title prefix."
 )
 
 

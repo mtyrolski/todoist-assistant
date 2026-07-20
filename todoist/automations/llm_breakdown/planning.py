@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import json
 from typing import Any
@@ -12,6 +12,7 @@ from todoist.llm.llm_utils import (
 )
 from todoist.llm.types import MessageRole
 from todoist.core.types import Task
+from todoist.features.ai_context import AIContextEntry
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class PreparedBreakdownRequest:
     max_children: int
     max_total_tasks: int
     queue_depth_limit: int
+    project_context: list[AIContextEntry]
     messages: list[dict[str, str]]
 
 
@@ -52,6 +54,7 @@ def prepare_breakdown_request(
     item: BreakdownCandidate,
     tasks_by_id: Mapping[str, Task],
     fetch_task: TaskFetcher,
+    project_context: Sequence[AIContextEntry] = (),
 ) -> PreparedBreakdownRequest:
     task = item.task
     label = item.label
@@ -90,6 +93,7 @@ def prepare_breakdown_request(
         variant_key=variant_key,
         max_depth=max_depth,
         max_children=max_children,
+        project_context=project_context,
     )
     return PreparedBreakdownRequest(
         task=task,
@@ -102,6 +106,7 @@ def prepare_breakdown_request(
         max_children=max_children,
         max_total_tasks=max_total_tasks,
         queue_depth_limit=queue_depth_limit,
+        project_context=list(project_context),
         messages=messages,
     )
 
@@ -170,6 +175,7 @@ def build_messages(
     variant_key: str,
     max_depth: int,
     max_children: int,
+    project_context: Sequence[AIContextEntry] = (),
 ) -> list[dict[str, str]]:
     ancestor_context = _build_ancestor_context(task, tasks_by_id, fetch_task)
     ancestor_summary = _render_ancestor_context(ancestor_context)
@@ -188,6 +194,7 @@ def build_messages(
             "max_depth": max_depth,
             "max_children": max_children,
         },
+        "project_context": [entry.as_dict() for entry in project_context],
     }
     if ancestor_summary:
         payload["ancestor_context"] = ancestor_summary

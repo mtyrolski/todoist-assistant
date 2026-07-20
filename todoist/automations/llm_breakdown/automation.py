@@ -21,6 +21,7 @@ from todoist.core.runtime_env import (
 )
 from todoist.core.types import Task
 from todoist.core.utils import Cache
+from todoist.features.ai_context import AI_CONTEXT_LABEL, normalize_label
 
 from .config import (
     build_system_prompt,
@@ -329,6 +330,7 @@ class LLMBreakdown(Automation):
             label
             for label in task.task_entry.labels
             if not label.lower().startswith(self.label_prefix_lower)
+            and normalize_label(label) != AI_CONTEXT_LABEL
         ]
         return labels or None
 

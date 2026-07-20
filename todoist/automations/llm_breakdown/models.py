@@ -105,13 +105,30 @@ class BreakdownNode(BaseModel):
         return _normalize_children(value)
 
 
+class ContextUpdate(BaseModel):
+    task_id: str | None = None
+    content: str | None = None
+    description: str | None = None
+
+    @field_validator("task_id", "content", "description", mode="before")
+    @classmethod
+    def _normalize_text(cls, value: object) -> str | None:
+        return _normalize_text(value)
+
+
 class TaskBreakdown(BaseModel):
     children: list[BreakdownNode] = Field(default_factory=list)
+    context_updates: list[ContextUpdate] = Field(default_factory=list)
 
     @field_validator("children", mode="before")
     @classmethod
     def _normalize_children(cls, value: object) -> list[NormalizedChild]:
         return _normalize_children(value)
+
+    @field_validator("context_updates", mode="before")
+    @classmethod
+    def _normalize_context_updates(cls, value: object) -> list[object]:
+        return value if isinstance(value, list) else []
 
 
 BreakdownNode.model_rebuild()

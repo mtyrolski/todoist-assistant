@@ -7,6 +7,11 @@ from todoist.llm.llm_utils import (
     _task_from_api_payload,
 )
 from todoist.core.types import Task
+from todoist.features.ai_context import (
+    AIContextEntry,
+    collect_ai_context,
+    upsert_ai_context_task,
+)
 
 from .generation import generate_breakdowns
 from .models import (
@@ -93,6 +98,7 @@ def _completion_comment(
     run_id: str,
     created_count: int,
     nodes: list[Any],
+    context_results: list[dict[str, Any]] | None = None,
 ) -> str:
     lines = [
         _comment_header(),
@@ -105,7 +111,54 @@ def _completion_comment(
     if titles:
         lines.append("Planned children:")
         lines.extend(f"- {title}" for title in titles[:10])
+    if context_results:
+        lines.append("AI context changes:")
+        lines.extend(
+            f"- {item['action']}: {item['content']}" for item in context_results
+        )
     return "\n".join(lines)
+
+
+def _apply_context_updates(
+    db: Database,
+    *,
+    project_id: str,
+    existing_entries: list[AIContextEntry],
+    updates: list[Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for update in updates[:3]:
+        content = str(getattr(update, "content", "") or "").strip()
+        if not content:
+            continue
+        try:
+            result = upsert_ai_context_task(
+                db,
+                project_id=project_id,
+                task_id=str(getattr(update, "task_id", "") or "").strip() or None,
+                content=content,
+                description=str(getattr(update, "description", "") or "").strip()
+                or None,
+                existing_entries=existing_entries,
+            )
+        except Exception as exc:  # pragma: no cover - network safety
+            message = f"{type(exc).__name__}: {exc}"
+            errors.append(message)
+            logger.warning("Failed to apply AI context update: {}", message)
+            continue
+        results.append(result)
+        if result["action"] == "created":
+            existing_entries.append(
+                AIContextEntry(
+                    task_id=str(result["taskId"]),
+                    project_id=project_id,
+                    project_name="",
+                    content=str(result["content"]),
+                    description=str(result["description"]),
+                )
+            )
+    return results, errors
 
 
 def _task_failure_comment_count(db: Database, task_id: str) -> int:
@@ -162,6 +215,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
     logger.info("Running AI Breakdown automation")
     projects = db.fetch_projects(include_tasks=True)
     all_tasks: list[Task] = [task for project in projects for task in project.tasks]
+    context_by_project: dict[str, list[AIContextEntry]] = {}
+    for entry in collect_ai_context(projects):
+        context_by_project.setdefault(entry.project_id, []).append(entry)
     logger.debug(f"Found {len(all_tasks)} tasks in total")
 
     tasks_by_id = build_task_lookup(all_tasks)
@@ -281,6 +337,9 @@ def run_breakdown(automation: Any, db: Database) -> None:
             item=item,
             tasks_by_id=tasks_by_id,
             fetch_task=fetch_task,
+            project_context=context_by_project.get(
+                str(item.task.task_entry.project_id), []
+            ),
         )
         for item in tasks_to_process
     ]
@@ -427,6 +486,20 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 automation.update_root_labels(db, task, label)
             record_failure(error_message, created_count=created_count)
             continue
+        context_results, context_errors = _apply_context_updates(
+            db,
+            project_id=str(task.task_entry.project_id),
+            existing_entries=context_by_project.setdefault(
+                str(task.task_entry.project_id), list(request.project_context)
+            ),
+            updates=result.breakdown.context_updates,
+        )
+        if context_errors:
+            logger.warning(
+                "AI breakdown for task {} completed, but {} context update(s) failed",
+                task.id,
+                len(context_errors),
+            )
         if automation.remove_label_after_processing and source == "label":
             automation.update_root_labels(db, task, label)
         completed += 1
@@ -437,6 +510,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 run_id=run_id,
                 created_count=created_count,
                 nodes=nodes,
+                context_results=context_results,
             ),
         )
 
