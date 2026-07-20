@@ -68,7 +68,10 @@ def test_ai_context_helpers_fetch_and_upsert_only_project_memory(
     )
 
     assert ctx.ai_context(project_id="project-1")[0]["taskId"] == "context-1"
-    assert "[Platform] * Stable constraint" in ctx.rendered_ai_context()
+    assert "Project: Platform (1 context task(s))" in ctx.rendered_ai_context()
+    aggregate = ctx.project_ai_context(project_id="project-1")[0]
+    assert aggregate["contextCount"] == 1
+    assert aggregate["entries"][0]["taskId"] == "context-1"
     result = ctx.upsert_ai_context(
         "project-1",
         "Updated stable constraint",
@@ -76,7 +79,7 @@ def test_ai_context_helpers_fetch_and_upsert_only_project_memory(
     )
 
     assert result["action"] == "updated"
-    assert fake_db.updated[0][1]["content"] == "* Updated stable constraint"
+    assert fake_db.updated[0][1]["description"] == "Updated stable constraint"
 
 
 def _save_dashboard_activity(cache_path: Path) -> None:

@@ -12,7 +12,7 @@ from todoist.llm.llm_utils import (
 )
 from todoist.llm.types import MessageRole
 from todoist.core.types import Task
-from todoist.features.ai_context import AIContextEntry
+from todoist.features.ai_context import AIContextEntry, aggregate_ai_context
 
 
 @dataclass(frozen=True)
@@ -195,6 +195,9 @@ def build_messages(
             "max_children": max_children,
         },
         "project_context": [entry.as_dict() for entry in project_context],
+        "project_context_aggregate": [
+            aggregate.as_dict() for aggregate in aggregate_ai_context(project_context)
+        ],
     }
     if ancestor_summary:
         payload["ancestor_context"] = ancestor_summary

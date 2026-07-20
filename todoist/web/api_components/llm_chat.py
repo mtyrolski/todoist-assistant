@@ -335,6 +335,7 @@ def _assistant_metadata_payload() -> dict[str, Any]:
             "telemetry_status()",
             "projects()",
             "ai_context(project_id=None, project_name=None)",
+            "project_ai_context(project_id=None, project_name=None)",
             "activity_dataframe()",
             "project_comparison(period='week', as_of=None, offset=0, limit=12)",
             "executive_summary(period='week', as_of=None, offset=0, limit=8)",

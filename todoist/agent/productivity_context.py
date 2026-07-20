@@ -19,6 +19,7 @@ from todoist.core.env import EnvVar
 from todoist.core.utils import CACHE_STORAGE_REGISTRY, resolve_cache_dir
 from todoist.database.base import Database
 from todoist.features.ai_context import (
+    aggregate_ai_context,
     collect_ai_context,
     render_ai_context,
     upsert_ai_context_task,
@@ -312,6 +313,22 @@ class ProductivityContext:
         entries = collect_ai_context(db.fetch_projects(include_tasks=True))
         return render_ai_context(entries)
 
+    def project_ai_context(
+        self,
+        *,
+        project_id: str | None = None,
+        project_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return a fresh, lossless project grouping of all durable context tasks."""
+
+        db = Database(str(self.env_path))
+        entries = collect_ai_context(
+            db.fetch_projects(include_tasks=True),
+            project_id=project_id,
+            project_name=project_name,
+        )
+        return [aggregate.as_dict() for aggregate in aggregate_ai_context(entries)]
+
     def upsert_ai_context(
         self,
         project_id: str,
@@ -399,6 +416,7 @@ def productivity_context_payload(ctx: ProductivityContext) -> dict[str, Any]:
             "telemetry_status()",
             "projects()",
             "ai_context(project_id=None, project_name=None)",
+            "project_ai_context(project_id=None, project_name=None)",
             "activity_dataframe()",
             "project_comparison(period='week', as_of=None, offset=0, limit=12)",
             "executive_summary(period='week', as_of=None, offset=0, limit=8)",

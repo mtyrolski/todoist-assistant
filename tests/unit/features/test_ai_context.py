@@ -1,9 +1,14 @@
+import pytest
+
 from tests.factories import make_project, make_task
 from todoist.features.ai_context import (
     AI_CONTEXT_LABEL,
+    MAX_AI_CONTEXT_DESCRIPTION_CHARS,
+    aggregate_ai_context,
     collect_ai_context,
     is_ai_context_task,
     is_non_removable_content,
+    merge_context_description,
     protected_context_content,
     render_ai_context,
     upsert_ai_context_task,
@@ -48,10 +53,10 @@ def test_collect_ai_context_requires_label_and_literal_prefix() -> None:
     assert is_non_removable_content("* protected") is True
     assert is_non_removable_content("*missing-space") is False
     assert [entry.task_id for entry in entries] == ["valid"]
-    assert (
-        "[Platform] * Architecture: Prefer event-driven boundaries."
-        in render_ai_context(entries)
-    )
+    rendered = render_ai_context(entries)
+    assert "Project: Platform (1 context task(s))" in rendered
+    assert "- * Architecture: Prefer event-driven boundaries." in rendered
+    assert entries[0].updated_at == "2024-01-01T00:00:00Z"
 
 
 def test_upsert_ai_context_is_constrained_to_context_tasks_in_project() -> None:
@@ -88,8 +93,9 @@ def test_upsert_ai_context_is_constrained_to_context_tasks_in_project() -> None:
     assert created["content"] == "* New durable fact"
     assert db.created[0]["labels"] == [AI_CONTEXT_LABEL]
     assert updated["action"] == "updated"
-    assert db.updated[0][1]["content"] == "* Updated durable fact"
-    assert "description" not in db.updated[0][1]
+    assert updated["content"] == "* Existing"
+    assert db.updated[0][1]["description"] == "Updated durable fact"
+    assert "content" not in db.updated[0][1]
 
 
 def test_upsert_ai_context_updates_exact_title_instead_of_duplicating() -> None:
@@ -114,10 +120,98 @@ def test_upsert_ai_context_updates_exact_title_instead_of_duplicating() -> None:
         existing_entries=collect_ai_context([project]),
     )
 
-    assert result["action"] == "updated"
+    assert result["action"] == "unchanged"
     assert result["taskId"] == "context-1"
     assert db.created == []
-    assert db.updated[0][1]["description"] == "Original detail"
+    assert db.updated == []
+
+
+def test_ai_context_updates_accumulate_without_losing_existing_facts() -> None:
+    project = make_project(
+        project_id="project-1",
+        tasks=[
+            make_task(
+                "context-1",
+                content="* Release policy",
+                description="Run unit tests before release.",
+                labels=[AI_CONTEXT_LABEL],
+                project_id="project-1",
+            )
+        ],
+    )
+    db = _FakeDb()
+
+    result = upsert_ai_context_task(
+        db,
+        project_id="project-1",
+        task_id="context-1",
+        content="Release policy",
+        description="Run a staging smoke test before production.",
+        existing_entries=collect_ai_context([project]),
+    )
+
+    assert result["content"] == "* Release policy"
+    assert result["description"] == (
+        "Run unit tests before release.\nRun a staging smoke test before production."
+    )
+    assert db.updated[0][1] == {"description": result["description"]}
+
+
+def test_context_merge_keeps_more_complete_text_and_rejects_lossy_overflow() -> None:
+    existing = "Production deploys require approval and a rollback plan."
+
+    assert merge_context_description(existing, "approval and a rollback") == existing
+    assert (
+        merge_context_description(existing, f"Policy: {existing}")
+        == f"Policy: {existing}"
+    )
+    with pytest.raises(ValueError, match="separate ai_context task"):
+        merge_context_description(
+            "x" * (MAX_AI_CONTEXT_DESCRIPTION_CHARS - 1), "new fact"
+        )
+
+
+def test_dynamic_aggregation_keeps_multiple_topics_and_projects() -> None:
+    projects = [
+        make_project(
+            project_id="project-1",
+            name="Platform",
+            tasks=[
+                make_task(
+                    "context-architecture",
+                    content="* Architecture",
+                    labels=[AI_CONTEXT_LABEL],
+                    project_id="project-1",
+                ),
+                make_task(
+                    "context-release",
+                    content="* Release policy",
+                    labels=[AI_CONTEXT_LABEL],
+                    project_id="project-1",
+                ),
+            ],
+        ),
+        make_project(
+            project_id="project-2",
+            name="Research",
+            tasks=[
+                make_task(
+                    "context-data",
+                    content="* Data source",
+                    labels=[AI_CONTEXT_LABEL],
+                    project_id="project-2",
+                )
+            ],
+        ),
+    ]
+
+    aggregates = aggregate_ai_context(collect_ai_context(projects))
+
+    assert [(item.project_name, len(item.entries)) for item in aggregates] == [
+        ("Platform", 2),
+        ("Research", 1),
+    ]
+    assert aggregates[0].as_dict()["contextCount"] == 2
 
 
 def test_upsert_ai_context_rejects_cross_project_or_ordinary_task_id() -> None:

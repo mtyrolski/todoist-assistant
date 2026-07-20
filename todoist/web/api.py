@@ -468,6 +468,7 @@ def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
         "telemetry_status": productivity_ctx.telemetry_status,
         "projects": productivity_ctx.projects,
         "ai_context": productivity_ctx.ai_context,
+        "project_ai_context": productivity_ctx.project_ai_context,
         "activity_dataframe": productivity_ctx.activity_dataframe,
         "project_comparison": productivity_ctx.project_comparison,
         "executive_summary": productivity_ctx.executive_summary,

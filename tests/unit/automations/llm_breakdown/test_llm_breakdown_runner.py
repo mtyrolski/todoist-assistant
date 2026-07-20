@@ -202,6 +202,8 @@ def test_run_breakdown_injects_same_project_ai_context(monkeypatch) -> None:
 
     user_payload = llm.messages[0][1]["content"]
     assert '"project_context"' in user_payload
+    assert '"project_context_aggregate"' in user_payload
+    assert '"contextCount": 1' in user_payload
     assert '"taskId": "context-1"' in user_payload
     assert "Avoid internal endpoints." in user_payload
 
@@ -254,7 +256,8 @@ def test_run_breakdown_updates_only_existing_same_project_context(monkeypatch) -
     run_breakdown(automation, cast(Database, db))
 
     update = next(call for call in db.update_calls if call[0] == "context-1")
-    assert update[1]["content"] == "* Deployment target is production"
+    assert update[1]["description"] == "Deployment target is production"
+    assert "content" not in update[1]
     assert "labels" not in update[1]
 
 

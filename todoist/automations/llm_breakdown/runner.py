@@ -156,6 +156,7 @@ def _apply_context_updates(
                     project_name="",
                     content=str(result["content"]),
                     description=str(result["description"]),
+                    updated_at="",
                 )
             )
     return results, errors
