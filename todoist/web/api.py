@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -180,6 +180,7 @@ async def healthcheck() -> dict[str, str]:
 
 
 Granularity = Literal["W", "ME", "3ME"]
+ProgressLaneStatus = Literal["queued", "active", "done"]
 
 
 class _DashboardState:
@@ -188,6 +189,7 @@ class _DashboardState:
         self.db: Database | None = None
         self.df_activity: pd.DataFrame | None = None
         self.active_projects: list[Project] | None = None
+        self.archived_projects: list[Project] | None = None
         self.project_colors: dict[str, str] | None = None
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
         self.demo_mode: bool = False
@@ -202,6 +204,18 @@ class _DashboardState:
 
 
 @dataclass
+class _ProgressLane:
+    id: str
+    label: str
+    detail: str
+    current: int
+    total: int
+    unit: str | None
+    status: ProgressLaneStatus
+    updated_at: str
+
+
+@dataclass
 class _ProgressState:
     active: bool = False
     stage: str | None = None
@@ -212,6 +226,7 @@ class _ProgressState:
     detail: str | None = None
     sub_current: int | None = None
     sub_total: int | None = None
+    lanes: dict[str, _ProgressLane] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -224,7 +239,7 @@ _ADMIN_LOCK = asyncio.Lock()
 _JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
-_DASHBOARD_STATE_SCHEMA_VERSION = 2
+_DASHBOARD_STATE_SCHEMA_VERSION = 3
 _DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
@@ -732,7 +747,7 @@ def _save_mapping_file(
 
 def _load_projects_for_adjustments_sync(
     refresh: bool,
-) -> tuple[list[str], list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str], list[dict[str, Any]]]:
     if not refresh and _state.db is not None:
         dbio = _state.db
     else:
@@ -759,7 +774,155 @@ def _load_projects_for_adjustments_sync(
     remappable_active_root = sorted(
         [name for name in active_root if name in _REMAPPABLE_ACTIVE_ROOT_PROJECTS]
     )
-    return active_root, archived_root, archived_names, remappable_active_root
+    projects_by_id = {
+        str(project.id): project for project in [*active_projects, *archived_projects]
+    }
+    project_records: list[dict[str, Any]] = []
+    for project in projects_by_id.values():
+        ancestors: list[dict[str, str]] = []
+        current: Project | None = project
+        visited: set[str] = set()
+        while current is not None and str(current.id) not in visited:
+            current_id = str(current.id)
+            visited.add(current_id)
+            ancestors.append(
+                {
+                    "id": current_id,
+                    "name": str(current.project_entry.name),
+                }
+            )
+            parent_id = (
+                current.project_entry.parent_id or current.project_entry.v2_parent_id
+            )
+            current = (
+                projects_by_id.get(str(parent_id)) if parent_id is not None else None
+            )
+        root = ancestors[-1]
+        project_records.append(
+            {
+                "id": str(project.id),
+                "name": str(project.project_entry.name),
+                "isArchived": bool(project.is_archived),
+                "ancestors": ancestors,
+                "rootId": root["id"],
+                "rootName": root["name"],
+            }
+        )
+    return (
+        active_root,
+        archived_root,
+        archived_names,
+        remappable_active_root,
+        project_records,
+    )
+
+
+def _preferred_adjustment_project_id(
+    project_name: str, project_records: list[dict[str, Any]]
+) -> str | None:
+    matches = [
+        record for record in project_records if record.get("name") == project_name
+    ]
+    active_matches = [record for record in matches if not record.get("isArchived")]
+    preferred = active_matches or matches
+    if len(preferred) != 1:
+        return None
+    return str(preferred[0]["id"])
+
+
+def _resolve_automatic_project_mappings(
+    project_records: list[dict[str, Any]],
+    *,
+    manual_mappings: dict[str, str],
+    archived_parent_projects: set[str],
+) -> tuple[dict[str, str], list[dict[str, str | None]]]:
+    """Infer archived-project root assignments not overridden by saved mappings."""
+
+    candidates: dict[str, set[str]] = {}
+    candidate_details: list[dict[str, str | None]] = []
+    for record in project_records:
+        if not record.get("isArchived"):
+            continue
+        source_name = str(record.get("name") or "")
+        if (
+            not source_name
+            or source_name in manual_mappings
+            or source_name in archived_parent_projects
+        ):
+            continue
+        ancestors = cast(list[dict[str, str]], record.get("ancestors") or [])
+        if not ancestors:
+            continue
+
+        promoted_parent = next(
+            (
+                ancestor
+                for ancestor in ancestors
+                if ancestor["name"] in archived_parent_projects
+            ),
+            None,
+        )
+        manual_ancestor = next(
+            (ancestor for ancestor in ancestors if ancestor["name"] in manual_mappings),
+            None,
+        )
+        if promoted_parent is not None:
+            target_name = promoted_parent["name"]
+            target_id = promoted_parent["id"]
+        elif manual_ancestor is not None:
+            target_name = manual_mappings[manual_ancestor["name"]]
+            target_id = _preferred_adjustment_project_id(target_name, project_records)
+        else:
+            target_name = str(record.get("rootName") or "")
+            target_id = str(record.get("rootId") or "") or None
+        if not target_name or target_name == source_name:
+            continue
+
+        candidates.setdefault(source_name, set()).add(target_name)
+        candidate_details.append(
+            {
+                "sourceProject": source_name,
+                "sourceProjectId": str(record.get("id") or "") or None,
+                "parentProject": target_name,
+                "parentProjectId": target_id,
+                "provenance": "automatic",
+            }
+        )
+
+    automatic_mappings = {
+        source_name: next(iter(target_names))
+        for source_name, target_names in sorted(candidates.items())
+        if len(target_names) == 1
+    }
+    details = [
+        detail
+        for detail in candidate_details
+        if automatic_mappings.get(str(detail["sourceProject"]))
+        == detail["parentProject"]
+    ]
+    return automatic_mappings, details
+
+
+def _manual_project_mapping_details(
+    project_records: list[dict[str, Any]], manual_mappings: dict[str, str]
+) -> list[dict[str, str | None]]:
+    details: list[dict[str, str | None]] = []
+    for source_name, target_name in sorted(manual_mappings.items()):
+        source_records = [
+            record for record in project_records if record.get("name") == source_name
+        ] or [{}]
+        target_id = _preferred_adjustment_project_id(target_name, project_records)
+        for record in source_records:
+            details.append(
+                {
+                    "sourceProject": source_name,
+                    "sourceProjectId": str(record.get("id") or "") or None,
+                    "parentProject": target_name,
+                    "parentProjectId": target_id,
+                    "provenance": "manual",
+                }
+            )
+    return details
 
 
 def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:

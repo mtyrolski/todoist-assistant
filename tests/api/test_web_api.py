@@ -3,6 +3,7 @@
 from datetime import date
 
 import pandas as pd
+import plotly.graph_objects as go
 
 from tests.factories import make_project, make_project_entry, make_task
 from tests.web_api_helpers import (
@@ -12,6 +13,7 @@ from tests.web_api_helpers import (
     _stub_all_figures,
 )
 import todoist.web.api as web_api
+import todoist.web.routes.dashboard as dashboard_routes
 
 # pylint: disable=protected-access
 
@@ -70,6 +72,7 @@ def _save_dashboard_snapshot(cache: web_api.Cache, **overrides) -> None:
         "adjustments_cache_signature": [],
         "df_activity": _single_event_df(),
         "active_projects": [],
+        "archived_projects": [],
         "project_colors": {},
     }
     payload.update(overrides)
@@ -88,6 +91,7 @@ def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> N
     assert len(web_api._state.df_activity) == 1
     assert web_api._state.project_colors == {"A": "#123456"}
     assert web_api._state.active_projects == []
+    assert web_api._state.archived_projects == []
 
 
 def test_load_state_from_disk_cache_rejects_stale_activity_signature(
@@ -157,6 +161,7 @@ def test_load_state_from_disk_cache_restores_current_demo_snapshot(
     assert len(web_api._state.df_activity) == 1
     assert web_api._state.project_colors == {"A": "#123456"}
     assert web_api._state.active_projects == []
+    assert web_api._state.archived_projects == []
     assert web_api._state.demo_mode is True
 
 
@@ -232,59 +237,61 @@ def test_dashboard_home_requires_beg_and_end(monkeypatch, api_client) -> None:
     assert res.status_code == 400
 
 
-def test_dashboard_home_last_completed_week_parent_share(monkeypatch, api_client) -> None:
+def test_dashboard_home_last_completed_week_parent_share(
+    monkeypatch, api_client
+) -> None:
     _set_dashboard_df(
         monkeypatch,
         _event_df(
-        [
-            {
-                "date": "2025-01-06",
-                "id": "c1",
-                "title": "x",
-                "type": "completed",
-                "parent_project_name": "Parent A",
-                "root_project_name": "Root 1",
-                "task_id": "t1",
-            },
-            {
-                "date": "2025-01-07",
-                "id": "c2",
-                "title": "y",
-                "type": "completed",
-                "parent_project_name": "Parent A",
-                "root_project_name": "Root 1",
-                "task_id": "t2",
-            },
-            {
-                "date": "2025-01-08",
-                "id": "c3",
-                "title": "z",
-                "type": "completed",
-                "parent_project_name": "Parent B",
-                "root_project_name": "Root 2",
-                "task_id": "t3",
-            },
-            # Not completed:
-            {
-                "date": "2025-01-09",
-                "id": "a1",
-                "title": "n",
-                "type": "added",
-                "parent_project_name": "Parent A",
-                "root_project_name": "Root 1",
-                "task_id": "t4",
-            },
-            # Anchor (partial week, should be excluded from last completed week):
-            {
-                "date": "2025-01-15",
-                "id": "c4",
-                "title": "w",
-                "type": "completed",
-                "parent_project_name": "Parent C",
-                "root_project_name": "Root 3",
-                "task_id": "t5",
-            },
-        ]
+            [
+                {
+                    "date": "2025-01-06",
+                    "id": "c1",
+                    "title": "x",
+                    "type": "completed",
+                    "parent_project_name": "Parent A",
+                    "root_project_name": "Root 1",
+                    "task_id": "t1",
+                },
+                {
+                    "date": "2025-01-07",
+                    "id": "c2",
+                    "title": "y",
+                    "type": "completed",
+                    "parent_project_name": "Parent A",
+                    "root_project_name": "Root 1",
+                    "task_id": "t2",
+                },
+                {
+                    "date": "2025-01-08",
+                    "id": "c3",
+                    "title": "z",
+                    "type": "completed",
+                    "parent_project_name": "Parent B",
+                    "root_project_name": "Root 2",
+                    "task_id": "t3",
+                },
+                # Not completed:
+                {
+                    "date": "2025-01-09",
+                    "id": "a1",
+                    "title": "n",
+                    "type": "added",
+                    "parent_project_name": "Parent A",
+                    "root_project_name": "Root 1",
+                    "task_id": "t4",
+                },
+                # Anchor (partial week, should be excluded from last completed week):
+                {
+                    "date": "2025-01-15",
+                    "id": "c4",
+                    "title": "w",
+                    "type": "completed",
+                    "parent_project_name": "Parent C",
+                    "root_project_name": "Root 3",
+                    "task_id": "t5",
+                },
+            ]
         ),
     )
 
@@ -387,7 +394,9 @@ def test_dashboard_home_includes_habit_tracker_summary(monkeypatch, api_client) 
     assert habit_tracker["figure"]["data"]
 
 
-def test_dashboard_home_normalizes_integer_activity_index(monkeypatch, api_client) -> None:
+def test_dashboard_home_normalizes_integer_activity_index(
+    monkeypatch, api_client
+) -> None:
     df = pd.DataFrame(
         [
             {
@@ -473,3 +482,49 @@ def test_dashboard_home_includes_urgency_status(monkeypatch, api_client) -> None
     ]
     assert payload["configurableItems"][0]["icon"] == "wrench"
     assert isinstance(payload["figures"]["activeProjectHierarchy"], dict)
+
+
+def test_dashboard_home_passes_active_and_archived_projects_to_hierarchy(
+    monkeypatch, api_client
+) -> None:
+    _set_dashboard_df(monkeypatch, _single_event_df())
+    active = make_project(
+        project_id="active",
+        project_entry=make_project_entry(project_id="active", name="Active"),
+    )
+    archived = make_project(
+        project_id="archived",
+        project_entry=make_project_entry(
+            project_id="archived", name="Archived", parent_id="active"
+        ),
+        is_archived=True,
+    )
+    web_api._state.active_projects = [active]
+    web_api._state.archived_projects = [archived]
+    captured: dict[str, object] = {}
+
+    def _capture_hierarchy(*args, **kwargs):
+        captured["projects"] = args[3]
+        captured["mappings"] = kwargs["project_mappings"]
+        captured["archived_parents"] = kwargs["archived_parent_projects"]
+        return go.Figure()
+
+    monkeypatch.setattr(web_api, "plot_active_project_hierarchy", _capture_hierarchy)
+    monkeypatch.setattr(
+        dashboard_routes, "get_adjusting_mapping", lambda: {"Archived": "Active"}
+    )
+    monkeypatch.setattr(
+        dashboard_routes,
+        "get_adjusting_archived_parent_projects",
+        lambda: {"Archived"},
+    )
+
+    response = _home(api_client)
+
+    assert response.status_code == 200
+    assert [project.id for project in captured["projects"]] == [
+        "active",
+        "archived",
+    ]
+    assert captured["mappings"] == {"Archived": "Active"}
+    assert captured["archived_parents"] == {"Archived"}

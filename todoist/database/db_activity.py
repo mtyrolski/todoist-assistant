@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -7,7 +8,11 @@ from todoist.features.stats import extract_task_due_date
 from todoist.core.types import Event, EventEntry
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
-from todoist.core.utils import report_tqdm_progress, safe_instantiate_entry
+from todoist.core.utils import (
+    get_max_concurrent_requests,
+    report_tqdm_progress,
+    safe_instantiate_entry,
+)
 
 ACTIVITY_PAGE_LIMIT = 100
 
@@ -331,8 +336,9 @@ class DatabaseActivity:
         events_already_fetched: set[Event] | None = None,
         early_stop_after_n_windows: int | None = 2,
         progress_desc: str = "Fetching archived project activity",
+        progress_lane_labels: Mapping[str, str] | None = None,
     ) -> list[Event]:
-        """Fetch scoped activity, stopping early for projects already cached."""
+        """Fetch project scopes concurrently while scanning each scope sequentially."""
 
         project_ids = sorted(
             {project_id for project_id in parent_project_ids if project_id}
@@ -346,17 +352,16 @@ class DatabaseActivity:
         if early_stop_after_n_windows is not None and early_stop_after_n_windows <= 0:
             raise ValueError("early_stop_after_n_windows must be positive")
 
-        seen_events = set(events_already_fetched or set())
+        initial_seen_events = set(events_already_fetched or set())
         cached_project_ids = {
             project_id
-            for event in seen_events
+            for event in initial_seen_events
             for project_id in (
                 event.event_entry.parent_project_id,
                 event.event_entry.v2_parent_project_id,
             )
             if project_id
         }
-        fetched_events: list[Event] = []
         window_delta = timedelta(weeks=window_weeks)
         estimated_windows_per_project = max(
             1,
@@ -369,11 +374,17 @@ class DatabaseActivity:
                 // window_delta.total_seconds()
             ),
         )
-        total_windows = len(project_ids) * estimated_windows_per_project
-        completed_windows = 0
+        max_workers = min(get_max_concurrent_requests(), len(project_ids))
+        lane_labels = progress_lane_labels or {}
 
-        report_tqdm_progress(progress_desc, 0, total_windows, "window")
-        for project_index, parent_project_id in enumerate(project_ids, start=1):
+        def _scan_project(project_index: int, parent_project_id: str) -> list[Event]:
+            lane_id = f"archived-project:{parent_project_id}"
+            lane_label = lane_labels.get(
+                parent_project_id,
+                f"Project {project_index}/{len(project_ids)}",
+            )
+            seen_events = set(initial_seen_events)
+            project_events: list[Event] = []
             window_end = date_to
             project_windows_scanned = 0
             consecutive_empty_windows = 0
@@ -381,20 +392,32 @@ class DatabaseActivity:
                 early_stop_after_n_windows is not None
                 and parent_project_id in cached_project_ids
             )
+            report_tqdm_progress(
+                progress_desc,
+                0,
+                estimated_windows_per_project,
+                "window",
+                detail=f"{lane_label}: waiting to scan activity windows",
+                lane_id=lane_id,
+                lane_label=lane_label,
+                lane_status="active",
+            )
             while window_end > date_from:
                 window_start = max(date_from, window_end - window_delta)
-                completed_windows += 1
                 project_windows_scanned += 1
                 window_range = _format_progress_date_range(window_start, window_end)
                 report_tqdm_progress(
                     progress_desc,
-                    completed_windows - 1,
-                    total_windows,
+                    project_windows_scanned - 1,
+                    estimated_windows_per_project,
                     "window",
                     detail=(
-                        f"{progress_desc}: project {project_index}/{len(project_ids)} "
-                        f"scanning {window_range}; cached events={len(seen_events)}"
+                        f"{lane_label}: scanning {window_range}; "
+                        f"cached events={len(seen_events)}"
                     ),
+                    lane_id=lane_id,
+                    lane_label=lane_label,
+                    lane_status="active",
                 )
                 window_events = self._fetch_activity_range(
                     date_from=window_start,
@@ -404,19 +427,26 @@ class DatabaseActivity:
                     parent_project_id=parent_project_id,
                 )
                 new_events = _events_not_in(window_events, seen_events)
-                fetched_events.extend(new_events)
+                project_events.extend(new_events)
                 seen_events.update(new_events)
                 consecutive_empty_windows = (
                     0 if new_events else consecutive_empty_windows + 1
                 )
                 report_tqdm_progress(
                     progress_desc,
-                    completed_windows,
-                    total_windows,
+                    project_windows_scanned,
+                    estimated_windows_per_project,
                     "window",
                     detail=(
-                        f"{progress_desc}: project {project_index}/{len(project_ids)} "
-                        f"completed {window_range}; new events={len(new_events)}"
+                        f"{lane_label}: completed {window_range}; "
+                        f"new events={len(new_events)}"
+                    ),
+                    lane_id=lane_id,
+                    lane_label=lane_label,
+                    lane_status=(
+                        "done"
+                        if project_windows_scanned >= estimated_windows_per_project
+                        else "active"
                     ),
                 )
                 window_end = window_start
@@ -428,19 +458,66 @@ class DatabaseActivity:
                     skipped_windows = max(
                         estimated_windows_per_project - project_windows_scanned, 0
                     )
-                    completed_windows += skipped_windows
                     report_tqdm_progress(
                         progress_desc,
-                        completed_windows,
-                        total_windows,
+                        estimated_windows_per_project,
+                        estimated_windows_per_project,
                         "window",
                         detail=(
-                            f"{progress_desc}: project {project_index}/{len(project_ids)} "
-                            f"stopped after {consecutive_empty_windows} newest windows "
+                            f"{lane_label}: stopped after "
+                            f"{consecutive_empty_windows} newest windows "
                             f"with no new events; skipped {skipped_windows} older windows"
                         ),
+                        lane_id=lane_id,
+                        lane_label=lane_label,
+                        lane_status="done",
                     )
                     break
+            return project_events
+
+        fetched_events: list[Event] = []
+        report_tqdm_progress(
+            progress_desc,
+            0,
+            len(project_ids),
+            "project",
+            detail=(
+                f"{progress_desc}: scanning {len(project_ids)} project(s); "
+                f"workers={max_workers}"
+            ),
+        )
+        for project_index, parent_project_id in enumerate(project_ids, start=1):
+            lane_label = lane_labels.get(
+                parent_project_id,
+                f"Project {project_index}/{len(project_ids)}",
+            )
+            report_tqdm_progress(
+                progress_desc,
+                0,
+                estimated_windows_per_project,
+                "window",
+                detail=f"{lane_label}: queued",
+                lane_id=f"archived-project:{parent_project_id}",
+                lane_label=lane_label,
+                lane_status="queued",
+            )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_scan_project, project_index, parent_project_id)
+                for project_index, parent_project_id in enumerate(project_ids, start=1)
+            ]
+            for completed_projects, future in enumerate(as_completed(futures), start=1):
+                fetched_events.extend(future.result())
+                report_tqdm_progress(
+                    progress_desc,
+                    completed_projects,
+                    len(project_ids),
+                    "project",
+                    detail=(
+                        f"{progress_desc}: completed {completed_projects}/"
+                        f"{len(project_ids)} project(s); workers={max_workers}"
+                    ),
+                )
 
         fetched_events = list(set(fetched_events))
         fetched_events.sort(

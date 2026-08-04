@@ -40,7 +40,8 @@ LOCAL_STORAGE_EXCEPTIONS = (
 DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
 MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
 MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.3"
-CACHE_STORAGE_REGISTRY: dict[str, tuple[str, Callable[[], Any]]] = {
+CacheStorageSpec = tuple[str, Callable[[], Any]]
+CACHE_STORAGE_REGISTRY: dict[str, CacheStorageSpec] = {
     "activity": ("activity.joblib", set),
     "observer_state": ("observer_state.joblib", dict),
     "integration_launches": ("integration_launches.joblib", dict),
@@ -51,6 +52,7 @@ CACHE_STORAGE_REGISTRY: dict[str, tuple[str, Callable[[], Any]]] = {
     "habit_tracker_posts": ("habit_tracker_posts.joblib", dict),
     "processed_gmail_messages": ("processed_gmail_messages.joblib", set),
     "dashboard_state": ("dashboard_state.joblib", dict),
+    "archived_activity_scans": ("archived_activity_scans.joblib", dict),
     "llm_breakdown_progress": ("llm_breakdown_progress.joblib", dict),
     "llm_breakdown_queue": ("llm_breakdown_queue.joblib", dict),
     "llm_chat_conversations": ("llm_chat_conversations.joblib", list),
@@ -104,11 +106,42 @@ def report_tqdm_progress(
     total: int,
     unit: str | None = None,
     detail: str | None = None,
+    *,
+    lane_id: str | None = None,
+    lane_label: str | None = None,
+    lane_status: str | None = None,
 ) -> None:
     callback = _STATE.tqdm_progress_callback
     if callback is None:
         return
     try:
+        if lane_id is not None:
+            try:
+                callback(
+                    desc,
+                    current,
+                    total,
+                    unit,
+                    detail,
+                    lane_id,
+                    lane_label,
+                    lane_status,
+                )
+                return
+            except TypeError:
+                try:
+                    callback(
+                        desc,
+                        current,
+                        total,
+                        unit,
+                        detail,
+                        lane_id,
+                        lane_label,
+                    )
+                    return
+                except TypeError:
+                    pass
         if detail is None:
             callback(desc, current, total, unit)
         else:
