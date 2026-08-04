@@ -24,6 +24,8 @@ scripts/*
 !scripts/create_task_tree.py
 !scripts/android_bootstrap_sdk.sh
 !scripts/android_build_apk.sh
+!scripts/android_install_smoke.sh
+!scripts/android_verify_apk.sh
 !scripts/download_models.py
 !scripts/dashboard_stack.sh
 !scripts/resolve_llm_backend.py
@@ -54,6 +56,8 @@ token.json
 *.pem
 *.p12
 *.pfx
+*.jks
+*.keystore
 *.key
 secrets/
 outputs/

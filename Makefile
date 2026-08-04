@@ -1,4 +1,4 @@
-.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any android_bootstrap_sdk android_apk android_release_apk build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any android_bootstrap_sdk android_apk android_staging_apk android_release_apk android_verify_debug_apk android_verify_staging_apk android_verify_release_apk android_install_smoke_debug android_install_smoke_staging build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
@@ -139,8 +139,26 @@ android_bootstrap_sdk: ## Install repo-local Android SDK/JDK prerequisites
 android_apk: ## Build the Android debug APK
 	./scripts/android_build_apk.sh
 
+android_staging_apk: ## Build the Android staging APK for sideload testing
+	ANDROID_BUILD_VARIANT=Staging ./scripts/android_build_apk.sh
+
 android_release_apk: ## Build the Android release APK
 	ANDROID_BUILD_VARIANT=Release ./scripts/android_build_apk.sh
+
+android_verify_debug_apk: ## Verify the Android debug APK is signed and launchable
+	ANDROID_EXPECT_DEBUGGABLE=true ./scripts/android_verify_apk.sh android/app/build/outputs/apk/debug/app-debug.apk
+
+android_verify_staging_apk: ## Verify the Android staging APK is signed and launchable
+	ANDROID_EXPECT_DEBUGGABLE=false ./scripts/android_verify_apk.sh android/app/build/outputs/apk/staging/app-staging.apk
+
+android_verify_release_apk: ## Verify the Android release APK is signed and launchable
+	ANDROID_EXPECT_DEBUGGABLE=false ./scripts/android_verify_apk.sh android/app/build/outputs/apk/release/app-release.apk
+
+android_install_smoke_debug: ## Install and launch the debug APK on the connected Android device/emulator
+	./scripts/android_install_smoke.sh android/app/build/outputs/apk/debug/app-debug.apk
+
+android_install_smoke_staging: ## Install and launch the staging APK on the connected Android device/emulator
+	./scripts/android_install_smoke.sh android/app/build/outputs/apk/staging/app-staging.apk
 
 pyright: ## Run Pyright type checks
 	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)
