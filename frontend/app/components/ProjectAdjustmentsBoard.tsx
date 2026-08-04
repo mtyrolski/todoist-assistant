@@ -10,6 +10,15 @@ type ProjectAdjustmentsResponse = {
   files: string[];
   selectedFile: string;
   mappings: Record<string, string>;
+  automaticMappings?: Record<string, string>;
+  mappingProvenance?: Record<string, "manual" | "automatic">;
+  mappingDetails?: Array<{
+    sourceProject: string;
+    sourceProjectId: string | null;
+    parentProject: string;
+    parentProjectId: string | null;
+    provenance: "manual" | "automatic";
+  }>;
   activeRootProjects: string[];
   archivedRootProjects: string[];
   remappableActiveRootProjects: string[];
@@ -33,12 +42,13 @@ type Props = {
 };
 
 const HELP_TEXT = `**Project hierarchy adjustments**
-Map archived projects or selected active roots like \`Inbox\` to root projects so your history stays grouped.
+Todoist parent links map archived projects automatically. Saved mappings override those assignments when needed.
 
 - Pick a mapping file (stored locally in \`personal/\`).
 - Drag project tiles into parent buckets to map them.
 - Drop a tile onto "Make parent" to allow that archived project as a parent bucket.
-- Leave a project unmapped if you want it counted as its own separate bucket.
+- Automatic and manual assignments are labeled separately below.
+- Leave a root project unmapped if you want it counted as its own separate bucket.
 - Save to update the dashboard data.`;
 
 const RETRY_LIMIT = 6;
@@ -198,7 +208,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   }, [activeRoots, archivedParentsDraft]);
   const archivedParentSet = useMemo(() => new Set(archivedParentsDraft), [archivedParentsDraft]);
 
-  const mappedEntries = useMemo(
+  const manualMappedEntries = useMemo(
     () =>
       Object.entries(mappingDraft).filter(
         ([archived, parent]) => Boolean(parent) && !archivedParentSet.has(archived)
@@ -206,38 +216,60 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     [mappingDraft, archivedParentSet]
   );
 
+  const automaticMappedEntries = useMemo(
+    () =>
+      Object.entries(adjustments?.automaticMappings ?? {}).filter(
+        ([archived, parent]) =>
+          Boolean(parent) && !(archived in mappingDraft) && !archivedParentSet.has(archived)
+      ),
+    [adjustments, mappingDraft, archivedParentSet]
+  );
+
+  const mappedEntries = useMemo(
+    () => [
+      ...manualMappedEntries.map(([project, parent]) => ({ project, parent, provenance: "manual" as const })),
+      ...automaticMappedEntries.map(([project, parent]) => ({ project, parent, provenance: "automatic" as const }))
+    ],
+    [manualMappedEntries, automaticMappedEntries]
+  );
+
   const unmappedProjects = useMemo(() => {
-    const mapped = new Set(mappedEntries.map(([archived]) => archived));
+    const mapped = new Set(mappedEntries.map(({ project }) => project));
     return sourceProjects.filter((p) => !mapped.has(p) && !archivedParentSet.has(p));
   }, [sourceProjects, mappedEntries, archivedParentSet]);
 
   const assignments = useMemo(() => {
-    const result: Record<string, string[]> = {};
-    for (const [archived, parent] of mappedEntries) {
+    const result: Record<string, Array<{ project: string; provenance: "manual" | "automatic" }>> = {};
+    for (const { project, parent, provenance } of mappedEntries) {
       if (!parent) continue;
       if (!result[parent]) result[parent] = [];
-      result[parent].push(archived);
+      result[parent].push({ project, provenance });
     }
     for (const list of Object.values(result)) {
-      list.sort((a, b) => a.localeCompare(b));
+      list.sort((a, b) => a.project.localeCompare(b.project));
     }
     return result;
   }, [mappedEntries]);
 
   const mappingTargets = useMemo(() => {
     const set = new Set<string>();
-    for (const [, parent] of mappedEntries) {
+    for (const { parent } of mappedEntries) {
       if (parent) set.add(parent);
     }
     return Array.from(set);
   }, [mappedEntries]);
+
+  const manualMappingTargets = useMemo(
+    () => manualMappedEntries.map(([, parent]) => parent).filter(Boolean),
+    [manualMappedEntries]
+  );
 
   useEffect(() => {
     if (!archivedProjects.length) return;
     setArchivedParentsDraft((prev) => {
       const next = new Set(prev);
       let changed = false;
-      for (const target of mappingTargets) {
+      for (const target of manualMappingTargets) {
         if (archivedProjects.includes(target) && !next.has(target)) {
           next.add(target);
           changed = true;
@@ -245,7 +277,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       }
       return changed ? Array.from(next).sort((a, b) => a.localeCompare(b)) : prev;
     });
-  }, [archivedProjects, mappingTargets]);
+  }, [archivedProjects, manualMappingTargets]);
 
   const parentBuckets = useMemo(() => {
     const buckets: Array<{ name: string; kind: "active" | "archived" | "unknown"; removable: boolean }> = [];
@@ -412,8 +444,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             <InfoTip label="About adjustments" content={HELP_TEXT} />
           </div>
           <p className="muted tiny" style={{ margin: 0 }}>
-            Map archived projects or configurable active roots like Inbox to a root project so history and charts stay
-            together the way you want. Refreshes may take a few minutes while Todoist data syncs.
+            Archived projects follow their Todoist parent automatically. Add a saved mapping only when you need to
+            override that hierarchy. Refreshes may take a few minutes while Todoist data syncs.
           </p>
         </div>
         <div className="adjustmentsHeaderActions">
@@ -462,7 +494,8 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         <>
           <div className="adjustmentsSummary">
             <span className="pill pill-warn">Unmapped: {unmappedProjects.length}</span>
-            <span className="pill">Mapped: {mappedEntries.length}</span>
+            <span className="pill">Manual: {manualMappedEntries.length}</span>
+            <span className="pill">Automatic: {automaticMappedEntries.length}</span>
             <span className="pill">Parents: {parentBuckets.length}</span>
             <span className="muted tiny">
               {archivedProjects.length} archived projects • {remappableActiveRoots.length} configurable active roots •{" "}
@@ -570,7 +603,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                       </div>
                       <div className="adjustmentsBucketBody">
                         {items.length ? (
-                          items.map((name) => (
+                          items.map(({ project: name, provenance }) => (
                             <div
                               key={name}
                               className="adjustmentsTile adjustmentsTileCompact"
@@ -578,21 +611,28 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                               onDragStart={startDrag(name)}
                               onDragEnd={endDrag}
                             >
-                              <span>{name}</span>
+                              <span>
+                                {name}{" "}
+                                <span className="muted tiny">
+                                  ({provenance === "manual" ? "manual" : "automatic"})
+                                </span>
+                              </span>
                               <div className="adjustmentsTileActions">
-                                <button
-                                  className="button buttonSmall buttonGhost"
-                                  type="button"
-                                  onClick={() =>
-                                    setMappingDraft((prev) => {
-                                      const next = { ...prev };
-                                      delete next[name];
-                                      return next;
-                                    })
-                                  }
-                                >
-                                  Unmap
-                                </button>
+                                {provenance === "manual" ? (
+                                  <button
+                                    className="button buttonSmall buttonGhost"
+                                    type="button"
+                                    onClick={() =>
+                                      setMappingDraft((prev) => {
+                                        const next = { ...prev };
+                                        delete next[name];
+                                        return next;
+                                      })
+                                    }
+                                  >
+                                    Use automatic
+                                  </button>
+                                ) : null}
                                 {!parentSet.has(name) ? (
                                   <button
                                     className="button buttonSmall buttonGhost"

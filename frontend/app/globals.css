@@ -292,6 +292,89 @@ a {
   box-shadow: 0 0 12px rgba(106, 227, 255, 0.35);
 }
 
+.progressLanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  position: relative;
+  z-index: 1;
+}
+
+.progressLane {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(106, 227, 255, 0.14);
+  background: rgba(11, 16, 28, 0.32);
+}
+
+.progressLaneHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.progressLaneLabel {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  color: #d7f6ff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progressLaneMeta {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.progressLaneDetail {
+  min-height: 2.6em;
+  margin: 5px 0 7px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.progressLaneTrack {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.progressLaneFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6ae3ff, #8c7bff);
+  box-shadow: 0 0 10px rgba(106, 227, 255, 0.3);
+  transition: width 0.25s ease;
+}
+
+.progressLane-queued {
+  border-color: rgba(255, 255, 255, 0.08);
+  opacity: 0.72;
+}
+
+.progressLane-queued .progressLaneFill {
+  box-shadow: none;
+}
+
+.progressLane-done {
+  border-color: rgba(97, 244, 179, 0.18);
+}
+
+.progressLane-done .progressLaneFill {
+  background: linear-gradient(90deg, #6ae3ff, #61f4b3);
+}
+
 .progressError {
   margin: 4px 0 0;
   font-size: 11px;
