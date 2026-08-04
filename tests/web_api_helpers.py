@@ -46,6 +46,7 @@ def _stub_all_figures(monkeypatch) -> None:
 def _set_state_with_df(df: pd.DataFrame) -> None:
     web_api._state.df_activity = df
     web_api._state.active_projects = []
+    web_api._state.archived_projects = []
     web_api._state.project_colors = {}
     web_api._state.db = None
     web_api._state.home_payload_cache = {}
@@ -54,6 +55,7 @@ def _set_state_with_df(df: pd.DataFrame) -> None:
 def _clear_dashboard_state() -> None:
     web_api._state.df_activity = None
     web_api._state.active_projects = None
+    web_api._state.archived_projects = None
     web_api._state.project_colors = None
     web_api._state.db = None
     web_api._state.demo_mode = False

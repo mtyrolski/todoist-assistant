@@ -9,6 +9,7 @@ from tests.factories import make_project, make_task
 from todoist.automations.llm_breakdown.automation import LLMBreakdown
 from todoist.automations.llm_breakdown.models import (
     BreakdownNode,
+    ContextUpdate,
     ProgressKey,
     TaskBreakdown,
 )
@@ -70,6 +71,7 @@ class _FakeDb:
     def __init__(self, tasks):
         self.project = make_project(project_id="project-1", tasks=list(tasks))
         self.updated: list[tuple[str, list[str] | None]] = []
+        self.update_calls: list[tuple[str, dict[str, object]]] = []
         self.insert_calls: list[dict[str, object]] = []
         self.comments: list[dict[str, str]] = []
         self.fail_next_insert = False
@@ -79,6 +81,7 @@ class _FakeDb:
         return [self.project]
 
     def update_task(self, task_id: str, **kwargs):
+        self.update_calls.append((task_id, dict(kwargs)))
         self.updated.append((task_id, kwargs.get("labels")))
         return {"id": task_id}
 
@@ -172,13 +175,160 @@ def test_run_breakdown_omits_project_id_for_subtasks(monkeypatch) -> None:
     assert db.insert_calls[0]["project_id"] is None
 
 
+def test_run_breakdown_does_not_propagate_reserved_context_label(monkeypatch) -> None:
+    db = _FakeDb([_task(labels=["ai-breakdown", "ai_context", "work"])])
+    automation = LLMBreakdown()
+    _use_llm(monkeypatch, automation)
+
+    run_breakdown(automation, cast(Database, db))
+
+    assert db.insert_calls[0]["labels"] == ["work"]
+
+
+def test_run_breakdown_injects_same_project_ai_context(monkeypatch) -> None:
+    root = _task()
+    same_project_context = make_task(
+        "context-1",
+        content="* Use the public API",
+        description="Avoid internal endpoints.",
+        labels=["ai_context"],
+        project_id="project-1",
+    )
+    db = _FakeDb([root, same_project_context])
+    automation = LLMBreakdown()
+    llm = _use_llm(monkeypatch, automation)
+
+    run_breakdown(automation, cast(Database, db))
+
+    user_payload = llm.messages[0][1]["content"]
+    assert '"project_context"' in user_payload
+    assert '"project_context_aggregate"' in user_payload
+    assert '"contextCount": 1' in user_payload
+    assert '"taskId": "context-1"' in user_payload
+    assert "Avoid internal endpoints." in user_payload
+
+
+def test_run_breakdown_applies_constrained_context_creation(monkeypatch) -> None:
+    db = _FakeDb([_task()])
+    automation = LLMBreakdown()
+    response = TaskBreakdown(
+        children=[BreakdownNode(content="Draft metrics")],
+        context_updates=[
+            ContextUpdate(
+                content="Public launch requires legal approval",
+                description="Confirm approval before publishing.",
+            )
+        ],
+    )
+    _use_llm(monkeypatch, automation, _FakeLlm([response]))
+
+    run_breakdown(automation, cast(Database, db))
+
+    context_insert = next(
+        call for call in db.insert_calls if call.get("labels") == ["ai_context"]
+    )
+    assert context_insert["content"] == "* Public launch requires legal approval"
+    assert context_insert["project_id"] == "project-1"
+    assert context_insert.get("parent_id") is None
+    assert all(comment["task_id"] == "task-1" for comment in db.comments)
+    assert all(
+        "AI context changes:" not in comment["content"] for comment in db.comments
+    )
+
+
+def test_run_breakdown_updates_only_existing_same_project_context(monkeypatch) -> None:
+    context_task = make_task(
+        "context-1",
+        content="* Deployment target",
+        labels=["ai_context"],
+        project_id="project-1",
+    )
+    db = _FakeDb([_task(), context_task])
+    automation = LLMBreakdown()
+    response = TaskBreakdown(
+        children=[BreakdownNode(content="Draft metrics")],
+        context_updates=[
+            ContextUpdate(
+                task_id="context-1",
+                content="Deployment target is production",
+                description="Deploy releases to the production environment.",
+            )
+        ],
+    )
+    _use_llm(monkeypatch, automation, _FakeLlm([response]))
+
+    run_breakdown(automation, cast(Database, db))
+
+    update = next(call for call in db.update_calls if call[0] == "context-1")
+    assert update[1]["content"] == "* Deployment target is production"
+    assert update[1]["description"] == (
+        "Deploy releases to the production environment."
+    )
+    assert "labels" not in update[1]
+    context_comments = [
+        comment for comment in db.comments if comment["task_id"] == "context-1"
+    ]
+    assert len(context_comments) == 1
+    assert "Title — from:\n* Deployment target" in context_comments[0]["content"]
+    assert (
+        "Title — to:\n* Deployment target is production"
+        in context_comments[0]["content"]
+    )
+    source_comments = [
+        comment for comment in db.comments if comment["task_id"] == "task-1"
+    ]
+    assert all("AI context changes:" not in item["content"] for item in source_comments)
+
+
+def test_run_breakdown_accumulates_multiple_inline_updates_to_same_context(
+    monkeypatch,
+) -> None:
+    context_task = make_task(
+        "context-1",
+        content="* Release policy",
+        description="Run unit tests.",
+        labels=["ai_context"],
+        project_id="project-1",
+    )
+    db = _FakeDb([_task(), context_task])
+    automation = LLMBreakdown()
+    response = TaskBreakdown(
+        children=[BreakdownNode(content="Draft metrics")],
+        context_updates=[
+            ContextUpdate(
+                task_id="context-1",
+                content="Release policy",
+                description="Run a staging smoke test.",
+            ),
+            ContextUpdate(
+                task_id="context-1",
+                content="Release policy",
+                description="Get release approval.",
+            ),
+        ],
+    )
+    _use_llm(monkeypatch, automation, _FakeLlm([response]))
+
+    run_breakdown(automation, cast(Database, db))
+
+    context_updates = [call for call in db.update_calls if call[0] == "context-1"]
+    assert len(context_updates) == 2
+    assert context_updates[0][1]["description"] == (
+        "Run unit tests.\nRun a staging smoke test."
+    )
+    assert context_updates[1][1]["description"] == (
+        "Run unit tests.\nRun a staging smoke test.\nGet release approval."
+    )
+    assert (
+        len([comment for comment in db.comments if comment["task_id"] == "context-1"])
+        == 2
+    )
+
+
 def test_run_breakdown_reports_insert_failure_without_fallback(
     monkeypatch,
 ) -> None:
-    tasks = [
-        _task(f"task-{index}")
-        for index in range(2)
-    ]
+    tasks = [_task(f"task-{index}") for index in range(2)]
     db = _FakeDb(tasks)
     db.fail_next_insert = True
     automation = LLMBreakdown()

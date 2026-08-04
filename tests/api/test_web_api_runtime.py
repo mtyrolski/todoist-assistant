@@ -2,12 +2,15 @@
 
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 import todoist
 import todoist.web.api_components.runtime as runtime_component
 import todoist.web.api as web_api
+import todoist.web.api_components.dashboard_runtime as dashboard_runtime_component
+from tests.unit.database.helpers import make_event
 
 # pylint: disable=protected-access
 
@@ -29,6 +32,7 @@ def _set_progress_state(**overrides) -> None:
         "detail": None,
         "sub_current": None,
         "sub_total": None,
+        "lanes": {},
         "error": None,
     }
     defaults.update(overrides)
@@ -36,7 +40,9 @@ def _set_progress_state(**overrides) -> None:
         setattr(web_api._progress_state, name, value)
 
 
-def test_runtime_logs_only_return_explicit_allowlist(monkeypatch, tmp_path, api_client) -> None:
+def test_runtime_logs_only_return_explicit_allowlist(
+    monkeypatch, tmp_path, api_client
+) -> None:
     cache_dir = tmp_path / "cache"
     dashboard_dir = _dashboard_log_dir(cache_dir)
     (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
@@ -85,7 +91,9 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
     assert missing.status_code == 404
 
 
-def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_logs_lists_explicit_runtime_sources(
+    monkeypatch, tmp_path, api_client
+) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
@@ -113,7 +121,9 @@ def test_admin_logs_lists_explicit_runtime_sources(monkeypatch, tmp_path, api_cl
     assert all(item["path"] != "dashboard/unexpected.log" for item in payload["logs"])
 
 
-def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_read_log_uses_named_runtime_source(
+    monkeypatch, tmp_path, api_client
+) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
@@ -139,7 +149,9 @@ def test_admin_read_log_uses_named_runtime_source(monkeypatch, tmp_path, api_cli
     assert "not available yet" in missing.json()["detail"]
 
 
-def test_runtime_logs_lists_curated_sources(monkeypatch, tmp_path: Path, api_client) -> None:
+def test_runtime_logs_lists_curated_sources(
+    monkeypatch, tmp_path: Path, api_client
+) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
@@ -240,7 +252,9 @@ def test_admin_timezone_set_and_clear(monkeypatch, tmp_path, api_client) -> None
     assert "TODOIST_TIMEZONE" not in env_text_after_clear
 
 
-def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_timezone_rejects_invalid_timezone(
+    monkeypatch, tmp_path, api_client
+) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
@@ -255,7 +269,9 @@ def test_admin_timezone_rejects_invalid_timezone(monkeypatch, tmp_path, api_clie
     assert "Invalid timezone" in payload["detail"]
 
 
-def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_api_token_status_uses_safe_env_label(
+    monkeypatch, tmp_path, api_client
+) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
     monkeypatch.setenv("API_KEY", "test_api_key_12345")
@@ -269,7 +285,9 @@ def test_admin_api_token_status_uses_safe_env_label(monkeypatch, tmp_path, api_c
     assert payload["envPath"] == ".env"
 
 
-def test_admin_api_token_save_clear_and_status_cycle(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_api_token_save_clear_and_status_cycle(
+    monkeypatch, tmp_path, api_client
+) -> None:
     env_path = tmp_path / ".env"
     token = "a" * 32
     monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
@@ -383,6 +401,7 @@ def test_dashboard_progress_states(state, expected, api_client) -> None:
         "startedAt",
         "updatedAt",
         "detail",
+        "lanes",
         "error",
     } <= set(payload)
     assert {key: payload[key] for key in expected} == expected
@@ -434,6 +453,114 @@ def test_dashboard_progress_uses_verbose_tqdm_detail(api_client) -> None:
     )
     assert payload["subCurrent"] == 1
     assert payload["subTotal"] == 3
+
+
+def test_dashboard_progress_reports_parallel_worker_lanes(api_client) -> None:
+    _set_progress_state()
+    callback = web_api._build_tqdm_progress_callback()
+    stage = "Fetching archived project activity"
+    callback(stage, 0, 2, "project", f"{stage}: workers=2")
+    callback(
+        stage,
+        4,
+        4,
+        "window",
+        "Skynet: complete",
+        "archived-project:skynet",
+        "Skynet",
+    )
+    callback(
+        stage,
+        0,
+        4,
+        "window",
+        "Academy: scanning",
+        "archived-project:academy",
+        "Academy",
+    )
+    callback(
+        stage,
+        0,
+        4,
+        "window",
+        "Health: queued",
+        "archived-project:health",
+        "Health",
+        "queued",
+    )
+
+    payload = api_client.get("/api/dashboard/progress").json()
+    lanes = {lane["id"]: lane for lane in payload["lanes"]}
+
+    assert payload["detail"] == f"{stage}: workers=2"
+    assert payload["subCurrent"] == 0
+    assert payload["subTotal"] == 2
+    assert lanes["archived-project:skynet"] == {
+        "id": "archived-project:skynet",
+        "label": "Skynet",
+        "detail": "Skynet: complete",
+        "current": 4,
+        "total": 4,
+        "unit": "window",
+        "status": "done",
+        "updatedAt": lanes["archived-project:skynet"]["updatedAt"],
+    }
+    assert lanes["archived-project:academy"]["status"] == "active"
+    assert lanes["archived-project:health"]["status"] == "queued"
+
+
+def test_archived_activity_scan_cache_skips_unchanged_projects_and_invalidates_safely(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    target_holder = {
+        "target": dashboard_runtime_component._ArchivedActivityTarget(
+            project_id="archived-1",
+            label="Archived One",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+    }
+    monkeypatch.setattr(
+        dashboard_runtime_component,
+        "_configured_archived_parent_projects",
+        lambda _dbio: {"archived-1": target_holder["target"]},
+    )
+    monkeypatch.setattr(
+        dashboard_runtime_component,
+        "_set_progress_sync",
+        lambda *_args, **_kwargs: None,
+    )
+    event = make_event("archived-event", parent_project_id="archived-1")
+    dbio = MagicMock()
+    dbio.fetch_activity_for_parent_projects.return_value = [event]
+
+    first = dashboard_runtime_component._fetch_configured_archived_parent_activity(
+        dbio, set()
+    )
+    second = dashboard_runtime_component._fetch_configured_archived_parent_activity(
+        dbio, {event}
+    )
+
+    assert first == {event}
+    assert second == set()
+    assert dbio.fetch_activity_for_parent_projects.call_count == 1
+    saved_state = web_api.Cache().archived_activity_scans.load()
+    assert saved_state["projects"]["archived-1"]["projectUpdatedAt"] == (
+        "2026-01-01T00:00:00Z"
+    )
+
+    target_holder["target"] = dashboard_runtime_component._ArchivedActivityTarget(
+        project_id="archived-1",
+        label="Archived One",
+        updated_at="2026-02-01T00:00:00Z",
+    )
+    dashboard_runtime_component._fetch_configured_archived_parent_activity(
+        dbio, {event}
+    )
+    assert dbio.fetch_activity_for_parent_projects.call_count == 2
+
+    dashboard_runtime_component._fetch_configured_archived_parent_activity(dbio, set())
+    assert dbio.fetch_activity_for_parent_projects.call_count == 3
 
 
 def test_dashboard_status_excludes_triton_service(api_client) -> None:

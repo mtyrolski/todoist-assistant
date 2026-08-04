@@ -60,11 +60,12 @@ Account-lifetime distribution of time between task creation and completion. Rece
 Completed tasks per project for each period in the selected range.`,
   cumsumCompletedTasksPeriodically: `Cumulative Completed Tasks
 Running total of completions per project across the range.`,
-  activeProjectHierarchy: `Active Project Hierarchy
-Sunburst view of the busiest active root projects and their busiest subprojects.
+  activeProjectHierarchy: `Project Hierarchy
+Sunburst view of the busiest active and archived projects and their subprojects.
 
 - Ring area is proportional to completed tasks in the selected range.
-- The inner ring shows active roots and outer rings show active subprojects.
+- The inner ring shows roots and outer rings show active or archived subprojects.
+- Todoist parent links are applied automatically; saved adjustments take priority.
 - Smaller long-tail projects are folded into Other only when they stay smaller than the smallest visible sibling.`,
   heatmapEventsByDayHour: `Event Heatmap
 Activity intensity by day of week and hour. Darker means more events.`,

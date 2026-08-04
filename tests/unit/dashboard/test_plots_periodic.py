@@ -49,6 +49,32 @@ def test_periodic_frame_buckets_utc_events_in_configured_timezone(monkeypatch: A
     assert int(periodic.loc[pd.Timestamp("2026-06-28"), "Academy"]) == 1
 
 
+def test_periodic_plot_localizes_automatic_utc_range_bounds(monkeypatch: Any):
+    monkeypatch.setenv("TODOIST_TIMEZONE", "Europe/Warsaw")
+    _freeze_periodic_now(monkeypatch, datetime(2026, 8, 1, 19, 0, 0))
+    df = pd.DataFrame(
+        {
+            "root_project_name": ["Academy", "Academy"],
+            "type": ["completed", "completed"],
+            "title": ["First", "Second"],
+        },
+        index=pd.to_datetime(
+            ["2026-08-01T14:00:00Z", "2026-08-01T15:00:00Z"], utc=True
+        ),
+    )
+
+    fig = plot_completed_tasks_periodically(
+        df,
+        datetime(2026, 7, 1, 12, 0, 0),
+        datetime(2026, 8, 1, 16, 0, 0),
+        granularity="W-SUN",
+        project_colors={"Academy": "#123456"},
+        bounds_are_utc=True,
+    )
+
+    assert list(cast(Any, _trace_by_name(fig, "All Projects (so far)")).y) == [2.0]
+
+
 def _monthly_completion_df() -> pd.DataFrame:
     return _completed_df(
         [
@@ -317,7 +343,7 @@ def test_completed_tasks_periodically_uses_matching_forecast_marker_colors(
         datetime(2024, 4, 1),
         datetime(2024, 7, 15),
         granularity="ME",
-        project_colors={"Project A": "#123456"},
+        project_colors={"project a": "#123456"},
     )
 
     project_so_far = _trace_by_name(fig, "Project A (so far)")
@@ -478,7 +504,7 @@ def test_completed_tasks_periodically_groups_by_root_project_when_parent_exists(
         datetime(2024, 6, 1),
         datetime(2024, 6, 10),
         granularity="W-SUN",
-        project_colors={"Academy": "#123456", "skynet": "#654321"},
+        project_colors={"Academy": "#123456", "SKYNET": "#654321"},
     )
 
     _assert_trace_names(
@@ -486,6 +512,35 @@ def test_completed_tasks_periodically_groups_by_root_project_when_parent_exists(
         include=("Academy", "skynet"),
         exclude=("DeepMhcFlare", "MSFT"),
     )
+    assert cast(Any, _trace_by_name(fig, "Academy")).line.color == "#123456"
+    assert cast(Any, _trace_by_name(fig, "skynet")).line.color == "#654321"
+
+
+@pytest.mark.parametrize(
+    ("plot_func", "total_name"),
+    PLOT_FUNCTIONS,
+)
+def test_completed_tasks_periodically_counts_archived_roots_in_total(
+    plot_func: Any, total_name: str
+) -> None:
+    fig = plot_func(
+        _completed_df(
+            [
+                ("2024-06-03", "Archived Root", "a-1", "Archived 1"),
+                ("2024-06-04", "Archived Root", "a-2", "Archived 2"),
+                ("2024-06-05", "Active Root", "b-1", "Active 1"),
+            ]
+        ),
+        datetime(2024, 6, 1),
+        datetime(2024, 6, 10),
+        granularity="W-SUN",
+        project_colors={"Archived Root": "#123456", "Active Root": "#654321"},
+    )
+
+    archived_trace = _trace_by_name(fig, "Archived Root")
+    total_trace = _trace_by_lower_name(fig, total_name)
+    assert float(cast(Any, archived_trace).y[-1]) == 2.0
+    assert float(cast(Any, total_trace).y[-1]) == 3.0
 
 
 def test_cumsum_completed_tasks_periodically_keeps_sparse_project_totals_compact():

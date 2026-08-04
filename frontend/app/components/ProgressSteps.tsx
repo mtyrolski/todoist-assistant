@@ -5,6 +5,17 @@ type ProgressStep = {
   hint: string;
 };
 
+export type DashboardProgressLane = {
+  id: string;
+  label: string;
+  detail: string;
+  current: number;
+  total: number;
+  unit: string | null;
+  status: "queued" | "active" | "done";
+  updatedAt: string;
+};
+
 export type DashboardProgress = {
   active: boolean;
   stage: string | null;
@@ -15,6 +26,7 @@ export type DashboardProgress = {
   detail: string | null;
   subCurrent?: number | null;
   subTotal?: number | null;
+  lanes?: DashboardProgressLane[];
   error: string | null;
 };
 
@@ -73,6 +85,7 @@ export function ProgressSteps({ progress }: { progress: DashboardProgress | null
   const subCurrent = progress.subCurrent ?? 0;
   const subRatio = subTotal > 0 ? Math.min(1, subCurrent / subTotal) : null;
   const subPercent = subRatio !== null ? Math.round(subRatio * 100) : null;
+  const lanes = progress.lanes ?? [];
 
   return (
     <section className="progressCard" role="status" aria-live="polite">
@@ -97,6 +110,42 @@ export function ProgressSteps({ progress }: { progress: DashboardProgress | null
           Step {Math.min(stepIndex + 1, totalSteps)} of {totalSteps}
         </p>
       </div>
+
+      {lanes.length > 0 ? (
+        <div className="progressLanes">
+          {lanes.map((lane) => {
+            const laneRatio = lane.total > 0 ? Math.min(1, lane.current / lane.total) : 0;
+            const lanePercent = Math.round(laneRatio * 100);
+            const laneUnit = lane.unit ? ` ${lane.unit}` : "";
+            const laneMeta = lane.status === "queued"
+              ? "Queued"
+              : `${lanePercent}% • ${lane.current}/${lane.total}${laneUnit}`;
+            return (
+              <div
+                key={lane.id}
+                className={`progressLane progressLane-${lane.status}`}
+                role="progressbar"
+                aria-label={lane.label}
+                aria-valuemin={0}
+                aria-valuemax={lane.total}
+                aria-valuenow={lane.current}
+              >
+                <div className="progressLaneHeader">
+                  <span className="progressLaneLabel">{lane.label}</span>
+                  <span className="progressLaneMeta">{laneMeta}</span>
+                </div>
+                <p className="progressLaneDetail">{lane.detail}</p>
+                <div className="progressLaneTrack" aria-hidden>
+                  <div
+                    className="progressLaneFill"
+                    style={{ width: `${lanePercent}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="progressTrack" aria-hidden>
         <div className="progressFill" style={{ width: `${Math.round(ratio * 100)}%` }} />

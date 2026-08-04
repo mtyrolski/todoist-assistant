@@ -29,6 +29,8 @@ class _HierarchyNode:
     color: str
     hidden_projects: int = 0
     parent_id: str = ""
+    is_archived: bool = False
+    parent_assignment: str = "Root project"
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,95 @@ def _direct_completed_counts(
 
     counts = pd.Series(resolved_ids, dtype="string").value_counts()
     return {str(project_id): int(count) for project_id, count in counts.items()}
+
+
+def _project_parent_id(project: Project) -> str | None:
+    return project.project_entry.parent_id or project.project_entry.v2_parent_id
+
+
+def _preferred_project_id_for_name(
+    project_name: str, projects_by_id: dict[str, Project]
+) -> str | None:
+    matches = [
+        project
+        for project in projects_by_id.values()
+        if str(project.project_entry.name) == project_name
+    ]
+    active_matches = [project for project in matches if not project.is_archived]
+    preferred = active_matches or matches
+    if len(preferred) != 1:
+        return None
+    return str(preferred[0].id)
+
+
+def _would_create_parent_cycle(
+    project_id: str,
+    parent_id: str,
+    effective_parent_by_id: dict[str, str | None],
+) -> bool:
+    current_id: str | None = parent_id
+    visited: set[str] = set()
+    while current_id is not None and current_id not in visited:
+        if current_id == project_id:
+            return True
+        visited.add(current_id)
+        current_id = effective_parent_by_id.get(current_id)
+    return False
+
+
+def _effective_project_parents(
+    projects_by_id: dict[str, Project],
+    *,
+    project_mappings: dict[str, str] | None = None,
+    archived_parent_projects: set[str] | None = None,
+) -> tuple[dict[str, str | None], dict[str, str]]:
+    """Resolve physical parents, then apply explicit dashboard adjustments."""
+
+    effective_parent_by_id: dict[str, str | None] = {}
+    assignment_by_id: dict[str, str] = {}
+    for project_id, project in projects_by_id.items():
+        parent_id = _project_parent_id(project)
+        known_parent_id = (
+            str(parent_id)
+            if parent_id is not None and str(parent_id) in projects_by_id
+            else None
+        )
+        effective_parent_by_id[project_id] = known_parent_id
+        if known_parent_id is None:
+            assignment_by_id[project_id] = (
+                "Archived root" if project.is_archived else "Root project"
+            )
+        elif project.is_archived:
+            assignment_by_id[project_id] = "Automatic (Todoist hierarchy)"
+        else:
+            assignment_by_id[project_id] = "Todoist hierarchy"
+
+    archived_parent_projects = archived_parent_projects or set()
+    for project_id, project in projects_by_id.items():
+        if (
+            project.is_archived
+            and str(project.project_entry.name) in archived_parent_projects
+        ):
+            effective_parent_by_id[project_id] = None
+            assignment_by_id[project_id] = "Manual parent bucket"
+
+    for source_name, target_name in (project_mappings or {}).items():
+        if source_name == target_name or source_name in archived_parent_projects:
+            continue
+        target_id = _preferred_project_id_for_name(target_name, projects_by_id)
+        if target_id is None:
+            continue
+        for project_id, project in projects_by_id.items():
+            if str(project.project_entry.name) != source_name:
+                continue
+            if project_id == target_id or _would_create_parent_cycle(
+                project_id, target_id, effective_parent_by_id
+            ):
+                continue
+            effective_parent_by_id[project_id] = target_id
+            assignment_by_id[project_id] = "Manual mapping"
+
+    return effective_parent_by_id, assignment_by_id
 
 
 def _normalize_activity_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -240,23 +331,32 @@ def _select_visible_nodes(
 def _active_project_tree(
     df_completed: pd.DataFrame,
     active_projects: list[Project],
+    *,
+    project_mappings: dict[str, str] | None = None,
+    archived_parent_projects: set[str] | None = None,
 ) -> tuple[
     dict[str, Project],
     dict[str, list[str]],
     list[str],
     dict[str, int],
     Callable[[str], int],
+    dict[str, str],
 ]:
     projects_by_id = {str(project.id): project for project in active_projects}
+    effective_parent_by_id, assignment_by_id = _effective_project_parents(
+        projects_by_id,
+        project_mappings=project_mappings,
+        archived_parent_projects=archived_parent_projects,
+    )
     children_by_parent: dict[str, list[str]] = defaultdict(list)
     root_ids: list[str] = []
     for project in active_projects:
         project_id = str(project.id)
-        parent_id = project.project_entry.parent_id
-        if parent_id is None or str(parent_id) not in projects_by_id:
+        parent_id = effective_parent_by_id[project_id]
+        if parent_id is None:
             root_ids.append(project_id)
             continue
-        children_by_parent[str(parent_id)].append(project_id)
+        children_by_parent[parent_id].append(project_id)
 
     for child_ids in children_by_parent.values():
         child_ids.sort(
@@ -281,7 +381,14 @@ def _active_project_tree(
             for child_id in children_by_parent.get(project_id, [])
         )
 
-    return projects_by_id, children_by_parent, root_ids, direct_counts, subtree_total
+    return (
+        projects_by_id,
+        children_by_parent,
+        root_ids,
+        direct_counts,
+        subtree_total,
+        assignment_by_id,
+    )
 
 
 def _cluster_x_positions(count: int) -> list[float]:
@@ -409,6 +516,8 @@ def _build_trace(
             point.node.depth,
             point.node.hidden_projects,
             point.node.kind,
+            "Archived" if point.node.is_archived else "Active",
+            point.node.parent_assignment,
         ]
         for point in points
     ]
@@ -455,6 +564,7 @@ def _collect_active_descendants(
     children_by_parent: dict[str, list[str]],
     subtree_total: Callable[[str], int],
     direct_counts: dict[str, int],
+    assignment_by_id: dict[str, str],
 ) -> list[_HierarchyNode]:
     descendants: list[_HierarchyNode] = []
 
@@ -475,6 +585,8 @@ def _collect_active_descendants(
                     depth=depth,
                     kind="project",
                     color=_mix_color(root_color, "#ffffff", 0.22 + depth * 0.09),
+                    is_archived=child_project.is_archived,
+                    parent_assignment=assignment_by_id[child_id],
                 )
             )
             collect(child_id, depth=depth + 1)
@@ -492,12 +604,15 @@ def plot_active_project_hierarchy(
     end_date: datetime,
     active_projects: list[Project],
     project_colors: dict[str, str],
+    *,
+    project_mappings: dict[str, str] | None = None,
+    archived_parent_projects: set[str] | None = None,
 ) -> go.Figure:
     empty_message: str | None = None
     if df.empty:
         empty_message = "No activity in the selected range"
     elif not active_projects:
-        empty_message = "No active projects available"
+        empty_message = "No projects available"
     elif "type" not in df.columns:
         empty_message = "Activity data is missing project event types"
     if empty_message is not None:
@@ -511,8 +626,18 @@ def plot_active_project_hierarchy(
             "No completed tasks in the selected range"
         )
 
-    projects_by_id, children_by_parent, root_ids, direct_counts, subtree_total = (
-        _active_project_tree(df_completed, active_projects)
+    (
+        projects_by_id,
+        children_by_parent,
+        root_ids,
+        direct_counts,
+        subtree_total,
+        assignment_by_id,
+    ) = _active_project_tree(
+        df_completed,
+        active_projects,
+        project_mappings=project_mappings,
+        archived_parent_projects=archived_parent_projects,
     )
 
     active_root_ids = [
@@ -520,7 +645,7 @@ def plot_active_project_hierarchy(
     ]
     if not active_root_ids:
         return _empty_project_hierarchy_figure(
-            "No active project completions in the selected range"
+            "No project completions in the selected range"
         )
 
     root_nodes = [
@@ -539,6 +664,8 @@ def plot_active_project_hierarchy(
                 "#ffffff",
                 0.1,
             ),
+            is_archived=projects_by_id[project_id].is_archived,
+            parent_assignment=assignment_by_id[project_id],
         )
         for project_id in sorted(
             active_root_ids,
@@ -561,7 +688,7 @@ def plot_active_project_hierarchy(
                 label="Other Roots",
                 total_completed=hidden_total,
                 direct_completed=sum(node.direct_completed for node in hidden_roots),
-                root_name="Other active roots",
+                root_name="Other roots",
                 depth=0,
                 kind="aggregate",
                 color=_mix_color(_EMPTY_COLOR, "#dbe7f5", 0.18),
@@ -582,6 +709,7 @@ def plot_active_project_hierarchy(
             children_by_parent=children_by_parent,
             subtree_total=subtree_total,
             direct_counts=direct_counts,
+            assignment_by_id=assignment_by_id,
         )
         visible_descendants, hidden_descendants = _select_visible_nodes(
             descendants, preferred_visible=3, max_visible=6
@@ -666,7 +794,7 @@ def plot_active_project_hierarchy(
 
     child_glow, child_trace = _build_trace(
         child_points,
-        name="Active subprojects",
+        name="Subprojects",
         line_width=1.6,
         border_mix=0.42,
         glow_scale=1.55,
@@ -678,6 +806,8 @@ def plot_active_project_hierarchy(
             "<br>Completed directly in project: %{customdata[3]}"
             "<br>Hierarchy depth: %{customdata[5]}"
             "<br>Hidden projects folded in: %{customdata[6]}"
+            "<br>Project status: %{customdata[8]}"
+            "<br>Parent assignment: %{customdata[9]}"
             "<extra></extra>"
         ),
     )
@@ -693,6 +823,8 @@ def plot_active_project_hierarchy(
             "<br>Total completed in range: %{customdata[2]}"
             "<br>Completed directly in root: %{customdata[3]}"
             "<br>Hidden roots folded in: %{customdata[6]}"
+            "<br>Project status: %{customdata[8]}"
+            "<br>Parent assignment: %{customdata[9]}"
             "<extra></extra>"
         ),
     )

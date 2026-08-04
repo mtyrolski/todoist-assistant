@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from tests.factories import make_project, make_task
 from todoist.agent.productivity_context import build_productivity_context
 from todoist.core.env import EnvVar
 from todoist.core.utils import Cache
@@ -31,6 +32,64 @@ def test_create_tasks_requires_explicit_confirmation(
 
     with pytest.raises(PermissionError):
         ctx.create_tasks("project-id", [{"content": "Draft proposal"}])
+
+
+def test_ai_context_helpers_fetch_and_upsert_only_project_memory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    context_task = make_task(
+        "context-1",
+        content="* Stable constraint",
+        labels=["ai_context"],
+        project_id="project-1",
+    )
+    project = make_project(
+        project_id="project-1", name="Platform", tasks=[context_task]
+    )
+
+    class _FakeDatabase:
+        def __init__(self, _env_path: str) -> None:
+            self.updated = []
+            self.comments = []
+
+        def fetch_projects(self, *, include_tasks: bool):
+            assert include_tasks is True
+            return [project]
+
+        def update_task(self, task_id: str, **kwargs):
+            self.updated.append((task_id, kwargs))
+            return {"id": task_id}
+
+        def create_comment(self, *, task_id: str, content: str):
+            self.comments.append({"task_id": task_id, "content": content})
+            return {"id": "comment-1"}
+
+    fake_db = _FakeDatabase(str(tmp_path / ".env"))
+    monkeypatch.setattr(
+        "todoist.agent.productivity_context.Database", lambda _path: fake_db
+    )
+    ctx = build_productivity_context(
+        cache_path=tmp_path, repo_root=tmp_path, env_path=tmp_path / ".env"
+    )
+
+    assert ctx.ai_context(project_id="project-1")[0]["taskId"] == "context-1"
+    assert "Project: Platform (1 context task(s))" in ctx.rendered_ai_context()
+    aggregate = ctx.project_ai_context(project_id="project-1")[0]
+    assert aggregate["contextCount"] == 1
+    assert aggregate["entries"][0]["taskId"] == "context-1"
+    result = ctx.upsert_ai_context(
+        "project-1",
+        "Updated stable constraint",
+        description="The stable constraint applies to every release.",
+        task_id="context-1",
+    )
+
+    assert result["action"] == "updated"
+    assert fake_db.updated[0][1] == {
+        "content": "* Updated stable constraint",
+        "description": "The stable constraint applies to every release.",
+    }
+    assert fake_db.comments[0]["task_id"] == "context-1"
 
 
 def _save_dashboard_activity(cache_path: Path) -> None:

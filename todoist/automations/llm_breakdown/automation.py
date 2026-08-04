@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeAlias, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -21,8 +21,10 @@ from todoist.core.runtime_env import (
 )
 from todoist.core.types import Task
 from todoist.core.utils import Cache
+from todoist.features.ai_context import AI_CONTEXT_LABEL, normalize_label
 
 from .config import (
+    VariantResolution,
     build_system_prompt,
     merge_variants,
     resolve_variant,
@@ -34,6 +36,8 @@ from .runner import run_breakdown
 # === LLM BREAKDOWN AUTOMATION ================================================
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+RuntimeEnvValues: TypeAlias = dict[str, Any]
+BackendSelection: TypeAlias = tuple[str, RuntimeEnvValues]
 
 
 @dataclass(frozen=True)
@@ -197,7 +201,7 @@ class LLMBreakdown(Automation):
         return resolve_runtime_env_path(repo_root=_REPO_ROOT)
 
     @staticmethod
-    def _env_values() -> dict[str, Any]:
+    def _env_values() -> RuntimeEnvValues:
         return load_runtime_env_values(LLMBreakdown._resolve_env_path())
 
     @staticmethod
@@ -210,7 +214,7 @@ class LLMBreakdown(Automation):
             return backend
         return None
 
-    def _resolve_selected_backend(self) -> tuple[str, dict[str, Any]]:
+    def _resolve_selected_backend(self) -> BackendSelection:
         values = self._env_values()
         locked_backend = self._locked_backend()
         if locked_backend is not None:
@@ -237,7 +241,7 @@ class LLMBreakdown(Automation):
             self._llm_backend = backend
         return self._llm
 
-    def _resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
+    def _resolve_variant(self, label: str) -> VariantResolution:
         return resolve_variant(
             label,
             label_prefix_lower=self.label_prefix_lower,
@@ -290,7 +294,7 @@ class LLMBreakdown(Automation):
     def concurrent_executor(max_workers: int) -> ThreadPoolExecutor:
         return ThreadPoolExecutor(max_workers=max_workers)
 
-    def resolve_variant(self, label: str) -> tuple[str, dict[str, Any]]:
+    def resolve_variant(self, label: str) -> VariantResolution:
         return self._resolve_variant(label)
 
     def build_system_prompt(
@@ -329,6 +333,7 @@ class LLMBreakdown(Automation):
             label
             for label in task.task_entry.labels
             if not label.lower().startswith(self.label_prefix_lower)
+            and normalize_label(label) != AI_CONTEXT_LABEL
         ]
         return labels or None
 
