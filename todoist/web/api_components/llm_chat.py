@@ -339,7 +339,7 @@ def _assistant_metadata_payload() -> dict[str, Any]:
             "activity_dataframe()",
             "project_comparison(period='week', as_of=None, offset=0, limit=12)",
             "executive_summary(period='week', as_of=None, offset=0, limit=8)",
-            "upsert_ai_context(project_id, content, description=None, task_id=None)",
+            "upsert_ai_context(project_id, content, description='...', task_id=None)",
             "create_tasks(project_id, tasks, confirmation='CREATE_TODOIST_TASKS')",
         ],
         "scripts": ctx.script_catalog(),

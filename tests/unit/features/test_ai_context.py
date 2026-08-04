@@ -3,6 +3,7 @@ import pytest
 from tests.factories import make_project, make_task
 from todoist.features.ai_context import (
     AI_CONTEXT_LABEL,
+    AI_CONTEXT_UPDATE_COMMENT_HEADER,
     MAX_AI_CONTEXT_DESCRIPTION_CHARS,
     aggregate_ai_context,
     collect_ai_context,
@@ -19,6 +20,7 @@ class _FakeDb:
     def __init__(self) -> None:
         self.created = []
         self.updated = []
+        self.comments = []
 
     def insert_task(self, **kwargs):
         self.created.append(kwargs)
@@ -27,6 +29,10 @@ class _FakeDb:
     def update_task(self, task_id, **kwargs):
         self.updated.append((task_id, kwargs))
         return {"id": task_id}
+
+    def create_comment(self, *, task_id, content):
+        self.comments.append({"task_id": task_id, "content": content})
+        return {"id": f"comment-{len(self.comments)}"}
 
 
 def test_collect_ai_context_requires_label_and_literal_prefix() -> None:
@@ -55,6 +61,8 @@ def test_collect_ai_context_requires_label_and_literal_prefix() -> None:
     assert [entry.task_id for entry in entries] == ["valid"]
     rendered = render_ai_context(entries)
     assert "Project: Platform (1 context task(s))" in rendered
+    assert "HIGH-PRIORITY project AI context" in rendered
+    assert "explicit current user directions take precedence" in rendered
     assert "- * Architecture: Prefer event-driven boundaries." in rendered
     assert entries[0].updated_at == "2024-01-01T00:00:00Z"
 
@@ -86,6 +94,7 @@ def test_upsert_ai_context_is_constrained_to_context_tasks_in_project() -> None:
         project_id="project-1",
         task_id="context-1",
         content="* Updated durable fact",
+        description="Explain the updated fact completely.",
         existing_entries=entries,
     )
 
@@ -93,9 +102,22 @@ def test_upsert_ai_context_is_constrained_to_context_tasks_in_project() -> None:
     assert created["content"] == "* New durable fact"
     assert db.created[0]["labels"] == [AI_CONTEXT_LABEL]
     assert updated["action"] == "updated"
-    assert updated["content"] == "* Existing"
-    assert db.updated[0][1]["description"] == "Updated durable fact"
-    assert "content" not in db.updated[0][1]
+    assert updated["content"] == "* Updated durable fact"
+    assert db.updated[0][1] == {
+        "content": "* Updated durable fact",
+        "description": "Explain the updated fact completely.",
+    }
+    assert len(db.comments) == 1
+    assert db.comments[0]["task_id"] == "context-1"
+    assert AI_CONTEXT_UPDATE_COMMENT_HEADER in db.comments[0]["content"]
+    assert "Title — from:\n* Existing" in db.comments[0]["content"]
+    assert "Title — to:\n* Updated durable fact" in db.comments[0]["content"]
+    assert "Description — from:\n(empty)" in db.comments[0]["content"]
+    assert (
+        "Description — to:\nExplain the updated fact completely."
+        in db.comments[0]["content"]
+    )
+    assert created["auditComment"] is None
 
 
 def test_upsert_ai_context_updates_exact_title_instead_of_duplicating() -> None:
@@ -124,6 +146,7 @@ def test_upsert_ai_context_updates_exact_title_instead_of_duplicating() -> None:
     assert result["taskId"] == "context-1"
     assert db.created == []
     assert db.updated == []
+    assert db.comments == []
 
 
 def test_ai_context_updates_accumulate_without_losing_existing_facts() -> None:
@@ -155,6 +178,51 @@ def test_ai_context_updates_accumulate_without_losing_existing_facts() -> None:
         "Run unit tests before release.\nRun a staging smoke test before production."
     )
     assert db.updated[0][1] == {"description": result["description"]}
+    assert len(db.comments) == 1
+    audit = db.comments[0]["content"]
+    assert "Description — from:\nRun unit tests before release." in audit
+    assert f"Description — to:\n{result['description']}" in audit
+
+
+def test_ai_context_creation_requires_description_and_does_not_comment() -> None:
+    db = _FakeDb()
+
+    with pytest.raises(ValueError, match="description is required"):
+        upsert_ai_context_task(
+            db,
+            project_id="project-1",
+            content="Release policy",
+        )
+
+    assert db.created == []
+    assert db.comments == []
+
+
+def test_ai_context_cannot_update_an_unexplained_task_without_description() -> None:
+    project = make_project(
+        project_id="project-1",
+        tasks=[
+            make_task(
+                "context-1",
+                content="* Legacy topic",
+                labels=[AI_CONTEXT_LABEL],
+                project_id="project-1",
+            )
+        ],
+    )
+    db = _FakeDb()
+
+    with pytest.raises(ValueError, match="make the resulting task self-contained"):
+        upsert_ai_context_task(
+            db,
+            project_id="project-1",
+            task_id="context-1",
+            content="Updated topic",
+            existing_entries=collect_ai_context([project]),
+        )
+
+    assert db.updated == []
+    assert db.comments == []
 
 
 def test_context_merge_keeps_more_complete_text_and_rejects_lossy_overflow() -> None:
@@ -169,6 +237,35 @@ def test_context_merge_keeps_more_complete_text_and_rejects_lossy_overflow() -> 
         merge_context_description(
             "x" * (MAX_AI_CONTEXT_DESCRIPTION_CHARS - 1), "new fact"
         )
+
+
+def test_ai_context_rejects_update_when_exact_audit_would_be_too_large() -> None:
+    project = make_project(
+        project_id="project-1",
+        tasks=[
+            make_task(
+                "context-1",
+                content="* Large context",
+                description="x" * 7_000,
+                labels=[AI_CONTEXT_LABEL],
+                project_id="project-1",
+            )
+        ],
+    )
+    db = _FakeDb()
+
+    with pytest.raises(ValueError, match="exact from/to values"):
+        upsert_ai_context_task(
+            db,
+            project_id="project-1",
+            task_id="context-1",
+            content="Large context",
+            description="new fact",
+            existing_entries=collect_ai_context([project]),
+        )
+
+    assert db.updated == []
+    assert db.comments == []
 
 
 def test_dynamic_aggregation_keeps_multiple_topics_and_projects() -> None:

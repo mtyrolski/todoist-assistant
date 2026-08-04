@@ -123,6 +123,8 @@ def test_project_ai_context_is_added_to_planner_system_prompt() -> None:
     )
 
     assert "[Platform] * Keep backwards compatibility" in messages[0]["content"]
+    assert "authoritative project facts" in messages[0]["content"]
+    assert "explicit current user directions take precedence" in messages[0]["content"]
 
 
 def test_planner_decision_normalizes_log_like_output():

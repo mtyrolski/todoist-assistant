@@ -201,10 +201,15 @@ tasks are treated as durable project memory:
 
 - Same-project context is included automatically in `@ai-breakdown` prompts.
 - Dashboard AI chat receives current context grouped by project.
+- AI treats valid context as high-priority project data ahead of assumptions and
+  transient signals, while current explicit user directions still take precedence.
 - Codex may create or update context after project analysis when it finds a stable,
   reusable fact. It is instructed not to store transient metrics, guesses, secrets,
   or routine summaries, and updates are constrained to existing context tasks in the
   same project.
+- Each context task is self-contained in its title and description. Updates change
+  those fields inline; only a real update adds a `from`/`to` audit comment to that
+  context task. Creation and no-op upserts add no context comments.
 - Titles beginning with `* ` are protected from plugin deletion and stale-task
   cleanup. Todoist itself can still delete them when a user acts directly in Todoist.
 

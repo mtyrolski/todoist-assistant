@@ -50,6 +50,7 @@ def test_ai_context_helpers_fetch_and_upsert_only_project_memory(
     class _FakeDatabase:
         def __init__(self, _env_path: str) -> None:
             self.updated = []
+            self.comments = []
 
         def fetch_projects(self, *, include_tasks: bool):
             assert include_tasks is True
@@ -58,6 +59,10 @@ def test_ai_context_helpers_fetch_and_upsert_only_project_memory(
         def update_task(self, task_id: str, **kwargs):
             self.updated.append((task_id, kwargs))
             return {"id": task_id}
+
+        def create_comment(self, *, task_id: str, content: str):
+            self.comments.append({"task_id": task_id, "content": content})
+            return {"id": "comment-1"}
 
     fake_db = _FakeDatabase(str(tmp_path / ".env"))
     monkeypatch.setattr(
@@ -75,11 +80,16 @@ def test_ai_context_helpers_fetch_and_upsert_only_project_memory(
     result = ctx.upsert_ai_context(
         "project-1",
         "Updated stable constraint",
+        description="The stable constraint applies to every release.",
         task_id="context-1",
     )
 
     assert result["action"] == "updated"
-    assert fake_db.updated[0][1]["description"] == "Updated stable constraint"
+    assert fake_db.updated[0][1] == {
+        "content": "* Updated stable constraint",
+        "description": "The stable constraint applies to every release.",
+    }
+    assert fake_db.comments[0]["task_id"] == "context-1"
 
 
 def _save_dashboard_activity(cache_path: Path) -> None:

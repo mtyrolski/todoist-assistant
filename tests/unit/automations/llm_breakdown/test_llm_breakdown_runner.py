@@ -230,7 +230,10 @@ def test_run_breakdown_applies_constrained_context_creation(monkeypatch) -> None
     assert context_insert["content"] == "* Public launch requires legal approval"
     assert context_insert["project_id"] == "project-1"
     assert context_insert.get("parent_id") is None
-    assert "AI context changes:" in db.comments[-1]["content"]
+    assert all(comment["task_id"] == "task-1" for comment in db.comments)
+    assert all(
+        "AI context changes:" not in comment["content"] for comment in db.comments
+    )
 
 
 def test_run_breakdown_updates_only_existing_same_project_context(monkeypatch) -> None:
@@ -248,6 +251,7 @@ def test_run_breakdown_updates_only_existing_same_project_context(monkeypatch) -
             ContextUpdate(
                 task_id="context-1",
                 content="Deployment target is production",
+                description="Deploy releases to the production environment.",
             )
         ],
     )
@@ -256,9 +260,69 @@ def test_run_breakdown_updates_only_existing_same_project_context(monkeypatch) -
     run_breakdown(automation, cast(Database, db))
 
     update = next(call for call in db.update_calls if call[0] == "context-1")
-    assert update[1]["description"] == "Deployment target is production"
-    assert "content" not in update[1]
+    assert update[1]["content"] == "* Deployment target is production"
+    assert update[1]["description"] == (
+        "Deploy releases to the production environment."
+    )
     assert "labels" not in update[1]
+    context_comments = [
+        comment for comment in db.comments if comment["task_id"] == "context-1"
+    ]
+    assert len(context_comments) == 1
+    assert "Title — from:\n* Deployment target" in context_comments[0]["content"]
+    assert (
+        "Title — to:\n* Deployment target is production"
+        in context_comments[0]["content"]
+    )
+    source_comments = [
+        comment for comment in db.comments if comment["task_id"] == "task-1"
+    ]
+    assert all("AI context changes:" not in item["content"] for item in source_comments)
+
+
+def test_run_breakdown_accumulates_multiple_inline_updates_to_same_context(
+    monkeypatch,
+) -> None:
+    context_task = make_task(
+        "context-1",
+        content="* Release policy",
+        description="Run unit tests.",
+        labels=["ai_context"],
+        project_id="project-1",
+    )
+    db = _FakeDb([_task(), context_task])
+    automation = LLMBreakdown()
+    response = TaskBreakdown(
+        children=[BreakdownNode(content="Draft metrics")],
+        context_updates=[
+            ContextUpdate(
+                task_id="context-1",
+                content="Release policy",
+                description="Run a staging smoke test.",
+            ),
+            ContextUpdate(
+                task_id="context-1",
+                content="Release policy",
+                description="Get release approval.",
+            ),
+        ],
+    )
+    _use_llm(monkeypatch, automation, _FakeLlm([response]))
+
+    run_breakdown(automation, cast(Database, db))
+
+    context_updates = [call for call in db.update_calls if call[0] == "context-1"]
+    assert len(context_updates) == 2
+    assert context_updates[0][1]["description"] == (
+        "Run unit tests.\nRun a staging smoke test."
+    )
+    assert context_updates[1][1]["description"] == (
+        "Run unit tests.\nRun a staging smoke test.\nGet release approval."
+    )
+    assert (
+        len([comment for comment in db.comments if comment["task_id"] == "context-1"])
+        == 2
+    )
 
 
 def test_run_breakdown_reports_insert_failure_without_fallback(

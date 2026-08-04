@@ -98,7 +98,6 @@ def _completion_comment(
     run_id: str,
     created_count: int,
     nodes: list[Any],
-    context_results: list[dict[str, Any]] | None = None,
 ) -> str:
     lines = [
         _comment_header(),
@@ -111,11 +110,6 @@ def _completion_comment(
     if titles:
         lines.append("Planned children:")
         lines.extend(f"- {title}" for title in titles[:10])
-    if context_results:
-        lines.append("AI context changes:")
-        lines.extend(
-            f"- {item['action']}: {item['content']}" for item in context_results
-        )
     return "\n".join(lines)
 
 
@@ -159,6 +153,25 @@ def _apply_context_updates(
                     updated_at="",
                 )
             )
+        elif result["action"] == "updated":
+            previous = next(
+                entry
+                for entry in existing_entries
+                if entry.task_id == str(result["taskId"])
+            )
+            existing_entries[:] = [
+                AIContextEntry(
+                    task_id=previous.task_id,
+                    project_id=previous.project_id,
+                    project_name=previous.project_name,
+                    content=str(result["content"]),
+                    description=str(result["description"]),
+                    updated_at=previous.updated_at,
+                )
+                if entry.task_id == previous.task_id
+                else entry
+                for entry in existing_entries
+            ]
     return results, errors
 
 
@@ -487,7 +500,7 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 automation.update_root_labels(db, task, label)
             record_failure(error_message, created_count=created_count)
             continue
-        context_results, context_errors = _apply_context_updates(
+        _, context_errors = _apply_context_updates(
             db,
             project_id=str(task.task_entry.project_id),
             existing_entries=context_by_project.setdefault(
@@ -511,7 +524,6 @@ def run_breakdown(automation: Any, db: Database) -> None:
                 run_id=run_id,
                 created_count=created_count,
                 nodes=nodes,
-                context_results=context_results,
             ),
         )
 
