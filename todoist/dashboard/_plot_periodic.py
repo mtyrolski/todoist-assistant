@@ -16,6 +16,7 @@ from todoist.dashboard._plot_common import (
     forecast_period_total,
     period_grouper,
 )
+from todoist.dashboard._project_colors import resolve_project_color
 
 
 def _current_period_label(
@@ -71,6 +72,21 @@ def _local_periodic_index(index: pd.Index) -> pd.DatetimeIndex:
     )
 
 
+def _local_periodic_datetime(value: datetime) -> datetime:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return cast(
+        datetime,
+        cast(
+            Any,
+            timestamp.tz_convert(_periodic_timezone()).tz_localize(None),
+        ).to_pydatetime(warn=False),
+    )
+
+
 def _drop_projects_without_period_activity(df_periodic: pd.DataFrame) -> pd.DataFrame:
     if df_periodic.empty or df_periodic.columns.empty:
         return df_periodic
@@ -95,7 +111,7 @@ def _columns_with_completed_activity(
 
     always_visible_projects = always_visible_projects or set()
     df_visible = df_completed[
-        (df_completed.index >= beg_date) & (df_completed.index <= end_date)
+        (df_completed.index >= beg_date) & (df_completed.index < end_date)
     ]
     visible_names: set[str] = set()
     if not df_visible.empty:
@@ -190,7 +206,7 @@ def _prepare_completed_periodic_frame(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     df_completed = cast(pd.DataFrame, df[df["type"] == "completed"].copy())
     df_completed.index = _local_periodic_index(df_completed.index)
-    df_completed = cast(pd.DataFrame, df_completed[df_completed.index <= end_date])
+    df_completed = cast(pd.DataFrame, df_completed[df_completed.index < end_date])
     visibility_beg = visibility_beg_date or beg_date
     visibility_end = visibility_end_date or end_date
     active_columns = _columns_with_completed_activity(
@@ -626,6 +642,8 @@ def _add_project_forecast_traces(
         )
 
 
+# Plot configuration and range/visibility controls are intentionally explicit.
+# pylint: disable=too-many-arguments
 def _completed_tasks_periodically_figure(
     df: pd.DataFrame,
     beg_date: datetime,
@@ -636,8 +654,22 @@ def _completed_tasks_periodically_figure(
     visibility_beg_date: datetime | None = None,
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
+    bounds_are_utc: bool = False,
     config: _PeriodicPlotConfig = _PERIODIC_CONFIG,
 ) -> go.Figure:
+    if bounds_are_utc:
+        beg_date = _local_periodic_datetime(beg_date)
+        end_date = _local_periodic_datetime(end_date)
+        visibility_beg_date = (
+            _local_periodic_datetime(visibility_beg_date)
+            if visibility_beg_date is not None
+            else None
+        )
+        visibility_end_date = (
+            _local_periodic_datetime(visibility_end_date)
+            if visibility_end_date is not None
+            else None
+        )
     df_completed, df_weekly_per_project = _prepare_completed_periodic_frame(
         df,
         beg_date=beg_date,
@@ -683,7 +715,7 @@ def _completed_tasks_periodically_figure(
         )
         if project_series.empty:
             continue
-        color = project_colors.get(root_project_name, "#808080")
+        color = resolve_project_color(root_project_name, project_colors)
         historical = _historical_part(
             project_series,
             context=forecast_context,
@@ -765,6 +797,7 @@ def plot_completed_tasks_periodically(
     visibility_beg_date: datetime | None = None,
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
+    bounds_are_utc: bool = False,
 ) -> go.Figure:
     return _completed_tasks_periodically_figure(
         df,
@@ -776,6 +809,7 @@ def plot_completed_tasks_periodically(
         visibility_beg_date,
         visibility_end_date,
         always_visible_projects,
+        bounds_are_utc,
         config=_PERIODIC_CONFIG,
     )
 
@@ -790,6 +824,7 @@ def cumsum_completed_tasks_periodically(
     visibility_beg_date: datetime | None = None,
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
+    bounds_are_utc: bool = False,
 ) -> go.Figure:
     return _completed_tasks_periodically_figure(
         df,
@@ -801,5 +836,6 @@ def cumsum_completed_tasks_periodically(
         visibility_beg_date,
         visibility_end_date,
         always_visible_projects,
+        bounds_are_utc,
         config=_CUMULATIVE_CONFIG,
     )
