@@ -37,6 +37,7 @@ stale_tasks:
     exempt_labels:
     - no_stale
     - track_habit
+    - ai_context
     exclude_recurring: true
     exclude_due_within_days: 7
     exclude_overdue: true

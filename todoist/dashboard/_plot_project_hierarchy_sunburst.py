@@ -18,6 +18,7 @@ from todoist.dashboard._plot_project_hierarchy import (
     _select_visible_nodes,
     _wrap_label,
 )
+from todoist.dashboard._project_colors import resolve_project_color
 
 _EMPTY_COLOR = "#8ea3ff"
 _CENTER_COLOR = "#151a2b"
@@ -38,6 +39,7 @@ def _build_nodes_for_parent(
     children_by_parent: dict[str, list[str]],
     subtree_total: Callable[[str], int],
     direct_counts: dict[str, int],
+    assignment_by_id: dict[str, str],
 ) -> list[_HierarchyNode]:
     candidates: list[_HierarchyNode] = []
     for child_id in children_by_parent.get(parent_id, []):
@@ -61,6 +63,8 @@ def _build_nodes_for_parent(
                     _mix_color(root_color, "#ffffff", min(0.34, 0.1 + depth * 0.11)),
                     max(0.84, 1.0 - depth * 0.06),
                 ),
+                is_archived=child_project.is_archived,
+                parent_assignment=assignment_by_id[child_id],
             )
         )
 
@@ -105,17 +109,26 @@ def _build_nodes_for_parent(
                     children_by_parent=children_by_parent,
                     subtree_total=subtree_total,
                     direct_counts=direct_counts,
+                    assignment_by_id=assignment_by_id,
                 )
             )
     return nodes
 
 
 def _sunburst_display_label(node: _HierarchyNode) -> str:
-    if node.kind == "center":
-        return f"{node.label}<br>{node.total_completed}"
     if node.kind == "aggregate":
         return "Other" if node.label == "Other" else _wrap_label(node.label)
     return _wrap_label(node.label)
+
+
+def _sunburst_display_text(node: _HierarchyNode, project_total: int) -> str:
+    label = _sunburst_display_label(node)
+    if node.kind == "center":
+        return f"{label}<br>{node.total_completed}"
+    if node.depth == 1:
+        percentage = 100.0 * node.total_completed / max(project_total, 1)
+        return f"{label}<br><b>{percentage:.1f}%</b>"
+    return f"{label}<br>{node.total_completed}"
 
 
 def plot_active_project_hierarchy_sunburst(
@@ -124,12 +137,15 @@ def plot_active_project_hierarchy_sunburst(
     end_date: datetime,
     active_projects: list[Project],
     project_colors: dict[str, str],
+    *,
+    project_mappings: dict[str, str] | None = None,
+    archived_parent_projects: set[str] | None = None,
 ) -> go.Figure:
     empty_message: str | None = None
     if df.empty:
         empty_message = "No activity in the selected range"
     elif not active_projects:
-        empty_message = "No active projects available"
+        empty_message = "No projects available"
     elif "type" not in df.columns:
         empty_message = "Activity data is missing project event types"
     if empty_message is not None:
@@ -141,17 +157,25 @@ def plot_active_project_hierarchy_sunburst(
     if df_completed.empty:
         return _empty_sunburst_figure("No completed tasks in the selected range")
 
-    projects_by_id, children_by_parent, root_ids, direct_counts, subtree_total = (
-        _active_project_tree(df_completed, active_projects)
+    (
+        projects_by_id,
+        children_by_parent,
+        root_ids,
+        direct_counts,
+        subtree_total,
+        assignment_by_id,
+    ) = _active_project_tree(
+        df_completed,
+        active_projects,
+        project_mappings=project_mappings,
+        archived_parent_projects=archived_parent_projects,
     )
 
     active_root_ids = [
         project_id for project_id in root_ids if subtree_total(project_id) > 0
     ]
     if not active_root_ids:
-        return _empty_sunburst_figure(
-            "No active project completions in the selected range"
-        )
+        return _empty_sunburst_figure("No project completions in the selected range")
 
     root_nodes = [
         _HierarchyNode(
@@ -163,17 +187,12 @@ def plot_active_project_hierarchy_sunburst(
             root_name=str(projects_by_id[project_id].project_entry.name),
             depth=1,
             kind="root",
-            color=_rgba(
-                _mix_color(
-                    project_colors.get(
-                        str(projects_by_id[project_id].project_entry.name),
-                        _EMPTY_COLOR,
-                    ),
-                    "#f9fcff",
-                    0.02,
-                ),
-                0.96,
+            color=resolve_project_color(
+                projects_by_id[project_id].project_entry.name,
+                project_colors,
             ),
+            is_archived=projects_by_id[project_id].is_archived,
+            parent_assignment=assignment_by_id[project_id],
         )
         for project_id in sorted(
             active_root_ids,
@@ -194,7 +213,7 @@ def plot_active_project_hierarchy_sunburst(
                 label="Other Roots",
                 total_completed=sum(node.total_completed for node in hidden_roots),
                 direct_completed=sum(node.direct_completed for node in hidden_roots),
-                root_name="Active projects",
+                root_name="Projects",
                 depth=1,
                 kind="aggregate",
                 color=_rgba(_mix_color(_EMPTY_COLOR, "#efe1ff", 0.34), 0.88),
@@ -206,10 +225,10 @@ def plot_active_project_hierarchy_sunburst(
         _HierarchyNode(
             node_id="active-projects",
             parent_id="",
-            label="Active projects",
+            label="Projects",
             total_completed=sum(node.total_completed for node in visible_roots),
             direct_completed=sum(node.direct_completed for node in visible_roots),
-            root_name="Active projects",
+            root_name="Projects",
             depth=0,
             kind="center",
             color=_rgba(_CENTER_COLOR, 0.98),
@@ -228,12 +247,15 @@ def plot_active_project_hierarchy_sunburst(
                     children_by_parent=children_by_parent,
                     subtree_total=subtree_total,
                     direct_counts=direct_counts,
+                    assignment_by_id=assignment_by_id,
                 )
             )
 
     ids = [node.node_id for node in all_nodes]
     parents = [node.parent_id for node in all_nodes]
     labels = [_sunburst_display_label(node) for node in all_nodes]
+    project_total = all_nodes[0].total_completed
+    texts = [_sunburst_display_text(node, project_total) for node in all_nodes]
     values = [node.total_completed for node in all_nodes]
     colors = [node.color for node in all_nodes]
     customdata = [
@@ -246,6 +268,8 @@ def plot_active_project_hierarchy_sunburst(
             node.depth,
             node.hidden_projects,
             node.kind,
+            "Archived" if node.is_archived else "Active",
+            node.parent_assignment,
         ]
         for node in all_nodes
     ]
@@ -255,6 +279,7 @@ def plot_active_project_hierarchy_sunburst(
             go.Sunburst(
                 ids=ids,
                 labels=labels,
+                text=texts,
                 parents=parents,
                 values=values,
                 branchvalues="total",
@@ -265,7 +290,7 @@ def plot_active_project_hierarchy_sunburst(
                 ),
                 leaf=dict(opacity=0.98),
                 customdata=customdata,
-                textinfo="label+value",
+                textinfo="text",
                 insidetextorientation="auto",
                 insidetextfont=dict(
                     family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
@@ -293,6 +318,8 @@ def plot_active_project_hierarchy_sunburst(
                     "<br>Root project: %{customdata[4]}"
                     "<br>Hierarchy depth: %{customdata[5]}"
                     "<br>Hidden projects folded in: %{customdata[6]}"
+                    "<br>Project status: %{customdata[8]}"
+                    "<br>Parent assignment: %{customdata[9]}"
                     "<extra></extra>"
                 ),
             )

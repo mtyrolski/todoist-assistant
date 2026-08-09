@@ -18,6 +18,12 @@ from todoist.core import telemetry
 from todoist.core.env import EnvVar
 from todoist.core.utils import CACHE_STORAGE_REGISTRY, resolve_cache_dir
 from todoist.database.base import Database
+from todoist.features.ai_context import (
+    aggregate_ai_context,
+    collect_ai_context,
+    render_ai_context,
+    upsert_ai_context_task,
+)
 from todoist.llm.usage import load_llm_usage_summary
 
 _SUBPROCESS_RUN = subprocess.run
@@ -284,6 +290,75 @@ class ProductivityContext:
         items.sort(key=lambda item: str(item["name"]).lower())
         return items
 
+    def ai_context(
+        self,
+        *,
+        project_id: str | None = None,
+        project_name: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Fetch durable AI context, optionally scoped to an exact project."""
+
+        db = Database(str(self.env_path))
+        entries = collect_ai_context(
+            db.fetch_projects(include_tasks=True),
+            project_id=project_id,
+            project_name=project_name,
+        )
+        return [entry.as_dict() for entry in entries]
+
+    def rendered_ai_context(self) -> str:
+        """Fetch and render bounded context for automatic prompt injection."""
+
+        db = Database(str(self.env_path))
+        entries = collect_ai_context(db.fetch_projects(include_tasks=True))
+        return render_ai_context(entries)
+
+    def project_ai_context(
+        self,
+        *,
+        project_id: str | None = None,
+        project_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return a fresh, lossless project grouping of all durable context tasks."""
+
+        db = Database(str(self.env_path))
+        entries = collect_ai_context(
+            db.fetch_projects(include_tasks=True),
+            project_id=project_id,
+            project_name=project_name,
+        )
+        return [aggregate.as_dict() for aggregate in aggregate_ai_context(entries)]
+
+    def upsert_ai_context(
+        self,
+        project_id: str,
+        content: str,
+        *,
+        description: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or update a protected project-memory task."""
+
+        normalized_project_id = str(project_id or "").strip()
+        db = Database(str(self.env_path))
+        projects = db.fetch_projects(include_tasks=True)
+        active_project_ids = {
+            project.id
+            for project in projects
+            if not project.is_archived and not project.project_entry.is_deleted
+        }
+        if normalized_project_id not in active_project_ids:
+            raise ValueError("project_id must identify an active Todoist project")
+        entries = collect_ai_context(projects, project_id=normalized_project_id)
+        return upsert_ai_context_task(
+            db,
+            project_id=normalized_project_id,
+            content=content,
+            description=description,
+            task_id=task_id,
+            existing_entries=entries,
+        )
+
     def create_tasks(
         self,
         project_id: str,
@@ -340,9 +415,12 @@ def productivity_context_payload(ctx: ProductivityContext) -> dict[str, Any]:
             "llm_usage()",
             "telemetry_status()",
             "projects()",
+            "ai_context(project_id=None, project_name=None)",
+            "project_ai_context(project_id=None, project_name=None)",
             "activity_dataframe()",
             "project_comparison(period='week', as_of=None, offset=0, limit=12)",
             "executive_summary(period='week', as_of=None, offset=0, limit=8)",
+            "upsert_ai_context(project_id, content, description='...', task_id=None)",
             "create_tasks(project_id, tasks, confirmation='CREATE_TODOIST_TASKS')",
         ],
     }

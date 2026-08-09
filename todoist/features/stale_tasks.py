@@ -4,6 +4,10 @@ from enum import StrEnum
 from typing import Sequence
 
 from todoist.features.stats import extract_task_due_date, try_parse_date
+from todoist.features.ai_context import (
+    AI_CONTEXT_LABEL,
+    is_non_removable_content,
+)
 from todoist.core.types import Project, Task
 
 
@@ -21,7 +25,7 @@ class StaleTaskConfig:
     old_label: str = "old"
     very_old_label: str = "very-old"
     delete_after_warning_days: int = 7
-    exempt_labels: tuple[str, ...] = ("no_stale", "track_habit")
+    exempt_labels: tuple[str, ...] = ("no_stale", "track_habit", AI_CONTEXT_LABEL)
     exclude_recurring: bool = True
     exclude_due_within_days: int = 7
     exclude_overdue: bool = True
@@ -115,7 +119,9 @@ def evaluate_task_staleness(
     due_at = extract_task_due_date(task.task_entry.due)
 
     skip_reason: str | None = None
-    if normalized_labels & exempt_labels:
+    if is_non_removable_content(task.task_entry.content):
+        skip_reason = "non_removable"
+    elif normalized_labels & exempt_labels:
         skip_reason = "exempt_label"
     elif config.exclude_recurring and task.is_recurring:
         skip_reason = "recurring"

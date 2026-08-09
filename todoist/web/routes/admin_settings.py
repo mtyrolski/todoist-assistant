@@ -166,17 +166,16 @@ async def admin_project_adjustments(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     warning: str | None = None
     try:
-        (
-            active_root,
-            archived_root,
-            archived_names,
-            remappable_active_root,
-        ) = cast(
-            tuple[list[str], list[str], list[str], list[str]],
-            await asyncio.to_thread(
-                _load_projects_for_adjustments_sync,
-                refresh,
-            ),
+        project_data = cast(
+            tuple[Any, ...],
+            await asyncio.to_thread(_load_projects_for_adjustments_sync, refresh),
+        )
+        active_root = cast(list[str], project_data[0])
+        archived_root = cast(list[str], project_data[1])
+        archived_names = cast(list[str], project_data[2])
+        remappable_active_root = cast(list[str], project_data[3])
+        project_records = cast(
+            list[dict[str, Any]], project_data[4] if len(project_data) > 4 else []
         )
     except Exception as exc:  # pragma: no cover - network safety
         logger.warning(f"Failed loading project lists for adjustments: {exc}")
@@ -184,10 +183,22 @@ async def admin_project_adjustments(
         archived_root = []
         archived_names = []
         remappable_active_root = []
+        project_records = []
         warning = f"Project list unavailable ({type(exc).__name__}). Showing saved mappings only."
     source_projects = sorted(set(archived_names) | set(remappable_active_root))
+    automatic_mappings, automatic_mapping_details = _resolve_automatic_project_mappings(
+        project_records,
+        manual_mappings=mappings,
+        archived_parent_projects=set(archived_parents),
+    )
+    mapping_provenance = {
+        **{source_name: "automatic" for source_name in automatic_mappings},
+        **{source_name: "manual" for source_name in mappings},
+    }
     unmapped_source_projects = [
-        name for name in source_projects if name not in mappings
+        name
+        for name in source_projects
+        if name not in mappings and name not in automatic_mappings
     ]
     archived_parents = sorted(
         [name for name in archived_parents if name in archived_names]
@@ -197,6 +208,12 @@ async def admin_project_adjustments(
         "files": _available_mapping_files(),
         "selectedFile": selected,
         "mappings": mappings,
+        "automaticMappings": automatic_mappings,
+        "mappingProvenance": mapping_provenance,
+        "mappingDetails": [
+            *_manual_project_mapping_details(project_records, mappings),
+            *automatic_mapping_details,
+        ],
         "activeRootProjects": active_root,
         "archivedRootProjects": archived_root,
         "remappableActiveRootProjects": remappable_active_root,

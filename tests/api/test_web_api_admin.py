@@ -39,7 +39,9 @@ def _write_yaml(path, *lines: str) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch, api_client) -> None:
+def test_admin_project_adjustments_exposes_remappable_active_roots(
+    monkeypatch, api_client
+) -> None:
     monkeypatch.setattr(web_api, "_available_mapping_files", lambda: ["adj_private.py"])
     monkeypatch.setattr(
         web_api,
@@ -71,6 +73,119 @@ def test_admin_project_adjustments_exposes_remappable_active_roots(monkeypatch, 
         "Inbox",
     ]
     assert payload["unmappedSourceProjects"] == ["Archived Root", "Inbox"]
+
+
+def test_automatic_project_mappings_use_parent_ids_and_manual_overrides() -> None:
+    records = [
+        {
+            "id": "active-root",
+            "name": "Academy",
+            "isArchived": False,
+            "ancestors": [{"id": "active-root", "name": "Academy"}],
+            "rootId": "active-root",
+            "rootName": "Academy",
+        },
+        {
+            "id": "old-root",
+            "name": "Old Research",
+            "isArchived": True,
+            "ancestors": [{"id": "old-root", "name": "Old Research"}],
+            "rootId": "old-root",
+            "rootName": "Old Research",
+        },
+        {
+            "id": "old-child",
+            "name": "Old Experiment",
+            "isArchived": True,
+            "ancestors": [
+                {"id": "old-child", "name": "Old Experiment"},
+                {"id": "old-root", "name": "Old Research"},
+            ],
+            "rootId": "old-root",
+            "rootName": "Old Research",
+        },
+    ]
+
+    automatic, details = web_api._resolve_automatic_project_mappings(
+        records,
+        manual_mappings={"Old Research": "Academy"},
+        archived_parent_projects=set(),
+    )
+
+    assert automatic == {"Old Experiment": "Academy"}
+    assert details == [
+        {
+            "sourceProject": "Old Experiment",
+            "sourceProjectId": "old-child",
+            "parentProject": "Academy",
+            "parentProjectId": "active-root",
+            "provenance": "automatic",
+        }
+    ]
+
+
+def test_admin_project_adjustments_labels_manual_and_automatic_mappings(
+    monkeypatch, api_client
+) -> None:
+    records = [
+        {
+            "id": "academy",
+            "name": "Academy",
+            "isArchived": False,
+            "ancestors": [{"id": "academy", "name": "Academy"}],
+            "rootId": "academy",
+            "rootName": "Academy",
+        },
+        {
+            "id": "old-root",
+            "name": "Old Root",
+            "isArchived": True,
+            "ancestors": [{"id": "old-root", "name": "Old Root"}],
+            "rootId": "old-root",
+            "rootName": "Old Root",
+        },
+        {
+            "id": "old-child",
+            "name": "Old Child",
+            "isArchived": True,
+            "ancestors": [
+                {"id": "old-child", "name": "Old Child"},
+                {"id": "old-root", "name": "Old Root"},
+            ],
+            "rootId": "old-root",
+            "rootName": "Old Root",
+        },
+    ]
+    monkeypatch.setattr(web_api, "_available_mapping_files", lambda: ["map.py"])
+    monkeypatch.setattr(
+        web_api, "_load_mapping_file", lambda filename: ({"Old Root": "Academy"}, [])
+    )
+    monkeypatch.setattr(
+        web_api,
+        "_load_projects_for_adjustments_sync",
+        lambda refresh: (
+            ["Academy"],
+            ["Old Root"],
+            ["Old Child", "Old Root"],
+            [],
+            records,
+        ),
+    )
+
+    response = api_client.get("/api/admin/project_adjustments")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mappings"] == {"Old Root": "Academy"}
+    assert payload["automaticMappings"] == {"Old Child": "Academy"}
+    assert payload["mappingProvenance"] == {
+        "Old Child": "automatic",
+        "Old Root": "manual",
+    }
+    assert payload["unmappedSourceProjects"] == []
+    details = {item["sourceProject"]: item for item in payload["mappingDetails"]}
+    assert details["Old Root"]["parentProjectId"] == "academy"
+    assert details["Old Child"]["sourceProjectId"] == "old-child"
 
 
 def test_admin_project_adjustments_rejects_path_traversal(
@@ -274,7 +389,9 @@ def test_admin_dashboard_settings_roundtrip(monkeypatch, tmp_path, api_client) -
     assert "label: Kickoff" in saved_text
 
 
-def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch, api_client) -> None:
+def test_admin_dashboard_labels_returns_sorted_local_labels(
+    monkeypatch, api_client
+) -> None:
     class _FakeDatabase:
         def __init__(self, dotenv_path: str) -> None:
             _ = dotenv_path
@@ -301,7 +418,9 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(monkeypatch, api_cli
     ]
 
 
-def test_admin_automations_returns_enabled_and_connection(monkeypatch, api_client) -> None:
+def test_admin_automations_returns_enabled_and_connection(
+    monkeypatch, api_client
+) -> None:
     monkeypatch.setattr(
         web_api,
         "_load_automation_inventory",
@@ -456,7 +575,9 @@ def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(
     ]
 
 
-def test_admin_set_automation_enabled_updates_config(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_set_automation_enabled_updates_config(
+    monkeypatch, tmp_path, api_client
+) -> None:
     config_path = tmp_path / "automations.yaml"
     _write_yaml(
         config_path,
@@ -531,7 +652,9 @@ def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path, api_client) 
     assert "dry_run: false" in saved
 
 
-def test_admin_multiplication_settings_roundtrip_cleanup(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_multiplication_settings_roundtrip_cleanup(
+    monkeypatch, tmp_path, api_client
+) -> None:
     config_path = tmp_path / "automations.yaml"
     _write_yaml(
         config_path,
@@ -609,7 +732,9 @@ def test_set_automation_enabled_returns_false_for_unknown_key(
     assert changed is False
 
 
-def test_admin_gmail_connect_requires_credentials(monkeypatch, tmp_path, api_client) -> None:
+def test_admin_gmail_connect_requires_credentials(
+    monkeypatch, tmp_path, api_client
+) -> None:
     monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
 
@@ -702,7 +827,6 @@ def test_start_gmail_manual_auth_session_enables_insecure_transport_temporarily(
 
     assert session.auth_url == "http://127.0.0.1:9999/auth"
     assert "OAUTHLIB_INSECURE_TRANSPORT" not in os.environ
-
 
 
 def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:

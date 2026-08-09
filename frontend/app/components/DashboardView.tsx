@@ -733,12 +733,12 @@ export function DashboardView({
               <header className="cardHeader hierarchyCardHeader">
                 <div className="hierarchyCardHeaderTop">
                   <div className="cardTitleRow">
-                    <h2>Active Project Hierarchy</h2>
-                    <InfoTip label="About active project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
+                    <h2>Project Hierarchy</h2>
+                    <InfoTip label="About project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
                   </div>
                 </div>
                 <p className="muted hierarchyCardLead">
-                  Sunburst view of active roots and subprojects, tuned to match the dashboard palette.
+                  Sunburst view of active and archived projects, assigned to their effective parent.
                 </p>
               </header>
               <div className="cardBody cardBodyFill hierarchyCardBody">

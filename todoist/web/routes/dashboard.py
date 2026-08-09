@@ -16,7 +16,10 @@ from todoist.dashboard.plots import (
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
-from todoist.database.dataframe import get_adjusting_archived_parent_projects
+from todoist.database.dataframe import (
+    get_adjusting_archived_parent_projects,
+    get_adjusting_mapping,
+)
 from todoist.features.habit_tracker import extract_tracked_habit_tasks
 from todoist.features.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.web.dashboard_payload import (
@@ -112,6 +115,7 @@ async def dashboard_home(
 
     df_activity = _state.df_activity
     active_projects = _state.active_projects
+    archived_projects = _state.archived_projects or []
     project_colors = _state.project_colors
 
     if df_activity is None or active_projects is None or project_colors is None:
@@ -143,6 +147,7 @@ async def dashboard_home(
     )
     plot_events = _normalize_plot_events(dashboard_settings_cfg)
     always_visible_projects = get_adjusting_archived_parent_projects()
+    project_mappings = get_adjusting_mapping()
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
@@ -192,6 +197,7 @@ async def dashboard_home(
                     visibility_beg_date=beg_range,
                     visibility_end_date=end_range,
                     always_visible_projects=always_visible_projects,
+                    bounds_are_utc=beg is None,
                 ),
                 plot_events,
                 beg=history_beg_range,
@@ -211,6 +217,7 @@ async def dashboard_home(
                     visibility_beg_date=beg_range,
                     visibility_end_date=end_range,
                     always_visible_projects=always_visible_projects,
+                    bounds_are_utc=beg is None,
                 ),
                 plot_events,
                 beg=history_beg_range,
@@ -242,8 +249,10 @@ async def dashboard_home(
                     df_activity,
                     beg_range,
                     end_range,
-                    active_projects,
+                    [*active_projects, *archived_projects],
                     project_colors,
+                    project_mappings=project_mappings,
+                    archived_parent_projects=always_visible_projects,
                 )
             ),
         }

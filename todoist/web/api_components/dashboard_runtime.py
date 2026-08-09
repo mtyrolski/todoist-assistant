@@ -3,12 +3,29 @@
 
 # pylint: disable=protected-access,cyclic-import,too-many-lines,undefined-variable,global-variable-undefined,used-before-assignment
 
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from threading import Lock
+from typing import Any, Literal
 
 from todoist.database.base import Database
 from todoist.core.types import Event, Project
+
+ProgressLaneStatus = Literal["queued", "active", "done"]
+ProgressValue = tuple[str, str | None, int, int, ProgressLaneStatus | None]
+
+
+@dataclass(frozen=True, slots=True)
+class _ArchivedActivityTarget:
+    project_id: str
+    label: str
+    updated_at: str
+
+
+_ARCHIVED_ACTIVITY_SCAN_STATE_VERSION = 1
+_ARCHIVED_ACTIVITY_SENTINEL_LIMIT = 16
 
 
 def _sync_api_globals() -> None:
@@ -49,6 +66,10 @@ def _set_progress_sync(
     detail: str,
     sub_current: int | None = None,
     sub_total: int | None = None,
+    lane_id: str | None = None,
+    lane_label: str | None = None,
+    unit: str | None = None,
+    lane_status: ProgressLaneStatus | None = None,
 ) -> None:
     _run_async_in_main_loop(
         _set_progress(
@@ -58,6 +79,10 @@ def _set_progress_sync(
             detail=detail,
             sub_current=sub_current,
             sub_total=sub_total,
+            lane_id=lane_id,
+            lane_label=lane_label,
+            unit=unit,
+            lane_status=lane_status,
         )
     )
 
@@ -74,6 +99,22 @@ async def _progress_snapshot() -> dict[str, Any]:
             "detail": _progress_state.detail,
             "subCurrent": _progress_state.sub_current,
             "subTotal": _progress_state.sub_total,
+            "lanes": [
+                {
+                    "id": lane.id,
+                    "label": lane.label,
+                    "detail": lane.detail,
+                    "current": lane.current,
+                    "total": lane.total,
+                    "unit": lane.unit,
+                    "status": lane.status,
+                    "updatedAt": lane.updated_at,
+                }
+                for lane in sorted(
+                    _progress_state.lanes.values(),
+                    key=lambda item: item.label.casefold(),
+                )
+            ],
             "error": _progress_state.error,
         }
 
@@ -86,20 +127,48 @@ async def _set_progress(
     detail: str | None = None,
     sub_current: int | None = None,
     sub_total: int | None = None,
+    lane_id: str | None = None,
+    lane_label: str | None = None,
+    unit: str | None = None,
+    lane_status: ProgressLaneStatus | None = None,
 ) -> None:
     now = _now_iso()
     async with _PROGRESS_LOCK:
         if not _progress_state.active:
             _progress_state.started_at = now
             _progress_state.error = None
+            _progress_state.lanes.clear()
+        elif lane_id is None and _progress_state.stage != stage:
+            _progress_state.lanes.clear()
         _progress_state.active = True
         _progress_state.stage = stage
         _progress_state.step = step
         _progress_state.total_steps = total_steps
-        _progress_state.detail = detail
-        _progress_state.sub_current = sub_current
-        _progress_state.sub_total = sub_total
+        if lane_id is None:
+            _progress_state.detail = detail
+            _progress_state.sub_current = sub_current
+            _progress_state.sub_total = sub_total
         _progress_state.updated_at = now
+        if lane_id is not None:
+            lane_current = max(sub_current or 0, 0)
+            lane_total = max(sub_total or 0, 0)
+            resolved_lane_status: ProgressLaneStatus
+            if lane_status in {"queued", "active", "done"}:
+                resolved_lane_status = lane_status
+            elif lane_total > 0 and lane_current >= lane_total:
+                resolved_lane_status = "done"
+            else:
+                resolved_lane_status = "active"
+            _progress_state.lanes[lane_id] = _ProgressLane(
+                id=lane_id,
+                label=lane_label or lane_id,
+                detail=detail or "",
+                current=lane_current,
+                total=lane_total,
+                unit=unit,
+                status=resolved_lane_status,
+                updated_at=now,
+            )
 
 
 async def _finish_progress(error: str | None = None) -> None:
@@ -113,13 +182,15 @@ async def _finish_progress(error: str | None = None) -> None:
         _progress_state.started_at = None
         _progress_state.sub_current = None
         _progress_state.sub_total = None
+        _progress_state.lanes.clear()
         _progress_state.updated_at = now
         _progress_state.error = error
 
 
-def _build_tqdm_progress_callback():
-    last_update = 0.0
-    last_value = -1
+def _build_tqdm_progress_callback() -> Callable[..., None]:
+    last_updates: dict[str, float] = {}
+    last_values: dict[str, ProgressValue] = {}
+    callback_lock = Lock()
     adaptive_activity_stages = {
         "Backfilling activity history",
         "Fetching activity history",
@@ -132,18 +203,26 @@ def _build_tqdm_progress_callback():
         total: int,
         unit: str | None,
         detail_override: str | None = None,
+        lane_id: str | None = None,
+        lane_label: str | None = None,
+        lane_status: ProgressLaneStatus | None = None,
     ) -> None:
-        nonlocal last_update, last_value
         if desc in adaptive_activity_stages and unit == "page":
             return
         now = time.time()
-        progress_value = (desc, unit, current, total)
-        if progress_value == last_value and (now - last_update) < 0.4:
-            return
-        if current != total and (now - last_update) < 0.35:
-            return
-        last_value = progress_value
-        last_update = now
+        progress_value = (desc, unit, current, total, lane_status)
+        progress_key = lane_id or "__aggregate__"
+        with callback_lock:
+            last_update = last_updates.get(progress_key, 0.0)
+            if (
+                progress_value == last_values.get(progress_key)
+                and (now - last_update) < 0.4
+            ):
+                return
+            if current != total and (now - last_update) < 0.35:
+                return
+            last_values[progress_key] = progress_value
+            last_updates[progress_key] = now
         step = _TQDM_STEP_MAP.get(desc, _progress_state.step or 1)
         unit_suffix = f" {unit}" if unit else ""
         detail = detail_override or f"{desc}: {current}/{total}{unit_suffix}"
@@ -153,6 +232,10 @@ def _build_tqdm_progress_callback():
             detail=detail,
             sub_current=current,
             sub_total=total,
+            lane_id=lane_id,
+            lane_label=lane_label,
+            unit=unit,
+            lane_status=lane_status,
         )
 
     return _callback
@@ -221,7 +304,9 @@ def _project_has_candidate_ancestor(
     return False
 
 
-def _configured_archived_parent_project_ids(dbio: Database) -> set[str]:
+def _configured_archived_parent_projects(
+    dbio: Database,
+) -> dict[str, _ArchivedActivityTarget]:
     from todoist.database.dataframe import (
         get_adjusting_archived_parent_projects,
         get_adjusting_mapping,
@@ -229,7 +314,7 @@ def _configured_archived_parent_project_ids(dbio: Database) -> set[str]:
 
     archived_parent_names = set(get_adjusting_archived_parent_projects())
     if not archived_parent_names:
-        return set()
+        return {}
 
     link_mapping = get_adjusting_mapping()
     candidate_names = set(archived_parent_names)
@@ -241,7 +326,7 @@ def _configured_archived_parent_project_ids(dbio: Database) -> set[str]:
 
     projects = dbio.fetch_projects(include_tasks=False) + dbio.fetch_archived_projects()
     projects_by_id = {project.id: project for project in projects}
-    target_ids: set[str] = set()
+    target_projects: dict[str, _ArchivedActivityTarget] = {}
     for project in projects:
         if not project.is_archived:
             continue
@@ -253,45 +338,158 @@ def _configured_archived_parent_project_ids(dbio: Database) -> set[str]:
                 candidate_names=candidate_names,
             )
         ):
-            target_ids.add(project.id)
-    return target_ids
+            project_id = str(project.id)
+            target_projects[project_id] = _ArchivedActivityTarget(
+                project_id=project_id,
+                label=str(project.project_entry.name),
+                updated_at=str(project.project_entry.updated_at or ""),
+            )
+    return target_projects
+
+
+def _load_archived_activity_scan_fingerprints(
+    cached_events: set[Event],
+) -> dict[str, str]:
+    try:
+        payload = Cache().archived_activity_scans.load()
+    except LocalStorageError:
+        return {}
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("version") != _ARCHIVED_ACTIVITY_SCAN_STATE_VERSION
+    ):
+        return {}
+
+    sentinels = payload.get("activitySentinels")
+    if not isinstance(sentinels, list) or not all(
+        isinstance(event_id, str) for event_id in sentinels
+    ):
+        return {}
+    cached_event_ids = {str(event.id) for event in cached_events}
+    if not set(sentinels).issubset(cached_event_ids):
+        logger.info(
+            "Archived activity scan state invalidated because cached activity "
+            "sentinels are missing."
+        )
+        return {}
+
+    projects = payload.get("projects")
+    if not isinstance(projects, Mapping):
+        return {}
+    return {
+        str(project_id): str(entry.get("projectUpdatedAt") or "")
+        for project_id, entry in projects.items()
+        if isinstance(entry, Mapping)
+    }
+
+
+def _save_archived_activity_scan_fingerprints(
+    fingerprints: Mapping[str, str],
+    scanned_targets: Mapping[str, _ArchivedActivityTarget],
+    cached_events: set[Event],
+) -> None:
+    completed_at = _now_iso()
+    merged_fingerprints = dict(fingerprints)
+    merged_fingerprints.update(
+        {
+            project_id: target.updated_at
+            for project_id, target in scanned_targets.items()
+        }
+    )
+    event_ids = sorted({str(event.id) for event in cached_events})
+    Cache().archived_activity_scans.save(
+        {
+            "version": _ARCHIVED_ACTIVITY_SCAN_STATE_VERSION,
+            "activitySentinels": event_ids[:_ARCHIVED_ACTIVITY_SENTINEL_LIMIT],
+            "projects": {
+                project_id: {
+                    "projectUpdatedAt": project_updated_at,
+                    "completedAt": completed_at,
+                }
+                for project_id, project_updated_at in merged_fingerprints.items()
+            },
+        }
+    )
 
 
 def _fetch_configured_archived_parent_activity(
     dbio: Database,
     cached_events: set[Event],
 ) -> set[Event]:
-    parent_project_ids = _configured_archived_parent_project_ids(dbio)
-    if not parent_project_ids:
+    targets = _configured_archived_parent_projects(dbio)
+    if not targets:
+        return set()
+
+    fingerprints = _load_archived_activity_scan_fingerprints(cached_events)
+    pending_targets = {
+        project_id: target
+        for project_id, target in targets.items()
+        if not target.updated_at or fingerprints.get(project_id) != target.updated_at
+    }
+    skipped_projects = len(targets) - len(pending_targets)
+    if not pending_targets:
+        logger.info(
+            "Skipping archived activity fetch for {} unchanged project(s).",
+            skipped_projects,
+        )
+        _set_progress_sync(
+            "Fetching archived project activity",
+            step=1,
+            detail=(
+                f"Archived activity cache is current; skipped "
+                f"{skipped_projects} unchanged project(s)"
+            ),
+            sub_current=skipped_projects,
+            sub_total=skipped_projects,
+        )
         return set()
 
     now_utc = datetime.now(timezone.utc)
     date_from = now_utc - timedelta(weeks=520)
     date_to = now_utc
     logger.info(
-        "Fetching scoped activity for {} configured archived parent project id(s).",
-        len(parent_project_ids),
+        "Fetching scoped activity for {} changed archived project(s); skipped {} unchanged.",
+        len(pending_targets),
+        skipped_projects,
     )
     fetched_events = dbio.fetch_activity_for_parent_projects(
-        parent_project_ids,
+        pending_targets,
         date_from=date_from,
         date_to=date_to,
         window_weeks=52,
         events_already_fetched=set(cached_events),
         progress_desc="Fetching archived project activity",
+        progress_lane_labels={
+            project_id: target.label for project_id, target in pending_targets.items()
+        },
     )
-    return {
+    recent_events = {
         event
         for event in fetched_events
         if _coerce_activity_datetime_utc(event.date) >= date_from
     }
+    try:
+        _save_archived_activity_scan_fingerprints(
+            fingerprints,
+            pending_targets,
+            cached_events | recent_events,
+        )
+    except LocalStorageError as exc:
+        logger.warning(f"Failed to save archived activity scan state: {exc}")
+    return recent_events
 
 
 def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
     df_activity = _state.df_activity
     active_projects = _state.active_projects
+    archived_projects = _state.archived_projects
     project_colors = _state.project_colors
-    if df_activity is None or active_projects is None or project_colors is None:
+    if (
+        df_activity is None
+        or active_projects is None
+        or archived_projects is None
+        or project_colors is None
+    ):
         return
 
     payload: dict[str, Any] = {
@@ -306,6 +504,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         "adjustments_cache_signature": _adjustments_cache_signature(),
         "df_activity": df_activity,
         "active_projects": active_projects,
+        "archived_projects": archived_projects,
         "project_colors": project_colors,
     }
     try:
@@ -344,10 +543,12 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
 
     df_activity = payload.get("df_activity")
     active_projects = payload.get("active_projects")
+    archived_projects = payload.get("archived_projects")
     project_colors = payload.get("project_colors")
     if not (
         isinstance(df_activity, pd.DataFrame)
         and isinstance(active_projects, list)
+        and isinstance(archived_projects, list)
         and isinstance(project_colors, dict)
     ):
         return False
@@ -355,13 +556,15 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     _state.db = None
     _state.df_activity = _normalize_activity_df(df_activity)
     _state.active_projects = active_projects
+    _state.archived_projects = archived_projects
     _state.project_colors = {str(k): str(v) for k, v in project_colors.items()}
     _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
     _state.home_payload_cache = {}
     _state.demo_mode = demo_mode
     logger.info(
         "Loaded dashboard state cache from disk "
-        f"(events={len(df_activity)}, projects={len(active_projects)})"
+        f"(events={len(df_activity)}, active_projects={len(active_projects)}, "
+        f"archived_projects={len(archived_projects)})"
     )
     return True
 
@@ -527,6 +730,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             detail="Loading metadata and caches",
         )
         active_projects = dbio.fetch_projects(include_tasks=True)
+        archived_projects = dbio.fetch_archived_projects()
 
         if demo_mode and not dbio.is_anonymized:
             from todoist.database.demo import (
@@ -555,6 +759,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.db = dbio
         _state.df_activity = df_activity
         _state.active_projects = active_projects
+        _state.archived_projects = archived_projects
         _state.project_colors = project_colors
         _state.last_refresh_s = time.time()
         _state.home_payload_cache = {}

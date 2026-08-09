@@ -1,10 +1,23 @@
 import datetime as dt
 import inspect
 from datetime import datetime, timezone
+from threading import Lock
+from time import sleep
 from unittest.mock import patch
 
 from todoist.core.utils import set_tqdm_progress_callback
 from tests.unit.database.helpers import event_payload, make_event
+
+ProgressCall = tuple[
+    str,
+    int,
+    int,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+]
 
 
 @patch("todoist.database.db_activity.logger")
@@ -274,6 +287,83 @@ def test_fetch_activity_for_parent_projects_stops_after_cached_empty_windows(
 
     assert events == []
     assert fetch.call_count == 2
+
+
+def test_fetch_activity_for_parent_projects_runs_projects_in_parallel_and_reports_lanes(
+    db_activity,
+):
+    access_lock = Lock()
+    active_fetches = 0
+    max_active_fetches = 0
+    progress_calls: list[ProgressCall] = []
+
+    def _fetch_range(**_kwargs):
+        nonlocal active_fetches, max_active_fetches
+        with access_lock:
+            active_fetches += 1
+            max_active_fetches = max(max_active_fetches, active_fetches)
+        sleep(0.05)
+        with access_lock:
+            active_fetches -= 1
+        return []
+
+    def _capture_progress(
+        desc: str,
+        current: int,
+        total: int,
+        unit: str | None,
+        detail: str | None = None,
+        lane_id: str | None = None,
+        lane_label: str | None = None,
+        lane_status: str | None = None,
+    ) -> None:
+        progress_calls.append(
+            (
+                desc,
+                current,
+                total,
+                unit,
+                detail,
+                lane_id,
+                lane_label,
+                lane_status,
+            )
+        )
+
+    set_tqdm_progress_callback(_capture_progress)
+    try:
+        with (
+            patch(
+                "todoist.database.db_activity.get_max_concurrent_requests",
+                return_value=2,
+            ),
+            patch.object(
+                db_activity, "_fetch_activity_range", side_effect=_fetch_range
+            ),
+        ):
+            db_activity.fetch_activity_for_parent_projects(
+                ["parent-a", "parent-b"],
+                date_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                date_to=datetime(2024, 1, 8, tzinfo=timezone.utc),
+                window_weeks=1,
+                progress_lane_labels={
+                    "parent-a": "Archived A",
+                    "parent-b": "Archived B",
+                },
+            )
+    finally:
+        set_tqdm_progress_callback(None)
+
+    lane_ids = {call[5] for call in progress_calls}
+    queued_lane_ids = {call[5] for call in progress_calls if call[7] == "queued"}
+    details = {call[4] for call in progress_calls}
+    assert max_active_fetches == 2
+    assert {"archived-project:parent-a", "archived-project:parent-b"} <= lane_ids
+    assert queued_lane_ids == {
+        "archived-project:parent-a",
+        "archived-project:parent-b",
+    }
+    assert any(detail is not None and "workers=2" in detail for detail in details)
 
 
 def test_fetch_activity_signature(db_activity):

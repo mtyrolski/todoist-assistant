@@ -19,6 +19,7 @@ def build_planner_messages(
     prefab_contents: Sequence[str],
     *,
     custom_instructions: str = "",
+    project_ai_context: str = "",
 ) -> list[dict[str, str]]:
     """Build a single system prompt with tool + instruction context."""
 
@@ -27,6 +28,8 @@ def build_planner_messages(
         system_parts.append(
             "User-configured assistant instructions:\n" + custom_instructions.strip()
         )
+    if project_ai_context.strip():
+        system_parts.append(project_ai_context.strip())
     if prefab_contents:
         system_parts.append("Prefabs:\n" + "\n---\n".join(prefab_contents))
     system_parts.append(PLANNER_PROMPT)

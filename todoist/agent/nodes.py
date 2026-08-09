@@ -22,6 +22,7 @@ T = TypeVar("T", bound=BaseModel)
 class AgentState(TypedDict, total=False):
     messages: list[dict[str, str]]
     custom_instructions: str
+    project_ai_context: str
     selected_prefab_ids: list[str]
     selected_prefab_contents: list[str]
     plan: list[str]
@@ -234,6 +235,7 @@ class AgentNodes:
             messages,
             state.get("selected_prefab_contents") or [],
             custom_instructions=state.get("custom_instructions") or "",
+            project_ai_context=state.get("project_ai_context") or "",
         )
         try:
             decision = self.llm.structured_chat(base_messages, PlannerDecision)
