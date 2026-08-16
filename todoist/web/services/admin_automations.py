@@ -32,6 +32,7 @@ from todoist.automations.gmail_tasks import (
     resolve_gmail_token_path,
 )
 from todoist.automations.observer import AutomationObserver
+from todoist.features.activity import activity_sync_lock
 from todoist.database.base import Database
 from todoist.dashboard.settings import (
     load_dashboard_config,
@@ -730,7 +731,8 @@ def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
 
 async def _run_with_db(func: Any, *args: Any) -> Any:
     dbio = Database(".env")
-    await asyncio.to_thread(dbio.pull)
+    with activity_sync_lock():
+        await asyncio.to_thread(dbio.pull)
     try:
         return await asyncio.to_thread(func, *args, dbio=dbio)
     finally:

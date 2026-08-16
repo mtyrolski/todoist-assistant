@@ -77,6 +77,10 @@ class AutomationObserver:
             logger.info("Observer interrupted by user. Exiting.")
 
     def run_once(self) -> ObserverRunResult:
+        with activity_sync_lock():
+            return self._run_once_locked()
+
+    def _run_once_locked(self) -> ObserverRunResult:
         new_events = self._refresh_activity_cache()
 
         automations_to_run = self._eligible_automations(has_new_events=bool(new_events))
@@ -126,29 +130,26 @@ class AutomationObserver:
         ]
 
     def _refresh_activity_cache(self) -> set:
-        with activity_sync_lock():
-            events, stats = self._activity.fetch_recent_events(
-                self._db, max_pages=RECENT_ACTIVITY_PAGES
-            )
-            if stats.get("total"):
-                logger.debug(f"Observer activity snapshot: {stats}")
-            if not events:
-                return set()
+        events, stats = self._activity.fetch_recent_events(
+            self._db, max_pages=RECENT_ACTIVITY_PAGES
+        )
+        if stats.get("total"):
+            logger.debug(f"Observer activity snapshot: {stats}")
+        if not events:
+            return set()
 
-            cached_events: set = load_activity_cache()
-            new_events = {event for event in events if event not in cached_events}
-            if not new_events:
-                logger.debug(
-                    "Observer activity cache unchanged; no new events detected."
-                )
-                return set()
+        cached_events: set = load_activity_cache()
+        new_events = {event for event in events if event not in cached_events}
+        if not new_events:
+            logger.debug("Observer activity cache unchanged; no new events detected.")
+            return set()
 
-            cached_events = merge_activity_cache(new_events)
-            added = len(new_events)
-            logger.debug(
-                f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}"
-            )
-            return new_events
+        cached_events = merge_activity_cache(new_events)
+        added = len(new_events)
+        logger.debug(
+            f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}"
+        )
+        return new_events
 
     @staticmethod
     def _sleep(seconds: float, *, stop_event: Event | None = None) -> None:
