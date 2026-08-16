@@ -101,9 +101,7 @@ class DatabaseActivity:
         )
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             while n_empty_weeks < early_stop_after_n_windows:
-                batch: list[
-                    tuple[int, datetime, datetime, Future[list[Event]]]
-                ] = []
+                batch: list[tuple[int, datetime, datetime, Future[list[Event]]]] = []
                 for _ in range(worker_count):
                     if n_empty_weeks >= early_stop_after_n_windows:
                         break

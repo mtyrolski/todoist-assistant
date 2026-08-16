@@ -587,7 +587,6 @@ def _activity_fetch_window_config() -> tuple[int, int]:
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
-    global _activity_backfill_attempted
     # Reset progress state to clear any stale information from previous failed refreshes
     _run_async_in_main_loop(_finish_progress(error=None))
 
@@ -596,6 +595,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
     error: str | None = None
     history_scan_succeeded = False
+    backfill_attempted = bool(globals().get("_activity_backfill_attempted", False))
     try:
         _set_progress_sync(
             "Checking Todoist updates",
@@ -630,9 +630,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     len(cached_events),
                 )
 
-                if not _activity_backfill_attempted and needs_activity_history(
-                    cached_events
-                ):
+                if not backfill_attempted and needs_activity_history(cached_events):
                     nweeks, early_stop = _activity_fetch_window_config()
                     history_boundary = activity_history_boundary(cached_events)
                     logger.info(
@@ -676,7 +674,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 logger.warning(f"Failed to refresh activity cache: {exc}")
             finally:
                 if history_scan_succeeded or not needs_activity_history(cached_events):
-                    _activity_backfill_attempted = True
+                    backfill_attempted = True
+                globals()["_activity_backfill_attempted"] = backfill_attempted
 
         if _resolve_api_key():
             try:

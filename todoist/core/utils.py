@@ -438,9 +438,7 @@ class LocalStorage(Generic[T]):
         path_obj = Path(self.path)
         if not path_obj.exists():
             return
-        backup = path_obj.with_name(
-            f"{path_obj.name}.corrupt.{time.time_ns()}"
-        )
+        backup = path_obj.with_name(f"{path_obj.name}.corrupt.{time.time_ns()}")
         try:
             os.replace(path_obj, backup)
             logger.warning(
@@ -449,7 +447,9 @@ class LocalStorage(Generic[T]):
                 backup,
             )
         except OSError as exc:
-            logger.warning("Failed to quarantine corrupted cache file {}: {}", path_obj, exc)
+            logger.warning(
+                "Failed to quarantine corrupted cache file {}: {}", path_obj, exc
+            )
 
     def _save_unlocked(self, data: T) -> None:
         path_obj = Path(self.path)
@@ -483,7 +483,9 @@ class LocalStorage(Generic[T]):
                     self._save_unlocked(default_value)
                     return default_value
         except LOCAL_STORAGE_EXCEPTIONS as exc:
-            raise LocalStorageError(f"Failed to load data from {self.path}: {exc}") from exc
+            raise LocalStorageError(
+                f"Failed to load data from {self.path}: {exc}"
+            ) from exc
 
     def save(self, data: T) -> None:
         try:
@@ -519,7 +521,9 @@ class LocalStorage(Generic[T]):
                 self._save_unlocked(updated)
                 return updated
         except LOCAL_STORAGE_EXCEPTIONS as exc:
-            raise LocalStorageError(f"Failed to update data in {self.path}: {exc}") from exc
+            raise LocalStorageError(
+                f"Failed to update data in {self.path}: {exc}"
+            ) from exc
 
 
 class Cache:

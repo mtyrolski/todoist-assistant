@@ -75,7 +75,9 @@ def activity_history_boundary(events: EventCollection) -> datetime | None:
 
 def needs_activity_history(events: EventCollection) -> bool:
     boundary = activity_history_boundary(events)
-    return boundary is None or datetime.now(boundary.tzinfo) - boundary < MIN_HISTORY_SPAN
+    return (
+        boundary is None or datetime.now(boundary.tzinfo) - boundary < MIN_HISTORY_SPAN
+    )
 
 
 def get_last_n_events(events: EventCollection, n: int) -> EventCollection:
