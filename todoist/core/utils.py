@@ -400,6 +400,10 @@ class LocalStorage(Generic[T]):
     def _default_value(self) -> T:
         return cast(T, self.resource_class())
 
+    def _is_expected_type(self, value: object) -> bool:
+        expected_type = type(self._default_value())
+        return isinstance(value, expected_type)
+
     @contextmanager
     def _locked(self):
         """Serialize cache access in-process and, when available, across processes."""
@@ -424,9 +428,9 @@ class LocalStorage(Generic[T]):
         if not exists(self.path):
             return self._default_value()
         value = cast(T, load(self.path))
-        if not isinstance(value, self.resource_class):
+        if not self._is_expected_type(value):
             raise TypeError(
-                f"Expected {self.resource_class.__name__}, got {type(value).__name__}"
+                f"Expected {type(self._default_value()).__name__}, got {type(value).__name__}"
             )
         return value
 
@@ -483,9 +487,9 @@ class LocalStorage(Generic[T]):
 
     def save(self, data: T) -> None:
         try:
-            if not isinstance(data, self.resource_class):
+            if not self._is_expected_type(data):
                 raise TypeError(
-                    f"Expected {self.resource_class.__name__}, got {type(data).__name__}"
+                    f"Expected {type(self._default_value()).__name__}, got {type(data).__name__}"
                 )
             with self._locked():
                 self._save_unlocked(data)
@@ -507,9 +511,9 @@ class LocalStorage(Generic[T]):
                     self._quarantine_corrupt_file()
                     current = self._default_value()
                 updated = updater(current)
-                if not isinstance(updated, self.resource_class):
+                if not self._is_expected_type(updated):
                     raise TypeError(
-                        f"Expected updater to return {self.resource_class.__name__}, "
+                        f"Expected updater to return {type(self._default_value()).__name__}, "
                         f"got {type(updated).__name__}"
                     )
                 self._save_unlocked(updated)

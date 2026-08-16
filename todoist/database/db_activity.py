@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -101,7 +101,9 @@ class DatabaseActivity:
         )
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             while n_empty_weeks < early_stop_after_n_windows:
-                batch: list[tuple[int, datetime, datetime, object]] = []
+                batch: list[
+                    tuple[int, datetime, datetime, Future[list[Event]]]
+                ] = []
                 for _ in range(worker_count):
                     if n_empty_weeks >= early_stop_after_n_windows:
                         break

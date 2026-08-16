@@ -13,10 +13,11 @@ NWEEKSMAX = 520  # 10 years
 MIN_HISTORY_SPAN = timedelta(weeks=12)
 
 
-def load_activity_cache() -> EventCollection:
+def load_activity_cache(*, cache: Cache | None = None) -> EventCollection:
     """Load only valid event records, repairing semantically bad cache entries."""
 
-    raw = Cache().activity.load()
+    storage = (cache or Cache()).activity
+    raw = storage.load()
     valid_events = {
         event
         for event in raw
@@ -29,11 +30,13 @@ def load_activity_cache() -> EventCollection:
             "Discarded {} invalid activity cache record(s) during recovery.",
             len(raw) - len(valid_events),
         )
-        Cache().activity.save(valid_events)
+        valid_events = storage.update(load_valid_events)
     return valid_events
 
 
-def merge_activity_cache(events: EventCollection) -> EventCollection:
+def merge_activity_cache(
+    events: EventCollection, *, cache: Cache | None = None
+) -> EventCollection:
     """Merge events under the cache file lock so concurrent workers cannot lose data."""
 
     incoming = {
@@ -50,7 +53,7 @@ def merge_activity_cache(events: EventCollection) -> EventCollection:
             *incoming,
         }
 
-    return Cache().activity.update(_merge)
+    return (cache or Cache()).activity.update(_merge)
 
 
 def load_valid_events(events: object) -> EventCollection:

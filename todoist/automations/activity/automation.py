@@ -28,7 +28,7 @@ class Activity(Automation):
             events_history = merge_activity_cache(recent_events)
             new_events = events_history - events_so_far
             logger.info(
-                "Activity sync recent phase complete: fetched=%s; new=%s; cached=%s",
+                "Activity sync recent phase complete: fetched={}; new={}; cached={}",
                 len(recent_events),
                 len(new_events),
                 len(events_history),
@@ -38,7 +38,7 @@ class Activity(Automation):
             if needs_activity_history(events_history):
                 history_boundary = activity_history_boundary(events_history)
                 logger.info(
-                    "Activity sync history phase starting at boundary=%s",
+                    "Activity sync history phase starting at boundary={}",
                     history_boundary.isoformat() if history_boundary else "now",
                 )
                 history_result = db.fetch_activity_history(
@@ -52,7 +52,7 @@ class Activity(Automation):
                 if history_events:
                     events_history = merge_activity_cache(history_events)
                 logger.info(
-                    "Activity sync history phase complete: new=%s; cached=%s",
+                    "Activity sync history phase complete: new={}; cached={}",
                     len(history_events),
                     len(events_history),
                 )
