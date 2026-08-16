@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
@@ -54,6 +54,7 @@ class DatabaseActivity:
         progress_desc: str = "Querying activity data",
         date_to: datetime | None = None,
         max_workers: int | None = None,
+        on_events: Callable[[set[Event]], None] | None = None,
     ) -> list[Event]:
         """
         Fetch activity events from Todoist API in a moving-window pattern.
@@ -145,6 +146,8 @@ class DatabaseActivity:
                     n_empty_weeks = n_empty_weeks + 1 if not new_events else 0
                     total_events.extend(new_events)
                     events_already_fetched.update(new_events)
+                    if new_events and on_events is not None:
+                        on_events(set(new_events))
                     remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
                     report_tqdm_progress(
                         progress_desc,
@@ -264,6 +267,7 @@ class DatabaseActivity:
         date_to: datetime | None = None,
         progress_desc: str = "Fetching activity history",
         max_workers: int | None = None,
+        on_events: Callable[[set[Event]], None] | None = None,
     ) -> list[Event]:
         """Backfill older activity windows, optionally ending at the cache boundary."""
 
@@ -281,6 +285,7 @@ class DatabaseActivity:
             date_to=date_to,
             progress_desc=progress_desc,
             max_workers=max_workers,
+            on_events=on_events,
         )
 
     def _fetch_activity_range(

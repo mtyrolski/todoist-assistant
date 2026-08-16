@@ -66,6 +66,26 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
 
 
 @patch("todoist.database.db_activity.logger")
+def test_fetch_activity_adaptively_checkpoints_each_completed_window(
+    _mock_logger, db_activity
+):
+    first_event = make_event("event1")
+    second_event = make_event("event2")
+    checkpoints: list[set] = []
+
+    with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
+        mock_fetch_window.side_effect = [[first_event], [second_event], []]
+
+        db_activity.fetch_activity_adaptively(
+            nweeks_window_size=1,
+            early_stop_after_n_windows=1,
+            on_events=checkpoints.append,
+        )
+
+    assert checkpoints == [{first_event}, {second_event}]
+
+
+@patch("todoist.database.db_activity.logger")
 def test_fetch_activity_adaptively_passes_cached_events_to_range(
     _mock_logger, db_activity
 ):

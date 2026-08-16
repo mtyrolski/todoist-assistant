@@ -2,6 +2,7 @@ from loguru import logger
 
 from todoist.features.activity import (
     activity_history_boundary,
+    activity_sync_lock,
     load_activity_cache,
     merge_activity_cache,
     needs_activity_history,
@@ -22,6 +23,10 @@ class Activity(Automation):
         self.frequency_in_minutes = 0.1
 
     def _tick(self, db: Database):
+        with activity_sync_lock():
+            self._tick_locked(db)
+
+    def _tick_locked(self, db: Database):
         events_so_far = load_activity_cache()
         if hasattr(db, "fetch_activity_recent"):
             recent_events = set(db.fetch_activity_recent(max_pages=2))
@@ -41,15 +46,30 @@ class Activity(Automation):
                     "Activity sync history phase starting at boundary={}",
                     history_boundary.isoformat() if history_boundary else "now",
                 )
+                checkpointed_events: set[Event] = set()
+
+                def _checkpoint(events: set[Event]) -> None:
+                    nonlocal events_history
+                    checkpointed_events.update(events)
+                    events_history = merge_activity_cache(events)
+                    logger.info(
+                        "Activity sync history checkpoint: added={}; cached={}",
+                        len(events),
+                        len(events_history),
+                    )
+
                 history_result = db.fetch_activity_history(
                     nweeks_window_size=self.nweeks,
                     early_stop_after_n_windows=self.early_stop_after_n_windows,
                     events_already_fetched=events_history,
                     date_to=history_boundary,
                     progress_desc="Fetching activity history",
+                    on_events=_checkpoint,
                 )
-                history_events = set(history_result) - events_history
-                if history_events:
+                history_events = checkpointed_events or (
+                    set(history_result) - events_history
+                )
+                if history_events and not checkpointed_events:
                     events_history = merge_activity_cache(history_events)
                 logger.info(
                     "Activity sync history phase complete: new={}; cached={}",

@@ -1,4 +1,9 @@
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Iterator
+
+import fcntl
 
 from loguru import logger
 
@@ -54,6 +59,21 @@ def merge_activity_cache(
         }
 
     return (cache or Cache()).activity.update(_merge)
+
+
+@contextmanager
+def activity_sync_lock(*, cache: Cache | None = None) -> Iterator[None]:
+    """Serialize activity API syncs across threads and dashboard processes."""
+
+    activity_path = Path((cache or Cache()).activity.path)
+    lock_path = activity_path.with_name(f"{activity_path.stem}.sync.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def load_valid_events(events: object) -> EventCollection:
