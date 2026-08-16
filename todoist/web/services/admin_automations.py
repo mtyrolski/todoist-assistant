@@ -680,7 +680,9 @@ def _run_automation_sync(
             output_stream, format="{message}", level=get_log_level()
         )
         try:
+            logger.info("Manual automation run started: {}", automation.name)
             task_delegations = automation.tick(dbio)
+            logger.info("Manual automation run completed: {}", automation.name)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             logger.exception(
@@ -691,6 +693,8 @@ def _run_automation_sync(
             if not continue_on_error:
                 raise
         finally:
+            if error:
+                logger.error("Manual automation run failed: {}", automation.name)
             logger.remove(loguru_handler_id)
     finished_at = datetime.now()
     return {

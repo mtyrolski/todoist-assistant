@@ -63,7 +63,11 @@ function formatSignalMeta(a: AutomationInfo): string {
 }
 
 function automationLogSource(a: AutomationInfo): string {
-  return a.enabled ? "observer" : "automation";
+  // Manual runs execute in the dashboard API process and are written to the
+  // automation log. The observer log only contains the separate background
+  // observer process, even when this automation is enabled there.
+  void a;
+  return "automation";
 }
 
 function automationStatusTone(a: AutomationInfo): "good" | "warn" | "neutral" {

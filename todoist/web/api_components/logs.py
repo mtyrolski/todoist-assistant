@@ -52,7 +52,7 @@ def runtime_log_specs() -> tuple[RuntimeLogSpec, ...]:
             key="automation",
             label="Automation Jobs",
             category="automation",
-            description="Shared automation runner output outside the dashboard stack.",
+            description="Manual and API-triggered automation runs, including activity sync phases.",
             relative_path="automation.log",
         ),
     )
