@@ -108,6 +108,27 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     assert loaded is False
 
 
+def test_in_memory_dashboard_state_rejects_changed_activity_signature(
+    monkeypatch, tmp_path
+) -> None:
+    cache = _dashboard_cache(monkeypatch, tmp_path)
+    _clear_dashboard_state()
+    _set_state_with_df(_single_event_df())
+    web_api._state.activity_cache_signature = web_api._activity_cache_signature()
+
+    assert web_api._state.is_ready_for(
+        demo_mode=False,
+        activity_cache_signature=web_api._activity_cache_signature(),
+    )
+
+    cache.activity.save({"new-event"})
+
+    assert not web_api._state.is_ready_for(
+        demo_mode=False,
+        activity_cache_signature=web_api._activity_cache_signature(),
+    )
+
+
 def test_load_state_from_disk_cache_rejects_stale_adjustment_signature(
     monkeypatch, tmp_path
 ) -> None:

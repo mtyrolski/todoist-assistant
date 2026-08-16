@@ -193,13 +193,20 @@ class _DashboardState:
         self.project_colors: dict[str, str] | None = None
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
         self.demo_mode: bool = False
+        self.activity_cache_signature: dict[str, int] | None = None
 
-    def is_ready_for(self, *, demo_mode: bool) -> bool:
+    def is_ready_for(
+        self,
+        *,
+        demo_mode: bool,
+        activity_cache_signature: dict[str, int] | None = None,
+    ) -> bool:
         return (
             self.df_activity is not None
             and self.active_projects is not None
             and self.project_colors is not None
             and self.demo_mode == demo_mode
+            and self.activity_cache_signature == activity_cache_signature
         )
 
 

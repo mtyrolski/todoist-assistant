@@ -14,6 +14,7 @@ from todoist.database.base import Database
 from todoist.core.types import Event, Project
 from todoist.features.activity import (
     activity_history_boundary,
+    activity_sync_lock,
     load_activity_cache,
     merge_activity_cache,
     needs_activity_history,
@@ -567,6 +568,7 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
     _state.home_payload_cache = {}
     _state.demo_mode = demo_mode
+    _state.activity_cache_signature = payload.get("activity_cache_signature")
     logger.info(
         "Loaded dashboard state cache from disk "
         f"(events={len(df_activity)}, active_projects={len(active_projects)}, "
@@ -622,7 +624,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     step=1,
                     detail="Refreshing the newest activity pages",
                 )
-                recent_events = set(dbio.fetch_activity_recent(max_pages=2))
+                with activity_sync_lock():
+                    recent_events = set(dbio.fetch_activity_recent(max_pages=2))
                 cached_events = merge_activity_cache(recent_events)
                 logger.info(
                     "Activity sync recent phase complete: fetched={}; cached={}",
@@ -648,13 +651,17 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                             f"in {nweeks}-week windows"
                         ),
                     )
-                    history_events = dbio.fetch_activity_history(
-                        nweeks_window_size=nweeks,
-                        early_stop_after_n_windows=early_stop,
-                        events_already_fetched=set(cached_events),
-                        date_to=history_boundary,
-                        progress_desc="Fetching activity history",
-                    )
+                    with activity_sync_lock():
+                        cached_events = load_activity_cache()
+                        history_boundary = activity_history_boundary(cached_events)
+                        history_events = dbio.fetch_activity_history(
+                            nweeks_window_size=nweeks,
+                            early_stop_after_n_windows=early_stop,
+                            events_already_fetched=set(cached_events),
+                            date_to=history_boundary,
+                            progress_desc="Fetching activity history",
+                            on_events=merge_activity_cache,
+                        )
                     cached_events = merge_activity_cache(set(history_events))
                     logger.info(
                         "Activity sync history phase complete: cached={}",
@@ -750,6 +757,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.last_refresh_s = time.time()
         _state.home_payload_cache = {}
         _state.demo_mode = demo_mode
+        _state.activity_cache_signature = _activity_cache_signature()
         _persist_state_to_disk_cache(demo_mode=demo_mode)
     except Exception as exc:  # pragma: no cover - defensive
         error = f"{type(exc).__name__}: {exc}"
@@ -762,12 +770,18 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
     global _main_loop
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-    if not refresh and _state.is_ready_for(demo_mode=desired_demo):
+    if not refresh and _state.is_ready_for(
+        demo_mode=desired_demo,
+        activity_cache_signature=_activity_cache_signature(),
+    ):
         return
 
     async with _STATE_LOCK:
         desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-        if not refresh and _state.is_ready_for(demo_mode=desired_demo):
+        if not refresh and _state.is_ready_for(
+            demo_mode=desired_demo,
+            activity_cache_signature=_activity_cache_signature(),
+        ):
             return
         if not refresh and _load_state_from_disk_cache(demo_mode=desired_demo):
             return
