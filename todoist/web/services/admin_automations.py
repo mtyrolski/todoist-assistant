@@ -730,11 +730,11 @@ def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
 
 async def _run_with_db(func: Any, *args: Any) -> Any:
     dbio = Database(".env")
-    dbio.pull()
+    await asyncio.to_thread(dbio.pull)
     try:
         return await asyncio.to_thread(func, *args, dbio=dbio)
     finally:
-        dbio.reset()
+        await asyncio.to_thread(dbio.reset)
 
 
 async def _run_job(job_id: str, func: Any, *args: Any) -> None:
