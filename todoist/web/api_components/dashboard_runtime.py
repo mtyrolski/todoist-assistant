@@ -12,6 +12,12 @@ from typing import Any, Literal
 
 from todoist.database.base import Database
 from todoist.core.types import Event, Project
+from todoist.features.activity import (
+    activity_history_boundary,
+    load_activity_cache,
+    merge_activity_cache,
+    needs_activity_history,
+)
 
 ProgressLaneStatus = Literal["queued", "active", "done"]
 ProgressValue = tuple[str, str | None, int, int, ProgressLaneStatus | None]
@@ -589,6 +595,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
     set_tqdm_progress_callback(_build_tqdm_progress_callback())
 
     error: str | None = None
+    history_scan_succeeded = False
     try:
         _set_progress_sync(
             "Checking Todoist updates",
@@ -599,7 +606,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         dbio.pull()
 
         try:
-            cached_events = Cache().activity.load()
+            cached_events = load_activity_cache()
         except LocalStorageError:
             cached_events = set()
         _set_progress_sync(
@@ -608,92 +615,73 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             detail=f"Loaded {len(cached_events)} cached activity event(s)",
         )
 
-        def _should_backfill(events: set[Event]) -> bool:
-            if not events:
-                return True
-            dates = [e.date for e in events if isinstance(e.date, datetime)]
-            if not dates:
-                return True
-            span = max(dates) - min(dates)
-            return span < timedelta(weeks=12)
+        if _resolve_api_key():
+            try:
+                _set_progress_sync(
+                    "Fetching recent activity",
+                    step=1,
+                    detail="Refreshing the newest activity pages",
+                )
+                recent_events = set(dbio.fetch_activity_recent(max_pages=2))
+                cached_events = merge_activity_cache(recent_events)
+                logger.info(
+                    "Activity sync recent phase complete: fetched={}; cached={}",
+                    len(recent_events),
+                    len(cached_events),
+                )
 
-        if cached_events and _resolve_api_key() and not _activity_backfill_attempted:
-            if _should_backfill(cached_events):
-                try:
+                if not _activity_backfill_attempted and needs_activity_history(
+                    cached_events
+                ):
                     nweeks, early_stop = _activity_fetch_window_config()
+                    history_boundary = activity_history_boundary(cached_events)
                     logger.info(
-                        f"Activity cache looks short; backfilling history "
-                        f"(window={nweeks}w, stop={early_stop})."
+                        "Activity cache needs history recovery (window={}w, stop={}, boundary={}).",
+                        nweeks,
+                        early_stop,
+                        history_boundary.isoformat() if history_boundary else "now",
                     )
                     _set_progress_sync(
-                        "Backfilling activity history",
+                        "Fetching activity history",
                         step=1,
                         detail=(
-                            f"Cache has {len(cached_events)} event(s); "
-                            f"fetching older {nweeks}-week windows"
+                            f"Backfilling older activity before "
+                            f"{history_boundary.isoformat() if history_boundary else 'now'} "
+                            f"in {nweeks}-week windows"
                         ),
                     )
-                    events = dbio.fetch_activity_adaptively(
+                    history_events = dbio.fetch_activity_history(
                         nweeks_window_size=nweeks,
                         early_stop_after_n_windows=early_stop,
                         events_already_fetched=set(cached_events),
-                        progress_desc="Backfilling activity history",
+                        date_to=history_boundary,
+                        progress_desc="Fetching activity history",
                     )
-                    Cache().activity.save(set(events))
-                except Exception as exc:  # pragma: no cover - network-dependent
-                    logger.warning(f"Failed to backfill activity cache: {exc}")
-                finally:
-                    _activity_backfill_attempted = True
-            else:
-                _set_progress_sync(
-                    "Checking activity cache",
-                    step=1,
-                    detail=(
-                        f"Cache has {len(cached_events)} event(s); "
-                        "no history backfill needed"
-                    ),
-                )
-
-        if not cached_events and _resolve_api_key():
-            try:
-                nweeks, early_stop = _activity_fetch_window_config()
-                logger.info(
-                    f"Activity cache empty; fetching full history (window={nweeks}w, stop={early_stop})."
-                )
-                _set_progress_sync(
-                    "Fetching activity history",
-                    step=1,
-                    detail=(
-                        "Activity cache is empty; fetching Todoist "
-                        f"activity in {nweeks}-week windows"
-                    ),
-                )
-                events = dbio.fetch_activity_adaptively(
-                    nweeks_window_size=nweeks,
-                    early_stop_after_n_windows=early_stop,
-                    events_already_fetched=set(),
-                    progress_desc="Fetching activity history",
-                )
-                if not events:
+                    cached_events = merge_activity_cache(set(history_events))
                     logger.info(
-                        "Adaptive fetch returned no events; attempting recent activity pages."
+                        "Activity sync history phase complete: cached={}",
+                        len(cached_events),
                     )
+                    history_scan_succeeded = True
+                else:
                     _set_progress_sync(
-                        "Fetching recent activity",
+                        "Checking activity cache",
                         step=1,
-                        detail="No history events found yet; checking recent activity pages",
+                        detail=(
+                            f"Cache has {len(cached_events)} event(s); "
+                            "history backfill is not needed"
+                        ),
                     )
-                    events = dbio.fetch_activity(max_pages=2)
-                Cache().activity.save(set(events))
             except Exception as exc:  # pragma: no cover - network-dependent
-                logger.warning(f"Failed to seed activity cache: {exc}")
+                logger.warning(f"Failed to refresh activity cache: {exc}")
             finally:
-                _activity_backfill_attempted = True
+                if history_scan_succeeded or not needs_activity_history(cached_events):
+                    _activity_backfill_attempted = True
 
         if _resolve_api_key():
             try:
                 try:
-                    cached_events = Cache().activity.load()
+                    cached_events = load_activity_cache()
                 except LocalStorageError:
                     cached_events = set()
                 archived_parent_events = _fetch_configured_archived_parent_activity(
@@ -701,8 +689,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     set(cached_events),
                 )
                 if archived_parent_events:
-                    merged_events = set(cached_events) | archived_parent_events
-                    Cache().activity.save(merged_events)
+                    merged_events = merge_activity_cache(archived_parent_events)
                     logger.info(
                         "Merged {} scoped archived-parent event(s) into activity cache; total={}.",
                         len(archived_parent_events),

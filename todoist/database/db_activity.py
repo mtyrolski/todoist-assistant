@@ -52,6 +52,8 @@ class DatabaseActivity:
         max_pages_per_window: int | None = None,
         events_already_fetched: set[Event] | None = None,
         progress_desc: str = "Querying activity data",
+        date_to: datetime | None = None,
+        max_workers: int | None = None,
     ) -> list[Event]:
         """
         Fetch activity events from Todoist API in a moving-window pattern.
@@ -65,13 +67,30 @@ class DatabaseActivity:
 
         n_empty_weeks: int = 0
         iterated_weeks: int = 0
-        now_utc = datetime.now(timezone.utc)
+        if nweeks_window_size <= 0:
+            raise ValueError("nweeks_window_size must be positive")
+        if early_stop_after_n_windows <= 0:
+            raise ValueError("early_stop_after_n_windows must be positive")
+        if date_to is not None:
+            if date_to.tzinfo is None:
+                date_to = date_to.replace(tzinfo=timezone.utc)
+            now_utc = date_to.astimezone(timezone.utc)
+        else:
+            now_utc = datetime.now(timezone.utc)
+        worker_count = max_workers or get_max_concurrent_requests()
+        # Do not speculate farther than the configured empty-window stop
+        # horizon. This keeps recovery bounded while still removing the old
+        # single-worker bottleneck.
+        worker_count = max(1, min(worker_count, early_stop_after_n_windows))
         total_events: list[Event] = []
         logger.debug(
-            "Start fetch_activity_adaptively: window_size={}, early_stop={}, max_pages_per_window={}",
+            "Start fetch_activity_adaptively: window_size={}, early_stop={}, "
+            "max_pages_per_window={}, workers={}, date_to={}",
             nweeks_window_size,
             early_stop_after_n_windows,
             max_pages_per_window,
+            worker_count,
+            now_utc.isoformat(),
         )
         window_number = 0
         report_tqdm_progress(
@@ -80,53 +99,66 @@ class DatabaseActivity:
             max(early_stop_after_n_windows, 1),
             "window",
         )
-        while n_empty_weeks < early_stop_after_n_windows:
-            window_number += 1
-            remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
-            window_end = now_utc - timedelta(weeks=iterated_weeks)
-            window_start = window_end - timedelta(weeks=nweeks_window_size)
-            window_range = _format_progress_date_range(window_start, window_end)
-            report_tqdm_progress(
-                progress_desc,
-                window_number - 1,
-                max(window_number - 1 + remaining_empty_windows, 1),
-                "window",
-                detail=(
-                    f"{progress_desc}: window {window_number} scanning {window_range}; "
-                    "workers=1; "
-                    f"empty windows={n_empty_weeks}/{early_stop_after_n_windows}; "
-                    f"cached events={len(events_already_fetched)}"
-                ),
-            )
-            window_events = self._fetch_activity_range(
-                date_from=window_start,
-                date_to=window_end,
-                max_pages=max_pages_per_window,
-                events_already_fetched=events_already_fetched,
-                progress_desc=progress_desc,
-            )
-            iterated_weeks += nweeks_window_size
-            new_events = _events_not_in(window_events, events_already_fetched)
-            if len(new_events) == 0:
-                n_empty_weeks += 1
-            else:
-                n_empty_weeks = 0
-            total_events.extend(new_events)
-            events_already_fetched.update(new_events)
-            remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
-            report_tqdm_progress(
-                progress_desc,
-                window_number,
-                max(window_number + remaining_empty_windows, window_number),
-                "window",
-                detail=(
-                    f"{progress_desc}: completed window {window_number} "
-                    f"({window_range}); workers=1; "
-                    f"new events={len(new_events)}; "
-                    f"empty windows={n_empty_weeks}/{early_stop_after_n_windows}; "
-                    f"total cached events={len(events_already_fetched)}"
-                ),
-            )
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            while n_empty_weeks < early_stop_after_n_windows:
+                batch: list[tuple[int, datetime, datetime, object]] = []
+                for _ in range(worker_count):
+                    if n_empty_weeks >= early_stop_after_n_windows:
+                        break
+                    window_number += 1
+                    window_end = now_utc - timedelta(weeks=iterated_weeks)
+                    window_start = window_end - timedelta(weeks=nweeks_window_size)
+                    window_range = _format_progress_date_range(window_start, window_end)
+                    report_tqdm_progress(
+                        progress_desc,
+                        window_number - 1,
+                        max(window_number - 1 + early_stop_after_n_windows, 1),
+                        "window",
+                        detail=(
+                            f"{progress_desc}: window {window_number} scanning {window_range}; "
+                            f"workers={worker_count}; "
+                            f"empty windows={n_empty_weeks}/{early_stop_after_n_windows}; "
+                            f"cached events={len(events_already_fetched)}"
+                        ),
+                    )
+                    future = executor.submit(
+                        self._fetch_activity_range,
+                        date_from=window_start,
+                        date_to=window_end,
+                        max_pages=max_pages_per_window,
+                        events_already_fetched=set(events_already_fetched),
+                        progress_desc=progress_desc,
+                    )
+                    batch.append((window_number, window_start, window_end, future))
+                    iterated_weeks += nweeks_window_size
+
+                for current_window, window_start, window_end, future in batch:
+                    window_events = future.result()
+                    window_range = _format_progress_date_range(window_start, window_end)
+                    if n_empty_weeks >= early_stop_after_n_windows:
+                        logger.debug(
+                            "Discarding speculative activity window {} after early stop.",
+                            current_window,
+                        )
+                        continue
+                    new_events = _events_not_in(window_events, events_already_fetched)
+                    n_empty_weeks = n_empty_weeks + 1 if not new_events else 0
+                    total_events.extend(new_events)
+                    events_already_fetched.update(new_events)
+                    remaining_empty_windows = early_stop_after_n_windows - n_empty_weeks
+                    report_tqdm_progress(
+                        progress_desc,
+                        current_window,
+                        max(current_window + remaining_empty_windows, current_window),
+                        "window",
+                        detail=(
+                            f"{progress_desc}: completed window {current_window} "
+                            f"({window_range}); workers={worker_count}; "
+                            f"new events={len(new_events)}; "
+                            f"empty windows={n_empty_weeks}/{early_stop_after_n_windows}; "
+                            f"total cached events={len(events_already_fetched)}"
+                        ),
+                    )
         logger.debug(
             f"Stopping fetch after {iterated_weeks} weeks processed, total_events={len(total_events)}"
         )
@@ -216,6 +248,40 @@ class DatabaseActivity:
             f"Finished fetching activity pages. Total events collected: {len(result)}"
         )
         return result
+
+    def fetch_activity_recent(self, max_pages: int = 2) -> list[Event]:
+        """Fetch only the newest cursor pages used for routine polling."""
+
+        logger.info("Activity sync mode=recent; pages={}", max_pages)
+        return self.fetch_activity(max_pages=max_pages)
+
+    def fetch_activity_history(
+        self,
+        *,
+        nweeks_window_size: int = 10,
+        early_stop_after_n_windows: int = 5,
+        events_already_fetched: set[Event] | None = None,
+        date_to: datetime | None = None,
+        progress_desc: str = "Fetching activity history",
+        max_workers: int | None = None,
+    ) -> list[Event]:
+        """Backfill older activity windows, optionally ending at the cache boundary."""
+
+        logger.info(
+            "Activity sync mode=history; window={}w; stop={}; boundary={}; workers={}",
+            nweeks_window_size,
+            early_stop_after_n_windows,
+            date_to.isoformat() if date_to else "now",
+            max_workers or get_max_concurrent_requests(),
+        )
+        return self.fetch_activity_adaptively(
+            nweeks_window_size=nweeks_window_size,
+            early_stop_after_n_windows=early_stop_after_n_windows,
+            events_already_fetched=events_already_fetched,
+            date_to=date_to,
+            progress_desc=progress_desc,
+            max_workers=max_workers,
+        )
 
     def _fetch_activity_range(
         self,

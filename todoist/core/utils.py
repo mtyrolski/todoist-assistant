@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import MISSING, dataclass, field
 import time
 import random
@@ -6,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+from threading import RLock
 from lzma import LZMAError
 from os import getenv
 from os.path import exists
@@ -21,6 +23,11 @@ from loguru import logger
 from omegaconf import DictConfig
 
 from todoist.core.env import EnvVar
+
+try:  # pragma: no cover - platform-specific import
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
 
 T = TypeVar("T")
 LOCAL_STORAGE_EXCEPTIONS = (
@@ -90,6 +97,8 @@ class _RuntimeState:
 
 
 _STATE = _RuntimeState()
+_LOCAL_STORAGE_LOCKS: dict[str, RLock] = {}
+_LOCAL_STORAGE_LOCKS_GUARD = RLock()
 
 
 def set_tqdm_progress_callback(callback: TqdmProgressCallback | None) -> None:
@@ -391,37 +400,122 @@ class LocalStorage(Generic[T]):
     def _default_value(self) -> T:
         return cast(T, self.resource_class())
 
-    def _recreate_after_load_failure(self) -> T:
-        default_value = self._default_value()
-        path_obj = Path(self.path)
-        try:
-            path_obj.unlink(missing_ok=True)
-        except OSError as exc:
-            logger.warning(f"Failed to remove corrupted cache file {self.path}: {exc}")
-        try:
-            self.save(default_value)
-        except LocalStorageError as exc:
-            logger.error(f"Failed to recreate cache file {self.path}: {exc}")
-        return default_value
+    @contextmanager
+    def _locked(self):
+        """Serialize cache access in-process and, when available, across processes."""
 
-    def load(self) -> T:
+        path = str(Path(self.path).expanduser().resolve())
+        with _LOCAL_STORAGE_LOCKS_GUARD:
+            thread_lock = _LOCAL_STORAGE_LOCKS.setdefault(path, RLock())
+        with thread_lock:
+            lock_file = None
+            try:
+                lock_file = open(f"{path}.lock", "a+b")
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                yield
+            finally:
+                if lock_file is not None:
+                    if fcntl is not None:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    lock_file.close()
+
+    def _load_unlocked(self) -> T:
         if not exists(self.path):
             return self._default_value()
-
-        try:
-            return cast(T, load(self.path))
-        except LOCAL_STORAGE_EXCEPTIONS as exc:
-            logger.warning(
-                f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
-                "Removing and recreating cache."
+        value = cast(T, load(self.path))
+        if not isinstance(value, self.resource_class):
+            raise TypeError(
+                f"Expected {self.resource_class.__name__}, got {type(value).__name__}"
             )
-            return self._recreate_after_load_failure()
+        return value
+
+    def _quarantine_corrupt_file(self) -> None:
+        path_obj = Path(self.path)
+        if not path_obj.exists():
+            return
+        backup = path_obj.with_name(
+            f"{path_obj.name}.corrupt.{time.time_ns()}"
+        )
+        try:
+            os.replace(path_obj, backup)
+            logger.warning(
+                "Quarantined corrupted cache file {} as {}",
+                path_obj,
+                backup,
+            )
+        except OSError as exc:
+            logger.warning("Failed to quarantine corrupted cache file {}: {}", path_obj, exc)
+
+    def _save_unlocked(self, data: T) -> None:
+        path_obj = Path(self.path)
+        parent = path_obj.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{path_obj.name}.", suffix=".tmp", dir=parent
+        )
+        os.close(fd)
+        temporary_path = Path(temporary_name)
+        try:
+            dump(data, str(temporary_path), protocol=HIGHEST_PROTOCOL)
+            with temporary_path.open("rb") as temporary_file:
+                os.fsync(temporary_file.fileno())
+            os.replace(temporary_path, path_obj)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    def load(self) -> T:
+        try:
+            with self._locked():
+                try:
+                    return self._load_unlocked()
+                except LOCAL_STORAGE_EXCEPTIONS as exc:
+                    logger.warning(
+                        f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
+                        "Quarantining and recreating cache."
+                    )
+                    self._quarantine_corrupt_file()
+                    default_value = self._default_value()
+                    self._save_unlocked(default_value)
+                    return default_value
+        except LOCAL_STORAGE_EXCEPTIONS as exc:
+            raise LocalStorageError(f"Failed to load data from {self.path}: {exc}") from exc
 
     def save(self, data: T) -> None:
         try:
-            dump(data, self.path, protocol=HIGHEST_PROTOCOL)
+            if not isinstance(data, self.resource_class):
+                raise TypeError(
+                    f"Expected {self.resource_class.__name__}, got {type(data).__name__}"
+                )
+            with self._locked():
+                self._save_unlocked(data)
         except LOCAL_STORAGE_EXCEPTIONS as e:
             raise LocalStorageError(f"Failed to save data to {self.path}: {e}") from e
+
+    def update(self, updater: Callable[[T], T]) -> T:
+        """Atomically load, transform, and save one cache value."""
+
+        try:
+            with self._locked():
+                try:
+                    current = self._load_unlocked()
+                except LOCAL_STORAGE_EXCEPTIONS as exc:
+                    logger.warning(
+                        f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
+                        "Quarantining before applying update."
+                    )
+                    self._quarantine_corrupt_file()
+                    current = self._default_value()
+                updated = updater(current)
+                if not isinstance(updated, self.resource_class):
+                    raise TypeError(
+                        f"Expected updater to return {self.resource_class.__name__}, "
+                        f"got {type(updated).__name__}"
+                    )
+                self._save_unlocked(updated)
+                return updated
+        except LOCAL_STORAGE_EXCEPTIONS as exc:
+            raise LocalStorageError(f"Failed to update data in {self.path}: {exc}") from exc
 
 
 class Cache:

@@ -142,7 +142,7 @@ def test_fetch_activity_adaptively_reports_verbose_window_detail(
 
     details = [detail or "" for *_rest, detail in progress_calls]
     assert any("scanning" in detail and "to" in detail for detail in details)
-    assert any("workers=1" in detail for detail in details)
+    assert any("workers=2" in detail for detail in details)
     assert any("empty windows=" in detail for detail in details)
 
 

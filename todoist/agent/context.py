@@ -9,6 +9,7 @@ import pandas as pd
 
 from todoist.core.types import Event
 from todoist.core.utils import Cache
+from todoist.features.activity import load_activity_cache
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ def load_local_agent_context(cache_path: str | Path = ".") -> LocalAgentContext:
 
     cache_root = Path(cache_path)
     cache = Cache(str(cache_root))
-    activity: set[Event] = cache.activity.load()
+    activity: set[Event] = load_activity_cache()
     events = tuple(sorted(activity, key=lambda e: e.date))
     logger.info(
         "Loaded {} events from {}", len(events), str(cache_root / "activity.joblib")

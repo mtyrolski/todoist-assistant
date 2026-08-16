@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 import ast
 import os
+from datetime import datetime
 from pathlib import Path
 from pprint import pformat
 from typing import cast
@@ -342,7 +343,14 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
     activity_filename = "activity.joblib"
     # activity_db: set[Event] = load(activity_filename) if exists(activity_filename) else set()
     try:
-        activity_db: set[Event] = Cache().activity.load()
+        raw_activity_db = Cache().activity.load()
+        activity_db: set[Event] = {
+            event
+            for event in raw_activity_db
+            if isinstance(event, Event)
+            and isinstance(event.date, datetime)
+            and getattr(event, "event_entry", None) is not None
+        }
     except LocalStorageError as exc:
         logger.warning("Failed to load activity cache; using empty set: {}", exc)
         activity_db = set()
