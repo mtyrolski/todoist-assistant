@@ -57,7 +57,7 @@ def load_local_agent_context(cache_path: str | Path = ".") -> LocalAgentContext:
 
     cache_root = Path(cache_path)
     cache = Cache(str(cache_root))
-    activity: set[Event] = load_activity_cache()
+    activity: set[Event] = load_activity_cache(cache=cache)
     events = tuple(sorted(activity, key=lambda e: e.date))
     logger.info(
         "Loaded {} events from {}", len(events), str(cache_root / "activity.joblib")
