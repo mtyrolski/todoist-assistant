@@ -125,71 +125,6 @@ def _print_services(payload: dict[str, Any]) -> None:
         _print_line(name, status, detail)
 
 
-def _print_llm_snapshot(payload: dict[str, Any]) -> None:
-    _section("LLM Runtime")
-    backend_raw = payload.get("backend")
-    model_raw = payload.get("model")
-    device_raw = payload.get("device")
-    env_path_raw = payload.get("envPath")
-    usage_raw = payload.get("usage")
-    assistant_raw = payload.get("assistant")
-    backend = backend_raw if isinstance(backend_raw, dict) else {}
-    model = model_raw if isinstance(model_raw, dict) else {}
-    device = device_raw if isinstance(device_raw, dict) else {}
-    env_path = str(
-        env_path_raw
-        or backend.get("envPath")
-        or model.get("envPath")
-        or device.get("envPath")
-        or ""
-    ).strip()
-    usage = usage_raw if isinstance(usage_raw, dict) else {}
-    assistant = assistant_raw if isinstance(assistant_raw, dict) else {}
-
-    backend_label = str(backend.get("label") or backend.get("selected") or "unknown")
-    backend_selected = str(backend.get("selected") or backend_label).strip().lower()
-    backend_status = (
-        "ok" if payload.get("enabled") or backend_selected == "codex" else "warn"
-    )
-    _print_line("Backend", backend_status, backend_label)
-
-    model_active = str(model.get("active") or model.get("selected") or "unknown")
-    model_selected = str(model.get("label") or model.get("selected") or model_active)
-    model_detail = model_selected
-    if model_active != model_selected:
-        model_detail = f"{model_selected} (active: {model_active})"
-    _print_line("Selected model", "neutral", model_detail)
-    if env_path:
-        _print_line("Settings source", "neutral", env_path)
-
-    device_label = str(device.get("label") or device.get("selected") or "unknown")
-    _print_line("Device", "neutral", device_label)
-
-    totals_raw = usage.get("totals")
-    totals = totals_raw if isinstance(totals_raw, dict) else {}
-    token_detail = (
-        f"{int(totals.get('totalTokens') or 0)} total "
-        f"({int(totals.get('inputTokens') or 0)} input, "
-        f"{int(totals.get('outputTokens') or 0)} output)"
-    )
-    _print_line("Tokens", "neutral", token_detail)
-
-    tools = assistant.get("tools")
-    scripts = assistant.get("scripts")
-    _print_line("Tools", "neutral", str(len(tools) if isinstance(tools, list) else 0))
-    _print_line(
-        "Scripts", "neutral", str(len(scripts) if isinstance(scripts, list) else 0)
-    )
-
-    telemetry_raw = assistant.get("telemetry")
-    telemetry = telemetry_raw if isinstance(telemetry_raw, dict) else {}
-    telemetry_enabled = bool(telemetry.get("enabled"))
-    telemetry_detail = "enabled" if telemetry_enabled else "disabled"
-    if telemetry.get("endpointConfigured"):
-        telemetry_detail += ", endpoint configured"
-    _print_line("Telemetry", "ok" if telemetry_enabled else "neutral", telemetry_detail)
-
-
 def main() -> int:
     _section("Dashboard Status")
 
@@ -208,16 +143,6 @@ def main() -> int:
         )
     else:
         _print_line("Frontend", "down", f"offline at {FRONTEND_URL} ({frontend_error})")
-
-    llm_snapshot = _fetch_json(f"{API_BASE_URL}/api/dashboard/llm_chat")
-    if llm_snapshot.ok and llm_snapshot.payload:
-        print()
-        _print_llm_snapshot(llm_snapshot.payload)
-    else:
-        print()
-        _section("LLM Runtime")
-        error = llm_snapshot.error or "unavailable"
-        _print_line("LLM", "down", f"status endpoint unavailable ({error})")
 
     print()
     _section("Services")

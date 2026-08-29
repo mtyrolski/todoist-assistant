@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardHome, DashboardStatus, Granularity, Health } from "./dashboardData";
 import type { DashboardProgress } from "../components/ProgressSteps";
-import type { LlmBreakdownProgress } from "../components/LlmBreakdownStatus";
 
 const DASHBOARD_RETRY_LIMIT = 300;
 const DASHBOARD_RETRY_DELAY_MS = 2500;
@@ -298,45 +297,4 @@ export function useSyncLabel(status: DashboardStatus | null) {
   }, [status]);
 
   return { label, title };
-}
-
-export function useLlmBreakdownProgress({ pollMs = 2000 }: { pollMs?: number } = {}) {
-  const [progress, setProgress] = useState<LlmBreakdownProgress | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [refreshNonce, setRefreshNonce] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch("/api/dashboard/llm_breakdown", { signal: controller.signal });
-        if (!res.ok) throw new Error("llm-progress");
-        const payload = await readJson<LlmBreakdownProgress>(res);
-        if (!active) return;
-        setProgress(payload);
-      } catch (e) {
-        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
-          return;
-        }
-        setProgress(null);
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    load();
-    const interval = setInterval(load, pollMs);
-    return () => {
-      active = false;
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, [pollMs, refreshNonce]);
-
-  const refresh = () => setRefreshNonce((value) => value + 1);
-
-  return { progress, loading, refresh };
 }

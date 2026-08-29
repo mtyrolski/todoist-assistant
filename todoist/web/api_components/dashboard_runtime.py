@@ -854,31 +854,6 @@ def _service_statuses() -> list[dict[str, Any]]:
     ] + [{"name": "Observer", "status": observer_status, "detail": observer_detail}]
 
 
-def _llm_breakdown_snapshot() -> dict[str, Any]:
-    payload = Cache().llm_breakdown_progress.load()
-    if not isinstance(payload, dict):
-        payload = {}
-
-    results = payload.get(ProgressKey.RESULTS.value)
-    results = results if isinstance(results, list) else []
-    recent = results[-3:] if results else []
-
-    return {
-        "active": bool(payload.get("active")),
-        "status": payload.get("status") or "idle",
-        "runId": payload.get("run_id"),
-        "startedAt": payload.get("started_at"),
-        "updatedAt": payload.get("updated_at"),
-        "tasksTotal": int(payload.get("tasks_total") or 0),
-        "tasksCompleted": int(payload.get("tasks_completed") or 0),
-        "tasksFailed": int(payload.get("tasks_failed") or 0),
-        "tasksPending": int(payload.get("tasks_pending") or 0),
-        "current": payload.get("current"),
-        "error": payload.get("error"),
-        "recent": recent,
-    }
-
-
 _COMPONENT_EXPORTS = (
     "_env_demo_mode",
     "_run_async_in_main_loop",
@@ -894,6 +869,5 @@ _COMPONENT_EXPORTS = (
     "_cache_runtime_path",
     "_stat_file",
     "_service_statuses",
-    "_llm_breakdown_snapshot",
 )
 _ORIGINALS = {name: globals()[name] for name in _COMPONENT_EXPORTS}

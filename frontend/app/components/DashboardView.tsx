@@ -13,6 +13,7 @@ import { LeaderboardCard } from "./LeaderboardCard";
 import { InsightCard } from "./InsightCard";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
+import { ExecutiveReview } from "./ExecutiveReview";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -221,11 +222,13 @@ export function DashboardView({
   const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
   const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
+    { id: "executive-review", label: "Review" },
     { id: "insights", label: "Insights" },
     { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
     { id: "stats", label: "Focus" },
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
+    { id: "project-contribution", label: "Contribution" },
     { id: "events", label: "Events" },
     { id: "projects", label: "Projects" },
     { id: "ops", label: "Activity & Ops" }
@@ -571,6 +574,10 @@ export function DashboardView({
       ) : null}
 
       {!noData ? (
+        <ExecutiveReview />
+      ) : null}
+
+      {!noData ? (
         <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
           {insightItems.map((it, idx) =>
             it ? (
@@ -787,6 +794,16 @@ export function DashboardView({
           {completionPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
+        </section>
+      ) : null}
+
+      {!noData && figures.projectContributionTimeline ? (
+        <section id="project-contribution" className="stack jumpTarget" aria-label="Project contribution timeline">
+          <PlotCard
+            title="Project Contribution Timeline"
+            figure={figures.projectContributionTimeline}
+            help="Weekly completions by parent project and subproject. This makes each subproject's contribution to its master project visible."
+          />
         </section>
       ) : null}
 

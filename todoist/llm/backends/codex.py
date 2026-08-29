@@ -4,20 +4,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import TypeVar
 
 from langgraph_codex.execution import CodexExecutor
 from langgraph_codex.graph import create_codex_node
 from loguru import logger
-from pydantic import BaseModel
 
 from todoist.llm.constants import DEFAULT_CODEX_MODEL
-from todoist.llm.structured import _schema_instructions, _try_parse_structured_output
-from todoist.llm.types import MessageRole
-from todoist.llm.usage import record_llm_usage
-
-
-T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -57,35 +49,7 @@ class CodexCliChatModel:
 
     def chat(self, messages: Sequence[dict[str, str]]) -> str:
         prompt = _render_messages(messages)
-        return self._run_codex(prompt, operation="chat")
-
-    def structured_chat(self, messages: Sequence[dict[str, str]], schema: type[T]) -> T:
-        prompt = "\n\n".join(
-            [
-                _render_messages(messages),
-                _schema_instructions(schema),
-                "Return only the final JSON payload. Do not include markdown fences.",
-            ]
-        )
-        raw = self._run_codex(prompt, operation="structured_chat")
-        parsed = _try_parse_structured_output(raw, schema)
-        if parsed is not None:
-            return parsed
-
-        repaired = self._run_codex(
-            "\n\n".join(
-                [
-                    "Convert this draft into strict JSON only.",
-                    _schema_instructions(schema),
-                    raw,
-                ]
-            ),
-            operation="repair",
-        )
-        parsed = _try_parse_structured_output(repaired, schema)
-        if parsed is not None:
-            return parsed
-        raise ValueError(f"Invalid structured output for {schema.__name__}: {raw}")
+        return self._run_codex(prompt, operation="executive_review")
 
     def _run_codex(self, prompt: str, *, operation: str) -> str:
         logger.debug(
@@ -110,13 +74,6 @@ class CodexCliChatModel:
             raise ValueError(f"Codex CLI request failed: {detail}")
         if not stdout:
             raise ValueError("Codex CLI did not produce output.")
-        record_llm_usage(
-            backend="codex",
-            model_id=self.config.model,
-            operation=operation,
-            input_tokens=_estimate_token_count(prompt),
-            output_tokens=_estimate_token_count(stdout),
-        )
         return stdout
 
 
@@ -160,16 +117,12 @@ def codex_config_from_values(
 def _render_messages(messages: Sequence[dict[str, str]]) -> str:
     parts: list[str] = []
     for message in messages:
-        role = str(message.get("role") or MessageRole.USER.value).strip().lower()
+        role = str(message.get("role") or "user").strip().lower()
         content = str(message.get("content") or "").strip()
         if not content:
             continue
-        if role not in {
-            MessageRole.SYSTEM.value,
-            MessageRole.USER.value,
-            MessageRole.ASSISTANT.value,
-        }:
-            role = MessageRole.USER.value
+        if role not in {"system", "user", "assistant"}:
+            role = "user"
         parts.append(f"{role.upper()}:\n{content}")
     if not parts:
         raise ValueError("At least one message is required")
@@ -188,10 +141,3 @@ def _float(value: object, *, default: float) -> float:
         return float(str(value))
     except (TypeError, ValueError):
         return default
-
-
-def _estimate_token_count(text: str) -> int:
-    stripped = str(text or "").strip()
-    if not stripped:
-        return 0
-    return max(1, len(stripped.split()))

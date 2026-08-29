@@ -1,8 +1,0 @@
-description: "Compare productivity, completions, intake, or activity across Todoist projects."
-content: |
-  Call print(project_comparison(period="week")) unless the user explicitly requests a daily view.
-  The helper groups by mapped root_project_name and applies dashboard project adjustments.
-  Never group or label the answer by parent_project_id when mapped names are available.
-  Rank projects by material changes, distinguish completions from intake and deletions, and end with
-  a short portfolio-level interpretation. State the exact current and comparison windows.
-  If comparisonMode is elapsed_to_elapsed, explicitly describe both sides as matched partial periods.

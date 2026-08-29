@@ -1,5 +1,0 @@
-defaults:
-  - _self_
-  # Development templates
-  - templates/development@development.pr: pr
-  - templates/development@development.feature: feature

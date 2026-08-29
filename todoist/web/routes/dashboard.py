@@ -3,6 +3,8 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
+import asyncio
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -13,9 +15,13 @@ from todoist.dashboard.plots import (
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
+    plot_project_contribution_timeline,
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
+from todoist.dashboard.executive_review import review_context
+from todoist.core.runtime_env import load_runtime_env_values, resolve_llm_backend
+from todoist.llm.factory import build_codex_chat_model
 from todoist.database.dataframe import (
     get_adjusting_archived_parent_projects,
     get_adjusting_mapping,
@@ -40,6 +46,52 @@ from todoist.web.routes.common import _sync_api_globals
 
 Granularity = Literal["W", "ME", "3ME"]
 router = APIRouter()
+_EXECUTIVE_REVIEW_LOCK = asyncio.Lock()
+_EXECUTIVE_REVIEW_CACHE: dict[str, str] = {}
+
+
+def _executive_review_prompt(context: dict[str, Any]) -> str:
+    return (
+        "Write a concise executive review of this Todoist activity snapshot. "
+        "Use only the supplied evidence. Compare the latest seven days with the prior seven days, "
+        "identify momentum, work concentration, stalled or overloaded projects, and recommend one "
+        "next-focus flow with at most three steps. Do not create or modify anything. "
+        "Use short labelled lines and bullets, without Markdown heading syntax.\n\n"
+        f"Snapshot from local activity.joblib and active Todoist projects:\n{context}"
+    )
+
+
+@router.post("/api/dashboard/executive_review", tags=["dashboard"])
+async def executive_review(refresh: bool = False) -> dict[str, Any]:
+    _sync_api_globals(globals())
+    await _ensure_state(refresh=False)
+    if _state.df_activity is None or _state.active_projects is None:
+        return {"enabled": False, "summary": None, "detail": "Dashboard data is unavailable."}
+    env_path = _resolve_env_path()
+    backend = resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd())
+    if backend != "codex":
+        return {
+            "enabled": False,
+            "summary": None,
+            "detail": "Start with make dashboard_codex to generate the executive review.",
+        }
+    context = review_context(_normalize_activity_df(_state.df_activity), _state.active_projects)
+    key = repr(context)
+    if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
+        return {"enabled": True, "summary": _EXECUTIVE_REVIEW_CACHE[key], "cached": True}
+    async with _EXECUTIVE_REVIEW_LOCK:
+        if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
+            return {"enabled": True, "summary": _EXECUTIVE_REVIEW_CACHE[key], "cached": True}
+        model = await asyncio.to_thread(
+            build_codex_chat_model, load_runtime_env_values(env_path), cwd=_REPO_ROOT
+        )
+        summary = await asyncio.to_thread(
+            model.chat,
+            [{"role": "user", "content": _executive_review_prompt(context)}],
+        )
+        _EXECUTIVE_REVIEW_CACHE.clear()
+        _EXECUTIVE_REVIEW_CACHE[key] = summary
+    return {"enabled": True, "summary": summary, "cached": False}
 
 
 @router.get("/api/dashboard/status", tags=["dashboard"])
@@ -83,14 +135,6 @@ async def dashboard_progress() -> dict[str, Any]:
     """Return current data refresh progress for the dashboard."""
 
     return await _progress_snapshot()
-
-
-@router.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
-async def dashboard_llm_breakdown() -> dict[str, Any]:
-    _sync_api_globals(globals())
-    """Return AI breakdown queue progress."""
-
-    return _llm_breakdown_snapshot()
 
 
 @router.get("/api/dashboard/home", tags=["dashboard"])
@@ -254,6 +298,9 @@ async def dashboard_home(
                     project_mappings=project_mappings,
                     archived_parent_projects=always_visible_projects,
                 )
+            ),
+            "projectContributionTimeline": _fig_to_dict(
+                plot_project_contribution_timeline(df_activity, beg_range, end_range)
             ),
         }
         parent_completed_share = _completed_share_leaderboard(

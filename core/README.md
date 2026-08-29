@@ -1,33 +1,19 @@
 # Todoist Assistant Core
 
-This package ships the **core data layer** of Todoist Assistant: API client, database access,
-types, activity helpers, and utilities. It **excludes** the web dashboard, plots, and frontend.
+The core package contains the local Todoist data layer: API access, database
+persistence, shared types, and activity helpers. It intentionally excludes the
+dashboard, frontend, plots, Codex review integration, Gmail import, and observer.
 
-Latest stable release: `v0.3.4`.
-
-## Install (editable, from repo)
+Install from a checkout:
 
 ```bash
 uv pip install -e core
 ```
 
-## Build (wheel + sdist)
+Build distributable artifacts:
 
 ```bash
 uv build core
 ```
 
-## What’s included
-
-- `todoist.api`, `todoist.database`, `todoist.core.types`, `todoist.core.utils`
-- activity helpers (`todoist.features.activity`)
-- automation base utilities (`todoist.automations.base`, `todoist.automations.activity`, etc.)
-
-## What’s excluded
-
-- Dashboard + web stack (`todoist.web`, `todoist.dashboard`)
-- Plotting (`todoist.dashboard.plots`)
-- LLM / agent modules (`todoist.llm`, `todoist.agent`)
-- Gmail/LLM automations and other UI‑only modules
-
-If you need the full dashboard + UI, use the main `todoist-assistant` package instead.
+Use the main package when you need the local dashboard or automations.

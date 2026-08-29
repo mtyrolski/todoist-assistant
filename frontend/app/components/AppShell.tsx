@@ -13,13 +13,8 @@ const NAV_GROUPS = [
     ]
   },
   {
-    title: "Automation Studio",
-    items: [
-      { href: "/llm-agent-chat", label: "Personal Assistant", hint: "Interactive Codex chat" },
-      { href: "/task-rollout-rules", label: "Task Rollout Rules", hint: "AI breakdown prompts" },
-      { href: "/task-templates", label: "Task Templates", hint: "Create and edit templates" },
-      { href: "/multiplication-labels", label: "Multiplication Labels", hint: "Tune Xn effects" }
-    ]
+    title: "Automation",
+    items: [{ href: "/multiplication-labels", label: "Task Multiplication", hint: "Expand labelled work safely" }]
   },
   {
     title: "Operations",

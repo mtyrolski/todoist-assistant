@@ -13,7 +13,6 @@ from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.core.constants import TaskField
 from todoist.api.client import EndpointCallResult
 from todoist.core.types import Task
-from todoist.features.ai_context import is_non_removable_content
 from todoist.core.utils import (
     MaxRetriesExceeded,
     RETRY_MAX_ATTEMPTS,
@@ -218,15 +217,6 @@ class DatabaseTasks:
         - True if the task was removed successfully.
         - False otherwise.
         """
-        task_payload = self.fetch_task_by_id(task_id)
-        if is_non_removable_content(task_payload.get("content")):
-            logger.warning(
-                "Refusing to delete protected task {} ({!r}); titles beginning with '* ' are non-removable.",
-                task_id,
-                task_payload.get("content"),
-            )
-            return False
-
         spec = RequestSpec(
             endpoint=TodoistEndpoints.DELETE_TASK.format(task_id=task_id),
             headers=self._json_headers(),

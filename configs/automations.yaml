@@ -1,6 +1,3 @@
-defaults:
-- templates
-- _self_
 activity:
   _target_: todoist.automations.activity.Activity
   name: Activity Fetching Automation
@@ -37,57 +34,18 @@ stale_tasks:
     exempt_labels:
     - no_stale
     - track_habit
-    - ai_context
     exclude_recurring: true
     exclude_due_within_days: 7
     exclude_overdue: true
     apply_to_subtasks: false
   dry_run: true
   max_updates_per_tick: 25
-template:
-  _target_: todoist.automations.template.Template
-  task_templates:
-    pr: ${development.pr}
-    feature: ${development.feature}
-llm_breakdown:
-  _target_: todoist.automations.llm_breakdown.LLMBreakdown
-  frequency_in_minutes: 0.1
-  label_prefix: ai-breakdown
-  default_variant: breakdown
-  max_depth: 3
-  max_children: 6
-  max_total_tasks: 60
-  allow_existing_children: false
-  remove_label_after_processing: true
-  propagate_labels: true
-  max_tasks_per_tick: 0
-  max_queue_depth: 1
-  auto_queue_children: true
-  model_config:
-    max_new_tokens: 384
-  variants:
-    breakdown:
-      instruction: Balanced breakdown with 4-6 top-level tasks.
-      queue_depth: 1
-    breakdown-lite:
-      instruction: Keep it short and light.
-      max_depth: 2
-      max_children: 4
-      queue_depth: 1
-    breakdown-deep:
-      instruction: Provide more detail and intermediate steps.
-      max_depth: 2
-      max_children: 6
-      queue_depth: 2
 automations:
 - ${activity}
 - ${multiply}
 - ${gmail_tasks}
 - ${habit_tracker}
 - ${stale_tasks}
-- ${template}
-- ${llm_breakdown}
 hydra:
   searchpath:
   - file://configs
-  - file://configs/templates

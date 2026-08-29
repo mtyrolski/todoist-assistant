@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { InfoTip } from "./InfoTip";
-import { LlmRuntimeSettings } from "./LlmRuntimeSettings";
 import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 import {
   clearAdminApiToken,
@@ -728,8 +727,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
               {timezoneNotice ? <p className="pill pill-good">{timezoneNotice}</p> : null}
             </div>
           </div>
-
-          <LlmRuntimeSettings compact onAfterMutation={onAfterMutation} />
         </div>
       ) : null}
     </section>

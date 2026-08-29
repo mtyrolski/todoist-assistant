@@ -31,11 +31,8 @@ include = ["todoist", "todoist.*", "todoist_assistant", "todoist_assistant.*"]
 exclude = [
     "todoist.web*",
     "todoist.dashboard*",
-    "todoist.agent*",
     "todoist.llm*",
-    "todoist.automations.llm_breakdown*",
     "todoist.automations.gmail_tasks*",
-    "todoist.automations.template*",
     "todoist.automations.update_env*",
     "todoist.automations.init_env*",
     "todoist_assistant.web*",

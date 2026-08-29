@@ -1221,6 +1221,17 @@ textarea.textInput {
   min-height: 0;
 }
 
+.executiveReview {
+  border-color: rgba(105, 193, 255, 0.28);
+  background: linear-gradient(125deg, rgba(53, 116, 179, 0.16), rgba(255, 255, 255, 0.03));
+}
+
+.executiveReviewBody {
+  display: block;
+  line-height: 1.6;
+  color: #dfe9f6;
+}
+
 .cardBodyFill {
   flex: 1 1 auto;
   min-height: 0;

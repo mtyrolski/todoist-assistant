@@ -57,23 +57,6 @@ from todoist.automations.gmail_tasks import (
     resolve_gmail_token_path,
 )
 from todoist.automations.observer import AutomationObserver
-from todoist.automations.llm_breakdown.config import (
-    BASE_SYSTEM_PROMPT,
-)
-from todoist.automations.llm_breakdown.models import ProgressKey
-from todoist.automations.llm_breakdown.models import TaskBreakdown, BreakdownNode
-from todoist.llm import (
-    DEFAULT_CODEX_MODEL,
-    MessageRole,
-)
-from todoist.llm.factory import (
-    ChatModel,
-    build_codex_chat_model,
-    model_backend,
-)
-from todoist.llm.llm_utils import _sanitize_text
-from todoist.llm.usage import load_llm_usage_summary
-from todoist.llm.model_catalog import CODEX_MODEL_OPTIONS
 from todoist.dashboard.settings import (
     load_dashboard_config,
     observer_settings_payload,
@@ -117,22 +100,13 @@ from todoist.web.api_components.runtime import (
 )
 from todoist.web.api_components.settings import (
     dashboard_settings_payload as _component_dashboard_settings_payload,
-    llm_breakdown_settings_payload as _llm_breakdown_settings_payload,
     multiplication_settings_payload as _multiplication_settings_payload,
     stale_tasks_settings_payload as _stale_tasks_settings_payload,
 )
-from todoist.web.api_components.templates import (
-    ensure_identifier as _ensure_identifier,
-    load_defaults_list as _load_defaults_list,
-    normalize_template_node as _normalize_template_node,
+from todoist.web.api_components.configuration import (
     read_yaml_config as _read_yaml_config,
     save_yaml_config as _save_yaml_config,
-    template_defaults_key as _template_defaults_key,
-    template_path as _component_template_path,
-    template_summary as _component_template_summary,
-    template_to_camel as _template_to_camel,
 )
-from todoist.web.api_components import llm_chat as _llm_chat_component
 from todoist.web.api_components import dashboard_runtime as _dashboard_runtime_component
 from todoist.web.api_components import (
     automation_runtime as _automation_runtime_component,
@@ -151,9 +125,6 @@ from todoist.core.utils import (
 from todoist.core.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.core.version import get_version
-
-if TYPE_CHECKING:
-    from todoist.agent.graph import AgentState
 
 configure_runtime_logging(log_path=automation_log_path())
 
@@ -271,9 +242,6 @@ _DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
 _AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
-_TEMPLATES_REGISTRY_PATH = _CONFIG_DIR / "templates.yaml"
-_TEMPLATES_DIR = _CONFIG_DIR / "templates"
-_CODEX_MODEL_OPTIONS = CODEX_MODEL_OPTIONS
 
 
 def _resolve_timezone_status() -> dict[str, Any]:
@@ -326,43 +294,7 @@ class _AdminJob:
 
 _JOBS: dict[str, _AdminJob] = {}
 
-# === LLM CHAT ===============================================================
-_CHAT_ROLES = {
-    MessageRole.SYSTEM.value,
-    MessageRole.USER.value,
-    MessageRole.ASSISTANT.value,
-    "operation",
-    "tool",
-}
-_LLM_CHAT_BACKEND_DEFAULT = "codex"
-_LLM_CHAT_BACKEND_LABELS = {
-    "codex": "Codex",
-}
-_LLM_CHAT_DEVICE_DEFAULT = "cpu"
-_LLM_CHAT_DEVICE_LABELS = {
-    "cpu": "CPU",
-    "cuda": "GPU",
-}
-_CHAT_SYSTEM_PROMPT = (
-    "You are a Codex-powered personal Todoist assistant. Use the assistant agent "
-    "for productivity analysis, task proposal iteration, cache inspection, script "
-    "execution, token usage, and telemetry questions. Never mutate Todoist data "
-    "unless the user explicitly confirms the exact creation action, except for the "
-    "strictly constrained ai_context memory helper."
-)
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
-
-_LlmChatModel = ChatModel
-
-_LLM_CHAT_MODEL: _LlmChatModel | None = None
-_LLM_CHAT_MODEL_LOADING = False
-_LLM_CHAT_MODEL_LOCK = asyncio.Lock()
-_LLM_CHAT_STORAGE_LOCK = asyncio.Lock()
-_LLM_CHAT_ACTIVE_TURNS: dict[str, dict[str, str]] = {}
-_LLM_CHAT_ACTIVE_TURNS_LOCK = asyncio.Lock()
-_LLM_CHAT_AGENT = None
-_LLM_CHAT_AGENT_LOCK = asyncio.Lock()
-_LLM_CHAT_TURN_LOCK = asyncio.Lock()
 
 
 def _call_dashboard_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -387,212 +319,6 @@ del _component_wrapper_name
 _ensure_state = _make_dashboard_runtime_wrapper("_ensure_state")
 _progress_snapshot = _make_dashboard_runtime_wrapper("_progress_snapshot")
 _service_statuses = _make_dashboard_runtime_wrapper("_service_statuses")
-
-
-def _make_llm_chat_wrapper(name: str):
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        return getattr(_llm_chat_component, name)(*args, **kwargs)
-
-    _wrapper.__name__ = name
-    _wrapper._component_wrapper_for = name
-    return _wrapper
-
-
-for _component_wrapper_name in _llm_chat_component._COMPONENT_EXPORTS:
-    globals()[_component_wrapper_name] = _make_llm_chat_wrapper(_component_wrapper_name)
-del _component_wrapper_name
-_build_llm_from_settings = _llm_chat_component._build_llm_from_settings
-_load_custom_assistant_instructions = (
-    _llm_chat_component._load_custom_assistant_instructions
-)
-_resolve_llm_chat_settings = _llm_chat_component._resolve_llm_chat_settings
-
-
-async def _reset_llm_chat_runtime() -> None:
-    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING, _LLM_CHAT_AGENT
-    async with _LLM_CHAT_MODEL_LOCK:
-        _LLM_CHAT_MODEL = None
-        _LLM_CHAT_MODEL_LOADING = False
-    async with _LLM_CHAT_AGENT_LOCK:
-        _LLM_CHAT_AGENT = None
-
-
-async def _llm_chat_model_status() -> tuple[bool, bool]:
-    async with _LLM_CHAT_MODEL_LOCK:
-        return _LLM_CHAT_MODEL is not None, _LLM_CHAT_MODEL_LOADING
-
-
-async def _start_llm_chat_model_load() -> None:
-    global _LLM_CHAT_MODEL_LOADING
-    async with _LLM_CHAT_MODEL_LOCK:
-        if _LLM_CHAT_MODEL is not None or _LLM_CHAT_MODEL_LOADING:
-            return
-        _LLM_CHAT_MODEL_LOADING = True
-    asyncio.create_task(_load_llm_chat_model_task())
-
-
-async def _load_llm_chat_model_task() -> None:
-    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
-    try:
-        settings = _resolve_llm_chat_settings()
-        model = await asyncio.to_thread(
-            _build_llm_from_settings,
-            settings,
-        )
-        async with _LLM_CHAT_MODEL_LOCK:
-            _LLM_CHAT_MODEL = model
-        await asyncio.to_thread(_build_llm_chat_agent_sync, model)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error(f"Failed to load LLM chat model: {exc}")
-    finally:
-        async with _LLM_CHAT_MODEL_LOCK:
-            _LLM_CHAT_MODEL_LOADING = False
-
-
-def _build_llm_chat_agent_sync(model: _LlmChatModel) -> None:
-    global _LLM_CHAT_AGENT
-    try:
-        from todoist.agent.context import load_local_agent_context
-        from todoist.agent.graph import build_agent_graph
-        from todoist.agent.productivity_context import build_productivity_context
-        from todoist.agent.repl_tool import SafePythonReplTool
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"LLM chat agent unavailable: {exc}")
-        return
-
-    cache_path = os.getenv(str(EnvVar.AGENT_CACHE_PATH), resolve_cache_dir())
-    prefabs_dir = os.getenv(
-        str(EnvVar.AGENT_INSTRUCTIONS_DIR),
-        str(_REPO_ROOT / "configs/agent_instructions"),
-    )
-    max_tool_loops_env = os.getenv(str(EnvVar.AGENT_MAX_TOOL_LOOPS), "8").strip()
-    try:
-        max_tool_loops = max(1, int(max_tool_loops_env))
-    except ValueError:
-        max_tool_loops = 8
-
-    local_ctx = load_local_agent_context(cache_path)
-    productivity_ctx = build_productivity_context(
-        cache_path=cache_path,
-        repo_root=_REPO_ROOT,
-        env_path=_resolve_env_path(),
-    )
-    tool_ctx = {
-        "events": local_ctx.events,
-        "events_df": local_ctx.events_df.copy(),
-        "pd": pd,
-        "np": np,
-        "cache_summary": productivity_ctx.cache_summary,
-        "load_cache": productivity_ctx.load_cache,
-        "script_catalog": productivity_ctx.script_catalog,
-        "run_script": productivity_ctx.run_script,
-        "llm_usage": productivity_ctx.llm_usage,
-        "telemetry_status": productivity_ctx.telemetry_status,
-        "projects": productivity_ctx.projects,
-        "ai_context": productivity_ctx.ai_context,
-        "project_ai_context": productivity_ctx.project_ai_context,
-        "activity_dataframe": productivity_ctx.activity_dataframe,
-        "project_comparison": productivity_ctx.project_comparison,
-        "executive_summary": productivity_ctx.executive_summary,
-        "upsert_ai_context": productivity_ctx.upsert_ai_context,
-        "create_tasks": productivity_ctx.create_tasks,
-    }
-    python_tool = SafePythonReplTool(tool_ctx)
-    agent = build_agent_graph(
-        llm=model,
-        python_repl=python_tool,
-        prefabs_dir=prefabs_dir,
-        max_tool_loops=max_tool_loops,
-    )
-    _LLM_CHAT_AGENT = agent
-
-
-async def _load_inline_codex_chat_model() -> tuple[_LlmChatModel | None, str | None]:
-    global _LLM_CHAT_MODEL, _LLM_CHAT_MODEL_LOADING
-    settings = _resolve_llm_chat_settings()
-    if settings["backend"] != "codex":
-        return None, "Model not loaded. Click Enable in the dashboard first."
-
-    async with _LLM_CHAT_MODEL_LOCK:
-        if _LLM_CHAT_MODEL is not None:
-            return _LLM_CHAT_MODEL, None
-        if _LLM_CHAT_MODEL_LOADING:
-            return None, "Model is still loading."
-        _LLM_CHAT_MODEL_LOADING = True
-
-    try:
-        model = await asyncio.to_thread(
-            _build_llm_from_settings,
-            settings,
-        )
-        async with _LLM_CHAT_MODEL_LOCK:
-            _LLM_CHAT_MODEL = model
-        await asyncio.to_thread(_build_llm_chat_agent_sync, model)
-        return model, None
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error(f"Failed to load inline Codex chat model: {exc}")
-        return None, f"{type(exc).__name__}: {exc}"
-    finally:
-        async with _LLM_CHAT_MODEL_LOCK:
-            _LLM_CHAT_MODEL_LOADING = False
-
-
-async def _run_llm_chat_turn(
-    conversation: dict[str, Any], user_content: str
-) -> list[dict[str, Any]]:
-    async with _LLM_CHAT_MODEL_LOCK:
-        model = _LLM_CHAT_MODEL
-    if model is None:
-        model, load_error = await _load_inline_codex_chat_model()
-        if model is None:
-            raise RuntimeError(load_error or "Codex model unavailable")
-
-    async with _LLM_CHAT_AGENT_LOCK:
-        agent = _LLM_CHAT_AGENT
-    if agent is None:
-        raise RuntimeError("Codex assistant agent is unavailable")
-
-    base_messages = [
-        {"role": msg.get("role"), "content": msg.get("content")}
-        for msg in (conversation.get("messages") or [])
-        if msg.get("role") and msg.get("content")
-    ]
-    from todoist.agent.productivity_context import build_productivity_context
-
-    productivity_ctx = build_productivity_context(
-        cache_path=os.getenv(str(EnvVar.AGENT_CACHE_PATH), None),
-        repo_root=_REPO_ROOT,
-        env_path=_resolve_env_path(),
-    )
-    try:
-        project_ai_context = await asyncio.to_thread(
-            productivity_ctx.rendered_ai_context
-        )
-    except Exception as exc:  # pragma: no cover - context must not block chat
-        logger.warning("Failed to load AI context for assistant turn: {}", exc)
-        project_ai_context = ""
-    state = cast(
-        "AgentState",
-        {
-            "messages": [
-                *base_messages,
-                {
-                    "role": MessageRole.USER.value,
-                    "content": user_content,
-                },
-            ],
-            "custom_instructions": _load_custom_assistant_instructions(),
-            "project_ai_context": project_ai_context,
-        },
-    )
-    async with _LLM_CHAT_TURN_LOCK:
-        result = await asyncio.to_thread(agent.invoke, state)
-    messages = result.get("messages") if isinstance(result, dict) else None
-    if not isinstance(messages, list):
-        raise ValueError("Agent returned invalid messages")
-    if len(messages) >= len(base_messages):
-        return messages[len(base_messages) :]
-    return messages
 
 
 def _call_automation_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -939,10 +665,3 @@ def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
         repo_root=_REPO_ROOT,
     )
 
-
-def _template_summary(path: Path) -> dict[str, Any]:
-    return _component_template_summary(
-        path,
-        config_dir=_CONFIG_DIR,
-        read_config=lambda item: _read_yaml_config(item),
-    )

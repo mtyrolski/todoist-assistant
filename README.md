@@ -1,268 +1,85 @@
-<div align="center">
-  <table>
-    <tr>
-      <td align="center" width="340">
-        <table border="1" cellpadding="8">
-          <tr>
-            <td align="center">
-              <img src="img/logo.png" alt="Todoist Assistant Logo" width="320" />
-            </td>
-          </tr>
-        </table>
-      </td>
-      <td align="left">
-        <h1>Todoist Assistant</h1>
-        <p>Local-first analytics, automation, and dashboards for Todoist with optional AI summaries and read-only chat.</p>
-        <ul>
-          <li>Cache Todoist data locally and explore it in a dashboard</li>
-          <li>Run automations like sync, task multiplication, and Gmail task import</li>
-          <li>Use optional local AI summaries and read-only chat over cached activity</li>
-        </ul>
-        <p><strong>Quick links</strong><br/>
-          <a href="docs/README.md">Docs index</a><br/>
-          <a href="docs/INSTALLATION.md">Installation</a><br/>
-          <a href="docs/USAGE.md">Usage</a><br/>
-          <a href="docs/DOCKER.md">Docker</a><br/>
-          <a href="docs/BUILDING.md">Build and CI</a><br/>
-          <a href="docs/CODE_LAYOUT.md">Code layout</a><br/>
-          <a href="https://github.com/mtyrolski/todoist-assistant/releases">Releases</a>
-        </p>
-      </td>
-    </tr>
-  </table>
-</div>
+# Todoist Assistant
 
-Todoist Assistant is a local-first Todoist toolkit. It syncs your Todoist data into a local cache, gives you a dashboard to explore it, and lets you run automations on top of that data.
+Todoist Assistant is a local dashboard and small automation toolkit for Todoist.
+It keeps a local activity cache, shows what changed, and helps turn an overloaded
+task list into a clear next step.
 
-The main product is the dashboard and automation workflow. Optional AI features can summarize your local activity and power a read-only chat view, but the core value of the project is local analytics and automation. After the first sync, most day-to-day usage runs against your local cached data.
+The v0.4 development branch deliberately keeps the product small:
+
+- Dashboard for activity, priorities, project hierarchy, and completion trends
+- Task Multiplication for splitting labelled work into a finite set of copies
+- Optional Gmail import and observer sync
+- An on-demand, read-only Codex executive review of cached activity and active projects
+
+It does not provide task templates, AI task breakdown, persistent AI context,
+personal AI chat, or an Android client.
+
 ![Dashboard overview](img/fig1.png)
-![Activity trends](img/fig2.png)
-## What this project is
-
-- A local dashboard for Todoist activity, trends, and task analysis
-- A Python package and API for working with cached Todoist data
-- A set of automations such as environment updates, task multiplication, and Gmail task import
-- An optional local AI layer for summaries and chat over your cached history
-
-## Who it is for
-
-- Todoist users who want a local dashboard instead of only Todoist's built-in views
-- People who want to automate recurring Todoist workflows
-- Developers who want a Python codebase they can extend
-
-## Latest stable release
-
-`v0.3.4`
-
-Release assets live on GitHub Releases:
-- Windows: `TodoistAssistantSetup.exe` or the `.msi`
-- macOS: `.dmg` for the app, `.pkg` for CLI-only installs
-- Linux: source checkout or Docker
-- Android: native client APK for a reachable local API
-
-Releases: <https://github.com/mtyrolski/todoist-assistant/releases>
 
 ## Quick start
 
-### End users
-
-#### Windows
-
-1. Download `TodoistAssistantSetup.exe` from GitHub Releases.
-2. Run the installer.
-3. Paste your Todoist API token during first-run setup.
-4. Open the dashboard and let the first sync complete.
-
-More Windows details: [docs/windows_installer.md](docs/windows_installer.md)
-
-#### macOS
-
-- App + dashboard: install the `.dmg` release asset
-- CLI-only: install the `.pkg` release asset or use Homebrew
-
-Full instructions: [docs/INSTALLATION.md](docs/INSTALLATION.md)
-
-#### Linux
-
-- Run from source
-- Or use Docker Compose
-
-Setup details: [docs/INSTALLATION.md](docs/INSTALLATION.md)
-
-#### Android
-
-Use the `todoist-assistant-android-sideload-apk` GitHub Actions artifact for branch and pull request testing, or build the native Android client from source:
-
-```bash
-make android_apk
-```
-
-Run the local API on a reachable machine, then point the app at `http://10.0.2.2:8000` on an emulator or `http://<computer-lan-ip>:8000` on a physical device.
-
-Android details: [docs/ANDROID.md](docs/ANDROID.md)
-
-### Docker
-
-Compose runs the API and frontend services. The published container workflow builds the same two images for GHCR.
-
-```bash
-docker compose up --build
-```
-
-Open:
-- Dashboard: http://127.0.0.1:3000
-- API: http://127.0.0.1:8000
-
-Container workflow: [docs/DOCKER.md](docs/DOCKER.md)
-
-### Developers
-
-Prerequisites:
-- Python 3.11
-- `uv`
-- Node.js 20+
-- A Todoist API token
+Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js 20+, and a
+Todoist API token.
 
 ```bash
 git clone https://github.com/mtyrolski/todoist-assistant.git
 cd todoist-assistant
 cp .env.example .env
-# set API_KEY in .env
-make init_local_env
+# Set API_KEY in .env
+make setup
 make dashboard
 ```
 
-Open:
-- Dashboard: http://127.0.0.1:3000
-- API: http://127.0.0.1:8000
+Open the dashboard at <http://127.0.0.1:3000>.
 
-## Everyday usage
-
-### Main commands
+Useful commands:
 
 ```bash
-make setup             # first sync and local setup
-make dashboard         # start the dashboard without AI
-make dashboard_codex   # start the dashboard with Codex CLI AI
-make update_env        # refresh local cache and run short automations
-make run_observer      # keep syncing in the background
-make run_demo          # run the dashboard with demo/anonymized data
+make dashboard         # normal dashboard; no Codex request
+make dashboard_codex   # enables the on-demand executive review
+make update_env        # refresh local Todoist data
+make run_observer      # keep cache and short automations current
+make test_all          # complete test suite
 ```
 
-Command details: [docs/USAGE.md](docs/USAGE.md)
+The executive review is requested only when its button is used. It sends a compact
+snapshot derived from `activity.joblib` and active projects to the local Codex CLI
+in read-only mode; it never changes Todoist. It compares the last week with the
+previous week, considers completion timing and project concentration, and recommends
+one focused next-flow. The project-contribution chart complements it with a direct
+parent-project/subproject completion timeline.
 
-### What the first run looks like
+## Scope and data
 
-1. Paste your Todoist API token.
-2. Confirm or adjust project mapping for archived or moved projects.
-3. Let the first sync build the local cache.
-4. Use the dashboard, automations, or chat against local data.
+The dashboard uses the local cache after sync. Todoist is contacted to refresh that
+cache, not for routine chart rendering. Keep `.env` private: it contains your
+Todoist token. The default dashboard does not require Codex. To use the review,
+install and authenticate the Codex CLI, then start `make dashboard_codex`.
 
-## Main features
+## Project layout
 
-### Dashboard
+- `todoist/` — Python application, cache, API, dashboard and automations
+- `frontend/` — Next.js dashboard
+- `configs/` — dashboard and automation configuration
+- `core/` — core-only Python package
+- `tests/` — unit, API, integration, and packaging checks
 
-- Runs locally against cached Todoist data
-- Shows trends, counts, priorities, and activity summaries
-- Works well for repeated analysis after the initial sync
+## Packaging
 
-## Screenshots
+Windows and macOS packaging remains supported; see [Windows installer notes](docs/windows_installer.md).
+There is no Android build or release target.
 
-
-![Plots](img/fig3.png)
-![Automation controls](img/fig4.png)
-
-### Automations
-
-- `init_env` and `update_env` keep local data current
-- Multiplication automation expands tasks based on labels
-- Gmail automation can turn emails into Todoist tasks
-- Observer mode keeps refresh and short automations running continuously
-
-Automation setup lives in [`configs/automations.yaml`](configs/automations.yaml).
-
-### Optional AI features
-
-- Local summaries over cached Todoist history
-- Read-only dashboard chat
-- AI task breakdown for labeled Todoist tasks, with project-scoped durable context
-
-AI is opt-in. The user-facing commands are explicit:
-
-- `make dashboard`: default raw dashboard; no AI backend module is loaded
-- `make dashboard_codex`: uses the local Codex/langgraph-codex backend for chat and task breakdown
-
-Advanced users can still set `TODOIST_AGENT_BACKEND` in `.env`; supported values are `disabled` and `codex`.
-
-### Durable project AI context
-
-Use `@ai_context` on tasks whose title starts with the literal `* ` prefix. These
-tasks are treated as durable project memory:
-
-- Same-project context is included automatically in `@ai-breakdown` prompts.
-- Dashboard AI chat receives current context grouped by project.
-- AI treats valid context as high-priority project data ahead of assumptions and
-  transient signals, while current explicit user directions still take precedence.
-- Codex may create or update context after project analysis when it finds a stable,
-  reusable fact. It is instructed not to store transient metrics, guesses, secrets,
-  or routine summaries, and updates are constrained to existing context tasks in the
-  same project.
-- Each context task is self-contained in its title and description. Updates change
-  those fields inline; only a real update adds a `from`/`to` audit comment to that
-  context task. Creation and no-op upserts add no context comments.
-- Titles beginning with `* ` are protected from plugin deletion and stale-task
-  cleanup. Todoist itself can still delete them when a user acts directly in Todoist.
-
-See [Durable AI project context](docs/AI_CONTEXT.md) for the exact task contract,
-dynamic aggregation behavior, monotonic update guarantees, examples, helper APIs,
-and verification procedure.
-
-Ordinary task creation still requires explicit confirmation in dashboard chat. The
-project does not currently support arbitrary OpenAI-compatible HTTP endpoints,
-Anthropic-compatible HTTP endpoints, uncatalogued local model ids from the dashboard,
-or general write-capable AI agents.
-
-Usage details: [docs/USAGE.md](docs/USAGE.md)
-
-## Project structure
-
-- [`todoist/`](todoist) contains the main Python package
-- [`frontend/`](frontend) contains the Next.js dashboard
-- [`configs/`](configs) contains automation and dashboard configuration
-- [`docs/`](docs) contains longer-form documentation
-- [`tests/`](tests) contains API, integration, platform, and nested unit test segments
-- [`core/`](core) contains the core-only package variant
-
-Code layout details: [docs/CODE_LAYOUT.md](docs/CODE_LAYOUT.md)
-
-## Documentation
-
-- [docs/AI_CONTEXT.md](docs/AI_CONTEXT.md): durable project memory contract, aggregation, and safeguards
-- [docs/README.md](docs/README.md): docs index
-- [docs/INSTALLATION.md](docs/INSTALLATION.md): installation by platform
-- [docs/USAGE.md](docs/USAGE.md): commands, dashboard, and automations
-- [docs/DOCKER.md](docs/DOCKER.md): container workflow
-- [docs/BUILDING.md](docs/BUILDING.md): packaging and CI
-- [docs/gmail_setup.md](docs/gmail_setup.md): Gmail automation setup
-- [core/README.md](core/README.md): core-only package
-- [tests/README.md](tests/README.md): test layout and coverage notes
-
-## Checks
-
-Run this before closing code changes:
+## Verification
 
 ```bash
 uv sync --locked
+make check_fast
 make test_all
-make coverage
 ```
 
-CI also runs a dashboard smoke test in raw/demo mode and a Docker image workflow for the API and frontend images. Workflow details live in [docs/BUILDING.md](docs/BUILDING.md).
+For focused frontend checks:
 
-## Contributing
-
-Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) and [SKILLS.md](SKILLS.md) for repository rules and workflow expectations.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+```bash
+npm --prefix frontend run lint
+npm --prefix frontend run build
+```

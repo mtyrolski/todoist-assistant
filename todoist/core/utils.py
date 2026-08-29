@@ -60,10 +60,6 @@ CACHE_STORAGE_REGISTRY: dict[str, CacheStorageSpec] = {
     "processed_gmail_messages": ("processed_gmail_messages.joblib", set),
     "dashboard_state": ("dashboard_state.joblib", dict),
     "archived_activity_scans": ("archived_activity_scans.joblib", dict),
-    "llm_breakdown_progress": ("llm_breakdown_progress.joblib", dict),
-    "llm_breakdown_queue": ("llm_breakdown_queue.joblib", dict),
-    "llm_chat_conversations": ("llm_chat_conversations.joblib", list),
-    "llm_usage_stats": ("llm_usage_stats.joblib", dict),
 }
 RUNTIME_CACHE_FILENAMES: tuple[str, ...] = tuple(
     filename for filename, _default_factory in CACHE_STORAGE_REGISTRY.values()
