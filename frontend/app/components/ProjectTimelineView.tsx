@@ -83,7 +83,7 @@ function ParentGroup({
   scrollLeft,
   scrollTop,
   onScrollTop,
-  onScrollLeft
+  onHorizontalWheel
 }: {
   parent: ProjectTimelineParent;
   collapsed: boolean;
@@ -94,26 +94,15 @@ function ParentGroup({
   scrollLeft: number;
   scrollTop: number;
   onScrollTop: (value: number) => void;
-  onScrollLeft: (value: number) => void;
+  onHorizontalWheel: (event: WheelEvent) => void;
 }) {
   const labelScrollRef = useRef<HTMLDivElement | null>(null);
-  const horizontalScrollRef = useRef<HTMLDivElement | null>(null);
   const viewportHeight = Math.min(parent.children.length, MAX_VISIBLE_CHILD_ROWS) * ROW_HEIGHT;
   const duration = Math.max(DAY_MS, end - start + DAY_MS);
 
   useEffect(() => {
     if (labelScrollRef.current && labelScrollRef.current.scrollTop !== scrollTop) labelScrollRef.current.scrollTop = scrollTop;
   }, [scrollTop]);
-
-  useEffect(() => {
-    if (horizontalScrollRef.current && horizontalScrollRef.current.scrollLeft !== scrollLeft) horizontalScrollRef.current.scrollLeft = scrollLeft;
-  }, [scrollLeft]);
-
-  const horizontalWheel = (event: WheelEvent) => {
-    if (!horizontalScrollRef.current) return;
-    horizontalScrollRef.current.scrollLeft += event.shiftKey ? event.deltaY : event.deltaX;
-    event.preventDefault();
-  };
 
   return (
     <section className="timelineGroup" data-parent-id={parent.id}>
@@ -137,7 +126,7 @@ function ParentGroup({
             className="timelineRowsViewport"
             style={{ height: viewportHeight }}
             onWheel={(event) => {
-              if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) horizontalWheel(event);
+              if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) onHorizontalWheel(event);
               else if (labelScrollRef.current) {
                 labelScrollRef.current.scrollTop += event.deltaY;
                 event.preventDefault();
@@ -161,15 +150,6 @@ function ParentGroup({
               })}
             </div>
           </div>
-          <div className="timelineGroupScrollbarSpacer" aria-hidden />
-          <div
-            ref={horizontalScrollRef}
-            className="timelineGroupScrollbar"
-            aria-label={`Scroll ${parent.name} timeline`}
-            onScroll={(event) => onScrollLeft(event.currentTarget.scrollLeft)}
-          >
-            <div style={{ width: timelineWidth }} />
-          </div>
         </>
       ) : null}
     </section>
@@ -184,10 +164,15 @@ export function ProjectTimelineView() {
   const [parentScroll, setParentScroll] = useState(() => new Map(sessionState.scrollTop));
   const [beg, setBeg] = useState("");
   const [end, setEnd] = useState("");
+  const scrollbarRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (data?.range) { setBeg(data.range.start); setEnd(data.range.end); }
   }, [data?.range]);
+
+  useEffect(() => {
+    if (scrollbarRef.current && scrollbarRef.current.scrollLeft !== scrollLeft) scrollbarRef.current.scrollLeft = scrollLeft;
+  }, [scrollLeft]);
 
   const parents = useMemo(() => (data?.parents ?? []).map((parent) => ({
     ...parent,
@@ -221,6 +206,11 @@ export function ProjectTimelineView() {
   const updateScrollLeft = (value: number) => {
     sessionState.scrollLeft = value;
     setScrollLeft(value);
+  };
+  const horizontalWheel = (event: WheelEvent) => {
+    if (!scrollbarRef.current) return;
+    scrollbarRef.current.scrollLeft += event.shiftKey ? event.deltaY : event.deltaX;
+    event.preventDefault();
   };
   return (
     <div className="projectTimelinePage">
@@ -262,8 +252,10 @@ export function ProjectTimelineView() {
               </div>
             </div>
             <div className="timelineGroups">
-              {parents.map((parent) => <ParentGroup key={parent.id} parent={parent} collapsed={collapsed.has(parent.id)} toggle={() => { const next = new Set(collapsed); next.has(parent.id) ? next.delete(parent.id) : next.add(parent.id); sessionState.collapsed = next; setCollapsed(next); }} start={start} end={rangeEnd} timelineWidth={timelineWidth} scrollLeft={scrollLeft} scrollTop={parentScroll.get(parent.id) ?? 0} onScrollTop={(value) => { const next = new Map(parentScroll).set(parent.id, value); sessionState.scrollTop = next; setParentScroll(next); }} onScrollLeft={updateScrollLeft} />)}
+              {parents.map((parent) => <ParentGroup key={parent.id} parent={parent} collapsed={collapsed.has(parent.id)} toggle={() => { const next = new Set(collapsed); next.has(parent.id) ? next.delete(parent.id) : next.add(parent.id); sessionState.collapsed = next; setCollapsed(next); }} start={start} end={rangeEnd} timelineWidth={timelineWidth} scrollLeft={scrollLeft} scrollTop={parentScroll.get(parent.id) ?? 0} onScrollTop={(value) => { const next = new Map(parentScroll).set(parent.id, value); sessionState.scrollTop = next; setParentScroll(next); }} onHorizontalWheel={horizontalWheel} />)}
             </div>
+            <div className="timelineScrollbarSpacer" aria-hidden />
+            <div ref={scrollbarRef} className="timelineGlobalScrollbar" aria-label="Scroll the shared project timeline" onScroll={(event) => updateScrollLeft(event.currentTarget.scrollLeft)}><div style={{ width: timelineWidth }} /></div>
           </div>
         ) : null}
       </section>

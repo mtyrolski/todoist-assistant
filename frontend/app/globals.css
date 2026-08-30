@@ -1392,7 +1392,7 @@ textarea.textInput {
   position: absolute;
   z-index: 4;
   top: 0;
-  bottom: 0;
+  bottom: 19px;
   left: calc(var(--hierarchy-width) + var(--today-x) - var(--scroll-left));
   width: 1px;
   border-left: 1px dashed rgba(224, 232, 243, 0.72);
@@ -1413,7 +1413,7 @@ textarea.textInput {
   white-space: nowrap;
 }
 
-.timelineGroupScrollbarSpacer {
+.timelineScrollbarSpacer {
   position: relative;
   z-index: 5;
   height: 19px;
@@ -1421,7 +1421,7 @@ textarea.textInput {
   background: rgba(5, 8, 12, 0.25);
 }
 
-.timelineGroupScrollbar {
+.timelineGlobalScrollbar {
   height: 19px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1430,10 +1430,10 @@ textarea.textInput {
   scrollbar-width: thin;
 }
 
-.timelineGroupScrollbar > div { height: 1px; }
-.timelineGroupScrollbar::-webkit-scrollbar { height: 11px; }
-.timelineGroupScrollbar::-webkit-scrollbar-track { border-radius: 8px; background: rgba(255, 255, 255, 0.035); }
-.timelineGroupScrollbar::-webkit-scrollbar-thumb { border-radius: 8px; background: rgba(188, 196, 207, 0.48); }
+.timelineGlobalScrollbar > div { height: 1px; }
+.timelineGlobalScrollbar::-webkit-scrollbar { height: 11px; }
+.timelineGlobalScrollbar::-webkit-scrollbar-track { border-radius: 8px; background: rgba(255, 255, 255, 0.035); }
+.timelineGlobalScrollbar::-webkit-scrollbar-thumb { border-radius: 8px; background: rgba(188, 196, 207, 0.48); }
 
 .timelineEmpty {
   display: grid;
