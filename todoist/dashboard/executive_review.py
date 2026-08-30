@@ -76,7 +76,7 @@ def _project_counts(frame: pd.DataFrame) -> dict[str, int]:
         .value_counts()
         .head(10)
     )
-    return {name: int(count) for name, count in counts.items()}
+    return {str(name): int(count) for name, count in counts.items()}
 
 
 def _project_snapshots(projects: list[Project]) -> list[dict[str, Any]]:

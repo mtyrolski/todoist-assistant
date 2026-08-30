@@ -102,7 +102,6 @@ def _ensure_env_and_files(
     os.environ.setdefault(str(EnvVar.DATA_DIR), str(data_dir))
     os.environ.setdefault(str(EnvVar.LOGS_DIR), str(logs_dir))
     os.environ.setdefault(str(EnvVar.PERSONAL_DIR), str(data_dir / "personal"))
-    os.environ[str(EnvVar.AGENT_CACHE_PATH)] = str(cache_dir)
 
 
 def _launcher_log_path() -> str | None:

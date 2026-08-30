@@ -664,4 +664,3 @@ def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:
         dashboard_config_path=_DASHBOARD_CONFIG_PATH,
         repo_root=_REPO_ROOT,
     )
-

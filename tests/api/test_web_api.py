@@ -1,6 +1,7 @@
 """Tests for FastAPI dashboard home endpoints."""
 
 from datetime import date
+from typing import cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -543,7 +544,8 @@ def test_dashboard_home_passes_active_and_archived_projects_to_hierarchy(
     response = _home(api_client)
 
     assert response.status_code == 200
-    assert [project.id for project in captured["projects"]] == [
+    projects = cast(list[object], captured["projects"])
+    assert [getattr(project, "id") for project in projects] == [
         "active",
         "archived",
     ]
