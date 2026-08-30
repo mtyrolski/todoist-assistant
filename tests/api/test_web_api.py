@@ -55,6 +55,56 @@ def _home(api_client, query: str = "weeks=12&granularity=W"):
     return api_client.get(f"/api/dashboard/home?{query}")
 
 
+def test_project_timeline_endpoint_returns_structured_archived_history(
+    monkeypatch, api_client
+) -> None:
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(
+            project_id="root", name="Product", created_at="2026-01-01T00:00:00Z"
+        ),
+    )
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(
+            project_id="child",
+            name="Shipped",
+            parent_id="root",
+            created_at="2026-08-01T00:00:00Z",
+            updated_at="2026-08-19T00:00:00Z",
+        ),
+        is_archived=True,
+    )
+    activity = _event_df(
+        [
+            {
+                "date": "2026-08-18",
+                "id": "e1",
+                "title": "done",
+                "type": "completed",
+                "parent_project_id": "child",
+                "parent_project_name": "Shipped",
+                "root_project_name": "Product",
+                "task_id": "1",
+            }
+        ]
+    )
+    _set_dashboard_df(monkeypatch, activity)
+    web_api._state.active_projects = [root]
+    web_api._state.archived_projects = [child]
+
+    response = api_client.get(
+        "/api/dashboard/project-timeline?beg=2026-08-01&end=2026-08-31"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["range"] == {"start": "2026-08-01", "end": "2026-08-31"}
+    assert payload["parents"][0]["id"] == "root"
+    assert payload["parents"][0]["children"][0]["status"] == "completed"
+    assert payload["parents"][0]["children"][0]["archived"] is True
+
+
 def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)

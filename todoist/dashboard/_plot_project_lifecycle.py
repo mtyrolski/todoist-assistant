@@ -1,6 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal, NotRequired, TypedDict
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -8,15 +9,50 @@ import plotly.graph_objects as go
 from todoist.core.types import Project
 
 
+class ProjectLifecycleChild(TypedDict):
+    id: str
+    name: str
+    status: Literal["completed", "ongoing", "unresolved", "inactive"]
+    startDate: str
+    endDate: str | None
+    visualStart: str
+    visualEnd: str
+    completionDate: str | None
+    archiveDate: str | None
+    archived: bool
+    durationDays: int
+    completions: int
+    openTasks: int
+
+
+class ProjectLifecycleParent(TypedDict):
+    id: str
+    name: str
+    children: list[ProjectLifecycleChild]
+
+
+class ProjectLifecycleRange(TypedDict):
+    start: str
+    end: str
+
+
+class ProjectLifecycleData(TypedDict):
+    range: ProjectLifecycleRange | None
+    parents: list[ProjectLifecycleParent]
+    refreshedAt: NotRequired[str]
+
+
 @dataclass(frozen=True)
 class _Span:
+    parent_id: str
+    project_id: str
     parent: str
     project: str
     start: pd.Timestamp
     end: pd.Timestamp
     actual_start: pd.Timestamp
     actual_end: pd.Timestamp
-    status: str
+    status: Literal["completed", "ongoing", "stalled", "inactive"]
     completions: int
     open_tasks: int
     archived: bool
@@ -26,6 +62,7 @@ _STATUS = {
     "completed": ("Completed / archived", "#61f4b3"),
     "ongoing": ("Ongoing", "#6ae3ff"),
     "stalled": ("No completion in period", "#ffb86c"),
+    "inactive": ("No activity", "#8b929d"),
 }
 _HOVER = (
     "<b>%{customdata[1]}</b><br>Parent: %{customdata[0]}<br>"
@@ -46,13 +83,7 @@ def plot_project_lifecycle_timeline(
     if window_start is None or window_end is None or window_start >= window_end:
         return _empty("Select a valid period.")
 
-    frame = activity.copy()
-    frame.index = pd.to_datetime(frame.index, errors="coerce", utc=True).tz_localize(
-        None
-    )
-    frame = frame.loc[~frame.index.isna()]
-    event_column = "event_type" if "event_type" in frame else "type"
-    spans = _spans(frame, event_column, projects, window_start, window_end)
+    spans = _lifecycle_spans(activity, projects, window_start, window_end)
     if not spans:
         return _empty("No subproject spans overlap this period.")
 
@@ -99,6 +130,65 @@ def plot_project_lifecycle_timeline(
     return figure
 
 
+def build_project_lifecycle_data(
+    activity: pd.DataFrame,
+    beg: datetime,
+    end: datetime,
+    projects: list[Project],
+) -> ProjectLifecycleData:
+    """Return semantic lifecycle rows for the native project-timeline UI."""
+
+    window_start, window_end = _timestamp(beg), _timestamp(end)
+    if window_start is None or window_end is None or window_start >= window_end:
+        return {"range": None, "parents": []}
+
+    spans = _lifecycle_spans(activity, projects, window_start, window_end)
+    grouped: defaultdict[str, list[_Span]] = defaultdict(list)
+    for span in spans:
+        grouped[span.parent_id].append(span)
+
+    parents: list[ProjectLifecycleParent] = []
+    for parent_id, children in sorted(
+        grouped.items(),
+        key=lambda item: (
+            -sum(child.completions for child in item[1]),
+            item[1][0].parent.casefold(),
+            item[0],
+        ),
+    ):
+        first = children[0]
+        parents.append(
+            {
+                "id": parent_id,
+                "name": first.parent,
+                "children": [_span_payload(span) for span in children],
+            }
+        )
+
+    return {
+        "range": {
+            "start": window_start.date().isoformat(),
+            "end": (window_end - timedelta(microseconds=1)).date().isoformat(),
+        },
+        "parents": parents,
+    }
+
+
+def _lifecycle_spans(
+    activity: pd.DataFrame,
+    projects: list[Project],
+    window_start: pd.Timestamp,
+    window_end: pd.Timestamp,
+) -> list[_Span]:
+    frame = activity.copy()
+    frame.index = pd.to_datetime(frame.index, errors="coerce", utc=True).tz_localize(
+        None
+    )
+    frame = frame.loc[~frame.index.isna()]
+    event_column = "event_type" if "event_type" in frame else "type"
+    return _spans(frame, event_column, projects, window_start, window_end)
+
+
 def _trace(matching: list[tuple[_Span, float]], label: str, color: str) -> go.Bar:
     return go.Bar(
         x=[
@@ -125,7 +215,7 @@ def _spans(
 ) -> list[_Span]:
     by_id = {str(project.id): project for project in projects}
     active_roots = {
-        str(project.id): project.project_entry.name
+        str(project.id): project
         for project in projects
         if not project.is_archived and not _parent_id(project)
     }
@@ -137,12 +227,14 @@ def _spans(
             activity_by_project[str(project_id)] = group
     candidates: list[tuple[int, _Span]] = []
     for project in projects:
-        root_id = _root_id(project, by_id)
-        if root_id not in active_roots or str(project.id) == root_id:
-            continue
         project_frame = activity_by_project.get(str(project.id))
         if project_frame is None:
             project_frame = frame.head(0)
+        root_id = _activity_root_id(project_frame, active_roots) or _root_id(
+            project, by_id
+        )
+        if root_id not in active_roots or str(project.id) == root_id:
+            continue
         recent = project_frame.loc[
             (project_frame.index >= window_start) & (project_frame.index < window_end)
         ]
@@ -179,14 +271,21 @@ def _spans(
             status = "completed"
         else:
             endpoint = window_end - timedelta(microseconds=1)
-            status = "ongoing" if completions else "stalled"
+            if completions:
+                status = "ongoing"
+            elif not recent.empty or open_tasks:
+                status = "stalled"
+            else:
+                status = "inactive"
         if endpoint < window_start or created >= window_end:
             continue
         candidates.append(
             (
                 len(recent) * 3 + completions * 2 + open_tasks,
                 _Span(
-                    active_roots[root_id],
+                    root_id,
+                    str(project.id),
+                    active_roots[root_id].project_entry.name,
                     project.project_entry.name,
                     max(created, window_start),
                     min(endpoint, window_end),
@@ -201,6 +300,63 @@ def _spans(
         )
     candidates.sort(key=lambda item: (-item[0], item[1].project.casefold()))
     return [span for _, span in candidates]
+
+
+def _activity_root_id(
+    project_frame: pd.DataFrame,
+    active_roots: dict[str, Project],
+) -> str | None:
+    """Recover hierarchy flattened by Todoist's archived-project endpoint.
+
+    Archived project records can lose their ``parent_id``. Historical activity still
+    carries the original root id/name, so prefer that evidence when it identifies a
+    currently active parent project.
+    """
+
+    if project_frame.empty:
+        return None
+    if "root_project_id" in project_frame:
+        root_ids = project_frame["root_project_id"].dropna().astype(str)
+        if not root_ids.empty:
+            for root_id in root_ids.value_counts().index:
+                if root_id in active_roots:
+                    return root_id
+    if "root_project_name" not in project_frame:
+        return None
+    root_names = project_frame["root_project_name"].dropna().astype(str)
+    if root_names.empty:
+        return None
+    roots_by_name: defaultdict[str, list[str]] = defaultdict(list)
+    for root_id, root in active_roots.items():
+        roots_by_name[root.project_entry.name].append(root_id)
+    for root_name in root_names.value_counts().index:
+        matching = roots_by_name[root_name]
+        if len(matching) == 1:
+            return matching[0]
+    return None
+
+
+def _span_payload(span: _Span) -> ProjectLifecycleChild:
+    duration = max(1, (span.actual_end.date() - span.actual_start.date()).days + 1)
+    return {
+        "id": span.project_id,
+        "name": span.project,
+        "status": "unresolved" if span.status == "stalled" else span.status,
+        "startDate": span.actual_start.date().isoformat(),
+        "endDate": span.actual_end.date().isoformat()
+        if span.status == "completed"
+        else None,
+        "visualStart": span.start.date().isoformat(),
+        "visualEnd": span.end.date().isoformat(),
+        "completionDate": span.actual_end.date().isoformat()
+        if span.status == "completed"
+        else None,
+        "archiveDate": span.actual_end.date().isoformat() if span.archived else None,
+        "archived": span.archived,
+        "durationDays": duration,
+        "completions": span.completions,
+        "openTasks": span.open_tasks,
+    }
 
 
 def _positions(

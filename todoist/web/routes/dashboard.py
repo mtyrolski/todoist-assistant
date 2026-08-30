@@ -13,12 +13,12 @@ from fastapi import APIRouter
 from loguru import logger
 
 from todoist.dashboard.plots import (
+    build_project_lifecycle_data,
     cumsum_completed_tasks_periodically,
     plot_active_project_hierarchy,
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
-    plot_project_lifecycle_timeline,
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
@@ -62,6 +62,35 @@ class _ExecutiveReviewRun:
 
 _EXECUTIVE_REVIEW_RUN: _ExecutiveReviewRun | None = None
 _EXECUTIVE_REVIEW_TASKS: set[asyncio.Task[None]] = set()
+
+
+@router.get("/api/dashboard/project-timeline", tags=["dashboard"])
+async def project_timeline(
+    weeks: int = 12,
+    beg: str | None = None,
+    end: str | None = None,
+    refresh: bool = False,
+) -> dict[str, object]:
+    """Return structured project lifecycle data for the dedicated timeline view."""
+
+    _sync_api_globals(globals())
+    await _ensure_state(refresh=refresh)
+    activity = _state.df_activity
+    active_projects = _state.active_projects
+    if activity is None or active_projects is None:
+        return {"error": "Dashboard data unavailable.", "range": None, "parents": []}
+    activity = _normalize_activity_df(activity)
+    range_beg, range_end = _compute_plot_range(
+        activity, weeks=weeks, beg=beg, end=end
+    )
+    payload = build_project_lifecycle_data(
+        activity,
+        range_beg,
+        range_end,
+        [*active_projects, *(_state.archived_projects or [])],
+    )
+    payload["refreshedAt"] = datetime.now().isoformat(timespec="seconds")
+    return dict(payload)
 
 
 def _executive_review_prompt(context: dict[str, Any]) -> str:
@@ -300,9 +329,23 @@ async def dashboard_home(
 
     if no_data:
         figures = {}
+        project_timeline_summary = {"parentCount": 0, "subprojectCount": 0}
         parent_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
         root_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
     else:
+        lifecycle_data = build_project_lifecycle_data(
+            df_activity,
+            beg_range,
+            end_range,
+            [*active_projects, *archived_projects],
+        )
+        lifecycle_parents = lifecycle_data["parents"]
+        project_timeline_summary = {
+            "parentCount": len(lifecycle_parents),
+            "subprojectCount": sum(
+                len(parent["children"]) for parent in lifecycle_parents
+            ),
+        }
         weekly_completion_fig = plot_weekly_completion_trend(df_activity, end_range)
         completed_periodic_fig = _apply_date_axis_viewport(
             _add_plot_event_markers(
@@ -371,14 +414,6 @@ async def dashboard_home(
                     project_colors,
                     project_mappings=project_mappings,
                     archived_parent_projects=always_visible_projects,
-                )
-            ),
-            "projectLifecycleTimeline": _fig_to_dict(
-                plot_project_lifecycle_timeline(
-                    df_activity,
-                    beg_range,
-                    end_range,
-                    [*active_projects, *archived_projects],
                 )
             ),
         }
@@ -456,6 +491,7 @@ async def dashboard_home(
             }
         },
         "figures": figures,
+        "projectTimelineSummary": project_timeline_summary,
         "refreshedAt": datetime.now().isoformat(timespec="seconds"),
     }
     _state.home_payload_cache[cache_key] = payload
