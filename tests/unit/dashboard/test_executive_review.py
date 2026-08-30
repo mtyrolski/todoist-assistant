@@ -33,6 +33,14 @@ def test_review_context_compares_recent_activity() -> None:
     ]
 
 
+def test_review_context_accepts_runtime_type_column() -> None:
+    activity = _activity().rename(columns={"event_type": "type"})
+
+    context = review_context(activity, [])
+
+    assert context["completions"] == {"current": 2, "previous": 0}
+
+
 def test_project_contribution_timeline_uses_parent_and_subproject_names() -> None:
     figure = plot_project_contribution_timeline(
         _activity(),

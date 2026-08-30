@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter
+from loguru import logger
 
 from todoist.dashboard.plots import (
     cumsum_completed_tasks_periodically,
@@ -75,22 +76,38 @@ async def executive_review(refresh: bool = False) -> dict[str, Any]:
             "summary": None,
             "detail": "Start with make dashboard_codex to generate the executive review.",
         }
-    context = review_context(_normalize_activity_df(_state.df_activity), _state.active_projects)
-    key = repr(context)
-    if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
-        return {"enabled": True, "summary": _EXECUTIVE_REVIEW_CACHE[key], "cached": True}
-    async with _EXECUTIVE_REVIEW_LOCK:
+    try:
+        context = review_context(
+            _normalize_activity_df(_state.df_activity), _state.active_projects
+        )
+        key = repr(context)
         if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
             return {"enabled": True, "summary": _EXECUTIVE_REVIEW_CACHE[key], "cached": True}
-        model = await asyncio.to_thread(
-            build_codex_chat_model, load_runtime_env_values(env_path), cwd=_REPO_ROOT
-        )
-        summary = await asyncio.to_thread(
-            model.chat,
-            [{"role": "user", "content": _executive_review_prompt(context)}],
-        )
-        _EXECUTIVE_REVIEW_CACHE.clear()
-        _EXECUTIVE_REVIEW_CACHE[key] = summary
+        async with _EXECUTIVE_REVIEW_LOCK:
+            if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
+                return {
+                    "enabled": True,
+                    "summary": _EXECUTIVE_REVIEW_CACHE[key],
+                    "cached": True,
+                }
+            model = await asyncio.to_thread(
+                build_codex_chat_model,
+                load_runtime_env_values(env_path),
+                cwd=_REPO_ROOT,
+            )
+            summary = await asyncio.to_thread(
+                model.chat,
+                [{"role": "user", "content": _executive_review_prompt(context)}],
+            )
+            _EXECUTIVE_REVIEW_CACHE.clear()
+            _EXECUTIVE_REVIEW_CACHE[key] = summary
+    except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+        logger.exception("Codex executive review failed")
+        return {
+            "enabled": True,
+            "summary": None,
+            "detail": f"Codex could not generate the review: {str(exc)[:300]}",
+        }
     return {"enabled": True, "summary": summary, "cached": False}
 
 

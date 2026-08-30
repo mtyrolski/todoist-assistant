@@ -17,9 +17,22 @@ export function ExecutiveReview() {
     setLoading(true);
     try {
       const result = await fetch(`/api/dashboard/executive_review${refresh ? "?refresh=true" : ""}`, { method: "POST" });
-      setResponse((await result.json()) as ReviewResponse);
+      const body = (await result.json()) as ReviewResponse;
+      setResponse(
+        result.ok
+          ? body
+          : {
+              enabled: false,
+              summary: null,
+              detail: body.detail ?? `The review request failed (${result.status}).`
+            }
+      );
     } catch {
-      setResponse({ enabled: false, summary: null, detail: "The executive review could not be generated." });
+      setResponse({
+        enabled: false,
+        summary: null,
+        detail: "The dashboard API did not return a readable review response. Check the API status and try again."
+      });
     } finally {
       setLoading(false);
     }

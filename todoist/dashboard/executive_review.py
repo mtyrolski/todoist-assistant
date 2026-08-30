@@ -18,7 +18,10 @@ def review_context(activity: pd.DataFrame, projects: list[Project]) -> dict[str,
     end = frame.index.max().normalize() + timedelta(days=1)
     current_start = end - timedelta(days=7)
     previous_start = current_start - timedelta(days=7)
-    completed = frame.loc[frame["event_type"] == "completed"]
+    event_column = "event_type" if "event_type" in frame else "type"
+    if event_column not in frame:
+        return {"activity": "No supported activity events are available.", "projects": []}
+    completed = frame.loc[frame[event_column] == "completed"]
     current = completed.loc[(completed.index >= current_start) & (completed.index < end)]
     previous = completed.loc[(completed.index >= previous_start) & (completed.index < current_start)]
     current_by_project = _project_counts(current)
