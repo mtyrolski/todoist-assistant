@@ -69,7 +69,7 @@ function tooltip(child: ProjectTimelineChild, parent: ProjectTimelineParent): st
   const meta = STATUS_META[child.status];
   return [
     child.name,
-    `Parent project: ${parent.name}`,
+    parent.standalone ? null : `Parent project: ${parent.name}`,
     `Status: ${meta.label}`,
     `Start: ${dateLabel(child.startDate)}`,
     child.endDate ? `End: ${dateLabel(child.endDate)}` : "End: Ongoing",
@@ -104,6 +104,37 @@ function ParentGroup({
   const updateVerticalScroll = (value: number) => {
     rowsRef.current?.style.setProperty("--group-scroll-top", `${value}px`);
   };
+
+  if (parent.standalone) {
+    const child = parent.children[0];
+    const left = Math.max(0, (parseDay(child.visualStart) - start) / duration * timelineWidth);
+    const right = Math.min(timelineWidth, (parseDay(child.visualEnd) - start + DAY_MS) / duration * timelineWidth);
+    return (
+      <section className="timelineGroup timelineStandalone" data-parent-id={parent.id}>
+        <div className="timelineStandaloneLabel" title={parent.name}>
+          <strong>{parent.name}</strong><span>Archived root</span>
+        </div>
+        <div
+          className="timelineRowsViewport"
+          style={{ height: ROW_HEIGHT }}
+          onWheel={(event) => {
+            if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) onHorizontalWheel(event);
+          }}
+        >
+          <div className="timelineRows" style={{ width: timelineWidth, transform: "translateX(calc(0px - var(--scroll-left)))" }}>
+            <div className="timelineRow">
+              <span
+                className={`timelineBar ${STATUS_META[child.status].className}`}
+                style={{ left, width: Math.max(5, right - left) }}
+                title={tooltip(child, parent)}
+                aria-label={tooltip(child, parent)}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="timelineGroup" data-parent-id={parent.id}>

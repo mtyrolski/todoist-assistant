@@ -29,6 +29,7 @@ class ProjectLifecycleParent(TypedDict):
     id: str
     name: str
     children: list[ProjectLifecycleChild]
+    standalone: NotRequired[bool]
 
 
 class ProjectLifecycleRange(TypedDict):
@@ -163,6 +164,7 @@ def build_project_lifecycle_data(
         grouped[span.parent_id].append(span)
 
     parents: list[ProjectLifecycleParent] = []
+    archived_roots = grouped.pop(_ARCHIVED_ROOTS_ID, [])
     for parent_id, children in sorted(
         grouped.items(),
         key=lambda item: (
@@ -177,6 +179,20 @@ def build_project_lifecycle_data(
                 "id": parent_id,
                 "name": first.parent,
                 "children": [_span_payload(span) for span in children],
+            }
+        )
+
+    for span in sorted(
+        archived_roots,
+        key=lambda item: (item.actual_end, item.project.casefold()),
+        reverse=True,
+    ):
+        parents.append(
+            {
+                "id": f"archived-root:{span.project_id}",
+                "name": span.project,
+                "children": [_span_payload(span)],
+                "standalone": True,
             }
         )
 

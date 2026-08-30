@@ -157,7 +157,7 @@ def test_project_lifecycle_recovers_archived_child_parent_from_activity() -> Non
     assert payload["parents"][0]["children"][0]["status"] == "completed"
 
 
-def test_project_lifecycle_includes_archived_roots_and_archived_parent_groups() -> None:
+def test_project_lifecycle_puts_archived_roots_last_without_synthetic_group() -> None:
     archived_root = make_project(
         project_id="archived-root",
         project_entry=make_project_entry(
@@ -179,32 +179,61 @@ def test_project_lifecycle_includes_archived_roots_and_archived_parent_groups() 
         ),
         is_archived=True,
     )
+    recent_root = make_project(
+        project_id="recent-root",
+        project_entry=make_project_entry(
+            project_id="recent-root",
+            name="Recent root",
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-08-21T00:00:00Z",
+        ),
+        is_archived=True,
+    )
     activity = pd.DataFrame(
         {
-            "event_type": ["completed", "completed"],
-            "parent_project_id": ["archived-root", "archived-child"],
-            "root_project_id": ["archived-root", "archived-root"],
-            "root_project_name": ["Old product", "Old product"],
+            "event_type": ["completed", "completed", "completed"],
+            "parent_project_id": [
+                "archived-root",
+                "archived-child",
+                "recent-root",
+            ],
+            "root_project_id": [
+                "archived-root",
+                "archived-root",
+                "recent-root",
+            ],
+            "root_project_name": ["Old product", "Old product", "Recent root"],
         },
-        index=pd.to_datetime(["2026-08-18T12:00:00", "2026-08-19T12:00:00"]),
+        index=pd.to_datetime(
+            [
+                "2026-08-18T12:00:00",
+                "2026-08-19T12:00:00",
+                "2026-08-20T12:00:00",
+            ]
+        ),
     )
 
     payload = build_project_lifecycle_data(
         activity,
         datetime(2025, 1, 1),
         datetime(2026, 9, 1),
-        [archived_root, archived_child],
+        [archived_root, archived_child, recent_root],
     )
 
     groups = {parent["id"]: parent for parent in payload["parents"]}
-    assert groups["archived-root-projects"]["children"][0]["id"] == "archived-root"
+    assert "archived-root-projects" not in groups
     assert groups["archived-root"]["children"][0]["id"] == "archived-child"
+    assert [parent["id"] for parent in payload["parents"][-2:]] == [
+        "archived-root:recent-root",
+        "archived-root:archived-root",
+    ]
+    assert all(parent["standalone"] for parent in payload["parents"][-2:])
     assert payload["history"] == {
         "activityStart": "2026-08-18",
-        "activityEnd": "2026-08-19",
+        "activityEnd": "2026-08-20",
         "activeProjects": 0,
-        "archivedProjects": 2,
-        "archivedProjectsInView": 2,
+        "archivedProjects": 3,
+        "archivedProjectsInView": 3,
     }
 
 

@@ -5,6 +5,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -81,10 +82,12 @@ async def project_timeline(
         return {"error": "Dashboard data unavailable.", "range": None, "parents": []}
     activity = _normalize_activity_df(activity)
     if weeks == 0 and beg is None and end is None:
-        range_end = _safe_activity_anchor(activity)
-        range_beg = (
-            activity.index.min().to_pydatetime() if not activity.empty else range_end
+        anchor = _safe_activity_anchor(activity)
+        range_end = datetime.combine(
+            anchor.date() + timedelta(days=1), datetime.min.time()
         )
+        first_event = activity.index.min().to_pydatetime() if not activity.empty else anchor
+        range_beg = datetime.combine(first_event.date(), datetime.min.time())
     else:
         range_beg, range_end = _compute_plot_range(
             activity, weeks=weeks, beg=beg, end=end

@@ -20,6 +20,7 @@ export type ProjectTimelineParent = {
   id: string;
   name: string;
   children: ProjectTimelineChild[];
+  standalone?: boolean;
 };
 
 export type ProjectTimelineData = {

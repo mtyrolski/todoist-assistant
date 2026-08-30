@@ -104,6 +104,9 @@ def test_project_timeline_endpoint_returns_structured_archived_history(
     assert payload["parents"][0]["children"][0]["status"] == "completed"
     assert payload["parents"][0]["children"][0]["archived"] is True
 
+    full_history = api_client.get("/api/dashboard/project-timeline").json()
+    assert full_history["range"]["start"] == "2026-08-18"
+
 
 def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))

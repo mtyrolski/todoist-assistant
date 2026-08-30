@@ -1314,6 +1314,36 @@ textarea.textInput {
   line-height: 1;
 }
 
+.timelineStandaloneLabel {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  height: 31px;
+  padding: 5px 14px 5px 42px;
+  border-right: 1px solid var(--border);
+  background: #15191f;
+  color: #cbd2dc;
+  font-size: 11px;
+}
+
+.timelineStandaloneLabel strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timelineStandaloneLabel span {
+  flex: none;
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .timelineLabels {
   position: relative;
   z-index: 5;
