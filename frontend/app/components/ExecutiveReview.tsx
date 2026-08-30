@@ -1,17 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Markdown } from "./Markdown";
 
 type ReviewResponse = {
   enabled: boolean;
   summary: string | null;
   detail?: string;
+  loading?: boolean;
 };
 
 export function ExecutiveReview() {
   const [response, setResponse] = useState<ReviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const restore = async () => {
+      try {
+        const result = await fetch("/api/dashboard/executive_review");
+        const body = (await result.json()) as ReviewResponse;
+        if (!active) return;
+        setResponse(body);
+        setLoading(Boolean(body.loading));
+        if (body.loading) timer = setTimeout(restore, 1500);
+      } catch {
+        if (active) setLoading(false);
+      }
+    };
+    void restore();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   const generate = async (refresh = false) => {
     setLoading(true);

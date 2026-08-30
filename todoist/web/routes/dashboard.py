@@ -111,6 +111,23 @@ async def executive_review(refresh: bool = False) -> dict[str, Any]:
     return {"enabled": True, "summary": summary, "cached": False}
 
 
+@router.get("/api/dashboard/executive_review", tags=["dashboard"])
+async def executive_review_status() -> dict[str, Any]:
+    _sync_api_globals(globals())
+    backend = resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd())
+    summary = (
+        list(_EXECUTIVE_REVIEW_CACHE.values())[-1]
+        if _EXECUTIVE_REVIEW_CACHE
+        else None
+    )
+    return {
+        "enabled": backend == "codex",
+        "summary": summary,
+        "cached": summary is not None,
+        "loading": _EXECUTIVE_REVIEW_LOCK.locked(),
+    }
+
+
 @router.get("/api/dashboard/status", tags=["dashboard"])
 async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
