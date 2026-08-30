@@ -36,9 +36,18 @@ class ProjectLifecycleRange(TypedDict):
     end: str
 
 
+class ProjectLifecycleHistory(TypedDict):
+    activityStart: str | None
+    activityEnd: str | None
+    activeProjects: int
+    archivedProjects: int
+    archivedProjectsInView: int
+
+
 class ProjectLifecycleData(TypedDict):
     range: ProjectLifecycleRange | None
     parents: list[ProjectLifecycleParent]
+    history: ProjectLifecycleHistory
     refreshedAt: NotRequired[str]
 
 
@@ -71,6 +80,8 @@ _HOVER = (
     "Completions: %{customdata[6]}<br>Open tasks: %{customdata[7]}<br>"
     "Archived: %{customdata[8]}<extra></extra>"
 )
+_ARCHIVED_ROOTS_ID = "archived-root-projects"
+_ARCHIVED_ROOTS_NAME = "Archived root projects"
 
 
 def plot_project_lifecycle_timeline(
@@ -140,7 +151,11 @@ def build_project_lifecycle_data(
 
     window_start, window_end = _timestamp(beg), _timestamp(end)
     if window_start is None or window_end is None or window_start >= window_end:
-        return {"range": None, "parents": []}
+        return {
+            "range": None,
+            "parents": [],
+            "history": _history_payload(activity, projects, []),
+        }
 
     spans = _lifecycle_spans(activity, projects, window_start, window_end)
     grouped: defaultdict[str, list[_Span]] = defaultdict(list)
@@ -171,6 +186,7 @@ def build_project_lifecycle_data(
             "end": (window_end - timedelta(microseconds=1)).date().isoformat(),
         },
         "parents": parents,
+        "history": _history_payload(activity, projects, spans),
     }
 
 
@@ -230,10 +246,19 @@ def _spans(
         project_frame = activity_by_project.get(str(project.id))
         if project_frame is None:
             project_frame = frame.head(0)
-        root_id = _activity_root_id(project_frame, active_roots) or _root_id(
+        root_id = _activity_root_id(project_frame, by_id) or _root_id(
             project, by_id
         )
-        if root_id not in active_roots or str(project.id) == root_id:
+        project_id = str(project.id)
+        if root_id in active_roots and project_id == root_id:
+            continue
+        if root_id in by_id and root_id != project_id:
+            parent_id = root_id
+            parent_name = by_id[root_id].project_entry.name
+        elif project.is_archived:
+            parent_id = _ARCHIVED_ROOTS_ID
+            parent_name = _ARCHIVED_ROOTS_NAME
+        else:
             continue
         recent = project_frame.loc[
             (project_frame.index >= window_start) & (project_frame.index < window_end)
@@ -283,9 +308,9 @@ def _spans(
             (
                 len(recent) * 3 + completions * 2 + open_tasks,
                 _Span(
-                    root_id,
-                    str(project.id),
-                    active_roots[root_id].project_entry.name,
+                    parent_id,
+                    project_id,
+                    parent_name,
                     project.project_entry.name,
                     max(created, window_start),
                     min(endpoint, window_end),
@@ -304,7 +329,7 @@ def _spans(
 
 def _activity_root_id(
     project_frame: pd.DataFrame,
-    active_roots: dict[str, Project],
+    projects_by_id: dict[str, Project],
 ) -> str | None:
     """Recover hierarchy flattened by Todoist's archived-project endpoint.
 
@@ -319,7 +344,7 @@ def _activity_root_id(
         root_ids = project_frame["root_project_id"].dropna().astype(str)
         if not root_ids.empty:
             for root_id in root_ids.value_counts().index:
-                if root_id in active_roots:
+                if root_id in projects_by_id:
                     return root_id
     if "root_project_name" not in project_frame:
         return None
@@ -327,13 +352,35 @@ def _activity_root_id(
     if root_names.empty:
         return None
     roots_by_name: defaultdict[str, list[str]] = defaultdict(list)
-    for root_id, root in active_roots.items():
+    for root_id, root in projects_by_id.items():
         roots_by_name[root.project_entry.name].append(root_id)
     for root_name in root_names.value_counts().index:
         matching = roots_by_name[root_name]
         if len(matching) == 1:
             return matching[0]
     return None
+
+
+def _history_payload(
+    activity: pd.DataFrame,
+    projects: list[Project],
+    spans: list[_Span],
+) -> ProjectLifecycleHistory:
+    timestamps = pd.to_datetime(activity.index, errors="coerce", utc=True)
+    timestamps = timestamps[~timestamps.isna()]
+    activity_start = timestamps.min() if len(timestamps) else None
+    activity_end = timestamps.max() if len(timestamps) else None
+    return {
+        "activityStart": activity_start.date().isoformat()
+        if activity_start is not None
+        else None,
+        "activityEnd": activity_end.date().isoformat()
+        if activity_end is not None
+        else None,
+        "activeProjects": sum(not project.is_archived for project in projects),
+        "archivedProjects": sum(project.is_archived for project in projects),
+        "archivedProjectsInView": sum(span.archived for span in spans),
+    }
 
 
 def _span_payload(span: _Span) -> ProjectLifecycleChild:

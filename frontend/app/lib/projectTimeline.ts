@@ -25,6 +25,13 @@ export type ProjectTimelineParent = {
 export type ProjectTimelineData = {
   range: { start: string; end: string } | null;
   parents: ProjectTimelineParent[];
+  history: {
+    activityStart: string | null;
+    activityEnd: string | null;
+    activeProjects: number;
+    archivedProjects: number;
+    archivedProjectsInView: number;
+  };
   refreshedAt?: string;
   error?: string;
 };

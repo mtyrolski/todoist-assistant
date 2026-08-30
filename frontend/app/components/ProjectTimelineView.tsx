@@ -236,10 +236,18 @@ export function ProjectTimelineView() {
             <span>Range</span>
             <div><input className="dateInput" type="date" value={beg} onChange={(event) => setBeg(event.target.value)} /><span>–</span><input className="dateInput" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /><button className="button buttonGhost" type="button" disabled={!beg || !end || beg > end} onClick={() => setCustomRange({ beg, end })}>Apply</button></div>
           </div>
-          <label className="timelineControl"><span>Period</span><select className="select" value={weeks} onChange={(event) => setRollingWeeks(Number(event.target.value))}><option value={4}>1 month</option><option value={12}>3 months</option><option value={26}>6 months</option><option value={52}>12 months</option><option value={260}>5 years</option></select></label>
+          <label className="timelineControl"><span>Period</span><select className="select" value={weeks} onChange={(event) => setRollingWeeks(Number(event.target.value))}><option value={0}>All fetched history</option><option value={4}>1 month</option><option value={12}>3 months</option><option value={26}>6 months</option><option value={52}>12 months</option></select></label>
           <label className="timelineControl"><span>Filter</span><select className="select" value={filter} onChange={(event) => setFilter(event.target.value as "all" | TimelineStatus)}><option value="all">All projects</option>{Object.entries(STATUS_META).map(([value, meta]) => <option value={value} key={value}>{meta.label}{value === "completed" ? ` (${archivedInPeriod})` : ""}</option>)}</select></label>
           <div className="timelineLegend" aria-label="Timeline legend"><span className="timelineLegendTitle">Legend</span>{Object.entries(STATUS_META).map(([status, meta]) => <span key={status}><i className={meta.className} />{meta.label}</span>)}</div>
         </div>
+
+        {data?.history ? (
+          <aside className="timelineHistoryPanel" aria-label="Fetched history coverage">
+            <div><span>History coverage</span><strong>{data.history.activityStart && data.history.activityEnd ? `${dateLabel(data.history.activityStart)} – ${dateLabel(data.history.activityEnd)}` : "No cached activity"}</strong></div>
+            <div><span>Projects fetched</span><strong>{data.history.activeProjects} active · {data.history.archivedProjects} archived</strong></div>
+            <div><span>Archived in view</span><strong>{data.history.archivedProjectsInView} of {data.history.archivedProjects}</strong></div>
+          </aside>
+        ) : null}
 
         {error ? <div className="timelineEmpty"><strong>Timeline unavailable</strong><span>{error}</span></div> : null}
         {!error && !loading && !parents.length ? <div className="timelineEmpty"><strong>No projects in this period</strong><span>Choose another range or status filter.</span></div> : null}

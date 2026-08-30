@@ -66,7 +66,7 @@ _EXECUTIVE_REVIEW_TASKS: set[asyncio.Task[None]] = set()
 
 @router.get("/api/dashboard/project-timeline", tags=["dashboard"])
 async def project_timeline(
-    weeks: int = 12,
+    weeks: int = 0,
     beg: str | None = None,
     end: str | None = None,
     refresh: bool = False,
@@ -80,9 +80,15 @@ async def project_timeline(
     if activity is None or active_projects is None:
         return {"error": "Dashboard data unavailable.", "range": None, "parents": []}
     activity = _normalize_activity_df(activity)
-    range_beg, range_end = _compute_plot_range(
-        activity, weeks=weeks, beg=beg, end=end
-    )
+    if weeks == 0 and beg is None and end is None:
+        range_end = _safe_activity_anchor(activity)
+        range_beg = (
+            activity.index.min().to_pydatetime() if not activity.empty else range_end
+        )
+    else:
+        range_beg, range_end = _compute_plot_range(
+            activity, weeks=weeks, beg=beg, end=end
+        )
     payload = build_project_lifecycle_data(
         activity,
         range_beg,

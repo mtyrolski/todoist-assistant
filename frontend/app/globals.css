@@ -1185,6 +1185,37 @@ textarea.textInput {
 .timelineLegend i.isInactive,
 .timelineBar.isInactive { background: linear-gradient(90deg, #6c7178, #858b92); }
 
+.timelineHistoryPanel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid var(--border);
+  background: var(--border);
+}
+
+.timelineHistoryPanel > div {
+  display: grid;
+  gap: 3px;
+  padding: 11px 18px;
+  background: rgba(10, 14, 20, 0.92);
+}
+
+.timelineHistoryPanel span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.timelineHistoryPanel strong {
+  overflow: hidden;
+  color: #dce3ed;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .projectTimelineMatrix {
   position: relative;
   display: grid;
@@ -1429,6 +1460,7 @@ textarea.textInput {
   .timelineRangeControl > div { flex-wrap: wrap; }
   .timelineRangeControl .dateInput { flex: 1; }
   .timelinePreview { align-items: flex-start; flex-direction: column; }
+  .timelineHistoryPanel { grid-template-columns: 1fr; }
 }
 
 .emptyState {

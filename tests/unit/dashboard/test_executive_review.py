@@ -157,6 +157,57 @@ def test_project_lifecycle_recovers_archived_child_parent_from_activity() -> Non
     assert payload["parents"][0]["children"][0]["status"] == "completed"
 
 
+def test_project_lifecycle_includes_archived_roots_and_archived_parent_groups() -> None:
+    archived_root = make_project(
+        project_id="archived-root",
+        project_entry=make_project_entry(
+            project_id="archived-root",
+            name="Old product",
+            created_at="2025-01-01T00:00:00Z",
+            updated_at="2026-08-20T00:00:00Z",
+        ),
+        is_archived=True,
+    )
+    archived_child = make_project(
+        project_id="archived-child",
+        project_entry=make_project_entry(
+            project_id="archived-child",
+            name="Old release",
+            parent_id=None,
+            created_at="2025-02-01T00:00:00Z",
+            updated_at="2026-08-19T00:00:00Z",
+        ),
+        is_archived=True,
+    )
+    activity = pd.DataFrame(
+        {
+            "event_type": ["completed", "completed"],
+            "parent_project_id": ["archived-root", "archived-child"],
+            "root_project_id": ["archived-root", "archived-root"],
+            "root_project_name": ["Old product", "Old product"],
+        },
+        index=pd.to_datetime(["2026-08-18T12:00:00", "2026-08-19T12:00:00"]),
+    )
+
+    payload = build_project_lifecycle_data(
+        activity,
+        datetime(2025, 1, 1),
+        datetime(2026, 9, 1),
+        [archived_root, archived_child],
+    )
+
+    groups = {parent["id"]: parent for parent in payload["parents"]}
+    assert groups["archived-root-projects"]["children"][0]["id"] == "archived-root"
+    assert groups["archived-root"]["children"][0]["id"] == "archived-child"
+    assert payload["history"] == {
+        "activityStart": "2026-08-18",
+        "activityEnd": "2026-08-19",
+        "activeProjects": 0,
+        "archivedProjects": 2,
+        "archivedProjectsInView": 2,
+    }
+
+
 def test_project_lifecycle_data_is_uncapped_and_groups_by_parent_id() -> None:
     roots = [
         make_project(
