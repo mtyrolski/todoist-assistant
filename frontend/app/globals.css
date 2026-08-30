@@ -1323,6 +1323,7 @@ textarea.textInput {
   background: #15191f;
   scrollbar-color: rgba(188, 196, 207, 0.42) transparent;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 
 .timelineLabels:not(.hasOverflow) { scrollbar-width: none; }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
 import { LoadingBar } from "./LoadingBar";
 import { useProjectTimeline } from "../lib/dashboardHooks";
 import type { ProjectTimelineChild, ProjectTimelineParent, TimelineStatus } from "../lib/projectTimeline";
@@ -27,8 +27,7 @@ const STATUS_META: Record<TimelineStatus, { label: string; className: string }> 
 };
 
 const sessionState = {
-  collapsed: new Set<string>(),
-  scrollTop: new Map<string, number>()
+  collapsed: new Set<string>()
 };
 
 function parseDay(value: string): number {
@@ -87,8 +86,6 @@ function ParentGroup({
   start,
   end,
   timelineWidth,
-  scrollTop,
-  onScrollTop,
   onHorizontalWheel
 }: {
   parent: ProjectTimelineParent;
@@ -97,17 +94,16 @@ function ParentGroup({
   start: number;
   end: number;
   timelineWidth: number;
-  scrollTop: number;
-  onScrollTop: (value: number) => void;
   onHorizontalWheel: (event: WheelEvent) => void;
 }) {
   const labelScrollRef = useRef<HTMLDivElement | null>(null);
+  const rowsRef = useRef<HTMLDivElement | null>(null);
   const viewportHeight = Math.min(parent.children.length, MAX_VISIBLE_CHILD_ROWS) * ROW_HEIGHT;
   const duration = Math.max(DAY_MS, end - start + DAY_MS);
 
-  useEffect(() => {
-    if (labelScrollRef.current && labelScrollRef.current.scrollTop !== scrollTop) labelScrollRef.current.scrollTop = scrollTop;
-  }, [scrollTop]);
+  const updateVerticalScroll = (value: number) => {
+    rowsRef.current?.style.setProperty("--group-scroll-top", `${value}px`);
+  };
 
   return (
     <section className="timelineGroup" data-parent-id={parent.id}>
@@ -123,7 +119,7 @@ function ParentGroup({
             ref={labelScrollRef}
             className={`timelineLabels${parent.children.length > MAX_VISIBLE_CHILD_ROWS ? " hasOverflow" : ""}`}
             style={{ height: viewportHeight }}
-            onScroll={(event) => onScrollTop(event.currentTarget.scrollTop)}
+            onScroll={(event) => updateVerticalScroll(event.currentTarget.scrollTop)}
           >
             {parent.children.map((child) => <div className="timelineLabel" key={child.id} title={child.name}>{child.name}</div>)}
           </div>
@@ -138,7 +134,7 @@ function ParentGroup({
               }
             }}
           >
-            <div className="timelineRows" style={{ width: timelineWidth, transform: `translate(calc(0px - var(--scroll-left)), ${-scrollTop}px)` }}>
+            <div ref={rowsRef} className="timelineRows" style={{ width: timelineWidth, transform: "translate(calc(0px - var(--scroll-left)), calc(0px - var(--group-scroll-top, 0px)))" }}>
               {parent.children.map((child) => {
                 const left = Math.max(0, (parseDay(child.visualStart) - start) / duration * timelineWidth);
                 const right = Math.min(timelineWidth, (parseDay(child.visualEnd) - start + DAY_MS) / duration * timelineWidth);
@@ -166,7 +162,6 @@ export function ProjectTimelineView() {
   const [filter, setFilter] = useState<"all" | TimelineStatus>("all");
   const [resolution, setResolution] = useState<TimelineResolution>("year");
   const [collapsed, setCollapsed] = useState(() => new Set(sessionState.collapsed));
-  const [parentScroll, setParentScroll] = useState(() => new Map(sessionState.scrollTop));
   const [viewportWidth, setViewportWidth] = useState(MIN_TIMELINE_WIDTH);
   const matrixRef = useRef<HTMLDivElement | null>(null);
   const axisViewportRef = useRef<HTMLDivElement | null>(null);
@@ -265,7 +260,7 @@ export function ProjectTimelineView() {
               </div>
             </div>
             <div className="timelineGroups">
-              {parents.map((parent) => <ParentGroup key={parent.id} parent={parent} collapsed={collapsed.has(parent.id)} toggle={() => { const next = new Set(collapsed); next.has(parent.id) ? next.delete(parent.id) : next.add(parent.id); sessionState.collapsed = next; setCollapsed(next); }} start={start} end={rangeEnd} timelineWidth={timelineWidth} scrollTop={parentScroll.get(parent.id) ?? 0} onScrollTop={(value) => { const next = new Map(parentScroll).set(parent.id, value); sessionState.scrollTop = next; setParentScroll(next); }} onHorizontalWheel={horizontalWheel} />)}
+              {parents.map((parent) => <ParentGroup key={parent.id} parent={parent} collapsed={collapsed.has(parent.id)} toggle={() => { const next = new Set(collapsed); next.has(parent.id) ? next.delete(parent.id) : next.add(parent.id); sessionState.collapsed = next; setCollapsed(next); }} start={start} end={rangeEnd} timelineWidth={timelineWidth} onHorizontalWheel={horizontalWheel} />)}
             </div>
             <div className="timelineScrollbarSpacer" aria-hidden />
             <div ref={scrollbarRef} className="timelineGlobalScrollbar" aria-label="Scroll the shared project timeline" onScroll={(event) => updateScrollLeft(event.currentTarget.scrollLeft)}><div style={{ width: timelineWidth }} /></div>
