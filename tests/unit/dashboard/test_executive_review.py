@@ -70,7 +70,10 @@ def test_project_lifecycle_timeline_uses_parent_and_subproject_names() -> None:
         [root, child],
     )
 
-    traces = figure.to_plotly_json()["data"]
-    labels = {label for trace in traces for label in trace["y"]}
-    assert "Product → Build" in labels
+    payload = figure.to_plotly_json()
+    traces = payload["data"]
+    assert "Product" in payload["layout"]["yaxis"]["ticktext"]
+    labels = {label for trace in traces for label in trace.get("text", [])}
+    assert "Build" in labels
+    assert "Ongoing" in {trace.get("name") for trace in traces}
     assert all(trace["type"] == "scatter" for trace in traces)

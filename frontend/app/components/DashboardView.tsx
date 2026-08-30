@@ -228,7 +228,7 @@ export function DashboardView({
     { id: "stats", label: "Focus" },
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
-    { id: "project-contribution", label: "Contribution" },
+    { id: "project-contribution", label: "Projects" },
     { id: "events", label: "Events" },
     { id: "projects", label: "Projects" },
     { id: "ops", label: "Activity & Ops" }
@@ -800,11 +800,11 @@ export function DashboardView({
       {!noData && figures.projectLifecycleTimeline ? (
         <section id="project-contribution" className="stack jumpTarget" aria-label="Project lifecycle timeline">
           <PlotCard
-            title="Project Lifecycles"
+            title="Subprojects by Parent Project"
             figure={figures.projectLifecycleTimeline}
             height={560}
             interactive
-            help="Lifecycle spans for relevant projects and subprojects. Diamonds mark creation, green points mark the latest completion, open circles show projects still open at the period end, and crosses show archived projects at their last known Todoist update."
+            help="Each active parent project is one lane. Green spans are archived, blue spans are active with completions in the selected period, and amber spans have no completion in that period."
           />
         </section>
       ) : null}
