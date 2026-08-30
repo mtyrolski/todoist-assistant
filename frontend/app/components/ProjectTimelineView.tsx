@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
 import { LoadingBar } from "./LoadingBar";
 import { useProjectTimeline } from "../lib/dashboardHooks";
 import type { ProjectTimelineChild, ProjectTimelineParent, TimelineStatus } from "../lib/projectTimeline";
@@ -8,11 +8,19 @@ import type { ProjectTimelineChild, ProjectTimelineParent, TimelineStatus } from
 const ROW_HEIGHT = 31;
 const MAX_VISIBLE_CHILD_ROWS = 6;
 const MIN_TIMELINE_WIDTH = 1060;
-const PIXELS_PER_DAY = 12;
 const DAY_MS = 86_400_000;
 
+type TimelineResolution = "quarter" | "half" | "year" | "twoYears";
+
+const RESOLUTION_META: Record<TimelineResolution, { label: string; visibleDays: number; tickDays: number }> = {
+  quarter: { label: "3 months", visibleDays: 92, tickDays: 7 },
+  half: { label: "6 months", visibleDays: 183, tickDays: 14 },
+  year: { label: "1 year", visibleDays: 365, tickDays: 28 },
+  twoYears: { label: "2 years", visibleDays: 730, tickDays: 56 }
+};
+
 const STATUS_META: Record<TimelineStatus, { label: string; className: string }> = {
-  completed: { label: "Archived in period", className: "isCompleted" },
+  completed: { label: "Archived", className: "isCompleted" },
   ongoing: { label: "Ongoing", className: "isOngoing" },
   unresolved: { label: "No completion in period", className: "isUnresolved" },
   inactive: { label: "No activity", className: "isInactive" }
@@ -20,7 +28,6 @@ const STATUS_META: Record<TimelineStatus, { label: string; className: string }> 
 
 const sessionState = {
   collapsed: new Set<string>(),
-  scrollLeft: 0,
   scrollTop: new Map<string, number>()
 };
 
@@ -32,13 +39,13 @@ function dateLabel(value: string): string {
   return new Intl.DateTimeFormat(undefined, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(parseDay(value));
 }
 
-function buildTicks(start: number, end: number) {
+function buildTicks(start: number, end: number, stepDays: number) {
   const ticks: { date: number; label: string }[] = [];
   const cursor = new Date(start);
   cursor.setUTCDate(cursor.getUTCDate() + ((8 - cursor.getUTCDay()) % 7));
   while (cursor.getTime() <= end) {
     ticks.push({ date: cursor.getTime(), label: String(cursor.getUTCDate()).padStart(2, "0") });
-    cursor.setUTCDate(cursor.getUTCDate() + 7);
+    cursor.setUTCDate(cursor.getUTCDate() + stepDays);
   }
   return ticks;
 }
@@ -80,7 +87,6 @@ function ParentGroup({
   start,
   end,
   timelineWidth,
-  scrollLeft,
   scrollTop,
   onScrollTop,
   onHorizontalWheel
@@ -91,7 +97,6 @@ function ParentGroup({
   start: number;
   end: number;
   timelineWidth: number;
-  scrollLeft: number;
   scrollTop: number;
   onScrollTop: (value: number) => void;
   onHorizontalWheel: (event: WheelEvent) => void;
@@ -133,7 +138,7 @@ function ParentGroup({
               }
             }}
           >
-            <div className="timelineRows" style={{ width: timelineWidth, transform: `translate(${-scrollLeft}px, ${-scrollTop}px)` }}>
+            <div className="timelineRows" style={{ width: timelineWidth, transform: `translate(calc(0px - var(--scroll-left)), ${-scrollTop}px)` }}>
               {parent.children.map((child) => {
                 const left = Math.max(0, (parseDay(child.visualStart) - start) / duration * timelineWidth);
                 const right = Math.min(timelineWidth, (parseDay(child.visualEnd) - start + DAY_MS) / duration * timelineWidth);
@@ -157,22 +162,25 @@ function ParentGroup({
 }
 
 export function ProjectTimelineView() {
-  const { data, loading, error, weeks, setRollingWeeks, setCustomRange, refresh } = useProjectTimeline();
+  const { data, loading, error, refresh } = useProjectTimeline();
   const [filter, setFilter] = useState<"all" | TimelineStatus>("all");
+  const [resolution, setResolution] = useState<TimelineResolution>("year");
   const [collapsed, setCollapsed] = useState(() => new Set(sessionState.collapsed));
-  const [scrollLeft, setScrollLeft] = useState(sessionState.scrollLeft);
   const [parentScroll, setParentScroll] = useState(() => new Map(sessionState.scrollTop));
-  const [beg, setBeg] = useState("");
-  const [end, setEnd] = useState("");
+  const [viewportWidth, setViewportWidth] = useState(MIN_TIMELINE_WIDTH);
+  const matrixRef = useRef<HTMLDivElement | null>(null);
+  const axisViewportRef = useRef<HTMLDivElement | null>(null);
   const scrollbarRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (data?.range) { setBeg(data.range.start); setEnd(data.range.end); }
+  useLayoutEffect(() => {
+    const viewport = axisViewportRef.current;
+    if (!viewport) return;
+    const updateWidth = () => setViewportWidth(Math.max(1, Math.round(viewport.clientWidth)));
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(viewport);
+    return () => observer.disconnect();
   }, [data?.range]);
-
-  useEffect(() => {
-    if (scrollbarRef.current && scrollbarRef.current.scrollLeft !== scrollLeft) scrollbarRef.current.scrollLeft = scrollLeft;
-  }, [scrollLeft]);
 
   const parents = useMemo(() => (data?.parents ?? []).map((parent) => ({
     ...parent,
@@ -189,8 +197,9 @@ export function ProjectTimelineView() {
   const start = data?.range ? parseDay(data.range.start) : 0;
   const rangeEnd = data?.range ? parseDay(data.range.end) : start;
   const rangeDays = Math.max(1, Math.round((rangeEnd - start) / DAY_MS) + 1);
-  const timelineWidth = Math.max(MIN_TIMELINE_WIDTH, rangeDays * PIXELS_PER_DAY);
-  const ticks = useMemo(() => buildTicks(start, rangeEnd), [start, rangeEnd]);
+  const resolutionMeta = RESOLUTION_META[resolution];
+  const timelineWidth = Math.max(viewportWidth, Math.ceil(viewportWidth * rangeDays / resolutionMeta.visibleDays));
+  const ticks = useMemo(() => buildTicks(start, rangeEnd, resolutionMeta.tickDays), [start, rangeEnd, resolutionMeta.tickDays]);
   const months = useMemo(() => buildMonths(start, rangeEnd), [start, rangeEnd]);
   const xFor = (date: number) => (date - start) / Math.max(DAY_MS, rangeEnd - start + DAY_MS) * timelineWidth;
   const today = new Date();
@@ -198,15 +207,23 @@ export function ProjectTimelineView() {
   const showToday = Boolean(data?.range && todayUtc >= start && todayUtc <= rangeEnd);
   const matrixStyle = {
     "--timeline-width": `${timelineWidth}px`,
-    "--scroll-left": `${scrollLeft}px`,
+    "--scroll-left": "0px",
     "--today-x": `${xFor(todayUtc)}px`,
-    "--grid-step": `${timelineWidth * 7 / rangeDays}px`
+    "--grid-step": `${timelineWidth * resolutionMeta.tickDays / rangeDays}px`
   } as CSSProperties;
 
   const updateScrollLeft = (value: number) => {
-    sessionState.scrollLeft = value;
-    setScrollLeft(value);
+    matrixRef.current?.style.setProperty("--scroll-left", `${value}px`);
   };
+
+  useLayoutEffect(() => {
+    const scrollbar = scrollbarRef.current;
+    if (!scrollbar) return;
+    const latest = Math.max(0, scrollbar.scrollWidth - scrollbar.clientWidth);
+    scrollbar.scrollLeft = latest;
+    updateScrollLeft(latest);
+  }, [data?.range?.start, data?.range?.end, resolution, timelineWidth]);
+
   const horizontalWheel = (event: WheelEvent) => {
     if (!scrollbarRef.current) return;
     scrollbarRef.current.scrollLeft += event.shiftKey ? event.deltaY : event.deltaX;
@@ -222,11 +239,7 @@ export function ProjectTimelineView() {
 
       <section className="timelineCard">
         <div className="timelineToolbar">
-          <div className="timelineControl timelineRangeControl">
-            <span>Range</span>
-            <div><input className="dateInput" type="date" value={beg} onChange={(event) => setBeg(event.target.value)} /><span>–</span><input className="dateInput" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /><button className="button buttonGhost" type="button" disabled={!beg || !end || beg > end} onClick={() => setCustomRange({ beg, end })}>Apply</button></div>
-          </div>
-          <label className="timelineControl"><span>Period</span><select className="select" value={weeks} onChange={(event) => setRollingWeeks(Number(event.target.value))}><option value={0}>All fetched history</option><option value={4}>1 month</option><option value={12}>3 months</option><option value={26}>6 months</option><option value={52}>12 months</option></select></label>
+          <label className="timelineControl"><span>Resolution</span><select className="select" value={resolution} onChange={(event) => setResolution(event.target.value as TimelineResolution)}>{Object.entries(RESOLUTION_META).map(([value, meta]) => <option value={value} key={value}>{meta.label} per window</option>)}</select></label>
           <label className="timelineControl"><span>Filter</span><select className="select" value={filter} onChange={(event) => setFilter(event.target.value as "all" | TimelineStatus)}><option value="all">All projects</option>{Object.entries(STATUS_META).map(([value, meta]) => <option value={value} key={value}>{meta.label}{value === "completed" ? ` (${archivedInPeriod})` : ""}</option>)}</select></label>
           <div className="timelineLegend" aria-label="Timeline legend"><span className="timelineLegendTitle">Legend</span>{Object.entries(STATUS_META).map(([status, meta]) => <span key={status}><i className={meta.className} />{meta.label}</span>)}</div>
         </div>
@@ -235,24 +248,24 @@ export function ProjectTimelineView() {
           <aside className="timelineHistoryPanel" aria-label="Fetched history coverage">
             <div><span>History coverage</span><strong>{data.history.activityStart && data.history.activityEnd ? `${dateLabel(data.history.activityStart)} – ${dateLabel(data.history.activityEnd)}` : "No cached activity"}</strong></div>
             <div><span>Projects fetched</span><strong>{data.history.activeProjects} active · {data.history.archivedProjects} archived</strong></div>
-            <div><span>Archived in view</span><strong>{data.history.archivedProjectsInView} of {data.history.archivedProjects}</strong></div>
+            <div><span>Archived loaded</span><strong>{data.history.archivedProjectsInView} of {data.history.archivedProjects}</strong></div>
           </aside>
         ) : null}
 
         {error ? <div className="timelineEmpty"><strong>Timeline unavailable</strong><span>{error}</span></div> : null}
-        {!error && !loading && !parents.length ? <div className="timelineEmpty"><strong>No projects in this period</strong><span>Choose another range or status filter.</span></div> : null}
+        {!error && !loading && !parents.length ? <div className="timelineEmpty"><strong>No matching projects</strong><span>Choose another status filter.</span></div> : null}
         {!error && parents.length && data?.range ? (
-          <div className="projectTimelineMatrix" style={matrixStyle}>
+          <div ref={matrixRef} className="projectTimelineMatrix" style={matrixStyle}>
             {showToday ? <div className="projectTimelineToday"><span>Today</span></div> : null}
             <div className="timelineAxisLabel">Parent project / subprojects</div>
-            <div className="timelineAxisViewport">
-              <div className="timelineAxis" style={{ width: timelineWidth, transform: `translateX(${-scrollLeft}px)` }}>
+            <div ref={axisViewportRef} className="timelineAxisViewport">
+              <div className="timelineAxis" style={{ width: timelineWidth, transform: "translateX(calc(0px - var(--scroll-left)))" }}>
                 {months.map((month) => <span className="timelineMonth" key={month.key} style={{ left: xFor(month.middle) }}>{month.label}</span>)}
                 {ticks.map((tick) => <span className="timelineTick" key={tick.date} style={{ left: xFor(tick.date) }}>{tick.label}</span>)}
               </div>
             </div>
             <div className="timelineGroups">
-              {parents.map((parent) => <ParentGroup key={parent.id} parent={parent} collapsed={collapsed.has(parent.id)} toggle={() => { const next = new Set(collapsed); next.has(parent.id) ? next.delete(parent.id) : next.add(parent.id); sessionState.collapsed = next; setCollapsed(next); }} start={start} end={rangeEnd} timelineWidth={timelineWidth} scrollLeft={scrollLeft} scrollTop={parentScroll.get(parent.id) ?? 0} onScrollTop={(value) => { const next = new Map(parentScroll).set(parent.id, value); sessionState.scrollTop = next; setParentScroll(next); }} onHorizontalWheel={horizontalWheel} />)}
+              {parents.map((parent) => <ParentGroup key={parent.id} parent={parent} collapsed={collapsed.has(parent.id)} toggle={() => { const next = new Set(collapsed); next.has(parent.id) ? next.delete(parent.id) : next.add(parent.id); sessionState.collapsed = next; setCollapsed(next); }} start={start} end={rangeEnd} timelineWidth={timelineWidth} scrollTop={parentScroll.get(parent.id) ?? 0} onScrollTop={(value) => { const next = new Map(parentScroll).set(parent.id, value); sessionState.scrollTop = next; setParentScroll(next); }} onHorizontalWheel={horizontalWheel} />)}
             </div>
             <div className="timelineScrollbarSpacer" aria-hidden />
             <div ref={scrollbarRef} className="timelineGlobalScrollbar" aria-label="Scroll the shared project timeline" onScroll={(event) => updateScrollLeft(event.currentTarget.scrollLeft)}><div style={{ width: timelineWidth }} /></div>

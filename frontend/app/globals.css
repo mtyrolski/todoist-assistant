@@ -1092,7 +1092,7 @@ textarea.textInput {
 .timelineCard {
   --hierarchy-width: 310px;
   min-width: 0;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
@@ -1117,31 +1117,11 @@ textarea.textInput {
   font-weight: 600;
 }
 
-.timelineControl .select,
-.timelineControl .dateInput {
+.timelineControl .select {
   height: 38px;
   border-radius: 8px;
   padding: 7px 10px;
   font-size: 12px;
-}
-
-.timelineRangeControl {
-  min-width: 365px;
-}
-
-.timelineRangeControl > div {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.timelineRangeControl .dateInput {
-  min-width: 128px;
-}
-
-.timelineRangeControl .button {
-  height: 38px;
-  padding: 7px 11px;
 }
 
 .timelineLegend {
@@ -1414,20 +1394,26 @@ textarea.textInput {
 }
 
 .timelineScrollbarSpacer {
-  position: relative;
-  z-index: 5;
+  position: sticky;
+  z-index: 7;
+  bottom: 0;
   height: 19px;
   border-right: 1px solid var(--border);
   background: rgba(5, 8, 12, 0.25);
 }
 
 .timelineGlobalScrollbar {
+  position: sticky;
+  z-index: 7;
+  bottom: 0;
   height: 19px;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-inline: contain;
   background: rgba(5, 8, 12, 0.25);
   scrollbar-color: rgba(188, 196, 207, 0.48) rgba(255, 255, 255, 0.035);
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 
 .timelineGlobalScrollbar > div { height: 1px; }
@@ -1456,9 +1442,6 @@ textarea.textInput {
 @media (max-width: 720px) {
   .timelineCard { --hierarchy-width: 230px; }
   .timelineTitleRow { flex-direction: column; }
-  .timelineRangeControl { min-width: 100%; }
-  .timelineRangeControl > div { flex-wrap: wrap; }
-  .timelineRangeControl .dateInput { flex: 1; }
   .timelinePreview { align-items: flex-start; flex-direction: column; }
   .timelineHistoryPanel { grid-template-columns: 1fr; }
 }

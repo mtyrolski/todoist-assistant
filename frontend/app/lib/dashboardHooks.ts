@@ -301,8 +301,6 @@ export function useSyncLabel(status: DashboardStatus | null) {
 }
 
 export function useProjectTimeline() {
-  const [weeks, setWeeks] = useState(0);
-  const [customRange, setCustomRange] = useState<{ beg: string; end: string } | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [data, setData] = useState<ProjectTimelineData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -314,11 +312,7 @@ export function useProjectTimeline() {
       setLoading(true);
       setError(null);
       try {
-        const query = new URLSearchParams({ weeks: String(weeks) });
-        if (customRange) {
-          query.set("beg", customRange.beg);
-          query.set("end", customRange.end);
-        }
+        const query = new URLSearchParams();
         if (refreshNonce) query.set("refresh", "true");
         const response = await fetch(`/api/dashboard/project-timeline?${query}`, { signal: controller.signal });
         const payload = await readJson<ProjectTimelineData>(response);
@@ -333,15 +327,12 @@ export function useProjectTimeline() {
     };
     load();
     return () => controller.abort();
-  }, [weeks, customRange, refreshNonce]);
+  }, [refreshNonce]);
 
   return {
     data,
     loading,
     error,
-    weeks,
-    setRollingWeeks: (value: number) => { setCustomRange(null); setWeeks(value); },
-    setCustomRange,
     refresh: () => setRefreshNonce((value) => value + 1)
   };
 }
