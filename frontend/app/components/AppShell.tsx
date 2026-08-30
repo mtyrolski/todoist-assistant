@@ -9,7 +9,8 @@ const NAV_GROUPS = [
   {
     title: "Stable",
     items: [
-      { href: "/", label: "Overview", hint: "Summary and highlights" }
+      { href: "/", label: "Overview", hint: "Summary and highlights" },
+      { href: "/project-timeline", label: "Project Timeline", hint: "Subprojects across time" }
     ]
   },
   {

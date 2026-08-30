@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlotParams } from "react-plotly.js";
@@ -797,15 +798,17 @@ export function DashboardView({
         </section>
       ) : null}
 
-      {!noData && figures.projectLifecycleTimeline ? (
-        <section id="project-contribution" className="stack jumpTarget" aria-label="Project lifecycle timeline">
-          <PlotCard
-            title="Subprojects by Parent Project"
-            figure={figures.projectLifecycleTimeline}
-            height={Math.max(360, Number(figures.projectLifecycleTimeline.layout?.height) || 560)}
-            interactive
-            help="Subprojects are grouped beneath their active parent. Green spans are completed or archived, blue spans are ongoing, and amber spans have no completion in the period."
-          />
+      {!noData ? (
+        <section id="project-contribution" className="card timelinePreview jumpTarget" aria-label="Project Timeline">
+          <div>
+            <p className="eyebrow">Projects</p>
+            <h2>Project Timeline</h2>
+            <p className="muted">
+              {dashboard?.projectTimelineSummary?.parentCount ?? 0} parent projects ·{" "}
+              {dashboard?.projectTimelineSummary?.subprojectCount ?? 0} active or historical subprojects
+            </p>
+          </div>
+          <Link className="button buttonGhost" href="/project-timeline">Open timeline →</Link>
         </section>
       ) : null}
 

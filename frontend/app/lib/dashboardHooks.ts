@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardHome, DashboardStatus, Granularity, Health } from "./dashboardData";
 import type { DashboardProgress } from "../components/ProgressSteps";
+import type { ProjectTimelineData } from "./projectTimeline";
 
 const DASHBOARD_RETRY_LIMIT = 300;
 const DASHBOARD_RETRY_DELAY_MS = 2500;
@@ -297,4 +298,50 @@ export function useSyncLabel(status: DashboardStatus | null) {
   }, [status]);
 
   return { label, title };
+}
+
+export function useProjectTimeline() {
+  const [weeks, setWeeks] = useState(12);
+  const [customRange, setCustomRange] = useState<{ beg: string; end: string } | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [data, setData] = useState<ProjectTimelineData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const query = new URLSearchParams({ weeks: String(weeks) });
+        if (customRange) {
+          query.set("beg", customRange.beg);
+          query.set("end", customRange.end);
+        }
+        if (refreshNonce) query.set("refresh", "true");
+        const response = await fetch(`/api/dashboard/project-timeline?${query}`, { signal: controller.signal });
+        const payload = await readJson<ProjectTimelineData>(response);
+        if (!response.ok || payload.error) throw new Error(payload.error ?? `Failed to load timeline (${response.status})`);
+        setData(payload);
+      } catch (reason) {
+        if (reason && typeof reason === "object" && "name" in reason && (reason as { name?: string }).name === "AbortError") return;
+        setError(reason instanceof Error ? reason.message : "Failed to load project timeline");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    load();
+    return () => controller.abort();
+  }, [weeks, customRange, refreshNonce]);
+
+  return {
+    data,
+    loading,
+    error,
+    weeks,
+    setRollingWeeks: (value: number) => { setCustomRange(null); setWeeks(value); },
+    setCustomRange,
+    refresh: () => setRefreshNonce((value) => value + 1)
+  };
 }
