@@ -301,7 +301,7 @@ export function useSyncLabel(status: DashboardStatus | null) {
 }
 
 export function useProjectTimeline() {
-  const [weeks, setWeeks] = useState(12);
+  const [weeks, setWeeks] = useState(52);
   const [customRange, setCustomRange] = useState<{ beg: string; end: string } | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [data, setData] = useState<ProjectTimelineData | null>(null);

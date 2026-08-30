@@ -12,7 +12,7 @@ const PIXELS_PER_DAY = 12;
 const DAY_MS = 86_400_000;
 
 const STATUS_META: Record<TimelineStatus, { label: string; className: string }> = {
-  completed: { label: "Completed", className: "isCompleted" },
+  completed: { label: "Archived in period", className: "isCompleted" },
   ongoing: { label: "Ongoing", className: "isOngoing" },
   unresolved: { label: "No completion in period", className: "isUnresolved" },
   inactive: { label: "No activity", className: "isInactive" }
@@ -193,6 +193,13 @@ export function ProjectTimelineView() {
     ...parent,
     children: filter === "all" ? parent.children : parent.children.filter((child) => child.status === filter)
   })).filter((parent) => parent.children.length), [data?.parents, filter]);
+  const archivedInPeriod = useMemo(
+    () => (data?.parents ?? []).reduce(
+      (total, parent) => total + parent.children.filter((child) => child.status === "completed").length,
+      0
+    ),
+    [data?.parents]
+  );
 
   const start = data?.range ? parseDay(data.range.start) : 0;
   const rangeEnd = data?.range ? parseDay(data.range.end) : start;
@@ -229,8 +236,8 @@ export function ProjectTimelineView() {
             <span>Range</span>
             <div><input className="dateInput" type="date" value={beg} onChange={(event) => setBeg(event.target.value)} /><span>–</span><input className="dateInput" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /><button className="button buttonGhost" type="button" disabled={!beg || !end || beg > end} onClick={() => setCustomRange({ beg, end })}>Apply</button></div>
           </div>
-          <label className="timelineControl"><span>Period</span><select className="select" value={weeks} onChange={(event) => setRollingWeeks(Number(event.target.value))}><option value={4}>1 month</option><option value={12}>3 months</option><option value={26}>6 months</option><option value={52}>12 months</option></select></label>
-          <label className="timelineControl"><span>Filter</span><select className="select" value={filter} onChange={(event) => setFilter(event.target.value as "all" | TimelineStatus)}><option value="all">All projects</option>{Object.entries(STATUS_META).map(([value, meta]) => <option value={value} key={value}>{meta.label}</option>)}</select></label>
+          <label className="timelineControl"><span>Period</span><select className="select" value={weeks} onChange={(event) => setRollingWeeks(Number(event.target.value))}><option value={4}>1 month</option><option value={12}>3 months</option><option value={26}>6 months</option><option value={52}>12 months</option><option value={260}>5 years</option></select></label>
+          <label className="timelineControl"><span>Filter</span><select className="select" value={filter} onChange={(event) => setFilter(event.target.value as "all" | TimelineStatus)}><option value="all">All projects</option>{Object.entries(STATUS_META).map(([value, meta]) => <option value={value} key={value}>{meta.label}{value === "completed" ? ` (${archivedInPeriod})` : ""}</option>)}</select></label>
           <div className="timelineLegend" aria-label="Timeline legend"><span className="timelineLegendTitle">Legend</span>{Object.entries(STATUS_META).map(([status, meta]) => <span key={status}><i className={meta.className} />{meta.label}</span>)}</div>
         </div>
 
