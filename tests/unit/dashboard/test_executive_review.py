@@ -72,8 +72,46 @@ def test_project_lifecycle_timeline_uses_parent_and_subproject_names() -> None:
 
     payload = figure.to_plotly_json()
     traces = payload["data"]
-    assert "Product" in payload["layout"]["yaxis"]["ticktext"]
-    labels = {label for trace in traces for label in trace.get("text", [])}
-    assert "Build" in labels
+    assert any("Product" in label for label in payload["layout"]["yaxis"]["ticktext"])
+    assert any("Build" in label for label in payload["layout"]["yaxis"]["ticktext"])
     assert "Ongoing" in {trace.get("name") for trace in traces}
-    assert all(trace["type"] == "scatter" for trace in traces)
+    assert all(trace["type"] == "bar" for trace in traces)
+
+
+def test_project_lifecycle_keeps_archived_child_in_active_parent_group() -> None:
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(
+            project_id="root", name="Product", created_at="2026-01-01T00:00:00Z"
+        ),
+    )
+    child = make_project(
+        project_id="archived-child",
+        project_entry=make_project_entry(
+            project_id="archived-child",
+            name="Shipped work",
+            parent_id="root",
+            created_at="2026-08-02T00:00:00Z",
+            updated_at="2026-08-20T00:00:00Z",
+        ),
+        is_archived=True,
+    )
+    activity = pd.DataFrame(
+        {"event_type": ["completed"], "parent_project_id": ["archived-child"]},
+        index=pd.to_datetime(["2026-08-18T12:00:00"]),
+    )
+
+    payload = plot_project_lifecycle_timeline(
+        activity, datetime(2026, 8, 1), datetime(2026, 9, 1), [root, child]
+    ).to_plotly_json()
+
+    assert "Completed / archived" in {trace.get("name") for trace in payload["data"]}
+    assert any(
+        "Shipped work" in label for label in payload["layout"]["yaxis"]["ticktext"]
+    )
+    completed = next(
+        trace
+        for trace in payload["data"]
+        if trace.get("name") == "Completed / archived"
+    )
+    assert completed["customdata"][0][8] == "Yes"

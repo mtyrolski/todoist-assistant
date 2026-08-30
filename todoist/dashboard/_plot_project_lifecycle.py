@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -16,16 +15,25 @@ class _Span:
     start: pd.Timestamp
     end: pd.Timestamp
     actual_start: pd.Timestamp
+    actual_end: pd.Timestamp
     status: str
     completions: int
     open_tasks: int
+    archived: bool
 
 
 _STATUS = {
-    "completed": ("Completed / archived", "#6fe3a1"),
-    "ongoing": ("Ongoing", "#63b8ea"),
-    "stalled": ("No completion in period", "#e7ad58"),
+    "completed": ("Completed / archived", "#61f4b3"),
+    "ongoing": ("Ongoing", "#6ae3ff"),
+    "stalled": ("No completion in period", "#ffb86c"),
 }
+_HOVER = (
+    "<b>%{customdata[1]}</b><br>Parent: %{customdata[0]}<br>"
+    "Status: %{customdata[2]}<br>Start: %{customdata[3]}<br>"
+    "End: %{customdata[4]}<br>Duration: %{customdata[5]}<br>"
+    "Completions: %{customdata[6]}<br>Open tasks: %{customdata[7]}<br>"
+    "Archived: %{customdata[8]}<extra></extra>"
+)
 
 
 def plot_project_lifecycle_timeline(
@@ -48,86 +56,64 @@ def plot_project_lifecycle_timeline(
     if not spans:
         return _empty("No subproject spans overlap this period.")
 
-    parents = sorted(
-        {span.parent for span in spans},
-        key=lambda parent: sum(
-            span.completions for span in spans if span.parent == parent
-        ),
-        reverse=True,
+    grouped: defaultdict[str, list[_Span]] = defaultdict(list)
+    for span in spans:
+        grouped[span.parent].append(span)
+    groups = sorted(
+        grouped.items(),
+        key=lambda item: (-sum(s.completions for s in item[1]), item[0].casefold()),
     )
-    positioned = _positions(spans, parents)
+    positioned, ticks, tick_labels = _positions(groups)
     figure = go.Figure()
     for status, (label, color) in _STATUS.items():
         matching = [(span, y) for span, y in positioned if span.status == status]
-        if not matching:
-            continue
-        figure.add_trace(
-            go.Scatter(
-                x=[
-                    value
-                    for span, _ in matching
-                    for value in (span.start, span.end, None)
-                ],
-                y=[value for _, y in matching for value in (y, y, None)],
-                mode="lines+markers",
-                name=label,
-                line={"color": color, "width": 11},
-                marker={"color": color, "size": 8},
-                customdata=[
-                    value
-                    for span, _ in matching
-                    for value in (
-                        _details(span),
-                        _details(span),
-                        [None, None, None, None, None],
-                    )
-                ],
-                hovertemplate=(
-                    "<b>%{customdata[1]}</b><br>Parent: %{customdata[0]}<br>"
-                    "Started: %{customdata[2]}<br>Completed in period: %{customdata[3]}<br>"
-                    "Open tasks: %{customdata[4]}<extra></extra>"
-                ),
-            )
-        )
-        figure.add_trace(
-            go.Scatter(
-                x=[span.start + (span.end - span.start) / 2 for span, _ in matching],
-                y=[y for _, y in matching],
-                mode="text",
-                text=[_short(span.project) for span, _ in matching],
-                textfont={"color": "#091018", "size": 10},
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
+        if matching:
+            figure.add_trace(_trace(matching, label, color))
 
     figure.update_layout(
         template="plotly_dark",
-        height=max(430, 100 * len(parents) + 150),
-        margin={"l": 26, "r": 26, "t": 28, "b": 54},
-        paper_bgcolor="#111318",
-        plot_bgcolor="#111318",
-        hovermode="closest",
-        legend={"orientation": "h", "x": 0, "y": 1.03, "yanchor": "bottom"},
+        height=max(340, 86 * len(groups) + 32 * len(spans) + 105),
+        margin={"l": 210, "r": 28, "t": 62, "b": 48},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        hoverlabel={"bgcolor": "#151922", "bordercolor": "rgba(255,255,255,.16)"},
+        legend={"orientation": "h", "x": 0, "y": 1.02, "yanchor": "bottom"},
         xaxis={
-            "title": "Subproject spans within the selected period",
             "type": "date",
             "range": [window_start.isoformat(), window_end.isoformat()],
             "gridcolor": "rgba(255,255,255,0.08)",
+            "tickformat": "%b %-d",
+            "nticks": 9,
             "zeroline": False,
         },
         yaxis={
-            "title": "Active parent project",
             "tickmode": "array",
-            "tickvals": list(range(len(parents))),
-            "ticktext": parents,
-            "range": [len(parents) - 0.4, -0.6],
+            "tickvals": ticks,
+            "ticktext": tick_labels,
+            "range": [max(ticks) + 0.7, min(ticks) - 0.7],
             "automargin": True,
-            "showgrid": True,
-            "gridcolor": "rgba(255,255,255,0.06)",
+            "showgrid": False,
+            "zeroline": False,
         },
     )
     return figure
+
+
+def _trace(matching: list[tuple[_Span, float]], label: str, color: str) -> go.Bar:
+    return go.Bar(
+        x=[
+            max((span.end - span.start).total_seconds(), 21_600) * 1000
+            for span, _ in matching
+        ],
+        base=[span.start for span, _ in matching],
+        y=[y for _, y in matching],
+        customdata=[_details(span) for span, _ in matching],
+        name=label,
+        orientation="h",
+        width=0.42,
+        marker={"color": color},
+        hovertemplate=_HOVER,
+    )
 
 
 def _spans(
@@ -143,74 +129,97 @@ def _spans(
         for project in projects
         if not project.is_archived and not _parent_id(project)
     }
+    activity_by_project: dict[str, pd.DataFrame] = {}
+    if "parent_project_id" in frame:
+        for project_id, group in frame.groupby(
+            frame["parent_project_id"].fillna("").astype(str), sort=False
+        ):
+            activity_by_project[str(project_id)] = group
     candidates: list[tuple[int, _Span]] = []
     for project in projects:
         root_id = _root_id(project, by_id)
         if root_id not in active_roots or str(project.id) == root_id:
             continue
-        project_frame = _project_activity(frame, str(project.id))
+        project_frame = activity_by_project.get(str(project.id))
+        if project_frame is None:
+            project_frame = frame.head(0)
         recent = project_frame.loc[
             (project_frame.index >= window_start) & (project_frame.index < window_end)
         ]
-        created = _timestamp(project.project_entry.created_at) or _edge(
-            project_frame, False
-        )
+        created = _timestamp(project.project_entry.created_at)
+        if created is None and not project_frame.empty:
+            created = _timestamp(str(project_frame.index.min()))
         if created is None:
             continue
         updated = _timestamp(project.project_entry.updated_at)
-        last_event = _edge(project_frame, True)
-        completed = (
-            recent.loc[recent[event_column] == "completed"]
+        last_event = (
+            None if project_frame.empty else _timestamp(str(project_frame.index.max()))
+        )
+        completions = (
+            int(recent[event_column].eq("completed").sum())
             if event_column in recent
-            else recent.iloc[0:0]
+            else 0
         )
         open_tasks = sum(
             not task.task_entry.checked and not task.task_entry.is_deleted
             for task in project.tasks
         )
-        relevant = (
-            not recent.empty
-            or open_tasks > 0
-            or (updated is not None and window_start <= updated < window_end)
-        )
-        if not relevant:
+        if (
+            recent.empty
+            and not open_tasks
+            and not (updated is not None and window_start <= updated < window_end)
+        ):
             continue
         if project.is_archived:
-            known_edges = [
-                value for value in (created, updated, last_event) if value is not None
-            ]
-            endpoint = max(known_edges)
+            endpoint = max(
+                created,
+                updated if updated is not None else created,
+                last_event if last_event is not None else created,
+            )
             status = "completed"
         else:
             endpoint = window_end - timedelta(microseconds=1)
-            status = "ongoing" if not completed.empty else "stalled"
+            status = "ongoing" if completions else "stalled"
         if endpoint < window_start or created >= window_end:
             continue
-        span = _Span(
-            parent=active_roots[root_id],
-            project=project.project_entry.name,
-            start=max(created, window_start),
-            end=min(endpoint, window_end),
-            actual_start=created,
-            status=status,
-            completions=len(completed),
-            open_tasks=open_tasks,
+        candidates.append(
+            (
+                len(recent) * 3 + completions * 2 + open_tasks,
+                _Span(
+                    active_roots[root_id],
+                    project.project_entry.name,
+                    max(created, window_start),
+                    min(endpoint, window_end),
+                    created,
+                    endpoint,
+                    status,
+                    completions,
+                    open_tasks,
+                    project.is_archived,
+                ),
+            )
         )
-        candidates.append((len(recent) * 3 + len(completed) * 2 + open_tasks, span))
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return [span for _, span in candidates[:28]]
+    candidates.sort(key=lambda item: (-item[0], item[1].project.casefold()))
+    return [span for _, span in candidates]
 
 
-def _positions(spans: list[_Span], parents: list[str]) -> list[tuple[_Span, float]]:
-    result: list[tuple[_Span, float]] = []
-    for parent_index, parent in enumerate(parents):
-        group = [span for span in spans if span.parent == parent][:7]
-        middle = (len(group) - 1) / 2
-        result.extend(
-            (span, parent_index + (index - middle) * 0.1)
-            for index, span in enumerate(group)
-        )
-    return result
+def _positions(
+    groups: list[tuple[str, list[_Span]]],
+) -> tuple[list[tuple[_Span, float]], list[float], list[str]]:
+    positioned: list[tuple[_Span, float]] = []
+    ticks: list[float] = []
+    labels: list[str] = []
+    cursor = 0.0
+    for parent, children in groups:
+        ticks.append(cursor)
+        labels.append(f"<b>{_short(parent, 32)}</b>")
+        for span in children:
+            cursor += 1.0
+            positioned.append((span, cursor))
+            ticks.append(cursor)
+            labels.append(f"  {_short(span.project, 34)}")
+        cursor += 0.9
+    return positioned, ticks, labels
 
 
 def _parent_id(project: Project) -> str | None:
@@ -230,12 +239,6 @@ def _root_id(project: Project, by_id: dict[str, Project]) -> str:
     return current
 
 
-def _project_activity(frame: pd.DataFrame, project_id: str) -> pd.DataFrame:
-    if "parent_project_id" not in frame:
-        return frame.iloc[0:0]
-    return frame.loc[frame["parent_project_id"].fillna("").astype(str) == project_id]
-
-
 def _timestamp(value: str | datetime | pd.Timestamp | None) -> pd.Timestamp | None:
     if value is None:
         return None
@@ -248,15 +251,6 @@ def _timestamp(value: str | datetime | pd.Timestamp | None) -> pd.Timestamp | No
     return parsed.tz_convert(None) if parsed.tzinfo else parsed
 
 
-def _edge(frame: pd.DataFrame, last: bool) -> pd.Timestamp | None:
-    values = [
-        parsed
-        for value in frame.index
-        if (parsed := _timestamp(str(value))) is not None
-    ]
-    return (max(values) if last else min(values)) if values else None
-
-
 def _short(value: str, limit: int = 24) -> str:
     return value if len(value) <= limit else f"{value[: limit - 1]}…"
 
@@ -265,9 +259,13 @@ def _details(span: _Span) -> list[str | int]:
     return [
         span.parent,
         span.project,
+        _STATUS[span.status][0],
         span.actual_start.strftime("%d %b %Y"),
+        span.actual_end.strftime("%d %b %Y"),
+        f"{max(1, (span.actual_end - span.actual_start).days)} days",
         span.completions,
         span.open_tasks,
+        "Yes" if span.archived else "No",
     ]
 
 

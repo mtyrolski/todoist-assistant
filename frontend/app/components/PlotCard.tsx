@@ -101,7 +101,8 @@ export function PlotCard({
               };
             })()}
             config={{
-              displayModeBar: interactive,
+              displayModeBar: interactive ? "hover" : false,
+              displaylogo: false,
               responsive: true,
               scrollZoom: interactive,
               doubleClick: interactive ? "reset+autosize" : false

@@ -802,9 +802,9 @@ export function DashboardView({
           <PlotCard
             title="Subprojects by Parent Project"
             figure={figures.projectLifecycleTimeline}
-            height={560}
+            height={Math.max(360, Number(figures.projectLifecycleTimeline.layout?.height) || 560)}
             interactive
-            help="Each active parent project is one lane. Green spans are archived, blue spans are active with completions in the selected period, and amber spans have no completion in that period."
+            help="Subprojects are grouped beneath their active parent. Green spans are completed or archived, blue spans are ongoing, and amber spans have no completion in the period."
           />
         </section>
       ) : null}
