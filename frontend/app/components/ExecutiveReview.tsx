@@ -40,19 +40,44 @@ export function ExecutiveReview() {
 
   return (
     <section id="executive-review" className="card executiveReview jumpTarget">
-      <header className="cardHeader">
-        <div className="cardTitleRow">
-          <h2>Executive review</h2>
-          <span className="pill pill-neutral">Local activity analysis</span>
+      <header className="executiveReviewHeader">
+        <div>
+          <p className="executiveReviewEyebrow">Weekly brief</p>
+          <h2>What changed, and what deserves focus now?</h2>
+          <p className="executiveReviewIntro">
+            A read-only Codex review of your cached activity, project load, completion rhythm, and recent momentum.
+          </p>
         </div>
-        <button className="button buttonSmall" type="button" onClick={() => generate(Boolean(response?.summary))} disabled={loading}>
-          {loading ? "Reviewing..." : response?.summary ? "Refresh review" : "Generate review"}
+        <button
+          className="button executiveReviewAction"
+          type="button"
+          onClick={() => generate(Boolean(response?.summary))}
+          disabled={loading}
+        >
+          {loading ? "Analyzing…" : response?.summary ? "Refresh brief" : "Analyze last week"}
         </button>
       </header>
-      {response?.summary ? (
-        <Markdown className="executiveReviewBody" content={response.summary} />
+      {loading ? (
+        <div className="executiveReviewLoading" role="status" aria-live="polite">
+          <span />
+          Comparing recent work with the preceding weeks…
+        </div>
+      ) : response?.summary ? (
+        <div className="executiveReviewResult" aria-live="polite">
+          <Markdown className="executiveReviewBody" content={response.summary} />
+        </div>
+      ) : response?.detail ? (
+        <div className="executiveReviewError" role="alert">
+          <strong>Review unavailable</strong>
+          <span>{response.detail}</span>
+        </div>
       ) : (
-        <p className="muted">{response?.detail ?? "Compare the latest week with prior activity, project load, completion rhythm, and the next focus flow."}</p>
+        <div className="executiveReviewSignals" aria-label="Review contents">
+          <span>7-day comparison</span>
+          <span>Project pressure</span>
+          <span>Completion hours</span>
+          <span>One next-focus flow</span>
+        </div>
       )}
     </section>
   );

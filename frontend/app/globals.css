@@ -1223,13 +1223,130 @@ textarea.textInput {
 
 .executiveReview {
   border-color: rgba(105, 193, 255, 0.28);
-  background: linear-gradient(125deg, rgba(53, 116, 179, 0.16), rgba(255, 255, 255, 0.03));
+  background:
+    radial-gradient(circle at 88% 0%, rgba(106, 227, 255, 0.15), transparent 34%),
+    linear-gradient(125deg, rgba(37, 73, 112, 0.28), rgba(255, 255, 255, 0.025));
+  display: grid;
+  gap: 18px;
+  overflow: hidden;
+  padding: 24px 26px;
+}
+
+.executiveReviewHeader {
+  align-items: center;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.executiveReviewEyebrow {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  margin: 0 0 5px;
+  text-transform: uppercase;
+}
+
+.executiveReviewHeader h2 {
+  font-size: clamp(19px, 2vw, 25px);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.executiveReviewIntro {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 8px 0 0;
+  max-width: 760px;
+}
+
+.executiveReviewAction {
+  min-width: 158px;
+  white-space: nowrap;
+}
+
+.executiveReviewSignals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.executiveReviewSignals span {
+  background: rgba(8, 13, 21, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  color: rgba(223, 233, 246, 0.88);
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
+.executiveReviewResult,
+.executiveReviewError,
+.executiveReviewLoading {
+  background: rgba(5, 9, 15, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  padding: 16px 18px;
 }
 
 .executiveReviewBody {
   display: block;
   line-height: 1.6;
   color: #dfe9f6;
+}
+
+.executiveReviewError {
+  border-color: rgba(255, 123, 123, 0.3);
+  color: #ffd0d0;
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+}
+
+.executiveReviewError span {
+  color: rgba(255, 208, 208, 0.78);
+}
+
+.executiveReviewLoading {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+}
+
+.executiveReviewLoading span {
+  animation: executiveReviewPulse 1.2s ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 6px rgba(106, 227, 255, 0.1);
+  height: 8px;
+  width: 8px;
+}
+
+@keyframes executiveReviewPulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+
+@media (max-width: 720px) {
+  .executiveReviewHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .executiveReviewAction {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .executiveReviewLoading span {
+    animation: none;
+  }
 }
 
 .cardBodyFill {
