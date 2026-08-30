@@ -3561,32 +3561,6 @@ textarea.textInput {
   color: var(--text);
 }
 
-.templateNode {
-  border: 1px dashed rgba(255, 255, 255, 0.2);
-  border-radius: 14px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  display: grid;
-  gap: 12px;
-}
-
-.templateNodeHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.templateNodeActions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.templateChildren {
-  display: grid;
-  gap: 12px;
-}
-
 .previewGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3671,31 +3645,6 @@ textarea.textInput {
 }
 
 @media (max-width: 980px) {
-  .assistantWorkspace {
-    grid-template-columns: 1fr;
-    height: auto;
-    min-height: auto;
-  }
-
-  .assistantRail {
-    grid-template-rows: auto auto auto;
-  }
-
-  .assistantConversationList {
-    grid-auto-columns: minmax(220px, 280px);
-    grid-auto-flow: column;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .assistantMain {
-    height: clamp(560px, calc(100dvh - 120px), 720px);
-  }
-
-  .assistantComposer {
-    grid-template-columns: 1fr;
-  }
-
   .appShell {
     grid-template-columns: 1fr;
   }
