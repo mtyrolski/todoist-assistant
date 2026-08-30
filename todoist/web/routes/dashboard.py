@@ -4,8 +4,10 @@
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter
 from loguru import logger
@@ -46,9 +48,20 @@ from todoist.web.dashboard_payload import (
 from todoist.web.routes.common import _sync_api_globals
 
 Granularity = Literal["W", "ME", "3ME"]
+ReviewStatus = Literal["running", "completed", "failed"]
 router = APIRouter()
-_EXECUTIVE_REVIEW_LOCK = asyncio.Lock()
-_EXECUTIVE_REVIEW_CACHE: dict[str, str] = {}
+
+
+@dataclass
+class _ExecutiveReviewRun:
+    id: str
+    status: ReviewStatus
+    summary: str | None = None
+    detail: str | None = None
+
+
+_EXECUTIVE_REVIEW_RUN: _ExecutiveReviewRun | None = None
+_EXECUTIVE_REVIEW_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _executive_review_prompt(context: dict[str, Any]) -> str:
@@ -62,70 +75,97 @@ def _executive_review_prompt(context: dict[str, Any]) -> str:
     )
 
 
+def _review_payload(run: _ExecutiveReviewRun | None) -> dict[str, Any]:
+    if run is None:
+        return {
+            "enabled": True,
+            "runId": None,
+            "status": "idle",
+            "summary": None,
+            "loading": False,
+            "cached": False,
+        }
+    return {
+        "enabled": True,
+        "runId": run.id,
+        "status": run.status,
+        "summary": run.summary,
+        "detail": run.detail,
+        "loading": run.status == "running",
+        "cached": run.status == "completed",
+    }
+
+
+def _finish_review(
+    run_id: str,
+    status: Literal["completed", "failed"],
+    *,
+    summary: str | None = None,
+    detail: str | None = None,
+) -> None:
+    if _EXECUTIVE_REVIEW_RUN is None or _EXECUTIVE_REVIEW_RUN.id != run_id:
+        return
+    _EXECUTIVE_REVIEW_RUN.status = status
+    _EXECUTIVE_REVIEW_RUN.summary = summary
+    _EXECUTIVE_REVIEW_RUN.detail = detail
+
+
+async def _generate_executive_review(run_id: str) -> None:
+    try:
+        await _ensure_state(refresh=False)
+        if _state.df_activity is None or _state.active_projects is None:
+            raise RuntimeError("Dashboard data is unavailable.")
+        context = review_context(
+            _normalize_activity_df(_state.df_activity), _state.active_projects
+        )
+        model = await asyncio.to_thread(
+            build_codex_chat_model,
+            load_runtime_env_values(_resolve_env_path()),
+            cwd=_REPO_ROOT,
+        )
+        summary = await asyncio.to_thread(
+            model.chat,
+            [{"role": "user", "content": _executive_review_prompt(context)}],
+        )
+        _finish_review(run_id, "completed", summary=summary)
+    except Exception as exc:
+        logger.exception("Codex executive review failed")
+        _finish_review(
+            run_id,
+            "failed",
+            detail=f"Codex could not generate the review: {str(exc)[:300]}",
+        )
+
+
 @router.post("/api/dashboard/executive_review", tags=["dashboard"])
 async def executive_review(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
-    await _ensure_state(refresh=False)
-    if _state.df_activity is None or _state.active_projects is None:
-        return {"enabled": False, "summary": None, "detail": "Dashboard data is unavailable."}
-    env_path = _resolve_env_path()
-    backend = resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd())
-    if backend != "codex":
+    if resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd()) != "codex":
         return {
             "enabled": False,
             "summary": None,
             "detail": "Start with make dashboard_codex to generate the executive review.",
         }
-    try:
-        context = review_context(
-            _normalize_activity_df(_state.df_activity), _state.active_projects
-        )
-        key = repr(context)
-        if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
-            return {"enabled": True, "summary": _EXECUTIVE_REVIEW_CACHE[key], "cached": True}
-        async with _EXECUTIVE_REVIEW_LOCK:
-            if not refresh and key in _EXECUTIVE_REVIEW_CACHE:
-                return {
-                    "enabled": True,
-                    "summary": _EXECUTIVE_REVIEW_CACHE[key],
-                    "cached": True,
-                }
-            model = await asyncio.to_thread(
-                build_codex_chat_model,
-                load_runtime_env_values(env_path),
-                cwd=_REPO_ROOT,
-            )
-            summary = await asyncio.to_thread(
-                model.chat,
-                [{"role": "user", "content": _executive_review_prompt(context)}],
-            )
-            _EXECUTIVE_REVIEW_CACHE.clear()
-            _EXECUTIVE_REVIEW_CACHE[key] = summary
-    except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
-        logger.exception("Codex executive review failed")
-        return {
-            "enabled": True,
-            "summary": None,
-            "detail": f"Codex could not generate the review: {str(exc)[:300]}",
-        }
-    return {"enabled": True, "summary": summary, "cached": False}
+
+    global _EXECUTIVE_REVIEW_RUN
+    if _EXECUTIVE_REVIEW_RUN and _EXECUTIVE_REVIEW_RUN.status == "running":
+        return _review_payload(_EXECUTIVE_REVIEW_RUN)
+    _EXECUTIVE_REVIEW_RUN = _ExecutiveReviewRun(str(uuid4()), "running")
+    payload = _review_payload(_EXECUTIVE_REVIEW_RUN)
+
+    task = asyncio.create_task(_generate_executive_review(_EXECUTIVE_REVIEW_RUN.id))
+    _EXECUTIVE_REVIEW_TASKS.add(task)
+    task.add_done_callback(_EXECUTIVE_REVIEW_TASKS.discard)
+    return payload
 
 
 @router.get("/api/dashboard/executive_review", tags=["dashboard"])
 async def executive_review_status() -> dict[str, Any]:
     _sync_api_globals(globals())
     backend = resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd())
-    summary = (
-        list(_EXECUTIVE_REVIEW_CACHE.values())[-1]
-        if _EXECUTIVE_REVIEW_CACHE
-        else None
-    )
-    return {
-        "enabled": backend == "codex",
-        "summary": summary,
-        "cached": summary is not None,
-        "loading": _EXECUTIVE_REVIEW_LOCK.locked(),
-    }
+    payload = _review_payload(_EXECUTIVE_REVIEW_RUN)
+    payload["enabled"] = backend == "codex"
+    return payload
 
 
 @router.get("/api/dashboard/status", tags=["dashboard"])

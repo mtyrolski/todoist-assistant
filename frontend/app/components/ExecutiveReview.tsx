@@ -3,63 +3,80 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "./Markdown";
 
+type ReviewStatus = "idle" | "running" | "completed" | "failed";
+
 type ReviewResponse = {
   enabled: boolean;
+  runId: string | null;
+  status: ReviewStatus;
   summary: string | null;
-  detail?: string;
-  loading?: boolean;
+  detail?: string | null;
 };
+
+async function requestReview(method: "GET" | "POST" = "GET", refresh = false): Promise<ReviewResponse> {
+  const result = await fetch(`/api/dashboard/executive_review${refresh ? "?refresh=true" : ""}`, { method });
+  const body = (await result.json()) as ReviewResponse;
+  if (!result.ok) throw new Error(body.detail ?? `The review request failed (${result.status}).`);
+  return body;
+}
 
 export function ExecutiveReview() {
   const [response, setResponse] = useState<ReviewResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const status = response?.status;
 
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const restore = async () => {
+    if (status && status !== "running") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
       try {
-        const result = await fetch("/api/dashboard/executive_review");
-        const body = (await result.json()) as ReviewResponse;
-        if (!active) return;
+        const body = await requestReview();
+        if (cancelled) return;
         setResponse(body);
-        setLoading(Boolean(body.loading));
-        if (body.loading) timer = setTimeout(restore, 1500);
-      } catch {
-        if (active) setLoading(false);
+        if (body.status === "running") timer = setTimeout(poll, 1500);
+      } catch (error) {
+        if (cancelled) return;
+        setResponse((current) => ({
+          enabled: current?.enabled ?? false,
+          runId: current?.runId ?? null,
+          status: "failed",
+          summary: null,
+          detail: error instanceof Error ? error.message : "Unable to restore the weekly brief."
+        }));
       }
     };
-    void restore();
+    timer = setTimeout(poll, status === "running" ? 1500 : 0);
     return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
+      cancelled = true;
+      clearTimeout(timer);
     };
-  }, []);
+  }, [status]);
 
   const generate = async (refresh = false) => {
-    setLoading(true);
+    if (status === "running") return;
+    setResponse({
+      enabled: response?.enabled ?? true,
+      runId: response?.runId ?? null,
+      status: "running",
+      summary: response?.summary ?? null
+    });
     try {
-      const result = await fetch(`/api/dashboard/executive_review${refresh ? "?refresh=true" : ""}`, { method: "POST" });
-      const body = (await result.json()) as ReviewResponse;
-      setResponse(
-        result.ok
-          ? body
-          : {
-              enabled: false,
-              summary: null,
-              detail: body.detail ?? `The review request failed (${result.status}).`
-            }
-      );
-    } catch {
+      setResponse(await requestReview("POST", refresh));
+    } catch (error) {
       setResponse({
         enabled: false,
+        runId: null,
+        status: "failed",
         summary: null,
-        detail: "The dashboard API did not return a readable review response. Check the API status and try again."
+        detail:
+          error instanceof Error
+            ? error.message
+            : "The dashboard API did not return a readable review response. Check the API status and try again."
       });
-    } finally {
-      setLoading(false);
     }
   };
+
+  const loading = status === "running";
 
   return (
     <section id="executive-review" className="card executiveReview jumpTarget">
