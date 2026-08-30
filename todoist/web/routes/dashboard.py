@@ -16,7 +16,7 @@ from todoist.dashboard.plots import (
     plot_completed_tasks_periodically,
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
-    plot_project_contribution_timeline,
+    plot_project_lifecycle_timeline,
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
@@ -316,8 +316,13 @@ async def dashboard_home(
                     archived_parent_projects=always_visible_projects,
                 )
             ),
-            "projectContributionTimeline": _fig_to_dict(
-                plot_project_contribution_timeline(df_activity, beg_range, end_range)
+            "projectLifecycleTimeline": _fig_to_dict(
+                plot_project_lifecycle_timeline(
+                    df_activity,
+                    beg_range,
+                    end_range,
+                    [*active_projects, *archived_projects],
+                )
             ),
         }
         parent_completed_share = _completed_share_leaderboard(

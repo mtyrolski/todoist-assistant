@@ -797,12 +797,14 @@ export function DashboardView({
         </section>
       ) : null}
 
-      {!noData && figures.projectContributionTimeline ? (
-        <section id="project-contribution" className="stack jumpTarget" aria-label="Project contribution timeline">
+      {!noData && figures.projectLifecycleTimeline ? (
+        <section id="project-contribution" className="stack jumpTarget" aria-label="Project lifecycle timeline">
           <PlotCard
-            title="Project Contribution Timeline"
-            figure={figures.projectContributionTimeline}
-            help="Weekly completions by parent project and subproject. This makes each subproject's contribution to its master project visible."
+            title="Project Lifecycles"
+            figure={figures.projectLifecycleTimeline}
+            height={560}
+            interactive
+            help="Lifecycle spans for relevant projects and subprojects. Diamonds mark creation, green points mark the latest completion, open circles show projects still open at the period end, and crosses show archived projects at their last known Todoist update."
           />
         </section>
       ) : null}

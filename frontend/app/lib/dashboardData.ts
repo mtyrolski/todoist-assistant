@@ -15,7 +15,7 @@ export type DashboardFigures = {
   heatmapEventsByDayHour?: PlotlyFigure;
   eventsOverTime?: PlotlyFigure;
   activeProjectHierarchy?: PlotlyFigure;
-  projectContributionTimeline?: PlotlyFigure;
+  projectLifecycleTimeline?: PlotlyFigure;
 };
 
 export type ConfigurableItem = {

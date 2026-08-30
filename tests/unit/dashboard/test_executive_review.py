@@ -2,9 +2,8 @@ from datetime import datetime
 
 import pandas as pd
 
-from todoist.dashboard._plot_project_contribution import (
-    plot_project_contribution_timeline,
-)
+from tests.factories import make_project, make_project_entry
+from todoist.dashboard._plot_project_lifecycle import plot_project_lifecycle_timeline
 from todoist.dashboard.executive_review import review_context
 
 
@@ -41,13 +40,37 @@ def test_review_context_accepts_runtime_type_column() -> None:
     assert context["completions"] == {"current": 2, "previous": 0}
 
 
-def test_project_contribution_timeline_uses_parent_and_subproject_names() -> None:
-    figure = plot_project_contribution_timeline(
-        _activity(),
+def test_project_lifecycle_timeline_uses_parent_and_subproject_names() -> None:
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(
+            project_id="root",
+            name="Product",
+            created_at="2026-08-01T08:00:00Z",
+            updated_at="2026-08-26T08:00:00Z",
+        ),
+    )
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(
+            project_id="child",
+            name="Build",
+            parent_id="root",
+            created_at="2026-08-22T08:00:00Z",
+            updated_at="2026-08-26T08:00:00Z",
+        ),
+    )
+    activity = _activity()
+    activity["parent_project_id"] = "child"
+
+    figure = plot_project_lifecycle_timeline(
+        activity,
         datetime(2026, 8, 20),
         datetime(2026, 8, 31),
+        [root, child],
     )
 
-    heatmap = figure.data[0]
-    assert heatmap.y == ("Product → Build",)
-    assert sum(heatmap.z[0]) == 2
+    traces = figure.to_plotly_json()["data"]
+    labels = {label for trace in traces for label in trace["y"]}
+    assert "Product → Build" in labels
+    assert all(trace["type"] == "scatter" for trace in traces)
