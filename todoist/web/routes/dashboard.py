@@ -86,7 +86,9 @@ async def project_timeline(
         range_end = datetime.combine(
             anchor.date() + timedelta(days=1), datetime.min.time()
         )
-        first_event = activity.index.min().to_pydatetime() if not activity.empty else anchor
+        first_event = (
+            activity.index.min().to_pydatetime() if not activity.empty else anchor
+        )
         range_beg = datetime.combine(first_event.date(), datetime.min.time())
     else:
         range_beg, range_end = _compute_plot_range(

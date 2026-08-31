@@ -20,28 +20,41 @@ def review_context(activity: pd.DataFrame, projects: list[Project]) -> dict[str,
     previous_start = current_start - timedelta(days=7)
     event_column = "event_type" if "event_type" in frame else "type"
     if event_column not in frame:
-        return {"activity": "No supported activity events are available.", "projects": []}
+        return {
+            "activity": "No supported activity events are available.",
+            "projects": [],
+        }
     completed = frame.loc[frame[event_column] == "completed"]
-    current = completed.loc[(completed.index >= current_start) & (completed.index < end)]
-    previous = completed.loc[(completed.index >= previous_start) & (completed.index < current_start)]
+    current = completed.loc[
+        (completed.index >= current_start) & (completed.index < end)
+    ]
+    previous = completed.loc[
+        (completed.index >= previous_start) & (completed.index < current_start)
+    ]
     current_by_project = _project_counts(current)
     previous_by_project = _project_counts(previous)
     weekly_history = (
         completed.groupby(completed.index.to_period("W-MON")).size().tail(8)
     )
-    density = current.groupby(current.index.day_name()).size().reindex(
-        [
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-            "Sunday",
-        ],
-        fill_value=0,
+    density = (
+        current.groupby(current.index.day_name())
+        .size()
+        .reindex(
+            [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ],
+            fill_value=0,
+        )
     )
-    hours = current.groupby(current.index.hour).size().sort_values(ascending=False).head(3)
+    hours = (
+        current.groupby(current.index.hour).size().sort_values(ascending=False).head(3)
+    )
     return {
         "period": {
             "start": current_start.date().isoformat(),
@@ -59,9 +72,7 @@ def review_context(activity: pd.DataFrame, projects: list[Project]) -> dict[str,
             {"week": str(week.start_time.date()), "completed": int(count)}
             for week, count in weekly_history.items()
         ],
-        "workday_density": {
-            str(day): int(count) for day, count in density.items()
-        },
+        "workday_density": {str(day): int(count) for day, count in density.items()},
         "peak_completion_hours": [
             {"hour": int(hour), "count": int(count)} for hour, count in hours.items()
         ],

@@ -264,9 +264,7 @@ def _spans(
         project_frame = activity_by_project.get(str(project.id))
         if project_frame is None:
             project_frame = frame.head(0)
-        root_id = _activity_root_id(project_frame, by_id) or _root_id(
-            project, by_id
-        )
+        root_id = _activity_root_id(project_frame, by_id) or _root_id(project, by_id)
         project_id = str(project.id)
         if root_id in active_roots and project_id == root_id:
             continue
@@ -440,9 +438,7 @@ def _span_payload(span: _Span) -> ProjectLifecycleChild:
         "archived": span.archived,
         "durationDays": duration,
         "completions": span.completions,
-        "completionWeeks": [
-            week.date().isoformat() for week in span.completion_weeks
-        ],
+        "completionWeeks": [week.date().isoformat() for week in span.completion_weeks],
         "openTasks": span.open_tasks,
     }
 
