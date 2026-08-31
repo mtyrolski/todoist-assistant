@@ -28,6 +28,7 @@ const STATUS_META: Record<TimelineStatus, { label: string }> = {
 
 const WEEK_META = {
   completed: { label: "Completion that week", className: "isCompletedWeek" },
+  ongoing: { label: "Ongoing · latest week", className: "isOngoingWeek" },
   quiet: { label: "Active · no completion", className: "isQuietWeek" }
 };
 
@@ -108,6 +109,10 @@ function WeeklyActivityRow({
   const phaseDays = ((parseDay(child.visualStart) - firstMonday) / DAY_MS) % 7;
   const weekPhase = phaseDays / 7 * weekWidth;
   const details = tooltip(child, parent);
+  const endDay = new Date(end).getUTCDay();
+  const latestWeekStart = end - ((endDay + 6) % 7) * DAY_MS;
+  const ongoingLeft = Math.max(activityLeft, xFor(latestWeekStart));
+  const ongoingRight = Math.min(activityRight, xFor(latestWeekStart + 7 * DAY_MS));
 
   return (
     <div className="timelineRow">
@@ -122,6 +127,14 @@ function WeeklyActivityRow({
         title={details}
         aria-label={details}
       />
+      {!child.archived && ongoingRight > ongoingLeft ? (
+        <span
+          className="timelineOngoingCell"
+          style={{ left: ongoingLeft, width: Math.max(3, ongoingRight - ongoingLeft - 2) }}
+          title={`${child.name}\nOngoing in the latest week`}
+          aria-label={`${child.name}, ongoing in the latest week`}
+        />
+      ) : null}
       {child.completionWeeks.map((week) => {
         const weekStart = parseDay(week);
         const left = Math.max(activityLeft, xFor(weekStart));

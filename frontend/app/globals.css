@@ -1158,6 +1158,8 @@ textarea.textInput {
 
 .timelineLegend i.isCompletedWeek,
 .timelineCompletionCell { background: linear-gradient(135deg, #679c42, #83b957); }
+.timelineLegend i.isOngoingWeek,
+.timelineOngoingCell { background: linear-gradient(135deg, #bd8428, #dfa940); }
 .timelineLegend i.isQuietWeek { background: #565d66; }
 
 .timelineHistoryPanel {
@@ -1386,6 +1388,7 @@ textarea.textInput {
 }
 
 .timelineActivitySpan,
+.timelineOngoingCell,
 .timelineCompletionCell {
   position: absolute;
   top: 8px;
@@ -1407,8 +1410,13 @@ textarea.textInput {
 }
 
 .timelineCompletionCell {
-  z-index: 1;
+  z-index: 2;
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), 0 2px 5px rgba(0, 0, 0, 0.22);
+}
+
+.timelineOngoingCell {
+  z-index: 1;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.14), 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
 .projectTimelineToday {
