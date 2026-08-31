@@ -4,15 +4,14 @@ Todoist Assistant is a local dashboard and small automation toolkit for Todoist.
 It keeps a local activity cache, shows what changed, and helps turn an overloaded
 task list into a clear next step.
 
-The v0.4 development branch deliberately keeps the product small:
+## What it includes
 
-- Dashboard for activity, priorities, project hierarchy, and completion trends
-- Task Multiplication for splitting labelled work into a finite set of copies
-- Optional Gmail import and observer sync
-- An on-demand, read-only Codex executive review of cached activity and active projects
-
-It does not provide task templates, AI task breakdown, persistent AI context,
-personal AI chat, or an Android client.
+- A dashboard for activity, priorities, project hierarchy, and completion trends
+- A project timeline showing weekly activity across the history cached for your account
+- Task Multiplication for expanding labelled work into a finite set of copies
+- Habit tracking and stale-task maintenance automations
+- Optional Gmail task import and continuous observer sync
+- An optional, read-only Codex executive review of cached activity and active projects
 
 ![Dashboard overview](img/fig1.png)
 
@@ -42,12 +41,12 @@ make run_observer      # keep cache and short automations current
 make test_all          # complete test suite
 ```
 
-The executive review is requested only when its button is used. It sends a compact
+The executive review runs only when requested from the dashboard. It sends a compact
 snapshot derived from `activity.joblib` and active projects to the local Codex CLI
 in read-only mode; it never changes Todoist. It compares the last week with the
 previous week, considers completion timing and project concentration, and recommends
-one focused next-flow. The project-contribution chart complements it with a direct
-parent-project/subproject completion timeline.
+one focused next step. The project timeline provides the underlying parent-project
+and subproject history directly in the dashboard.
 
 ## Scope and data
 
@@ -67,13 +66,11 @@ install and authenticate the Codex CLI, then start `make dashboard_codex`.
 ## Packaging
 
 Windows and macOS packaging remains supported; see [Windows installer notes](docs/windows_installer.md).
-There is no Android build or release target.
 
 ## Verification
 
 ```bash
 uv sync --locked
-make check_fast
 make test_all
 ```
 

@@ -2,7 +2,7 @@
 
 The core package contains the local Todoist data layer: API access, database
 persistence, shared types, and activity helpers. It intentionally excludes the
-dashboard, frontend, plots, Codex review integration, Gmail import, and observer.
+dashboard, frontend, plots, Codex review integration, and Gmail import.
 
 Install from a checkout:
 
