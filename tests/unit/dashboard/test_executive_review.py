@@ -346,3 +346,4 @@ def test_project_lifecycle_data_exposes_all_statuses_and_real_dates() -> None:
     assert rows["ongoing"]["visualStart"] == "2026-08-01"
     assert rows["completed"]["archived"] is True
     assert rows["completed"]["archiveDate"] == "2026-08-19"
+    assert rows["completed"]["completionWeeks"] == ["2026-08-17"]

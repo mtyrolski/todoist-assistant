@@ -22,6 +22,7 @@ class ProjectLifecycleChild(TypedDict):
     archived: bool
     durationDays: int
     completions: int
+    completionWeeks: list[str]
     openTasks: int
 
 
@@ -64,6 +65,7 @@ class _Span:
     actual_end: pd.Timestamp
     status: Literal["completed", "ongoing", "stalled", "inactive"]
     completions: int
+    completion_weeks: tuple[pd.Timestamp, ...]
     open_tasks: int
     archived: bool
 
@@ -71,7 +73,7 @@ class _Span:
 _STATUS = {
     "completed": ("Completed / archived", "#61f4b3"),
     "ongoing": ("Ongoing", "#6ae3ff"),
-    "stalled": ("No completion in period", "#ffb86c"),
+    "stalled": ("Active — no completions recorded", "#ffb86c"),
     "inactive": ("No activity", "#8b929d"),
 }
 _HOVER = (
@@ -293,6 +295,19 @@ def _spans(
             if event_column in recent
             else 0
         )
+        completion_weeks: tuple[pd.Timestamp, ...] = ()
+        if event_column in recent and completions:
+            completed_dates = pd.DatetimeIndex(
+                recent.index[recent[event_column].eq("completed")]
+            ).normalize()
+            completion_weeks = tuple(
+                sorted(
+                    {
+                        day - timedelta(days=day.weekday())
+                        for day in completed_dates
+                    }
+                )
+            )
         open_tasks = sum(
             not task.task_entry.checked and not task.task_entry.is_deleted
             for task in project.tasks
@@ -334,6 +349,7 @@ def _spans(
                     endpoint,
                     status,
                     completions,
+                    completion_weeks,
                     open_tasks,
                     project.is_archived,
                 ),
@@ -418,6 +434,9 @@ def _span_payload(span: _Span) -> ProjectLifecycleChild:
         "archived": span.archived,
         "durationDays": duration,
         "completions": span.completions,
+        "completionWeeks": [
+            week.date().isoformat() for week in span.completion_weeks
+        ],
         "openTasks": span.open_tasks,
     }
 

@@ -19,11 +19,16 @@ const RESOLUTION_META: Record<TimelineResolution, { label: string; visibleDays: 
   twoYears: { label: "2 years", visibleDays: 730, tickDays: 56 }
 };
 
-const STATUS_META: Record<TimelineStatus, { label: string; className: string }> = {
-  completed: { label: "Archived", className: "isCompleted" },
-  ongoing: { label: "Ongoing", className: "isOngoing" },
-  unresolved: { label: "No completion in period", className: "isUnresolved" },
-  inactive: { label: "No activity", className: "isInactive" }
+const STATUS_META: Record<TimelineStatus, { label: string }> = {
+  completed: { label: "Archived projects" },
+  ongoing: { label: "Active · completions recorded" },
+  unresolved: { label: "Active · no completions recorded" },
+  inactive: { label: "Active · no cached activity" }
+};
+
+const WEEK_META = {
+  completed: { label: "Completion that week", className: "isCompletedWeek" },
+  quiet: { label: "Active · no completion", className: "isQuietWeek" }
 };
 
 const sessionState = {
@@ -75,8 +80,66 @@ function tooltip(child: ProjectTimelineChild, parent: ProjectTimelineParent): st
     child.endDate ? `End: ${dateLabel(child.endDate)}` : "End: Ongoing",
     child.archiveDate ? `Archive date: ${dateLabel(child.archiveDate)}` : null,
     `Duration: ${child.durationDays} day${child.durationDays === 1 ? "" : "s"}`,
+    `Completed events: ${child.completions}`,
     `Archived: ${child.archived ? "Yes" : "No"}`
   ].filter(Boolean).join("\n");
+}
+
+function WeeklyActivityRow({
+  child,
+  parent,
+  start,
+  end,
+  timelineWidth
+}: {
+  child: ProjectTimelineChild;
+  parent: ProjectTimelineParent;
+  start: number;
+  end: number;
+  timelineWidth: number;
+}) {
+  const duration = Math.max(DAY_MS, end - start + DAY_MS);
+  const xFor = (date: number) => (date - start) / duration * timelineWidth;
+  const activityLeft = Math.max(0, xFor(parseDay(child.visualStart)));
+  const activityRight = Math.min(timelineWidth, xFor(parseDay(child.visualEnd) + DAY_MS));
+  const weekWidth = timelineWidth * 7 * DAY_MS / duration;
+  const startDay = new Date(start).getUTCDay();
+  const firstMonday = start - ((startDay + 6) % 7) * DAY_MS;
+  const phaseDays = ((parseDay(child.visualStart) - firstMonday) / DAY_MS) % 7;
+  const weekPhase = phaseDays / 7 * weekWidth;
+  const details = tooltip(child, parent);
+
+  return (
+    <div className="timelineRow">
+      <span
+        className="timelineActivitySpan"
+        style={{
+          left: activityLeft,
+          width: Math.max(3, activityRight - activityLeft),
+          "--week-width": `${weekWidth}px`,
+          "--week-phase": `${-weekPhase}px`
+        } as CSSProperties}
+        title={details}
+        aria-label={details}
+      />
+      {child.completionWeeks.map((week) => {
+        const weekStart = parseDay(week);
+        const left = Math.max(activityLeft, xFor(weekStart));
+        const right = Math.min(activityRight, xFor(weekStart + 7 * DAY_MS));
+        if (right <= left) return null;
+        const label = `${child.name}\nWeek of ${dateLabel(week)}\nAt least one completed task`;
+        return (
+          <span
+            className="timelineCompletionCell"
+            key={week}
+            style={{ left, width: Math.max(3, right - left - 2) }}
+            title={label}
+            aria-label={label}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 function ParentGroup({
@@ -99,7 +162,6 @@ function ParentGroup({
   const labelScrollRef = useRef<HTMLDivElement | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
   const viewportHeight = Math.min(parent.children.length, MAX_VISIBLE_CHILD_ROWS) * ROW_HEIGHT;
-  const duration = Math.max(DAY_MS, end - start + DAY_MS);
 
   const updateVerticalScroll = (value: number) => {
     rowsRef.current?.style.setProperty("--group-scroll-top", `${value}px`);
@@ -107,8 +169,6 @@ function ParentGroup({
 
   if (parent.standalone) {
     const child = parent.children[0];
-    const left = Math.max(0, (parseDay(child.visualStart) - start) / duration * timelineWidth);
-    const right = Math.min(timelineWidth, (parseDay(child.visualEnd) - start + DAY_MS) / duration * timelineWidth);
     return (
       <section className="timelineGroup timelineStandalone" data-parent-id={parent.id}>
         <div className="timelineStandaloneLabel" title={parent.name}>
@@ -122,14 +182,7 @@ function ParentGroup({
           }}
         >
           <div className="timelineRows" style={{ width: timelineWidth, transform: "translateX(calc(0px - var(--scroll-left)))" }}>
-            <div className="timelineRow">
-              <span
-                className={`timelineBar ${STATUS_META[child.status].className}`}
-                style={{ left, width: Math.max(5, right - left) }}
-                title={tooltip(child, parent)}
-                aria-label={tooltip(child, parent)}
-              />
-            </div>
+            <WeeklyActivityRow child={child} parent={parent} start={start} end={end} timelineWidth={timelineWidth} />
           </div>
         </div>
       </section>
@@ -166,20 +219,7 @@ function ParentGroup({
             }}
           >
             <div ref={rowsRef} className="timelineRows" style={{ width: timelineWidth, transform: "translate(calc(0px - var(--scroll-left)), calc(0px - var(--group-scroll-top, 0px)))" }}>
-              {parent.children.map((child) => {
-                const left = Math.max(0, (parseDay(child.visualStart) - start) / duration * timelineWidth);
-                const right = Math.min(timelineWidth, (parseDay(child.visualEnd) - start + DAY_MS) / duration * timelineWidth);
-                return (
-                  <div className="timelineRow" key={child.id}>
-                    <span
-                      className={`timelineBar ${STATUS_META[child.status].className}`}
-                      style={{ left, width: Math.max(5, right - left) }}
-                      title={tooltip(child, parent)}
-                      aria-label={tooltip(child, parent)}
-                    />
-                  </div>
-                );
-              })}
+              {parent.children.map((child) => <WeeklyActivityRow child={child} parent={parent} start={start} end={end} timelineWidth={timelineWidth} key={child.id} />)}
             </div>
           </div>
         </>
@@ -267,7 +307,7 @@ export function ProjectTimelineView() {
         <div className="timelineToolbar">
           <label className="timelineControl"><span>Resolution</span><select className="select" value={resolution} onChange={(event) => setResolution(event.target.value as TimelineResolution)}>{Object.entries(RESOLUTION_META).map(([value, meta]) => <option value={value} key={value}>{meta.label} per window</option>)}</select></label>
           <label className="timelineControl"><span>Filter</span><select className="select" value={filter} onChange={(event) => setFilter(event.target.value as "all" | TimelineStatus)}><option value="all">All projects</option>{Object.entries(STATUS_META).map(([value, meta]) => <option value={value} key={value}>{meta.label}{value === "completed" ? ` (${archivedInPeriod})` : ""}</option>)}</select></label>
-          <div className="timelineLegend" aria-label="Timeline legend"><span className="timelineLegendTitle">Legend</span>{Object.entries(STATUS_META).map(([status, meta]) => <span key={status}><i className={meta.className} />{meta.label}</span>)}</div>
+          <div className="timelineLegend" aria-label="Timeline legend"><span className="timelineLegendTitle">Weekly activity</span>{Object.entries(WEEK_META).map(([status, meta]) => <span key={status}><i className={meta.className} />{meta.label}</span>)}</div>
         </div>
 
         {data?.history ? (

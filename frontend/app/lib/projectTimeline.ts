@@ -13,6 +13,7 @@ export type ProjectTimelineChild = {
   archived: boolean;
   durationDays: number;
   completions: number;
+  completionWeeks: string[];
   openTasks: number;
 };
 
