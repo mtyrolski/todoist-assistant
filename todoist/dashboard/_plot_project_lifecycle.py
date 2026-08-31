@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -297,14 +297,19 @@ def _spans(
         )
         completion_weeks: tuple[pd.Timestamp, ...] = ()
         if event_column in recent and completions:
-            completed_dates = pd.DatetimeIndex(
-                recent.index[recent[event_column].eq("completed")]
-            ).normalize()
+            completed_dates = (
+                _timestamp(str(value))
+                for value in recent.index[recent[event_column].eq("completed")]
+            )
             completion_weeks = tuple(
                 sorted(
                     {
-                        day - timedelta(days=day.weekday())
+                        cast(
+                            pd.Timestamp,
+                            pd.Timestamp(day.date() - timedelta(days=day.weekday())),
+                        )
                         for day in completed_dates
+                        if day is not None
                     }
                 )
             )
@@ -386,7 +391,8 @@ def _activity_root_id(
     roots_by_name: defaultdict[str, list[str]] = defaultdict(list)
     for root_id, root in projects_by_id.items():
         roots_by_name[root.project_entry.name].append(root_id)
-    for root_name in root_names.value_counts().index:
+    for root_name_value in root_names.value_counts().index:
+        root_name = str(root_name_value)
         matching = roots_by_name[root_name]
         if len(matching) == 1:
             return matching[0]
@@ -400,8 +406,8 @@ def _history_payload(
 ) -> ProjectLifecycleHistory:
     timestamps = pd.to_datetime(activity.index, errors="coerce", utc=True)
     timestamps = timestamps[~timestamps.isna()]
-    activity_start = timestamps.min() if len(timestamps) else None
-    activity_end = timestamps.max() if len(timestamps) else None
+    activity_start = _timestamp(str(timestamps.min())) if len(timestamps) else None
+    activity_end = _timestamp(str(timestamps.max())) if len(timestamps) else None
     return {
         "activityStart": activity_start.date().isoformat()
         if activity_start is not None
