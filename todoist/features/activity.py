@@ -3,8 +3,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
-import fcntl
-
 from loguru import logger
 
 from todoist.database.base import Database
@@ -12,6 +10,11 @@ from todoist.core.types import Event
 import typer
 
 from todoist.core.utils import Cache
+
+try:  # pragma: no cover - platform-specific import
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
 
 EventCollection = set[Event]
 NWEEKSMAX = 520  # 10 years
@@ -69,11 +72,13 @@ def activity_sync_lock(*, cache: Cache | None = None) -> Iterator[None]:
     lock_path = activity_path.with_name(f"{activity_path.stem}.sync.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def load_valid_events(events: object) -> EventCollection:
