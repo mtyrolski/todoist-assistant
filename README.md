@@ -10,7 +10,7 @@ task list into a clear next step.
 - A project timeline showing weekly activity across the history cached for your account
 - Task Multiplication for expanding labelled work into a finite set of copies
 - Habit tracking and stale-task maintenance automations
-- Optional Gmail task import and continuous observer sync
+- Continuous observer sync for scheduled local automations
 - An optional, read-only Codex executive review of cached activity and active projects
 
 ![Dashboard overview](img/fig1.png)

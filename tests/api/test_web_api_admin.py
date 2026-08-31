@@ -1,9 +1,7 @@
 """Tests for FastAPI admin endpoints."""
 
-import os
 from datetime import datetime
 from typing import cast
-from unittest.mock import Mock
 
 import pytest
 
@@ -12,27 +10,6 @@ from todoist.core.utils import MaxRetriesExceeded
 import todoist.web.api as web_api
 
 # pylint: disable=protected-access
-
-
-def _pending_gmail_status(port: int, started_at: str) -> dict[str, object]:
-    auth_url = f"http://127.0.0.1:{port}/auth"
-    redirect_uri = f"http://127.0.0.1:{port}/"
-    return {
-        "credentialsPresent": True,
-        "tokenPresent": False,
-        "connected": False,
-        "credentialsPath": "gmail_credentials.json",
-        "tokenPath": "gmail_token.json",
-        "detail": "Pending authorization",
-        "setupDocPath": "docs/gmail_setup.md",
-        "pendingAuth": {
-            "active": True,
-            "authUrl": auth_url,
-            "redirectUri": redirect_uri,
-            "startedAt": started_at,
-            "error": None,
-        },
-    }
 
 
 def _write_yaml(path, *lines: str) -> None:
@@ -418,33 +395,21 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(
     ]
 
 
-def test_admin_automations_returns_enabled_and_connection(
-    monkeypatch, api_client
-) -> None:
+def test_admin_automations_returns_inventory(monkeypatch, api_client) -> None:
     monkeypatch.setattr(
         web_api,
         "_load_automation_inventory",
         lambda: [
             {
-                "key": "gmail_tasks",
-                "name": "Gmail Tasks",
-                "frequencyMinutes": 60,
+                "key": "activity",
+                "name": "Activity Fetching Automation",
+                "frequencyMinutes": 15,
                 "isLong": False,
                 "launchCount": 0,
                 "lastLaunch": None,
-                "enabled": False,
-                "authRequired": True,
-                "defaultEnabled": False,
-                "target": "todoist.automations.gmail_tasks.GmailTasksAutomation",
-                "connection": {
-                    "credentialsPresent": False,
-                    "tokenPresent": False,
-                    "connected": False,
-                    "credentialsPath": "gmail_credentials.json",
-                    "tokenPath": "gmail_token.json",
-                    "detail": "Missing Gmail credentials file",
-                    "setupDocPath": "docs/gmail_setup.md",
-                },
+                "enabled": True,
+                "defaultEnabled": True,
+                "target": "todoist.automations.activity.Activity",
             }
         ],
     )
@@ -453,10 +418,9 @@ def test_admin_automations_returns_enabled_and_connection(
 
     assert res.status_code == 200
     payload = res.json()
-    assert payload["automations"][0]["key"] == "gmail_tasks"
-    assert payload["automations"][0]["enabled"] is False
-    assert payload["automations"][0]["authRequired"] is True
-    assert payload["automations"][0]["connection"]["connected"] is False
+    assert payload["automations"][0]["key"] == "activity"
+    assert payload["automations"][0]["enabled"] is True
+    assert payload["automations"][0]["defaultEnabled"] is True
 
 
 class _ApiStubAutomation(web_api.Automation):
@@ -536,12 +500,9 @@ def test_run_all_automations_sync_continues_after_failure(
     assert db.reset_calls == 2
 
 
-def test_enabled_automation_keys_defaults_non_auth_sections() -> None:
+def test_enabled_automation_keys_defaults_to_all_sections() -> None:
     config = {
         "activity": {"_target_": "todoist.automations.activity.Activity"},
-        "gmail_tasks": {
-            "_target_": "todoist.automations.gmail_tasks.GmailTasksAutomation"
-        },
         "habit_tracker": {"_target_": "todoist.automations.habit_tracker.HabitTracker"},
     }
 
@@ -558,20 +519,18 @@ def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(
         "  - _self_",
         "activity:",
         "  _target_: todoist.automations.activity.Activity",
-        "gmail_tasks:",
-        "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
         "habit_tracker:",
         "  _target_: todoist.automations.habit_tracker.HabitTracker",
         "automations:",
         "  - ${activity}",
-        "  - ${gmail_tasks}",
+        "  - ${habit_tracker}",
     )
 
     config = web_api._read_yaml_config(config_path)
 
     assert web_api._configured_enabled_automation_keys(config) == [
         "activity",
-        "gmail_tasks",
+        "habit_tracker",
     ]
 
 
@@ -588,10 +547,10 @@ def test_admin_set_automation_enabled_updates_config(
         "  name: Activity Fetching Automation",
         "  early_stop_after_n_windows: 2",
         "  nweeks_window_size: 4",
-        "gmail_tasks:",
-        "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
-        "  name: Gmail Tasks",
-        "  frequency_in_minutes: 60",
+        "habit_tracker:",
+        "  _target_: todoist.automations.habit_tracker.HabitTracker",
+        "  name: Habit Tracker",
+        "  frequency_in_minutes: 10080",
         "automations:",
         "  - ${activity}",
     )
@@ -599,12 +558,12 @@ def test_admin_set_automation_enabled_updates_config(
     monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
 
     res = api_client.post(
-        "/api/admin/automations/gmail_tasks/enabled", json={"enabled": True}
+        "/api/admin/automations/habit_tracker/enabled", json={"enabled": True}
     )
 
     assert res.status_code == 200
     saved = config_path.read_text(encoding="utf-8")
-    assert "- ${gmail_tasks}" in saved
+    assert "- ${habit_tracker}" in saved
 
 
 def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
@@ -697,19 +656,19 @@ def test_set_automation_enabled_disables_config_entry(monkeypatch, tmp_path) -> 
         "  - _self_",
         "activity:",
         "  _target_: todoist.automations.activity.Activity",
-        "gmail_tasks:",
-        "  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation",
+        "habit_tracker:",
+        "  _target_: todoist.automations.habit_tracker.HabitTracker",
         "automations:",
         "  - ${activity}",
-        "  - ${gmail_tasks}",
+        "  - ${habit_tracker}",
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
-    changed = web_api._set_automation_enabled("gmail_tasks", enabled=False)
+    changed = web_api._set_automation_enabled("habit_tracker", enabled=False)
 
     assert changed is True
     saved = config_path.read_text(encoding="utf-8")
-    assert "- ${gmail_tasks}" not in saved
+    assert "- ${habit_tracker}" not in saved
 
 
 def test_set_automation_enabled_returns_false_for_unknown_key(
@@ -727,106 +686,9 @@ def test_set_automation_enabled_returns_false_for_unknown_key(
     )
     monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
 
-    changed = web_api._set_automation_enabled("gmail_tasks", enabled=True)
+    changed = web_api._set_automation_enabled("missing", enabled=True)
 
     assert changed is False
-
-
-def test_admin_gmail_connect_requires_credentials(
-    monkeypatch, tmp_path, api_client
-) -> None:
-    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
-
-    res = api_client.post("/api/admin/automations/gmail/connect")
-
-    assert res.status_code == 400
-    assert "gmail_credentials.json is required" in res.json()["detail"]
-
-
-@pytest.mark.parametrize(
-    ("port", "state", "started_at", "use_config_dir"),
-    [
-        (9999, "state-1", "2026-03-29T12:00:00", True),
-        (9998, "state-2", "2026-03-29T12:05:00", False),
-    ],
-)
-def test_admin_gmail_connect_reports_pending_auth(
-    monkeypatch, tmp_path, port, state, started_at, use_config_dir, api_client
-) -> None:
-    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    if use_config_dir:
-        monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
-    else:
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.delenv(str(web_api.EnvVar.CONFIG_DIR), raising=False)
-    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(
-        web_api,
-        "_start_gmail_manual_auth_session",
-        lambda: web_api._PendingGmailAuthSession(
-            state=state,
-            auth_url=f"http://127.0.0.1:{port}/auth",
-            redirect_uri=f"http://127.0.0.1:{port}/",
-            started_at=started_at,
-        ),
-    )
-    monkeypatch.setattr(
-        web_api,
-        "_gmail_automation_status",
-        lambda: _pending_gmail_status(port, started_at),
-    )
-
-    res = api_client.post("/api/admin/automations/gmail/connect")
-
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["credentialsPresent"] is True
-    assert payload["authUrl"] == f"http://127.0.0.1:{port}/auth"
-    assert payload["pendingAuth"]["active"] is True
-
-
-def test_gmail_automation_status_uses_safe_path_labels(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
-    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "gmail_token.json").write_text("{}", encoding="utf-8")
-
-    payload = web_api._gmail_automation_status()
-
-    assert payload["credentialsPath"] == "gmail_credentials.json"
-    assert payload["tokenPath"] == "gmail_token.json"
-    assert payload["setupDocPath"] == "docs/gmail_setup.md"
-
-
-def test_start_gmail_manual_auth_session_enables_insecure_transport_temporarily(
-    monkeypatch, tmp_path
-) -> None:
-    monkeypatch.setattr(web_api, "_REPO_ROOT", tmp_path)
-    monkeypatch.setenv(str(web_api.EnvVar.CONFIG_DIR), str(tmp_path))
-    monkeypatch.delenv("OAUTHLIB_INSECURE_TRANSPORT", raising=False)
-    (tmp_path / "gmail_credentials.json").write_text("{}", encoding="utf-8")
-
-    flow = Mock()
-
-    def _authorization_url(**kwargs):
-        assert kwargs["access_type"] == "offline"
-        assert kwargs["include_granted_scopes"] == "true"
-        assert kwargs["prompt"] == "consent"
-        assert os.environ["OAUTHLIB_INSECURE_TRANSPORT"] == "1"
-        return ("http://127.0.0.1:9999/auth", "state-1")
-
-    flow.authorization_url.side_effect = _authorization_url
-    monkeypatch.setattr(
-        web_api.InstalledAppFlow,
-        "from_client_secrets_file",
-        lambda *_args, **_kwargs: flow,
-    )
-
-    session = web_api._start_gmail_manual_auth_session()
-
-    assert session.auth_url == "http://127.0.0.1:9999/auth"
-    assert "OAUTHLIB_INSECURE_TRANSPORT" not in os.environ
 
 
 def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:

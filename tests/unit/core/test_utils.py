@@ -524,14 +524,6 @@ def test_cache_initialization_creates_expected_storages(tmp_path):
         assert storage.path == str(tmp_path / filename)
 
 
-def test_cache_storage_uses_registered_filename_and_default(tmp_path):
-    cache = Cache(str(tmp_path))
-    storage = cache.storage("processed_gmail_messages", set)
-
-    assert storage.path == str(tmp_path / "processed_gmail_messages.joblib")
-    assert storage.load() == set()
-
-
 def test_cache_uses_env_path_by_default(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     with patch.dict(os.environ, {EnvVar.CACHE_DIR: str(tmp_path)}, clear=True):
@@ -634,7 +626,6 @@ def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
         ("integration_launches", {"integration1": 5}),
         ("automation_launches", {"automation1": 2}),
         ("automation_run_signals", {"automation1": {"lastStatus": "completed"}}),
-        ("processed_gmail_messages", {"msg1"}),
     ],
 )
 def test_cache_storage_roundtrip(tmp_path, storage_attr: str, payload):

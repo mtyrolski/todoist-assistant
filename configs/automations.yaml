@@ -10,11 +10,6 @@ multiply:
     deep_child_label: effort-point
     cleanup_unused_labels: true
     cleanup_unused_labels_after_days: 7
-gmail_tasks:
-  _target_: todoist.automations.gmail_tasks.GmailTasksAutomation
-  name: Gmail Tasks
-  frequency_in_minutes: 0.1
-  allow_interactive_auth: false
 habit_tracker:
   _target_: todoist.automations.habit_tracker.HabitTracker
   name: Habit Tracker
@@ -43,7 +38,6 @@ stale_tasks:
 automations:
 - ${activity}
 - ${multiply}
-- ${gmail_tasks}
 - ${habit_tracker}
 - ${stale_tasks}
 hydra:

@@ -57,7 +57,6 @@ CACHE_STORAGE_REGISTRY: dict[str, CacheStorageSpec] = {
     "stale_task_warnings": ("stale_task_warnings.joblib", dict),
     "multiplication_label_usage": ("multiplication_label_usage.joblib", dict),
     "habit_tracker_posts": ("habit_tracker_posts.joblib", dict),
-    "processed_gmail_messages": ("processed_gmail_messages.joblib", set),
     "dashboard_state": ("dashboard_state.joblib", dict),
     "archived_activity_scans": ("archived_activity_scans.joblib", dict),
 }

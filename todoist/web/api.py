@@ -7,7 +7,6 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 import contextlib
@@ -18,7 +17,6 @@ import os.path
 from pathlib import Path
 import signal
 import subprocess
-import threading
 
 import time
 
@@ -26,8 +24,6 @@ import pandas as pd
 import numpy as np
 import hydra
 import httpx
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from todoist.database.base import Database
@@ -51,11 +47,6 @@ from todoist.dashboard.plots import (
 )
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
-from todoist.automations.gmail_tasks import (
-    GmailTasksAutomation,
-    resolve_gmail_credentials_path,
-    resolve_gmail_token_path,
-)
 from todoist.automations.observer import AutomationObserver
 from todoist.dashboard.settings import (
     load_dashboard_config,
@@ -342,16 +333,9 @@ _AUTOMATION_RUNTIME_EXPORTS = (
     "_load_automations",
     "_available_automation_keys",
     "_automation_ref",
-    "_automation_requires_auth",
     "_default_enabled_automation_keys",
     "_configured_enabled_automation_keys",
     "_enabled_automation_keys",
-    "_clear_gmail_auth_session",
-    "_current_gmail_auth_session",
-    "_write_gmail_token",
-    "_allow_insecure_oauth_transport",
-    "_start_gmail_manual_auth_session",
-    "_gmail_automation_status",
     "_automation_metadata_for_key",
     "_load_automation_inventory",
     "_save_enabled_automations",
@@ -365,7 +349,6 @@ _AUTOMATION_RUNTIME_EXPORTS = (
 )
 for _name in _AUTOMATION_RUNTIME_EXPORTS:
     globals()[_name] = _make_automation_runtime_wrapper(_name)
-_PendingGmailAuthSession = _automation_runtime_component._PendingGmailAuthSession
 
 
 def _log_files() -> list[dict[str, Any]]:

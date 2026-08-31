@@ -87,44 +87,6 @@ async def set_admin_automation_enabled(
     return await get_admin_automations()
 
 
-@router.get("/automations/gmail/status")
-async def gmail_status() -> dict[str, Any]:
-    return _web_api()._gmail_automation_status()
-
-
-@router.post("/automations/gmail/connect")
-async def gmail_connect() -> dict[str, Any]:
-    web_api = _web_api()
-    status = web_api._gmail_automation_status()
-    if not status["credentialsPresent"]:
-        raise HTTPException(
-            status_code=400,
-            detail="gmail_credentials.json is required before connecting Gmail.",
-        )
-    if status["connected"]:
-        return status
-    pending_auth = status.get("pendingAuth")
-    if isinstance(pending_auth, dict) and pending_auth.get("active"):
-        status["authUrl"] = pending_auth.get("authUrl")
-        status["redirectUri"] = pending_auth.get("redirectUri")
-        return status
-    session = await asyncio.to_thread(web_api._start_gmail_manual_auth_session)
-    next_status = web_api._gmail_automation_status()
-    next_status["authUrl"] = session.auth_url
-    next_status["redirectUri"] = session.redirect_uri
-    return next_status
-
-
-@router.delete("/automations/gmail/connect")
-async def gmail_disconnect() -> dict[str, Any]:
-    web_api = _web_api()
-    token_path = web_api.resolve_gmail_token_path()
-    if token_path.exists():
-        token_path.unlink()
-    web_api._clear_gmail_auth_session()
-    return web_api._gmail_automation_status()
-
-
 @router.get("/jobs/{job_id}")
 async def get_admin_job(job_id: str) -> dict[str, Any]:
     return await admin_job(job_id)

@@ -32,7 +32,6 @@ exclude = [
     "todoist.web*",
     "todoist.dashboard*",
     "todoist.llm*",
-    "todoist.automations.gmail_tasks*",
     "todoist.automations.update_env*",
     "todoist.automations.init_env*",
     "todoist_assistant.web*",
