@@ -178,6 +178,7 @@ async def _generate_executive_review(run_id: str) -> None:
 @router.post("/api/dashboard/executive_review", tags=["dashboard"])
 async def executive_review(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
+    del refresh  # The flag requests a new review; review input stays cache-only.
     if resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd()) != "codex":
         return {
             "enabled": False,
@@ -185,7 +186,7 @@ async def executive_review(refresh: bool = False) -> dict[str, Any]:
             "detail": "Start with make dashboard_codex to generate the executive review.",
         }
 
-    global _EXECUTIVE_REVIEW_RUN
+    global _EXECUTIVE_REVIEW_RUN  # pylint: disable=global-statement
     if _EXECUTIVE_REVIEW_RUN and _EXECUTIVE_REVIEW_RUN.status == "running":
         return _review_payload(_EXECUTIVE_REVIEW_RUN)
     _EXECUTIVE_REVIEW_RUN = _ExecutiveReviewRun(str(uuid4()), "running")

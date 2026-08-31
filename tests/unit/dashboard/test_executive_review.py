@@ -227,7 +227,7 @@ def test_project_lifecycle_puts_archived_roots_last_without_synthetic_group() ->
         "archived-root:recent-root",
         "archived-root:archived-root",
     ]
-    assert all(parent["standalone"] for parent in payload["parents"][-2:])
+    assert all(parent.get("standalone") for parent in payload["parents"][-2:])
     assert payload["history"] == {
         "activityStart": "2026-08-18",
         "activityEnd": "2026-08-20",
