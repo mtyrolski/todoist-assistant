@@ -4,18 +4,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, TypeVar
 
-from pydantic import BaseModel
-
-_StructuredT = TypeVar("_StructuredT", bound=BaseModel)
 _ModelT = TypeVar("_ModelT", bound="ChatModel")
 
 
 class ChatModel(Protocol):
     def chat(self, messages: Sequence[dict[str, str]]) -> str: ...
-
-    def structured_chat(
-        self, messages: Sequence[dict[str, str]], schema: type[_StructuredT]
-    ) -> _StructuredT: ...
 
 
 def mark_backend(model: _ModelT, backend: str) -> _ModelT:

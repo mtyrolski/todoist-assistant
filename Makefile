@@ -1,8 +1,8 @@
-.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any android_bootstrap_sdk android_apk android_staging_apk android_release_apk android_verify_debug_apk android_verify_staging_apk android_verify_release_apk android_install_smoke_debug android_install_smoke_staging build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_llm_activity_prompt.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/status.py
+PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/status.py
 PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
 PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
 CHECK_FAST_TARGETS := check_explicit_any ruff
@@ -18,7 +18,7 @@ setup: init_local_env ## First-time source setup: sync Todoist data, then use ma
 init_local_env: # syncs history, fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
 
-update_env: # updates history, fetches activity, do templates
+update_env: # updates history and fetches activity
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations
 
 ensure_frontend_deps: # installs frontend deps if missing
@@ -49,14 +49,14 @@ run_api:
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-dashboard: run_dashboard ## Start dashboard without AI by default; BACKEND/BACKEND_AI may override
+dashboard: run_dashboard ## Start dashboard without Codex executive review by default; BACKEND/BACKEND_AI may override
 
-dashboard_raw: ensure_frontend_deps ## Start dashboard with AI disabled
+dashboard_raw: ensure_frontend_deps ## Start dashboard with Codex executive review disabled
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start raw
 
-dashboard_codex: ensure_frontend_deps ## Start dashboard using the local Codex CLI backend
+dashboard_codex: ensure_frontend_deps ## Start dashboard with the local Codex executive review
 	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start codex
@@ -119,7 +119,7 @@ run_observer:
 clear_local_env:
 	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env $(CLEAR_LOCAL_ENV_ARGS)
 
-update_and_run: # updates history, fetches activity, do templates, and runs the dashboard
+update_and_run: # updates history, fetches activity, and runs the dashboard
 	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
 	make dashboard
 
@@ -132,33 +132,6 @@ coverage: ## Run full pytest coverage report
 
 check_explicit_any: ## Reject `: Any =` variable annotations used as typecheck escape hatches
 	PYTHONPATH=. uv run python3 -m scripts.check_explicit_any
-
-android_bootstrap_sdk: ## Install repo-local Android SDK/JDK prerequisites
-	./scripts/android_bootstrap_sdk.sh
-
-android_apk: ## Build the Android debug APK
-	./scripts/android_build_apk.sh
-
-android_staging_apk: ## Build the Android staging APK for sideload testing
-	ANDROID_BUILD_VARIANT=Staging ./scripts/android_build_apk.sh
-
-android_release_apk: ## Build the Android release APK
-	ANDROID_BUILD_VARIANT=Release ./scripts/android_build_apk.sh
-
-android_verify_debug_apk: ## Verify the Android debug APK is signed and launchable
-	ANDROID_EXPECT_DEBUGGABLE=true ./scripts/android_verify_apk.sh android/app/build/outputs/apk/debug/app-debug.apk
-
-android_verify_staging_apk: ## Verify the Android staging APK is signed and launchable
-	ANDROID_EXPECT_DEBUGGABLE=false ./scripts/android_verify_apk.sh android/app/build/outputs/apk/staging/app-staging.apk
-
-android_verify_release_apk: ## Verify the Android release APK is signed and launchable
-	ANDROID_EXPECT_DEBUGGABLE=false ./scripts/android_verify_apk.sh android/app/build/outputs/apk/release/app-release.apk
-
-android_install_smoke_debug: ## Install and launch the debug APK on the connected Android device/emulator
-	./scripts/android_install_smoke.sh android/app/build/outputs/apk/debug/app-debug.apk
-
-android_install_smoke_staging: ## Install and launch the staging APK on the connected Android device/emulator
-	./scripts/android_install_smoke.sh android/app/build/outputs/apk/staging/app-staging.apk
 
 pyright: ## Run Pyright type checks
 	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)

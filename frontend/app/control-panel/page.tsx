@@ -2,27 +2,24 @@
 
 import { AdminPanel } from "../components/AdminPanel";
 import { DashboardSettings } from "../components/DashboardSettings";
-import { LlmBreakdownStatus } from "../components/LlmBreakdownStatus";
-import { LlmRuntimeSettings } from "../components/LlmRuntimeSettings";
 import { LoadingBar } from "../components/LoadingBar";
 import { ObserverControl } from "../components/ObserverControl";
 import { PageHeader } from "../components/PageHeader";
 import { ServiceMonitor } from "../components/ServiceMonitor";
 import { StaleTaskSettings } from "../components/StaleTaskSettings";
 import { StatusPills } from "../components/StatusPills";
-import { useApiHealth, useDashboardStatus, useLlmBreakdownProgress, useSyncLabel } from "../lib/dashboardHooks";
+import { useApiHealth, useDashboardStatus, useSyncLabel } from "../lib/dashboardHooks";
 
 export default function ControlPanelPage() {
   const { health, loadingHealth, error } = useApiHealth();
   const { status, loadingStatus, refreshStatus } = useDashboardStatus();
-  const { progress, loading, refresh } = useLlmBreakdownProgress();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
   const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
   const healthTone = health?.status === "ok" ? "good" : "warn";
 
   return (
     <>
-      <LoadingBar active={loadingStatus || loading} />
+      <LoadingBar active={loadingStatus} />
       <PageHeader
         eyebrow="Control Panel"
         title="Operations & Monitoring"
@@ -43,17 +40,10 @@ export default function ControlPanelPage() {
           <AdminPanel
             onAfterMutation={() => {
               refreshStatus();
-              refresh();
             }}
           />
         </div>
         <div className="stack">
-          <LlmRuntimeSettings
-            onAfterMutation={() => {
-              refreshStatus();
-              refresh();
-            }}
-          />
           <DashboardSettings
             onAfterMutation={() => {
               refreshStatus();
@@ -67,10 +57,8 @@ export default function ControlPanelPage() {
           <ObserverControl
             onAfterMutation={() => {
               refreshStatus();
-              refresh();
             }}
           />
-          <LlmBreakdownStatus progress={progress} loading={loading} onRefresh={refresh} />
           <ServiceMonitor
             services={status?.services ?? null}
             configurableItems={status?.configurableItems}

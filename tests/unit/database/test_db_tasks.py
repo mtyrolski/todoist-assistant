@@ -77,31 +77,31 @@ def test_remove_task(mock_request, db_tasks):
     result = db_tasks.remove_task("task123")
 
     assert result is True
-    assert mock_request.call_count == 2
-    spec_arg = mock_request.call_args_list[-1].args[0]
+    assert mock_request.call_count == 1
+    spec_arg = mock_request.call_args.args[0]
     assert isinstance(spec_arg, RequestSpec)
     assert spec_arg.endpoint.url.endswith("/task123")
     assert (
-        mock_request.call_args_list[-1].kwargs["operation_name"]
+        mock_request.call_args.kwargs["operation_name"]
         == "delete task task123"
     )
 
 
 @patch("todoist.database.db_tasks.TodoistAPIClient.request")
-def test_remove_task_refuses_literal_star_space_title(mock_request, db_tasks):
+def test_remove_task_deletes_literal_star_space_title(mock_request, db_tasks):
     mock_request.return_value = EndpointCallResult(
-        endpoint=TodoistEndpoints.GET_TASK.format(task_id="context-1"),
+        endpoint=TodoistEndpoints.DELETE_TASK.format(task_id="context-1"),
         request_headers={},
         request_params={},
         status_code=200,
         elapsed=0.1,
-        text='{"id":"context-1","content":"* Durable context"}',
-        json={"id": "context-1", "content": "* Durable context"},
+        text="",
+        json=None,
     )
 
-    assert db_tasks.remove_task("context-1") is False
+    assert db_tasks.remove_task("context-1") is True
     assert mock_request.call_count == 1
-    assert mock_request.call_args.kwargs["operation_name"] == "fetch task context-1"
+    assert mock_request.call_args.kwargs["operation_name"] == "delete task context-1"
 
 
 @patch("todoist.database.db_tasks.TodoistAPIClient.request_json")

@@ -3,13 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { InfoTip } from "./InfoTip";
-import { LlmRuntimeSettings } from "./LlmRuntimeSettings";
 import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 import {
   clearAdminApiToken,
   clearAdminTimezone,
-  connectAdminGmailAutomation,
-  disconnectAdminGmailAutomation,
   getAdminApiTokenStatus,
   getAdminAutomations,
   getAdminJob,
@@ -63,11 +60,14 @@ function formatSignalMeta(a: AutomationInfo): string {
 }
 
 function automationLogSource(a: AutomationInfo): string {
-  return a.enabled ? "observer" : "automation";
+  // Manual runs execute in the dashboard API process and are written to the
+  // automation log. The observer log only contains the separate background
+  // observer process, even when this automation is enabled there.
+  void a;
+  return "automation";
 }
 
 function automationStatusTone(a: AutomationInfo): "good" | "warn" | "neutral" {
-  if (a.authRequired && !a.connection?.connected) return "warn";
   if (a.lastStatus === "failed") return "warn";
   if (a.lastStatus === "completed") return "good";
   if (a.enabled) return "good";
@@ -75,7 +75,6 @@ function automationStatusTone(a: AutomationInfo): "good" | "warn" | "neutral" {
 }
 
 function automationStatusLabel(a: AutomationInfo): string {
-  if (a.authRequired && !a.connection?.connected) return "Needs authorization";
   if (a.lastStatus === "failed") return "Last run failed";
   if (a.lastStatus === "completed") return "Last run completed";
   if (a.lastStatus === "skipped") return "Skipped in batch";
@@ -84,9 +83,6 @@ function automationStatusLabel(a: AutomationInfo): string {
 }
 
 function automationAvailabilityLabel(a: AutomationInfo): string {
-  if (a.authRequired) {
-    return a.connection?.connected ? "Connected and ready" : "Connect Gmail first";
-  }
   return a.enabled ? "Already active" : "One click to enable";
 }
 
@@ -122,7 +118,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [automationMutationKey, setAutomationMutationKey] = useState<string | null>(null);
-  const [gmailAuthUrl, setGmailAuthUrl] = useState<string | null>(null);
 
   const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>("");
@@ -139,9 +134,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const automationStats = automations
     ? {
         total: automations.length,
-        enabled: automations.filter((automation) => automation.enabled).length,
-        authRequired: automations.filter((automation) => automation.authRequired).length,
-        connected: automations.filter((automation) => automation.connection?.connected).length
+        enabled: automations.filter((automation) => automation.enabled).length
       }
     : null;
 
@@ -151,12 +144,10 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
         const payload = await getAdminAutomations();
         if (payload.error) {
           setAutomations(payload.automations ?? []);
-          setGmailAuthUrl(payload.automations?.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
           setAdminError(payload.error);
           return;
         }
         setAutomations(payload.automations);
-        setGmailAuthUrl(payload.automations.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
       } catch {
         setAutomations(null);
         setAdminError("Failed to load automations (check API logs).");
@@ -164,25 +155,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
     };
     loadAutomations();
   }, []);
-
-  useEffect(() => {
-    if (!gmailAuthUrl) return undefined;
-    const timer = window.setInterval(async () => {
-      try {
-        const list = await getAdminAutomations();
-        setAutomations(list.automations);
-        const gmail = list.automations.find((automation) => automation.key === "gmail_tasks");
-        const pendingUrl = gmail?.connection?.pendingAuth?.authUrl ?? null;
-        setGmailAuthUrl(pendingUrl);
-        if (gmail?.connection?.connected) {
-          setAdminNotice("Gmail connected. Future Gmail syncs can now run from the observer.");
-        }
-      } catch {
-        return;
-      }
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [gmailAuthUrl]);
 
   const loadApiToken = async () => {
     try {
@@ -286,58 +258,12 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
       setAutomations(payload.automations);
       setAdminNotice(
         enabled
-          ? `${automation.name} enabled. It will now run on schedule${automation.authRequired && !automation.connection?.connected ? ", but it still needs Gmail authorization" : ""}.`
+          ? `${automation.name} enabled. It will now run on schedule.`
           : `${automation.name} disabled. It will stop scheduling until you turn it back on.`
       );
       onAfterMutation();
     } catch (e) {
       setAdminError(e instanceof Error ? e.message : "Failed to update automation");
-    } finally {
-      setAutomationMutationKey(null);
-    }
-  };
-
-  const connectGmail = async () => {
-    try {
-      setAdminError(null);
-      setAdminNotice(null);
-      setAutomationMutationKey("gmail:connect");
-      const payload = await connectAdminGmailAutomation();
-      const list = await getAdminAutomations().catch(() => null);
-      if (list) {
-        setAutomations(list.automations);
-        setGmailAuthUrl(list.automations.find((automation) => automation.key === "gmail_tasks")?.connection?.pendingAuth?.authUrl ?? null);
-      }
-      const authUrl = payload.authUrl;
-      if (authUrl) {
-        setGmailAuthUrl(authUrl);
-        setAdminNotice("Gmail authorization link is ready. Open it in your preferred browser, then come back here.");
-      } else {
-        setAdminNotice("Gmail connected. Future Gmail syncs can now run from the observer.");
-      }
-      onAfterMutation();
-    } catch (e) {
-      setAdminError(e instanceof Error ? e.message : "Failed to connect Gmail");
-    } finally {
-      setAutomationMutationKey(null);
-    }
-  };
-
-  const disconnectGmail = async () => {
-    try {
-      setAdminError(null);
-      setAdminNotice(null);
-      setAutomationMutationKey("gmail:disconnect");
-      await disconnectAdminGmailAutomation();
-      const refreshed = await getAdminAutomations().catch(() => null);
-      if (refreshed) {
-        setAutomations(refreshed.automations);
-      }
-      setGmailAuthUrl(null);
-      setAdminNotice("Gmail disconnected. Reconnect later to resume Gmail automation.");
-      onAfterMutation();
-    } catch (e) {
-      setAdminError(e instanceof Error ? e.message : "Failed to disconnect Gmail");
     } finally {
       setAutomationMutationKey(null);
     }
@@ -453,14 +379,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
               <span className="automationSummaryValue">{automationStats?.enabled ?? 0}</span>
               <span className="automationSummaryLabel">Active</span>
             </div>
-            <div className="automationSummaryCard automationSummaryCardAccent">
-              <span className="automationSummaryValue">{automationStats?.authRequired ?? 0}</span>
-              <span className="automationSummaryLabel">Auth-gated</span>
-            </div>
-            <div className="automationSummaryCard automationSummaryCardNeutral">
-              <span className="automationSummaryValue">{automationStats?.connected ?? 0}</span>
-              <span className="automationSummaryLabel">Connected</span>
-            </div>
             <div className="automationSummaryCard automationSummaryCardWarm">
               <span className="automationSummaryValue">{automationStats?.total ?? 0}</span>
               <span className="automationSummaryLabel">Total</span>
@@ -468,7 +386,7 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
           </div>
           <div className="adminRow">
             <p className="muted tiny" style={{ margin: 0 }}>
-              Non-auth automations are enabled by default and stay persisted in `configs/automations.yaml`. Auth-gated automations stay off until connected.
+              Automations are enabled by default and stay persisted in `configs/automations.yaml`.
             </p>
             <button className="button buttonSmall" onClick={runAll} type="button" disabled={running !== null}>
               {running === "__all__" ? "Running…" : "Run all"}
@@ -502,30 +420,11 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                       </span>
                       <span className="pill pill-neutral">{automationAvailabilityLabel(a)}</span>
                       {a.defaultEnabled ? <span className="pill pill-good">Default on</span> : <span className="pill pill-neutral">Opt-in</span>}
-                      {a.authRequired ? <span className="pill pill-beta">Auth required</span> : <span className="pill pill-neutral">No auth</span>}
                     </div>
-                    {a.connection ? (
-                      <p className={`muted tiny automationDetailNote${a.connection.connected ? " automationDetailNoteGood" : ""}`}>
-                        Gmail: {a.connection.connected ? "connected" : a.connection.detail}
-                      </p>
-                    ) : null}
                     {a.lastError ? (
                       <p className="muted tiny automationDetailNote">
                         Last error: {a.lastError}
                       </p>
-                    ) : null}
-                    {a.key === "gmail_tasks" && (gmailAuthUrl || a.connection?.pendingAuth?.authUrl) ? (
-                      <div className="automationStatusLine" style={{ marginTop: 6 }}>
-                        <a
-                          className="button buttonSmall"
-                          href={gmailAuthUrl ?? a.connection?.pendingAuth?.authUrl ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open Gmail authorization link
-                        </a>
-                        <span className="pill pill-beta">Use your preferred browser</span>
-                      </div>
                     ) : null}
                   </div>
                   <div className="rowActions">
@@ -542,21 +441,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                           ? "Disable"
                           : "Enable"}
                     </button>
-                    {a.key === "gmail_tasks" ? (
-                      <button
-                        className={`button buttonSmall ${a.connection?.connected ? "" : "buttonGhost"}`}
-                        onClick={() => (a.connection?.connected ? disconnectGmail() : connectGmail())}
-                        type="button"
-                        disabled={automationMutationKey !== null}
-                        title={a.connection?.connected ? "Disconnect Gmail authorization" : "Connect Gmail authorization"}
-                      >
-                        {automationMutationKey === (a.connection?.connected ? "gmail:disconnect" : "gmail:connect")
-                          ? "Working…"
-                          : a.connection?.connected
-                            ? "Disconnect Gmail"
-                            : "Connect Gmail"}
-                      </button>
-                    ) : null}
                     <Link
                       className="button buttonSmall buttonGhost automationLogLink"
                       href={`/live-logs?source=${encodeURIComponent(automationLogSource(a))}`}
@@ -568,8 +452,8 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                       className={`button buttonSmall ${a.enabled ? "" : "buttonGhost"}`}
                       onClick={() => runAutomation(a.name)}
                       type="button"
-                      disabled={running !== null || !a.enabled || (a.authRequired && !a.connection?.connected)}
-                      title={a.authRequired && !a.connection?.connected ? "Connect Gmail first to run" : "Run this automation now"}
+                      disabled={running !== null || !a.enabled}
+                      title="Run this automation now"
                     >
                       {running === a.name ? "Running…" : "Run now"}
                     </button>
@@ -578,24 +462,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
                     <details className="rowDetails">
                       <summary className="muted tiny">Latest manual run output</summary>
                       <pre className="codeBlock">{runOutput[a.name].output || "(no output)"}</pre>
-                    </details>
-                  ) : null}
-                  {a.key === "gmail_tasks" && a.connection ? (
-                    <details className="rowDetails">
-                      <summary className="muted tiny">Gmail connection details</summary>
-                      <div className="stack">
-                        <p className="muted tiny" style={{ margin: 0 }}>
-                          Credentials file: {a.connection.credentialsPresent ? "present" : "missing"}
-                        </p>
-                        <p className="muted tiny" style={{ margin: 0 }}>{a.connection.credentialsPath}</p>
-                        <p className="muted tiny" style={{ margin: 0 }}>
-                          Token file: {a.connection.tokenPresent ? "present" : "missing"}
-                        </p>
-                        <p className="muted tiny" style={{ margin: 0 }}>{a.connection.tokenPath}</p>
-                        <p className="muted tiny" style={{ margin: 0 }}>
-                          Setup guide: {a.connection.setupDocPath}
-                        </p>
-                      </div>
                     </details>
                   ) : null}
                 </div>
@@ -724,8 +590,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
               {timezoneNotice ? <p className="pill pill-good">{timezoneNotice}</p> : null}
             </div>
           </div>
-
-          <LlmRuntimeSettings compact onAfterMutation={onAfterMutation} />
         </div>
       ) : null}
     </section>

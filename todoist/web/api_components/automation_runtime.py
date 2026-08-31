@@ -1,6 +1,5 @@
 """Compatibility wrappers for automation runtime helpers exposed by web.api."""
 
-from dataclasses import dataclass
 from typing import Any
 
 _COMPONENT_EXPORTS = (
@@ -10,16 +9,9 @@ _COMPONENT_EXPORTS = (
     "_load_automations",
     "_available_automation_keys",
     "_automation_ref",
-    "_automation_requires_auth",
     "_default_enabled_automation_keys",
     "_configured_enabled_automation_keys",
     "_enabled_automation_keys",
-    "_clear_gmail_auth_session",
-    "_current_gmail_auth_session",
-    "_write_gmail_token",
-    "_allow_insecure_oauth_transport",
-    "_start_gmail_manual_auth_session",
-    "_gmail_automation_status",
     "_automation_metadata_for_key",
     "_load_automation_inventory",
     "_save_enabled_automations",
@@ -35,16 +27,6 @@ _PATH_ALIASES = {
     "_AUTOMATIONS_PATH": "AUTOMATIONS_PATH",
     "_DASHBOARD_CONFIG_PATH": "DASHBOARD_CONFIG_PATH",
 }
-
-
-@dataclass
-class _PendingGmailAuthSession:
-    state: str
-    auth_url: str
-    redirect_uri: str
-    started_at: str
-    completed: bool = False
-    error: str | None = None
 
 
 def _service_module():

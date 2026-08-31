@@ -83,6 +83,7 @@ export type DashboardHome = {
     };
   };
   figures: DashboardFigures;
+  projectTimelineSummary?: { parentCount: number; subprojectCount: number };
   configurableItems?: ConfigurableItem[];
   refreshedAt: string;
   error?: string;

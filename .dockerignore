@@ -36,7 +36,6 @@ llm_breakdown_progress.joblib
 llm_chat_conversations.joblib
 llm_chat_queue.joblib
 observer_state.joblib
-processed_gmail_messages.joblib
 outputs/
 personal/
 

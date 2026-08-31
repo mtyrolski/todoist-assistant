@@ -59,6 +59,7 @@ def _clear_dashboard_state() -> None:
     web_api._state.project_colors = None
     web_api._state.db = None
     web_api._state.demo_mode = False
+    web_api._state.activity_cache_signature = None
     web_api._state.home_payload_cache = {}
 
 

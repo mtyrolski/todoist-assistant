@@ -13,6 +13,11 @@ from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.core.utils import Cache
+from todoist.features.activity import (
+    activity_sync_lock,
+    load_activity_cache,
+    merge_activity_cache,
+)
 
 POLL_INTERVAL_SECONDS = 30.0
 RECENT_ACTIVITY_PAGES = 1
@@ -72,6 +77,10 @@ class AutomationObserver:
             logger.info("Observer interrupted by user. Exiting.")
 
     def run_once(self) -> ObserverRunResult:
+        with activity_sync_lock():
+            return self._run_once_locked()
+
+    def _run_once_locked(self) -> ObserverRunResult:
         new_events = self._refresh_activity_cache()
 
         automations_to_run = self._eligible_automations(has_new_events=bool(new_events))
@@ -129,16 +138,14 @@ class AutomationObserver:
         if not events:
             return set()
 
-        cached_events: set = Cache().activity.load()
-
+        cached_events: set = load_activity_cache()
         new_events = {event for event in events if event not in cached_events}
         if not new_events:
             logger.debug("Observer activity cache unchanged; no new events detected.")
             return set()
 
-        cached_events.update(new_events)
+        cached_events = merge_activity_cache(new_events)
         added = len(new_events)
-        Cache().activity.save(cached_events)
         logger.debug(
             f"Observer activity cache updated; {added} new events saved, total {len(cached_events)}"
         )

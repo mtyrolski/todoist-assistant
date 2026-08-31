@@ -1,6 +1,7 @@
 """Tests for FastAPI dashboard home endpoints."""
 
 from datetime import date
+from typing import cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -52,6 +53,59 @@ def _set_dashboard_df(monkeypatch, df: pd.DataFrame) -> None:
 
 def _home(api_client, query: str = "weeks=12&granularity=W"):
     return api_client.get(f"/api/dashboard/home?{query}")
+
+
+def test_project_timeline_endpoint_returns_structured_archived_history(
+    monkeypatch, api_client
+) -> None:
+    root = make_project(
+        project_id="root",
+        project_entry=make_project_entry(
+            project_id="root", name="Product", created_at="2026-01-01T00:00:00Z"
+        ),
+    )
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(
+            project_id="child",
+            name="Shipped",
+            parent_id="root",
+            created_at="2026-08-01T00:00:00Z",
+            updated_at="2026-08-19T00:00:00Z",
+        ),
+        is_archived=True,
+    )
+    activity = _event_df(
+        [
+            {
+                "date": "2026-08-18",
+                "id": "e1",
+                "title": "done",
+                "type": "completed",
+                "parent_project_id": "child",
+                "parent_project_name": "Shipped",
+                "root_project_name": "Product",
+                "task_id": "1",
+            }
+        ]
+    )
+    _set_dashboard_df(monkeypatch, activity)
+    web_api._state.active_projects = [root]
+    web_api._state.archived_projects = [child]
+
+    response = api_client.get(
+        "/api/dashboard/project-timeline?beg=2026-08-01&end=2026-08-31"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["range"] == {"start": "2026-08-01", "end": "2026-08-31"}
+    assert payload["parents"][0]["id"] == "root"
+    assert payload["parents"][0]["children"][0]["status"] == "completed"
+    assert payload["parents"][0]["children"][0]["archived"] is True
+
+    full_history = api_client.get("/api/dashboard/project-timeline").json()
+    assert full_history["range"]["start"] == "2026-08-18"
 
 
 def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
@@ -106,6 +160,27 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     _clear_dashboard_state()
     loaded = web_api._load_state_from_disk_cache(demo_mode=False)
     assert loaded is False
+
+
+def test_in_memory_dashboard_state_rejects_changed_activity_signature(
+    monkeypatch, tmp_path
+) -> None:
+    cache = _dashboard_cache(monkeypatch, tmp_path)
+    _clear_dashboard_state()
+    _set_state_with_df(_single_event_df())
+    web_api._state.activity_cache_signature = web_api._activity_cache_signature()
+
+    assert web_api._state.is_ready_for(
+        demo_mode=False,
+        activity_cache_signature=web_api._activity_cache_signature(),
+    )
+
+    cache.activity.save({"new-event"})
+
+    assert not web_api._state.is_ready_for(
+        demo_mode=False,
+        activity_cache_signature=web_api._activity_cache_signature(),
+    )
 
 
 def test_load_state_from_disk_cache_rejects_stale_adjustment_signature(
@@ -522,7 +597,8 @@ def test_dashboard_home_passes_active_and_archived_projects_to_hierarchy(
     response = _home(api_client)
 
     assert response.status_code == 200
-    assert [project.id for project in captured["projects"]] == [
+    projects = cast(list[object], captured["projects"])
+    assert [getattr(project, "id") for project in projects] == [
         "active",
         "archived",
     ]

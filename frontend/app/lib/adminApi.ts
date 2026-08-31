@@ -1,22 +1,3 @@
-export type AdminAutomationConnectionPendingAuth = {
-  active: boolean;
-  authUrl: string;
-  redirectUri: string;
-  startedAt: string;
-  error?: string | null;
-};
-
-export type AdminAutomationConnection = {
-  credentialsPresent: boolean;
-  tokenPresent: boolean;
-  connected: boolean;
-  credentialsPath: string;
-  tokenPath: string;
-  detail: string;
-  setupDocPath: string;
-  pendingAuth?: AdminAutomationConnectionPendingAuth;
-};
-
 export type AdminAutomationInfo = {
   key: string;
   name: string;
@@ -35,9 +16,7 @@ export type AdminAutomationInfo = {
   lastError?: string | null;
   lastSuccessAt?: string | null;
   enabled: boolean;
-  authRequired: boolean;
   defaultEnabled: boolean;
-  connection?: AdminAutomationConnection;
 };
 
 export type AdminAutomationsResponse = {
@@ -103,11 +82,6 @@ export type AdminTimezoneStatus = {
   system: string;
   envPath: string;
   invalidOverride?: string;
-};
-
-export type AdminGmailAutomationStatus = AdminAutomationConnection & {
-  authUrl?: string;
-  redirectUri?: string;
 };
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -223,21 +197,5 @@ export async function setAdminAutomationEnabled(key: string, enabled: boolean): 
       body: JSON.stringify({ enabled })
     },
     "Failed to update automation"
-  );
-}
-
-export async function connectAdminGmailAutomation(): Promise<AdminGmailAutomationStatus> {
-  return requestJson<AdminGmailAutomationStatus>(
-    "/api/admin/automations/gmail/connect",
-    { method: "POST" },
-    "Failed to connect Gmail"
-  );
-}
-
-export async function disconnectAdminGmailAutomation(): Promise<AdminGmailAutomationStatus> {
-  return requestJson<AdminGmailAutomationStatus>(
-    "/api/admin/automations/gmail/connect",
-    { method: "DELETE" },
-    "Failed to disconnect Gmail"
   );
 }

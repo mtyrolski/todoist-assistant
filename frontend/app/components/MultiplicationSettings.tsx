@@ -100,7 +100,7 @@ export function MultiplicationSettings() {
       <div className="grid2">
         <section className="card">
           <header className="cardHeader">
-            <h2>Label templates</h2>
+            <h2>Generated labels</h2>
           </header>
           <p className="muted tiny">
             Use placeholders {`{base}`}, {`{i}`}, and {`{n}`} to control the generated task titles.
@@ -110,7 +110,7 @@ export function MultiplicationSettings() {
           ) : (
             <div className="formStack">
               <label className="field">
-                <span className="muted tiny">Flat label template (Xn)</span>
+                <span className="muted tiny">Flat label pattern (Xn)</span>
                 <input
                   className="textInput"
                   value={draft.flatLeafTemplate}
@@ -119,7 +119,7 @@ export function MultiplicationSettings() {
                 <span className="muted tiny">Pattern: {draft.flatLabelRegex}</span>
               </label>
               <label className="field">
-                <span className="muted tiny">Deep label template (_Xn)</span>
+                <span className="muted tiny">Deep label pattern (_Xn)</span>
                 <input
                   className="textInput"
                   value={draft.deepLeafTemplate}

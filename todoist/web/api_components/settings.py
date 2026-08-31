@@ -59,37 +59,6 @@ def nested_config(config: Any, key: str) -> tuple[dict[str, Any], dict[str, Any]
     return existing, existing["config"]
 
 
-def llm_breakdown_settings_payload(config: DictConfig) -> dict[str, Any]:
-    raw = config.get("llm_breakdown") if hasattr(config, "get") else None
-    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
-    if not isinstance(data, dict):
-        data = {}
-
-    variants_raw = data.get("variants") or {}
-    variants: dict[str, Any] = {}
-    if isinstance(variants_raw, Mapping):
-        for key, value in variants_raw.items():
-            if not isinstance(value, Mapping):
-                continue
-            variants[str(key)] = {
-                "instruction": value.get("instruction", ""),
-                "maxDepth": value.get("max_depth"),
-                "maxChildren": value.get("max_children"),
-                "queueDepth": value.get("queue_depth"),
-            }
-
-    return {
-        "labelPrefix": data.get("label_prefix", "ai-"),
-        "defaultVariant": data.get("default_variant", "breakdown"),
-        "maxDepth": data.get("max_depth", 3),
-        "maxChildren": data.get("max_children", 6),
-        "maxTotalTasks": data.get("max_total_tasks", 60),
-        "maxQueueDepth": data.get("max_queue_depth", 1),
-        "autoQueueChildren": data.get("auto_queue_children", True),
-        "variants": variants,
-    }
-
-
 def multiplication_settings_payload(config: DictConfig) -> dict[str, Any]:
     raw = config.get("multiply") if hasattr(config, "get") else None
     data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}

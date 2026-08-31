@@ -3,11 +3,18 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter
+from loguru import logger
 
 from todoist.dashboard.plots import (
+    build_project_lifecycle_data,
     cumsum_completed_tasks_periodically,
     plot_active_project_hierarchy,
     plot_completed_tasks_periodically,
@@ -16,6 +23,9 @@ from todoist.dashboard.plots import (
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
+from todoist.dashboard.executive_review import review_context
+from todoist.core.runtime_env import load_runtime_env_values, resolve_llm_backend
+from todoist.llm.factory import build_codex_chat_model
 from todoist.database.dataframe import (
     get_adjusting_archived_parent_projects,
     get_adjusting_mapping,
@@ -39,7 +49,164 @@ from todoist.web.dashboard_payload import (
 from todoist.web.routes.common import _sync_api_globals
 
 Granularity = Literal["W", "ME", "3ME"]
+ReviewStatus = Literal["running", "completed", "failed"]
 router = APIRouter()
+
+
+@dataclass
+class _ExecutiveReviewRun:
+    id: str
+    status: ReviewStatus
+    summary: str | None = None
+    detail: str | None = None
+
+
+_EXECUTIVE_REVIEW_RUN: _ExecutiveReviewRun | None = None
+_EXECUTIVE_REVIEW_TASKS: set[asyncio.Task[None]] = set()
+
+
+@router.get("/api/dashboard/project-timeline", tags=["dashboard"])
+async def project_timeline(
+    weeks: int = 0,
+    beg: str | None = None,
+    end: str | None = None,
+    refresh: bool = False,
+) -> dict[str, object]:
+    """Return structured project lifecycle data for the dedicated timeline view."""
+
+    _sync_api_globals(globals())
+    await _ensure_state(refresh=refresh)
+    activity = _state.df_activity
+    active_projects = _state.active_projects
+    if activity is None or active_projects is None:
+        return {"error": "Dashboard data unavailable.", "range": None, "parents": []}
+    activity = _normalize_activity_df(activity)
+    if weeks == 0 and beg is None and end is None:
+        anchor = _safe_activity_anchor(activity)
+        range_end = datetime.combine(
+            anchor.date() + timedelta(days=1), datetime.min.time()
+        )
+        first_event = (
+            activity.index.min().to_pydatetime() if not activity.empty else anchor
+        )
+        range_beg = datetime.combine(first_event.date(), datetime.min.time())
+    else:
+        range_beg, range_end = _compute_plot_range(
+            activity, weeks=weeks, beg=beg, end=end
+        )
+    payload = build_project_lifecycle_data(
+        activity,
+        range_beg,
+        range_end,
+        [*active_projects, *(_state.archived_projects or [])],
+    )
+    payload["refreshedAt"] = datetime.now().isoformat(timespec="seconds")
+    return dict(payload)
+
+
+def _executive_review_prompt(context: dict[str, Any]) -> str:
+    return (
+        "Write a concise executive review of this Todoist activity snapshot. "
+        "Use only the supplied evidence. Compare the latest seven days with the prior seven days, "
+        "identify momentum, work concentration, stalled or overloaded projects, and recommend one "
+        "next-focus flow with at most three steps. Do not create or modify anything. "
+        "Use short labelled lines and bullets, without Markdown heading syntax.\n\n"
+        f"Snapshot from local activity.joblib and active Todoist projects:\n{context}"
+    )
+
+
+def _review_payload(run: _ExecutiveReviewRun | None) -> dict[str, Any]:
+    if run is None:
+        return {
+            "enabled": True,
+            "runId": None,
+            "status": "idle",
+            "summary": None,
+            "loading": False,
+            "cached": False,
+        }
+    return {
+        "enabled": True,
+        "runId": run.id,
+        "status": run.status,
+        "summary": run.summary,
+        "detail": run.detail,
+        "loading": run.status == "running",
+        "cached": run.status == "completed",
+    }
+
+
+def _finish_review(
+    run_id: str,
+    status: Literal["completed", "failed"],
+    *,
+    summary: str | None = None,
+    detail: str | None = None,
+) -> None:
+    if _EXECUTIVE_REVIEW_RUN is None or _EXECUTIVE_REVIEW_RUN.id != run_id:
+        return
+    _EXECUTIVE_REVIEW_RUN.status = status
+    _EXECUTIVE_REVIEW_RUN.summary = summary
+    _EXECUTIVE_REVIEW_RUN.detail = detail
+
+
+async def _generate_executive_review(run_id: str) -> None:
+    try:
+        await _ensure_state(refresh=False)
+        if _state.df_activity is None or _state.active_projects is None:
+            raise RuntimeError("Dashboard data is unavailable.")
+        context = review_context(
+            _normalize_activity_df(_state.df_activity), _state.active_projects
+        )
+        model = await asyncio.to_thread(
+            build_codex_chat_model,
+            load_runtime_env_values(_resolve_env_path()),
+            cwd=_REPO_ROOT,
+        )
+        summary = await asyncio.to_thread(
+            model.chat,
+            [{"role": "user", "content": _executive_review_prompt(context)}],
+        )
+        _finish_review(run_id, "completed", summary=summary)
+    except Exception as exc:
+        logger.exception("Codex executive review failed")
+        _finish_review(
+            run_id,
+            "failed",
+            detail=f"Codex could not generate the review: {str(exc)[:300]}",
+        )
+
+
+@router.post("/api/dashboard/executive_review", tags=["dashboard"])
+async def executive_review(refresh: bool = False) -> dict[str, Any]:
+    _sync_api_globals(globals())
+    del refresh  # The flag requests a new review; review input stays cache-only.
+    if resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd()) != "codex":
+        return {
+            "enabled": False,
+            "summary": None,
+            "detail": "Start with make dashboard_codex to generate the executive review.",
+        }
+
+    global _EXECUTIVE_REVIEW_RUN  # pylint: disable=global-statement
+    if _EXECUTIVE_REVIEW_RUN and _EXECUTIVE_REVIEW_RUN.status == "running":
+        return _review_payload(_EXECUTIVE_REVIEW_RUN)
+    _EXECUTIVE_REVIEW_RUN = _ExecutiveReviewRun(str(uuid4()), "running")
+    payload = _review_payload(_EXECUTIVE_REVIEW_RUN)
+
+    task = asyncio.create_task(_generate_executive_review(_EXECUTIVE_REVIEW_RUN.id))
+    _EXECUTIVE_REVIEW_TASKS.add(task)
+    task.add_done_callback(_EXECUTIVE_REVIEW_TASKS.discard)
+    return payload
+
+
+@router.get("/api/dashboard/executive_review", tags=["dashboard"])
+async def executive_review_status() -> dict[str, Any]:
+    _sync_api_globals(globals())
+    backend = resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd())
+    payload = _review_payload(_EXECUTIVE_REVIEW_RUN)
+    payload["enabled"] = backend == "codex"
+    return payload
 
 
 @router.get("/api/dashboard/status", tags=["dashboard"])
@@ -83,14 +250,6 @@ async def dashboard_progress() -> dict[str, Any]:
     """Return current data refresh progress for the dashboard."""
 
     return await _progress_snapshot()
-
-
-@router.get("/api/dashboard/llm_breakdown", tags=["dashboard"])
-async def dashboard_llm_breakdown() -> dict[str, Any]:
-    _sync_api_globals(globals())
-    """Return AI breakdown queue progress."""
-
-    return _llm_breakdown_snapshot()
 
 
 @router.get("/api/dashboard/home", tags=["dashboard"])
@@ -182,9 +341,23 @@ async def dashboard_home(
 
     if no_data:
         figures = {}
+        project_timeline_summary = {"parentCount": 0, "subprojectCount": 0}
         parent_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
         root_completed_share = {"items": [], "totalCompleted": 0, "figure": {}}
     else:
+        lifecycle_data = build_project_lifecycle_data(
+            df_activity,
+            beg_range,
+            end_range,
+            [*active_projects, *archived_projects],
+        )
+        lifecycle_parents = lifecycle_data["parents"]
+        project_timeline_summary = {
+            "parentCount": len(lifecycle_parents),
+            "subprojectCount": sum(
+                len(parent["children"]) for parent in lifecycle_parents
+            ),
+        }
         weekly_completion_fig = plot_weekly_completion_trend(df_activity, end_range)
         completed_periodic_fig = _apply_date_axis_viewport(
             _add_plot_event_markers(
@@ -330,6 +503,7 @@ async def dashboard_home(
             }
         },
         "figures": figures,
+        "projectTimelineSummary": project_timeline_summary,
         "refreshedAt": datetime.now().isoformat(timespec="seconds"),
     }
     _state.home_payload_cache[cache_key] = payload

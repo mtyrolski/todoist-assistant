@@ -1,8 +1,16 @@
-from todoist.features.activity import quick_summarize
+from loguru import logger
+
+from todoist.features.activity import (
+    activity_history_boundary,
+    activity_sync_lock,
+    load_activity_cache,
+    merge_activity_cache,
+    needs_activity_history,
+    quick_summarize,
+)
 from todoist.automations.base import Automation
 from todoist.database.base import Database
 from todoist.core.types import Event
-from todoist.core.utils import Cache
 
 
 class Activity(Automation):
@@ -15,14 +23,71 @@ class Activity(Automation):
         self.frequency_in_minutes = 0.1
 
     def _tick(self, db: Database):
-        events_so_far: set[Event] = Cache().activity.load()
-        events_history = db.fetch_activity_adaptively(
-            nweeks_window_size=self.nweeks,
-            early_stop_after_n_windows=self.early_stop_after_n_windows,
-            events_already_fetched=events_so_far,
-        )
-        events_history = set(events_history)
-        Cache().activity.save(events_history)
+        with activity_sync_lock():
+            self._tick_locked(db)
+
+    def _tick_locked(self, db: Database):
+        events_so_far = load_activity_cache()
+        if hasattr(db, "fetch_activity_recent"):
+            recent_events = set(db.fetch_activity_recent(max_pages=2))
+            events_history = merge_activity_cache(recent_events)
+            new_events = events_history - events_so_far
+            logger.info(
+                "Activity sync recent phase complete: fetched={}; new={}; cached={}",
+                len(recent_events),
+                len(new_events),
+                len(events_history),
+            )
+
+            history_events: set[Event] = set()
+            if needs_activity_history(events_history):
+                history_boundary = activity_history_boundary(events_history)
+                logger.info(
+                    "Activity sync history phase starting at boundary={}",
+                    history_boundary.isoformat() if history_boundary else "now",
+                )
+                checkpointed_events: set[Event] = set()
+
+                def _checkpoint(events: set[Event]) -> None:
+                    nonlocal events_history
+                    checkpointed_events.update(events)
+                    events_history = merge_activity_cache(events)
+                    logger.info(
+                        "Activity sync history checkpoint: added={}; cached={}",
+                        len(events),
+                        len(events_history),
+                    )
+
+                history_result = db.fetch_activity_history(
+                    nweeks_window_size=self.nweeks,
+                    early_stop_after_n_windows=self.early_stop_after_n_windows,
+                    events_already_fetched=events_history,
+                    date_to=history_boundary,
+                    progress_desc="Fetching activity history",
+                    on_events=_checkpoint,
+                )
+                history_events = checkpointed_events or (
+                    set(history_result) - events_history
+                )
+                if history_events and not checkpointed_events:
+                    events_history = merge_activity_cache(history_events)
+                logger.info(
+                    "Activity sync history phase complete: new={}; cached={}",
+                    len(history_events),
+                    len(events_history),
+                )
+        else:
+            # Compatibility path for small test doubles and older integrations.
+            events_history = set(
+                db.fetch_activity_adaptively(
+                    nweeks_window_size=self.nweeks,
+                    early_stop_after_n_windows=self.early_stop_after_n_windows,
+                    events_already_fetched=events_so_far,
+                )
+            )
+            new_events = events_history - events_so_far
+            merge_activity_cache(new_events)
+
         quick_summarize(
             events=events_history, new_events=events_history - events_so_far
         )
@@ -32,7 +97,8 @@ class Activity(Automation):
     ) -> tuple[list[Event], dict[str, int]]:
         """Fetch recent activity pages and provide simple statistics."""
 
-        events = db.fetch_activity(max_pages=max_pages)
+        fetch_recent = getattr(db, "fetch_activity_recent", db.fetch_activity)
+        events = fetch_recent(max_pages=max_pages)
         stats: dict[str, int] = {"total": len(events)}
         for event in events:
             stats[event.event_type] = stats.get(event.event_type, 0) + 1

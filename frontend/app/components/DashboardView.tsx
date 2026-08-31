@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlotParams } from "react-plotly.js";
@@ -13,6 +14,7 @@ import { LeaderboardCard } from "./LeaderboardCard";
 import { InsightCard } from "./InsightCard";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
+import { ExecutiveReview } from "./ExecutiveReview";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -221,11 +223,13 @@ export function DashboardView({
   const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
   const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
+    { id: "executive-review", label: "Review" },
     { id: "insights", label: "Insights" },
     { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
     { id: "stats", label: "Focus" },
     { id: "badges", label: "Badges" },
     { id: "completed-tasks", label: "Completions" },
+    { id: "project-contribution", label: "Projects" },
     { id: "events", label: "Events" },
     { id: "projects", label: "Projects" },
     { id: "ops", label: "Activity & Ops" }
@@ -571,6 +575,10 @@ export function DashboardView({
       ) : null}
 
       {!noData ? (
+        <ExecutiveReview />
+      ) : null}
+
+      {!noData ? (
         <section id="insights" className="insightsRow jumpTarget" aria-label="Insights">
           {insightItems.map((it, idx) =>
             it ? (
@@ -787,6 +795,20 @@ export function DashboardView({
           {completionPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
+        </section>
+      ) : null}
+
+      {!noData ? (
+        <section id="project-contribution" className="card timelinePreview jumpTarget" aria-label="Project Timeline">
+          <div>
+            <p className="eyebrow">Projects</p>
+            <h2>Project Timeline</h2>
+            <p className="muted">
+              {dashboard?.projectTimelineSummary?.parentCount ?? 0} parent projects ·{" "}
+              {dashboard?.projectTimelineSummary?.subprojectCount ?? 0} active or historical subprojects
+            </p>
+          </div>
+          <Link className="button buttonGhost" href="/project-timeline">Open timeline →</Link>
         </section>
       ) : null}
 

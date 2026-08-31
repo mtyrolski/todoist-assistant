@@ -1,10 +1,11 @@
 """Reusable HTTP client helpers for the Todoist API."""
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from threading import Lock, local
-from time import perf_counter
+from time import monotonic, perf_counter, sleep
 from typing import Any, Mapping, MutableMapping, Optional
 
 import requests
@@ -22,6 +23,34 @@ from todoist.core.utils import (
 )
 
 from .endpoints import Endpoint
+
+
+_RATE_LIMIT_LOCK = Lock()
+_RATE_LIMIT_CALLS: deque[float] = deque()
+
+
+def _wait_for_rate_limit(max_requests_per_minute: int | None) -> None:
+    """Pace rate-limited requests shared by all clients in this process."""
+
+    if not max_requests_per_minute or max_requests_per_minute <= 0:
+        return
+    interval = RATE_LIMIT_WINDOW_SECONDS / max_requests_per_minute
+    while True:
+        with _RATE_LIMIT_LOCK:
+            now = monotonic()
+            while (
+                _RATE_LIMIT_CALLS
+                and now - _RATE_LIMIT_CALLS[0] >= RATE_LIMIT_WINDOW_SECONDS
+            ):
+                _RATE_LIMIT_CALLS.popleft()
+            next_allowed = (
+                _RATE_LIMIT_CALLS[-1] + interval if _RATE_LIMIT_CALLS else now
+            )
+            wait_seconds = max(0.0, next_allowed - now)
+            if wait_seconds == 0.0:
+                _RATE_LIMIT_CALLS.append(now)
+                return
+        sleep(wait_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +158,8 @@ class TodoistAPIClient:
         op_name = operation_name or spec.endpoint.name
 
         def _do_request() -> EndpointCallResult:
+            if spec.rate_limited:
+                _wait_for_rate_limit(self._max_requests_per_minute)
             start = perf_counter()
 
             try:

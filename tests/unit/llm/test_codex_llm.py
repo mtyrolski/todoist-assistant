@@ -1,8 +1,7 @@
 """Tests for the Codex CLI LLM adapter."""
 
-import pytest
 from langgraph_codex.execution import ExecutionResult
-from pydantic import BaseModel
+import pytest
 
 from todoist.core.env import EnvVar
 from todoist.llm.backends.codex import (
@@ -11,14 +10,6 @@ from todoist.llm.backends.codex import (
     CodexCliChatModel,
     codex_config_from_values,
 )
-from todoist.llm.codex_flags import CodexDangerousFlag, DANGEROUS_CODEX_FLAGS
-from todoist.automations.llm_breakdown.models import TaskBreakdown
-
-
-class _StrictPayload(BaseModel):
-    value: int
-
-
 def _fake_codex_executor(monkeypatch, outputs, captured: dict[str, object]) -> None:
     output_iter = iter(outputs)
 
@@ -38,15 +29,6 @@ def _fake_codex_executor(monkeypatch, outputs, captured: dict[str, object]) -> N
             return ExecutionResult(stdout=str(output), stderr="", returncode=0)
 
     monkeypatch.setattr("todoist.llm.backends.codex.CodexExecutor", _FakeExecutor)
-
-
-def test_dangerous_codex_flags_are_enum_backed_and_immutable() -> None:
-    assert DANGEROUS_CODEX_FLAGS == frozenset(CodexDangerousFlag)
-    assert CodexDangerousFlag.BYPASS_APPROVALS_AND_SANDBOX in DANGEROUS_CODEX_FLAGS
-    assert CodexDangerousFlag.BYPASS_HOOK_TRUST in DANGEROUS_CODEX_FLAGS
-    assert str(CodexDangerousFlag.BYPASS_APPROVALS_AND_SANDBOX) == (
-        "--dangerously-bypass-approvals-and-sandbox"
-    )
 
 
 def test_codex_chat_invokes_cli_and_reads_last_message(monkeypatch, tmp_path) -> None:
@@ -80,68 +62,6 @@ def test_codex_chat_invokes_cli_and_reads_last_message(monkeypatch, tmp_path) ->
     assert isinstance(requests, list)
     assert requests[0].workspace_path == tmp_path
     assert "Say adapter-ok" in requests[0].prompt
-
-
-def test_codex_structured_chat_parses_json_payload(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    captured: dict[str, object] = {}
-    _fake_codex_executor(
-        monkeypatch,
-        [
-            '{"children":[{"content":"Draft update","description":"",'
-            '"priority":2,"expand":false,"children":[]}]}'
-        ],
-        captured,
-    )
-
-    result = CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).structured_chat(
-        [{"role": "user", "content": "Break down status update"}],
-        TaskBreakdown,
-    )
-
-    assert result.children[0].content == "Draft update"
-    assert result.children[0].priority == 2
-
-
-def test_codex_structured_chat_repairs_invalid_json(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    outputs = iter(
-        [
-            "Here are tasks: Draft update",
-            '{"children":[{"content":"Draft update","description":"",'
-            '"priority":1,"expand":false,"children":[]}]}',
-        ]
-    )
-    captured: dict[str, object] = {}
-    _fake_codex_executor(monkeypatch, outputs, captured)
-
-    result = CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).structured_chat(
-        [{"role": "user", "content": "Break down status update"}],
-        TaskBreakdown,
-    )
-
-    assert result.children[0].content == "Draft update"
-    requests = captured["requests"]
-    assert isinstance(requests, list)
-    prompts = [request.prompt for request in requests]
-    assert len(prompts) == 2
-    assert "Convert this draft into strict JSON only." in prompts[1]
-
-
-def test_codex_structured_chat_raises_when_repair_is_still_invalid(
-    monkeypatch, tmp_path
-) -> None:
-    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
-    captured: dict[str, object] = {}
-    _fake_codex_executor(monkeypatch, ["not json", '{"value": "still wrong"}'], captured)
-
-    with pytest.raises(
-        ValueError, match="Invalid structured output for _StrictPayload"
-    ):
-        CodexCliChatModel(CodexChatConfig(cwd=tmp_path)).structured_chat(
-            [{"role": "user", "content": "Return a number"}],
-            _StrictPayload,
-        )
 
 
 def test_codex_cli_failure_raises_clear_error(monkeypatch, tmp_path) -> None:

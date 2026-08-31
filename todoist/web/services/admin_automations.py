@@ -8,30 +8,22 @@ import io
 import os
 import signal
 import subprocess
-import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
 import hydra
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from fastapi import HTTPException
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
 from todoist.automations.activity import Activity
 from todoist.automations.base import Automation
-from todoist.automations.gmail_tasks import (
-    GmailTasksAutomation,
-    resolve_gmail_credentials_path,
-    resolve_gmail_token_path,
-)
 from todoist.automations.observer import AutomationObserver
+from todoist.features.activity import activity_sync_lock
 from todoist.database.base import Database
 from todoist.dashboard.settings import (
     load_dashboard_config,
@@ -71,20 +63,7 @@ class _AdminJob:
     error: str | None = None
 
 
-@dataclass
-class _PendingGmailAuthSession:
-    state: str
-    auth_url: str
-    redirect_uri: str
-    started_at: str
-    completed: bool = False
-    error: str | None = None
-
-
 _JOBS: dict[str, _AdminJob] = {}
-_GMAIL_AUTH_LOCK = threading.Lock()
-_GMAIL_AUTH_SESSION: _PendingGmailAuthSession | None = None
-_OAUTHLIB_INSECURE_TRANSPORT = "OAUTHLIB_INSECURE_TRANSPORT"
 _SIGNAL_FIELDS = (
     "attemptCount",
     "successCount",
@@ -132,16 +111,6 @@ def _serialize_dt(value: Any) -> str | None:
     return None
 
 
-def _safe_display_path(path: Path, *, root: Path | None = None) -> str:
-    if root is not None:
-        try:
-            return str(path.relative_to(root))
-        except ValueError:
-            pass
-    name = path.name.strip()
-    return name or str(path)
-
-
 def _env_path(name: str, default: Path) -> Path:
     override = os.getenv(name)
     return Path(override).expanduser().resolve() if override else default
@@ -168,36 +137,6 @@ def _dashboard_state_dir() -> Path:
 
 def _dashboard_pid_dir() -> Path:
     return _env_path("DASHBOARD_PID_DIR", _dashboard_state_dir() / "pids")
-
-
-def _clear_gmail_auth_session() -> None:
-    global _GMAIL_AUTH_SESSION
-    with _GMAIL_AUTH_LOCK:
-        _GMAIL_AUTH_SESSION = None
-
-
-def _current_gmail_auth_session() -> _PendingGmailAuthSession | None:
-    with _GMAIL_AUTH_LOCK:
-        return _GMAIL_AUTH_SESSION
-
-
-def _write_gmail_token(credentials: Credentials) -> None:
-    token_path = resolve_gmail_token_path()
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(credentials.to_json(), encoding="utf-8")
-
-
-@contextlib.contextmanager
-def _allow_insecure_oauth_transport() -> Any:
-    previous = os.environ.get(_OAUTHLIB_INSECURE_TRANSPORT)
-    os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = "1"
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(_OAUTHLIB_INSECURE_TRANSPORT, None)
-        else:
-            os.environ[_OAUTHLIB_INSECURE_TRANSPORT] = previous
 
 
 def _load_automations(*, config_dir: Path | None = None) -> list[Automation]:
@@ -233,16 +172,8 @@ def _automation_ref_key(value: Any) -> str | None:
     return None
 
 
-def _automation_requires_auth(key: str) -> bool:
-    return key in {"gmail_tasks"}
-
-
 def _default_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
-    return [
-        key
-        for key in _available_automation_keys(config)
-        if not _automation_requires_auth(key)
-    ]
+    return _available_automation_keys(config)
 
 
 def _configured_enabled_automation_keys(config: Mapping[str, Any]) -> list[str]:
@@ -309,12 +240,9 @@ def _automation_metadata_for_key(
         **_automation_launch_metadata(automation),
         "key": key,
         "enabled": enabled,
-        "authRequired": _automation_requires_auth(key),
         "defaultEnabled": key in _default_enabled_automation_keys(config),
         "target": str(section.get("_target_") or ""),
     }
-    if key == "gmail_tasks":
-        payload["connection"] = _gmail_automation_status()
     return payload
 
 
@@ -429,163 +357,6 @@ def _restart_dashboard_observer_if_managed(
     return True
 
 
-def _gmail_automation_status(
-    *,
-    credentials_path: Path | None = None,
-    token_path: Path | None = None,
-) -> dict[str, Any]:
-    resolved_credentials_path = credentials_path or resolve_gmail_credentials_path()
-    resolved_token_path = token_path or resolve_gmail_token_path()
-    credentials_present = resolved_credentials_path.exists()
-    token_present = resolved_token_path.exists()
-    connected = False
-    token_detail = "Missing token"
-    if token_present:
-        try:
-            creds = Credentials.from_authorized_user_file(
-                str(resolved_token_path), GmailTasksAutomation.SCOPES
-            )
-            connected = bool(getattr(creds, "valid", False))
-            if connected:
-                token_detail = "Authorized"
-                _clear_gmail_auth_session()
-            elif getattr(creds, "expired", False) and getattr(
-                creds, "refresh_token", None
-            ):
-                token_detail = "Token expired but refreshable"
-            else:
-                token_detail = "Token present but invalid"
-        except Exception as exc:  # pragma: no cover - defensive
-            token_detail = f"Token unreadable ({type(exc).__name__})"
-    pending_auth = _pending_gmail_auth_payload(token_present=token_present)
-
-    status = {
-        "credentialsPresent": credentials_present,
-        "tokenPresent": token_present,
-        "connected": connected,
-        "credentialsPath": _safe_display_path(
-            resolved_credentials_path, root=_REPO_ROOT
-        ),
-        "tokenPath": _safe_display_path(resolved_token_path, root=_REPO_ROOT),
-        "detail": token_detail
-        if credentials_present
-        else "Missing Gmail credentials file",
-        "setupDocPath": _safe_display_path(
-            _REPO_ROOT / "docs" / "gmail_setup.md", root=_REPO_ROOT
-        ),
-    }
-    if pending_auth is not None:
-        status["pendingAuth"] = pending_auth
-    return status
-
-
-def _pending_gmail_auth_payload(*, token_present: bool) -> dict[str, Any] | None:
-    session = _current_gmail_auth_session()
-    if session is None or (session.completed and not session.error):
-        return None
-    if token_present and session.error:
-        _clear_gmail_auth_session()
-    return {
-        "active": not session.completed,
-        "authUrl": session.auth_url,
-        "redirectUri": session.redirect_uri,
-        "startedAt": session.started_at,
-        "error": session.error,
-    }
-
-
-def _start_gmail_manual_auth_session(
-    *,
-    credentials_path: Path | None = None,
-) -> _PendingGmailAuthSession:
-    global _GMAIL_AUTH_SESSION
-
-    resolved_credentials_path = credentials_path or resolve_gmail_credentials_path()
-    if not resolved_credentials_path.exists():
-        raise FileNotFoundError(
-            "gmail_credentials.json is required before connecting Gmail."
-        )
-
-    flow = InstalledAppFlow.from_client_secrets_file(
-        str(resolved_credentials_path), GmailTasksAutomation.SCOPES
-    )
-
-    class _OAuthCallbackHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            nonlocal flow
-            server = cast(ThreadingHTTPServer, self.server)
-            current_url = f"http://127.0.0.1:{server.server_address[1]}{self.path}"
-            try:
-                with _allow_insecure_oauth_transport():
-                    flow.fetch_token(authorization_response=current_url)
-                credentials = cast(Credentials, flow.credentials)
-                _write_gmail_token(credentials)
-                _set_automation_enabled("gmail_tasks", enabled=True)
-                _restart_dashboard_observer_if_managed()
-                with _GMAIL_AUTH_LOCK:
-                    if _GMAIL_AUTH_SESSION is not None:
-                        _GMAIL_AUTH_SESSION.completed = True
-                        _GMAIL_AUTH_SESSION.error = None
-                body = (
-                    "<html><body style='font-family:system-ui,sans-serif;padding:24px'>"
-                    "<h1>Gmail connected</h1>"
-                    "<p>You can return to the control panel and refresh the automation state.</p>"
-                    "</body></html>"
-                )
-                self.send_response(200)
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - callback failures are browser driven
-                with _GMAIL_AUTH_LOCK:
-                    if _GMAIL_AUTH_SESSION is not None:
-                        _GMAIL_AUTH_SESSION.error = f"{type(exc).__name__}: {exc}"
-                body = (
-                    "<html><body style='font-family:system-ui,sans-serif;padding:24px'>"
-                    "<h1>Gmail authorization failed</h1>"
-                    f"<p>{type(exc).__name__}: {exc}</p>"
-                    "</body></html>"
-                )
-                self.send_response(500)
-
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(body.encode("utf-8"))
-
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003  # pylint: disable=redefined-builtin
-            message = format % args if args else format
-            logger.info("Gmail OAuth callback: {}", message)
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _OAuthCallbackHandler)
-    server.timeout = 300
-    flow.redirect_uri = f"http://127.0.0.1:{server.server_port}/"
-    with _allow_insecure_oauth_transport():
-        auth_url, state = flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="true",
-            prompt="consent",
-        )
-
-    session = _PendingGmailAuthSession(
-        state=str(state),
-        auth_url=str(auth_url),
-        redirect_uri=str(flow.redirect_uri),
-        started_at=datetime.now().isoformat(timespec="seconds"),
-    )
-    with _GMAIL_AUTH_LOCK:
-        _GMAIL_AUTH_SESSION = session
-
-    def _serve_once() -> None:
-        try:
-            server.handle_request()
-        finally:
-            server.server_close()
-
-    threading.Thread(
-        target=_serve_once, name="gmail-oauth-callback", daemon=True
-    ).start()
-    return session
-
-
 def _load_observer_state(*, cache: Cache | None = None) -> dict[str, Any]:
     storage = cache or Cache()
     try:
@@ -680,7 +451,9 @@ def _run_automation_sync(
             output_stream, format="{message}", level=get_log_level()
         )
         try:
+            logger.info("Manual automation run started: {}", automation.name)
             task_delegations = automation.tick(dbio)
+            logger.info("Manual automation run completed: {}", automation.name)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             logger.exception(
@@ -691,6 +464,8 @@ def _run_automation_sync(
             if not continue_on_error:
                 raise
         finally:
+            if error:
+                logger.error("Manual automation run failed: {}", automation.name)
             logger.remove(loguru_handler_id)
     finished_at = datetime.now()
     return {
@@ -726,11 +501,12 @@ def _run_all_automations_sync(*, dbio: Database) -> dict[str, Any]:
 
 async def _run_with_db(func: Any, *args: Any) -> Any:
     dbio = Database(".env")
-    dbio.pull()
+    with activity_sync_lock():
+        await asyncio.to_thread(dbio.pull)
     try:
         return await asyncio.to_thread(func, *args, dbio=dbio)
     finally:
-        dbio.reset()
+        await asyncio.to_thread(dbio.reset)
 
 
 async def _run_job(job_id: str, func: Any, *args: Any) -> None:
@@ -781,39 +557,6 @@ async def admin_automations_payload() -> dict[str, Any]:
         logger.warning("Failed to load automations: {}", exc)
         return {"automations": [], "error": f"{type(exc).__name__}: {exc}"}
     return {"automations": automations, "configPath": str(AUTOMATIONS_PATH)}
-
-
-async def admin_gmail_connect_status() -> dict[str, Any]:
-    return _gmail_automation_status()
-
-
-async def admin_gmail_connect_start() -> dict[str, Any]:
-    status = _gmail_automation_status()
-    if not status["credentialsPresent"]:
-        raise HTTPException(
-            status_code=400,
-            detail="gmail_credentials.json is required before connecting Gmail.",
-        )
-    if status["connected"]:
-        return status
-    pending_auth = status.get("pendingAuth")
-    if isinstance(pending_auth, Mapping) and pending_auth.get("active"):
-        status["authUrl"] = pending_auth.get("authUrl")
-        status["redirectUri"] = pending_auth.get("redirectUri")
-        return status
-    session = await asyncio.to_thread(_start_gmail_manual_auth_session)
-    next_status = _gmail_automation_status()
-    next_status["authUrl"] = session.auth_url
-    next_status["redirectUri"] = session.redirect_uri
-    return next_status
-
-
-async def admin_gmail_disconnect() -> dict[str, Any]:
-    token_path = resolve_gmail_token_path()
-    if token_path.exists():
-        token_path.unlink()
-    _clear_gmail_auth_session()
-    return _gmail_automation_status()
 
 
 async def admin_observer_state() -> dict[str, Any]:

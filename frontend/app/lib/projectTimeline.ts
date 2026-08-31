@@ -1,0 +1,39 @@
+export type TimelineStatus = "completed" | "ongoing" | "unresolved" | "inactive";
+
+export type ProjectTimelineChild = {
+  id: string;
+  name: string;
+  status: TimelineStatus;
+  startDate: string;
+  endDate: string | null;
+  visualStart: string;
+  visualEnd: string;
+  completionDate: string | null;
+  archiveDate: string | null;
+  archived: boolean;
+  durationDays: number;
+  completions: number;
+  completionWeeks: string[];
+  openTasks: number;
+};
+
+export type ProjectTimelineParent = {
+  id: string;
+  name: string;
+  children: ProjectTimelineChild[];
+  standalone?: boolean;
+};
+
+export type ProjectTimelineData = {
+  range: { start: string; end: string } | null;
+  parents: ProjectTimelineParent[];
+  history: {
+    activityStart: string | null;
+    activityEnd: string | null;
+    activeProjects: number;
+    archivedProjects: number;
+    archivedProjectsInView: number;
+  };
+  refreshedAt?: string;
+  error?: string;
+};

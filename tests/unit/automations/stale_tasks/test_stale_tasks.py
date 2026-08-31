@@ -84,7 +84,7 @@ def test_evaluate_task_staleness_skips_exempt_label() -> None:
     assert decision.should_update is False
 
 
-def test_evaluate_task_staleness_skips_literal_star_space_title() -> None:
+def test_evaluate_task_staleness_treats_literal_star_space_title_as_normal_task() -> None:
     task = make_task(
         "task-context",
         content="* Durable project constraint",
@@ -99,8 +99,8 @@ def test_evaluate_task_staleness_skips_literal_star_space_title() -> None:
         config=StaleTaskConfig(),
     )
 
-    assert decision.state == "skip"
-    assert decision.reason == "non_removable"
+    assert decision.state == "very_old"
+    assert decision.reason == "very_old"
 
 
 def test_evaluate_task_staleness_skips_recurring_task() -> None:

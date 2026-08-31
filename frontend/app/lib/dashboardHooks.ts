@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardHome, DashboardStatus, Granularity, Health } from "./dashboardData";
 import type { DashboardProgress } from "../components/ProgressSteps";
-import type { LlmBreakdownProgress } from "../components/LlmBreakdownStatus";
+import type { ProjectTimelineData } from "./projectTimeline";
 
 const DASHBOARD_RETRY_LIMIT = 300;
 const DASHBOARD_RETRY_DELAY_MS = 2500;
@@ -300,43 +300,39 @@ export function useSyncLabel(status: DashboardStatus | null) {
   return { label, title };
 }
 
-export function useLlmBreakdownProgress({ pollMs = 2000 }: { pollMs?: number } = {}) {
-  const [progress, setProgress] = useState<LlmBreakdownProgress | null>(null);
-  const [loading, setLoading] = useState(false);
+export function useProjectTimeline() {
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [data, setData] = useState<ProjectTimelineData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    let active = true;
-
     const load = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        setLoading(true);
-        const res = await fetch("/api/dashboard/llm_breakdown", { signal: controller.signal });
-        if (!res.ok) throw new Error("llm-progress");
-        const payload = await readJson<LlmBreakdownProgress>(res);
-        if (!active) return;
-        setProgress(payload);
-      } catch (e) {
-        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
-          return;
-        }
-        setProgress(null);
+        const query = new URLSearchParams();
+        if (refreshNonce) query.set("refresh", "true");
+        const response = await fetch(`/api/dashboard/project-timeline?${query}`, { signal: controller.signal });
+        const payload = await readJson<ProjectTimelineData>(response);
+        if (!response.ok || payload.error) throw new Error(payload.error ?? `Failed to load timeline (${response.status})`);
+        setData(payload);
+      } catch (reason) {
+        if (reason && typeof reason === "object" && "name" in reason && (reason as { name?: string }).name === "AbortError") return;
+        setError(reason instanceof Error ? reason.message : "Failed to load project timeline");
       } finally {
-        if (active) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
-
     load();
-    const interval = setInterval(load, pollMs);
-    return () => {
-      active = false;
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, [pollMs, refreshNonce]);
+    return () => controller.abort();
+  }, [refreshNonce]);
 
-  const refresh = () => setRefreshNonce((value) => value + 1);
-
-  return { progress, loading, refresh };
+  return {
+    data,
+    loading,
+    error,
+    refresh: () => setRefreshNonce((value) => value + 1)
+  };
 }

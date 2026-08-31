@@ -51,7 +51,7 @@ msiexec /x todoist-assistant-<version>.msi /qn /norestart
 
 - Install dir: `C:\Program Files\TodoistAssistant`
 - Writable data/config: `C:\ProgramData\TodoistAssistant`
-  - `config\` (YAML config + templates + agent instructions)
+  - `config\` (YAML configuration)
   - `.env` (created on first launch)
   - `logs\` (runtime logs and installer logs)
 
@@ -103,7 +103,7 @@ dist\windows\todoist-assistant-<version>.msi
 
 - Install dir: `C:\Program Files\TodoistAssistant`
 - Writable data/config: `C:\ProgramData\TodoistAssistant`
-  - `config\` (YAML config + templates + agent instructions)
+  - `config\` (YAML configuration)
   - `.env` (created from `config\.env.template` on first launch)
 End users do not need Python installed; the MSI bundles the runtime via PyInstaller.
 
@@ -111,8 +111,6 @@ The launcher sets:
 
 - `TODOIST_CONFIG_DIR`
 - `TODOIST_CACHE_DIR`
-- `TODOIST_AGENT_CACHE_PATH`
-- `TODOIST_AGENT_INSTRUCTIONS_DIR`
 
 ## Notes
 
