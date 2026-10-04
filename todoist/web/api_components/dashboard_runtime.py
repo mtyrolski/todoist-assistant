@@ -15,11 +15,11 @@ from todoist.database.base import Database
 from todoist.features.activity import (
     activity_history_boundary,
     activity_project_ids,
-    activity_sync_lock,
     load_activity_cache,
     merge_activity_cache,
     needs_activity_history,
 )
+from todoist.features.data_sync import backfill_activity_history, sync_recent_activity
 
 ProgressLaneStatus = Literal["queued", "active", "done"]
 ProgressValue = tuple[str, str | None, int, int, ProgressLaneStatus | None]
@@ -579,14 +579,8 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
 
 
 def _activity_fetch_window_config() -> tuple[int, int]:
-    cfg = _read_yaml_config(_AUTOMATIONS_PATH, required=False)
-    activity_cfg = cfg.get("activity") if isinstance(cfg, DictConfig) else None
-    if not isinstance(activity_cfg, Mapping):
-        return 10, 2
-    return (
-        int(activity_cfg.get("nweeks_window_size", 10)),
-        int(activity_cfg.get("early_stop_after_n_windows", 2)),
-    )
+    """Bound history scans while keeping sync configuration independent of jobs."""
+    return 10, 2
 
 
 def _refresh_state_sync(*, demo_mode: bool) -> None:
@@ -627,14 +621,9 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     step=1,
                     detail="Fetching changes with a one-day overlap",
                 )
-                with activity_sync_lock():
-                    recent_events = set(
-                        dbio.fetch_activity_incremental(
-                            set(cached_events),
-                            overlap_days=1,
-                        )
-                    )
-                cached_events = merge_activity_cache(recent_events)
+                sync_result = sync_recent_activity(dbio)
+                recent_events = sync_result.new_events
+                cached_events = sync_result.events
                 activity_sync_succeeded = True
                 logger.info(
                     "Activity sync recent phase complete: fetched={}; cached={}",
@@ -660,18 +649,12 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                             f"in {nweeks}-week windows"
                         ),
                     )
-                    with activity_sync_lock():
-                        cached_events = load_activity_cache()
-                        history_boundary = activity_history_boundary(cached_events)
-                        history_events = dbio.fetch_activity_history(
-                            nweeks_window_size=nweeks,
-                            early_stop_after_n_windows=early_stop,
-                            events_already_fetched=set(cached_events),
-                            date_to=history_boundary,
-                            progress_desc="Fetching activity history",
-                            on_events=merge_activity_cache,
-                        )
-                    cached_events = merge_activity_cache(set(history_events))
+                    history_result = backfill_activity_history(
+                        dbio,
+                        nweeks_window_size=nweeks,
+                        early_stop_after_n_windows=early_stop,
+                    )
+                    cached_events = history_result.events
                     logger.info(
                         "Activity sync history phase complete: cached={}",
                         len(cached_events),
@@ -841,35 +824,9 @@ def _stat_file(path: str | Path) -> dict[str, Any] | None:
 def _service_statuses() -> list[dict[str, Any]]:
     api_key_set = bool(_resolve_api_key())
     cache_activity = _stat_file(_cache_runtime_path("activity.joblib"))
-    automation_log = _stat_file(automation_log_path())
-    observer_settings = observer_settings_payload(
-        load_dashboard_config(_DASHBOARD_CONFIG_PATH),
-        path=_DASHBOARD_CONFIG_PATH,
-    )
-    observer_enabled = bool(observer_settings["enabled"])
-
-    observer_recent = False
-    if automation_log and automation_log.get("mtime"):
-        try:
-            log_dt = datetime.fromisoformat(automation_log["mtime"])
-            observer_recent = (datetime.now() - log_dt) < timedelta(minutes=2)
-        except ValueError:
-            observer_recent = False
-
-    if not observer_enabled:
-        observer_status = "warn"
-        observer_detail = "disabled"
-    elif observer_recent:
-        observer_status = "ok"
-        observer_detail = "recent activity"
-    else:
-        observer_status = "neutral"
-        observer_detail = "enabled, waiting for first tick"
-
     service_specs = (
         ("Todoist token", api_key_set, "API_KEY set", "API_KEY missing"),
         ("Activity cache", cache_activity, cache_activity, "activity.joblib missing"),
-        ("Automation log", automation_log, automation_log, "automation.log missing"),
     )
     return [
         {
@@ -878,7 +835,7 @@ def _service_statuses() -> list[dict[str, Any]]:
             "detail": ok_detail if available else missing_detail,
         }
         for name, available, ok_detail, missing_detail in service_specs
-    ] + [{"name": "Observer", "status": observer_status, "detail": observer_detail}]
+    ]
 
 
 _COMPONENT_EXPORTS = (

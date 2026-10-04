@@ -1,1 +1,1 @@
-"""Domain feature helpers shared by automations and the dashboard."""
+"""Domain helpers shared by data sync and the dashboard."""

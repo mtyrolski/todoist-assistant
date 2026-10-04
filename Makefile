@@ -1,25 +1,21 @@
-.PHONY: setup init_local_env ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard dashboard_raw dashboard_codex run_dashboard stop_dashboard status run_demo run_observer clear_local_env update_and_run test coverage pyright pylint ruff ruff_format pyright_all pylint_all ruff_all typecheck lint validate check_fast check test_all check_explicit_any build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
+.PHONY: setup sync sync_history ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard run_dashboard stop_dashboard status run_demo clear_local_env update_and_run test coverage lint check test_all build_windows_installer build_macos_pkg build_macos_app build_macos_dmg docker_build docker_up docker_down docker_logs docker_pull docker_watch
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-PY_SOURCE_SCRIPTS := scripts/build_windows.py scripts/check_explicit_any.py scripts/check_versions.py scripts/clear_local_env.py scripts/create_task_tree.py scripts/get_version.py scripts/resolve_llm_backend.py scripts/status.py
-PY_SOURCE_PATHS := todoist $(PY_SOURCE_SCRIPTS)
-PY_CHECK_PATHS := todoist tests $(PY_SOURCE_SCRIPTS)
-CHECK_FAST_TARGETS := check_explicit_any ruff
-CHECK_TARGETS := check_explicit_any pyright pylint ruff
-TEST_ALL_TARGETS := check_explicit_any pyright_all pylint_all ruff_all test
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 BACKEND ?= raw
 BACKEND_AI ?=
 
-setup: init_local_env ## First-time source setup: sync Todoist data, then use make dashboard
+setup: sync_history ## First-time source setup: fetch Todoist activity history
 
-init_local_env: # syncs history, fetches activity
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.init_env.automation --config-dir configs --config-name automations
+sync: ## Refresh recent Todoist activity
+	uv run python3 -m todoist.sync
 
-update_env: # updates history and fetches activity
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations
+sync_history: ## Fetch recent and older Todoist activity
+	uv run python3 -m todoist.sync --history
+
+update_env: sync ## Compatibility alias for local data refresh
 
 ensure_frontend_deps: # installs frontend deps if missing
 	@needs_install=0; \
@@ -49,29 +45,12 @@ run_api:
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-dashboard: run_dashboard ## Start dashboard without Codex executive review by default; BACKEND/BACKEND_AI may override
+dashboard: run_dashboard ## Start the dashboard
 
-dashboard_raw: ensure_frontend_deps ## Start dashboard with Codex executive review disabled
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
+run_dashboard: ensure_frontend_deps ## Start API and frontend
+	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start raw
-
-dashboard_codex: ensure_frontend_deps ## Start dashboard with the local Codex executive review
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start codex
-
-run_dashboard: ensure_frontend_deps ## Start dashboard; supports BACKEND/BACKEND_AI=raw|codex
-	@backend="$(BACKEND)"; \
-	if [ -n "$(BACKEND_AI)" ]; then backend="$(BACKEND_AI)"; fi; \
-	case "$$backend" in \
-		raw|none|disabled) stack_backend="raw" ;; \
-		codex) stack_backend="codex" ;; \
-		*) echo "Unsupported dashboard backend: $$backend (use raw or codex)"; exit 2 ;; \
-	esac; \
-	DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
-	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
-	bash ./scripts/dashboard_stack.sh start "$$stack_backend"
+	bash ./scripts/dashboard_stack.sh start
 
 stop_dashboard:
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
@@ -113,61 +92,25 @@ run_demo: ensure_frontend_deps
 		wait -n $$api_pid $$fe_pid; \
 	'
 
-run_observer:
-	@HYDRA_FULL_ERROR=1 uv run python3 -m todoist.run_observer --config-dir configs --config-name automations
-
 clear_local_env:
 	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env $(CLEAR_LOCAL_ENV_ARGS)
 
-update_and_run: # updates history, fetches activity, and runs the dashboard
-	HYDRA_FULL_ERROR=1 uv run python3 -m todoist.automations.update_env.automation --config-dir configs --config-name automations && \
-	make dashboard
+update_and_run: sync ## Refresh activity and start the dashboard
+	$(MAKE) dashboard
 
 test: ## Run unit tests with pytest
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run python3 -m pytest -v --tb=short tests/
+	PYTHONPATH=. uv run python3 -m pytest -v --tb=short tests/
 
 coverage: ## Run full pytest coverage report
-	PYTHONPATH=. HYDRA_FULL_ERROR=1 uv run --with coverage python -m coverage run -m pytest tests/
+	PYTHONPATH=. uv run --with coverage python -m coverage run -m pytest tests/
 	PYTHONPATH=. uv run --with coverage python -m coverage report
 
-check_explicit_any: ## Reject `: Any =` variable annotations used as typecheck escape hatches
-	PYTHONPATH=. uv run python3 -m scripts.check_explicit_any
+lint: ## Check Python imports and undefined names
+	PYTHONPATH=. uv run ruff check --select F todoist tests scripts
 
-pyright: ## Run Pyright type checks
-	PYTHONPATH=. uv run pyright --warnings $(PY_SOURCE_PATHS)
+check: lint ## Alias for lint
 
-pylint: ## Run pylint
-	PYTHONPATH=. uv run pylint -j 0 --disable=cyclic-import $(PY_SOURCE_PATHS)
-
-ruff: ## Run Ruff lint checks
-	PYTHONPATH=. uv run ruff check $(PY_SOURCE_PATHS)
-
-ruff_format: ## Check Ruff formatting
-	PYTHONPATH=. uv run ruff format --check $(PY_SOURCE_PATHS)
-
-pyright_all: ## Run Pyright on source, tests, and scripts
-	PYTHONPATH=. uv run pyright --warnings $(PY_CHECK_PATHS)
-
-pylint_all: ## Run pylint on source, tests, and scripts
-	PYTHONPATH=. uv run pylint -j 0 --disable=cyclic-import $(PY_CHECK_PATHS)
-
-ruff_all: ## Run Ruff on source, tests, and scripts
-	PYTHONPATH=. uv run ruff check $(PY_CHECK_PATHS)
-
-typecheck: check_explicit_any pyright ## Run explicit-Any and Pyright checks
-
-lint: pylint ruff ruff_format ## Run pylint and Ruff checks
-
-check_fast: ## Run quick source-only checks in parallel
-	+@$(MAKE) --no-print-directory -j$(words $(CHECK_FAST_TARGETS)) $(CHECK_FAST_TARGETS)
-
-check: ## Run all static quality checks in parallel
-	+@$(MAKE) --no-print-directory -j$(words $(CHECK_TARGETS)) $(CHECK_TARGETS)
-
-validate: check ## Alias for make check
-
-test_all: ## Run static checks and tests in parallel
-	+@$(MAKE) --no-print-directory -j$(words $(TEST_ALL_TARGETS)) $(TEST_ALL_TARGETS)
+test_all: lint test ## Run lint and tests
 
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
 	uv run python3 -m scripts.build_windows

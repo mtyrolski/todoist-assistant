@@ -14,7 +14,6 @@ import { LeaderboardCard } from "./LeaderboardCard";
 import { InsightCard } from "./InsightCard";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
-import { ExecutiveReview } from "./ExecutiveReview";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -127,12 +126,10 @@ function toDateInputValue(date: Date): string {
 
 export function DashboardView({
   setupActive = false,
-  tokenReady = false,
-  setupComplete = false
+  tokenReady = false
 }: {
   setupActive?: boolean;
   tokenReady?: boolean;
-  setupComplete?: boolean;
 }) {
   const { health, loadingHealth, error } = useApiHealth();
   const {
@@ -158,7 +155,6 @@ export function DashboardView({
   const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
   const focusMetricsRef = useRef<HTMLDivElement | null>(null);
   const activityReady = Boolean(status?.activityCache);
-  const mappingReady = setupComplete;
   const setupSteps = useMemo(() => {
     return [
       {
@@ -171,13 +167,8 @@ export function DashboardView({
         hint: activityReady ? "Activity history ready" : "Fetching activity history",
         done: activityReady
       },
-      {
-        label: "Project mapping confirmed",
-        hint: mappingReady ? "Mappings saved" : "Confirm project adjustments",
-        done: mappingReady
-      }
     ];
-  }, [tokenReady, activityReady, mappingReady]);
+  }, [tokenReady, activityReady]);
   const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
   const setupChecklistActive = setupSteps.some((step) => !step.done);
 
@@ -415,7 +406,7 @@ export function DashboardView({
         <div>
           <p className="eyebrow">Todoist Assistant</p>
           <h1>Dashboard</h1>
-          <p className="lede">A fast, local dashboard for your Todoist data and automations.</p>
+          <p className="lede">A fast, local dashboard for your Todoist data.</p>
           <StatusPills
             items={[
               { label: healthLabel, tone: healthTone },
@@ -563,7 +554,7 @@ export function DashboardView({
             </div>
           </div>
           <p className="muted">
-            Once Todoist events start syncing, charts and insights will appear here. You can still manage automations and
+            Once Todoist events start syncing, charts and insights will appear here. You can still manage data and
             configuration in the Control Panel.
           </p>
           <div className="emptyStateActions">
@@ -572,10 +563,6 @@ export function DashboardView({
             </button>
           </div>
         </section>
-      ) : null}
-
-      {!noData ? (
-        <ExecutiveReview />
       ) : null}
 
       {!noData ? (
@@ -881,7 +868,7 @@ export function DashboardView({
             </div>
           </header>
           <p className="muted" style={{ marginTop: 0 }}>
-            Run automations, monitor services, and update runtime settings from the dedicated operations page.
+            Refresh data, monitor services, and update settings from the dedicated operations page.
           </p>
           <a className="button buttonSmall buttonGhost" href="/control-panel">
             Open Control Panel

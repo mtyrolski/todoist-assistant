@@ -1,10 +1,8 @@
 import os
 from pathlib import Path
 
-from todoist.core.env import EnvVar
 from todoist.core.runtime_env import (
     load_local_dotenv,
-    resolve_llm_backend,
     resolve_runtime_env_path,
 )
 
@@ -38,11 +36,6 @@ def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(
     data_dir.mkdir()
     cache_dir.mkdir()
 
-    (data_dir / ".env").write_text("TODOIST_AGENT_BACKEND='codex'", encoding="utf-8")
-    (cache_dir / ".env").write_text(
-        "TODOIST_AGENT_BACKEND='disabled'", encoding="utf-8"
-    )
-
     env_path = resolve_runtime_env_path(
         repo_root=tmp_path,
         cwd=tmp_path,
@@ -53,48 +46,11 @@ def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(
     )
 
     assert env_path == data_dir / ".env"
-    backend = resolve_llm_backend(
-        repo_root=tmp_path,
-        cwd=tmp_path,
-        environ={
-            "TODOIST_DATA_DIR": str(data_dir),
-            "TODOIST_CACHE_DIR": str(cache_dir),
-        },
-    )
-
-    assert backend == "codex"
-
-
-def test_resolve_llm_backend_reads_agent_backend_from_env_file(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text(
-        "TODOIST_AGENT_BACKEND='codex'",
-        encoding="utf-8",
-    )
-
-    backend = resolve_llm_backend(repo_root=tmp_path, cwd=tmp_path, environ={})
-
-    assert backend == "codex"
-
-
-def test_resolve_llm_backend_ignores_legacy_backend_env(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text(
-        "TODOIST_LLM_BACKEND='triton'",
-        encoding="utf-8",
-    )
-
-    backend = resolve_llm_backend(repo_root=tmp_path, cwd=tmp_path, environ={})
-
-    assert backend == "disabled"
-
-
 def test_load_local_dotenv_loads_resolved_env_file(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv(str(EnvVar.AGENT_BACKEND), raising=False)
-    (tmp_path / ".env").write_text(
-        "TODOIST_AGENT_BACKEND='codex'",
-        encoding="utf-8",
-    )
+    monkeypatch.delenv("API_KEY", raising=False)
+    (tmp_path / ".env").write_text("API_KEY='test-token'", encoding="utf-8")
 
     env_path = load_local_dotenv(repo_root=tmp_path, cwd=tmp_path)
 
     assert env_path == tmp_path / ".env"
-    assert os.getenv(str(EnvVar.AGENT_BACKEND)) == "codex"
+    assert os.getenv("API_KEY") == "test-token"

@@ -1,12 +1,8 @@
-"""Practical tests for dashboard utilities and multiplication-label helpers."""
+"""Practical tests for dashboard utilities."""
 
 import pandas as pd
 import pytest
 
-from todoist.automations.multiplicate import (
-    extract_multiplication_factor,
-    is_multiplication_label,
-)
 from todoist.dashboard.utils import extract_metrics, get_badges
 
 
@@ -120,22 +116,3 @@ def test_get_badges_handles_empty_projects():
     assert "P2 tasks 0" in badge
     assert "P3 tasks 0" in badge
     assert "P4 tasks 0" in badge
-
-
-def test_multiplication_labels_are_uppercase_only():
-    assert is_multiplication_label("X3")
-    assert not is_multiplication_label("x3")
-    with pytest.raises(ValueError):
-        extract_multiplication_factor("x3")
-    with pytest.raises(ValueError):
-        extract_multiplication_factor("X")
-
-
-def test_multiplication_label_pipeline_filters_and_extracts():
-    labels = ["X2", "ship", "X10", "X07"]
-    factors = [
-        extract_multiplication_factor(label)
-        for label in labels
-        if is_multiplication_label(label)
-    ]
-    assert factors == [2, 10, 7]

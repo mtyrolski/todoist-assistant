@@ -4,11 +4,10 @@
 
 import os
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, KeysView
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -38,7 +37,6 @@ from todoist.core.utils import (
     get_rate_pacing_jitter_max_seconds,
     get_rate_pacing_jitter_min_seconds,
     last_n_years_in_weeks,
-    load_config,
     retry_with_backoff,
     safe_instantiate_entry,
     try_n_times,
@@ -542,7 +540,7 @@ def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypat
     import todoist.core.utils as utils
 
     monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
-    log_path = tmp_path / "automation.log"
+    log_path = tmp_path / "runtime.log"
     with (
         patch("todoist.core.utils.logger.remove") as mock_remove,
         patch("todoist.core.utils.logger.add") as mock_add,
@@ -571,38 +569,10 @@ def test_configure_runtime_logging_is_idempotent(monkeypatch):
     assert mock_add.call_count == 1
 
 
-def test_configure_runtime_logging_isolates_default_runtime_log_under_pytest(
-    tmp_path, monkeypatch
-):
-    import todoist.core.utils as utils
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
-    monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
-    default_log_path = str(
-        (tmp_path / DEFAULT_CACHE_SUBDIR / "automation.log").resolve()
-    )
-
-    with (
-        patch("todoist.core.utils.logger.remove") as mock_remove,
-        patch("todoist.core.utils.logger.add") as mock_add,
-    ):
-        configure_runtime_logging(default_log_path, level="info")
-
-    mock_remove.assert_called_once()
-    isolated_log_path = mock_add.call_args_list[1].args[0]
-    assert isolated_log_path != default_log_path
-    assert isolated_log_path.startswith(
-        str(Path(tempfile.gettempdir()) / "todoist-assistant-pytest")
-    )
-
-
 def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     legacy_activity = tmp_path / "activity.joblib"
-    legacy_log = tmp_path / "automation.log"
     LocalStorage(str(legacy_activity), set).save({"event1"})
-    legacy_log.write_text("legacy-log", encoding="utf-8")
 
     with patch.dict(os.environ, {}, clear=True):
         cache = Cache()
@@ -612,20 +582,14 @@ def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
 
     assert cache.activity.load() == {"event1"}
     assert (cache_root / "activity.joblib").exists()
-    assert (cache_root / "automation.log").exists()
     assert (backup_root / "activity.joblib").exists()
-    assert (backup_root / "automation.log").exists()
     assert not legacy_activity.exists()
-    assert not legacy_log.exists()
 
 
 @pytest.mark.parametrize(
     ("storage_attr", "payload"),
     [
         ("activity", {"event1", "event2"}),
-        ("integration_launches", {"integration1": 5}),
-        ("automation_launches", {"automation1": 2}),
-        ("automation_run_signals", {"automation1": {"lastStatus": "completed"}}),
     ],
 )
 def test_cache_storage_roundtrip(tmp_path, storage_attr: str, payload):
@@ -676,49 +640,6 @@ def test_anonymizable_calls_abstract_method_once():
     mock_anonymize.assert_called_once_with(
         {"proj1": "anon_proj1"}, {"label1": "anon_label1"}
     )
-
-
-def test_load_config_with_relative_path():
-    with (
-        patch("todoist.core.utils.GlobalHydra") as mock_global_hydra,
-        patch("todoist.core.utils.initialize") as mock_initialize,
-        patch("todoist.core.utils.initialize_config_dir") as mock_initialize_config_dir,
-        patch("todoist.core.utils.compose") as mock_compose,
-    ):
-        mock_instance = MagicMock()
-        mock_global_hydra.instance.return_value = mock_instance
-        expected_config = MagicMock()
-        mock_compose.return_value = expected_config
-
-        result = load_config("test_config", "../config")
-
-        mock_instance.clear.assert_called_once()
-        mock_initialize.assert_called_once_with(config_path="../config")
-        mock_initialize_config_dir.assert_not_called()
-        mock_compose.assert_called_once_with(config_name="test_config")
-        assert result == expected_config
-
-
-def test_load_config_with_absolute_path():
-    absolute_config_dir = str((Path.cwd() / "tmp" / "todoist-config").resolve())
-
-    with (
-        patch("todoist.core.utils.GlobalHydra") as mock_global_hydra,
-        patch("todoist.core.utils.initialize") as mock_initialize,
-        patch("todoist.core.utils.initialize_config_dir") as mock_initialize_config_dir,
-        patch("todoist.core.utils.compose") as mock_compose,
-    ):
-        mock_instance = MagicMock()
-        mock_global_hydra.instance.return_value = mock_instance
-        mock_compose.return_value = MagicMock()
-
-        load_config("config", absolute_config_dir)
-
-        mock_instance.clear.assert_called_once()
-        mock_initialize.assert_not_called()
-        mock_initialize_config_dir.assert_called_once_with(
-            config_dir=absolute_config_dir
-        )
 
 
 def test_retry_with_backoff_success_first_attempt():

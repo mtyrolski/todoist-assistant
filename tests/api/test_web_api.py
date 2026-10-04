@@ -526,7 +526,7 @@ def test_dashboard_status_returns_services(api_client) -> None:
     payload = res.json()
     assert isinstance(payload.get("services"), list)
     assert any(svc.get("name") == "Todoist token" for svc in payload["services"])
-    assert payload["configurableItems"][0]["icon"] == "wrench"
+    assert payload["configurableItems"] == []
 
 
 def test_dashboard_home_includes_urgency_status(monkeypatch, api_client) -> None:

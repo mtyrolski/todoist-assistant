@@ -38,7 +38,7 @@ def test_windows_msi_contents() -> None:
         app_root = exe_path.parent
 
         _find_required(extracted_root, ".env.template")
-        _find_required(extracted_root, "automations.yaml")
+        _find_required(extracted_root, "dashboard.yaml")
 
         has_python = _has_python_runtime(app_root)
         assert has_python, (

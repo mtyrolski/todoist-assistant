@@ -4,7 +4,7 @@
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -13,8 +13,6 @@ from todoist.web.api_components.settings import (
     as_sequence as _as_sequence,
     body_object as _body_object,
     coerce_int as _coerce_int,
-    nested_config as _nested_config,
-    required_non_negative as _required_non_negative,
 )
 from todoist.web.routes.common import _sync_api_globals
 
@@ -55,17 +53,6 @@ def _dashboard_settings_response(config: Any, *, saved: bool = False) -> dict[st
         "settings": _dashboard_settings_payload(config),
         "editTargets": _dashboard_edit_targets(),
     }
-    return {"saved": True, **payload} if saved else payload
-
-
-def _automation_settings_response(
-    config: Any,
-    payload_fn: Callable[[Any], dict[str, Any]],
-    *,
-    saved: bool = False,
-    extra: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload = {"settings": payload_fn(config), **(extra or {})}
     return {"saved": True, **payload} if saved else payload
 
 
@@ -391,100 +378,3 @@ async def admin_update_dashboard_settings(
         config["plot_events"] = normalized_events
     await _save_config(_DASHBOARD_CONFIG_PATH, config)
     return _dashboard_settings_response(config, saved=True)
-
-
-@router.get("/api/admin/multiplication", tags=["admin"])
-async def admin_multiplication_settings() -> dict[str, Any]:
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    return _automation_settings_response(config, _multiplication_settings_payload)
-
-
-@router.put("/api/admin/multiplication", tags=["admin"])
-async def admin_update_multiplication_settings(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    payload = _body_object(payload)
-
-    flat_template = str(payload.get("flatLeafTemplate", "")).strip()
-    deep_template = str(payload.get("deepLeafTemplate", "")).strip()
-    if not flat_template or not deep_template:
-        raise HTTPException(
-            status_code=400, detail="flatLeafTemplate and deepLeafTemplate are required"
-        )
-
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    existing, config_data = _nested_config(config, "multiply")
-    config_data.update(
-        flat_leaf_template=flat_template,
-        deep_leaf_template=deep_template,
-    )
-    if "deepChildLabel" in payload:
-        deep_child_label = str(payload.get("deepChildLabel", "")).strip()
-        if not deep_child_label:
-            raise HTTPException(status_code=400, detail="deepChildLabel is required")
-        config_data["deep_child_label"] = deep_child_label
-    if "cleanupUnusedLabels" in payload:
-        config_data["cleanup_unused_labels"] = bool(payload.get("cleanupUnusedLabels"))
-    if "cleanupUnusedLabelsAfterDays" in payload:
-        config_data["cleanup_unused_labels_after_days"] = _required_non_negative(
-            payload, "cleanupUnusedLabelsAfterDays"
-        )
-
-    config["multiply"] = existing
-    await _save_config(_AUTOMATIONS_PATH, config)
-    return _automation_settings_response(
-        config, _multiplication_settings_payload, saved=True
-    )
-
-
-@router.get("/api/admin/stale_tasks", tags=["admin"])
-async def admin_stale_tasks_settings() -> dict[str, Any]:
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    return _automation_settings_response(config, _stale_tasks_settings_payload)
-
-
-@router.put("/api/admin/stale_tasks", tags=["admin"])
-async def admin_update_stale_tasks_settings(
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    payload = _body_object(payload)
-
-    old_after_days = _required_non_negative(payload, "oldAfterDays")
-    very_old_after_days = _required_non_negative(payload, "veryOldAfterDays")
-    delete_after_warning_days = _required_non_negative(
-        payload, "deleteAfterWarningDays"
-    )
-    warning_label = str(payload.get("warningLabel", "")).strip()
-    very_old_label = str(payload.get("veryOldLabel", "")).strip()
-    if not warning_label or not very_old_label:
-        raise HTTPException(
-            status_code=400,
-            detail="warningLabel and veryOldLabel are required",
-        )
-    if very_old_after_days < old_after_days:
-        raise HTTPException(
-            status_code=400,
-            detail="veryOldAfterDays must be greater than or equal to oldAfterDays",
-        )
-
-    config = _read_yaml_config(_AUTOMATIONS_PATH)
-    existing, config_data = _nested_config(config, "stale_tasks")
-    config_data.update(
-        old_after_days=old_after_days,
-        very_old_after_days=very_old_after_days,
-        old_label=warning_label,
-        very_old_label=very_old_label,
-        delete_after_warning_days=delete_after_warning_days,
-    )
-    if "dryRun" in payload:
-        existing["dry_run"] = bool(payload.get("dryRun"))
-    if "maxUpdatesPerTick" in payload:
-        existing["max_updates_per_tick"] = _required_non_negative(
-            payload, "maxUpdatesPerTick"
-        )
-    config["stale_tasks"] = existing
-
-    await _save_config(_AUTOMATIONS_PATH, config)
-    return _automation_settings_response(
-        config, _stale_tasks_settings_payload, saved=True
-    )

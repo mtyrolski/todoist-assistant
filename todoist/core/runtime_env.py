@@ -68,24 +68,3 @@ def load_local_dotenv(
     if env_path.exists():
         load_dotenv(env_path, override=override)
     return env_path
-
-
-def normalize_llm_backend(value: object) -> str:
-    backend = (_sanitize_env_text(value) or "disabled").lower()
-    if backend not in {"codex", "disabled"}:
-        raise ValueError(f"Unsupported agent backend: {backend}")
-    return backend
-
-
-def resolve_llm_backend(
-    *,
-    repo_root: Path | None = None,
-    cwd: Path | None = None,
-    environ: Mapping[str, str] | None = None,
-) -> str:
-    env = os.environ if environ is None else environ
-    env_path = resolve_runtime_env_path(repo_root=repo_root, cwd=cwd, environ=env)
-    file_values = load_runtime_env_values(env_path)
-    return normalize_llm_backend(
-        env.get(str(EnvVar.AGENT_BACKEND)) or file_values.get(str(EnvVar.AGENT_BACKEND))
-    )

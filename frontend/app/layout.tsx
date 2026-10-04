@@ -12,7 +12,7 @@ const grotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "Todoist Assistant",
-  description: "Local analytics and automation control for Todoist Assistant"
+  description: "Local Todoist analytics and project hierarchy management"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

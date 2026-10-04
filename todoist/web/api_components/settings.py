@@ -5,8 +5,6 @@ from typing import Any, cast
 from fastapi import HTTPException
 from omegaconf import DictConfig, OmegaConf
 
-from todoist.automations.multiplicate.automation import MultiplyConfig
-from todoist.features.stale_tasks import StaleTaskConfig
 from todoist.web.dashboard_payload import (
     DEFAULT_URGENCY_SETTINGS,
     normalize_plot_events,
@@ -57,72 +55,6 @@ def nested_config(config: Any, key: str) -> tuple[dict[str, Any], dict[str, Any]
     )
     existing["config"] = dict(config_data) if isinstance(config_data, Mapping) else {}
     return existing, existing["config"]
-
-
-def multiplication_settings_payload(config: DictConfig) -> dict[str, Any]:
-    raw = config.get("multiply") if hasattr(config, "get") else None
-    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
-    if not isinstance(data, dict):
-        data = {}
-
-    defaults = MultiplyConfig()
-    config_data = data.get("config") if isinstance(data.get("config"), Mapping) else {}
-    if not isinstance(config_data, Mapping):
-        config_data = {}
-
-    return {
-        "flatLeafTemplate": config_data.get(
-            "flat_leaf_template", defaults.flat_leaf_template
-        ),
-        "deepLeafTemplate": config_data.get(
-            "deep_leaf_template", defaults.deep_leaf_template
-        ),
-        "flatLabelRegex": config_data.get(
-            "flat_label_regex", defaults.flat_label_regex
-        ),
-        "deepLabelRegex": config_data.get(
-            "deep_label_regex", defaults.deep_label_regex
-        ),
-        "deepChildLabel": config_data.get(
-            "deep_child_label",
-            defaults.deep_child_label,
-        ),
-        "cleanupUnusedLabels": bool(
-            config_data.get("cleanup_unused_labels", defaults.cleanup_unused_labels)
-        ),
-        "cleanupUnusedLabelsAfterDays": config_data.get(
-            "cleanup_unused_labels_after_days",
-            defaults.cleanup_unused_labels_after_days,
-        ),
-    }
-
-
-def stale_tasks_settings_payload(config: DictConfig) -> dict[str, Any]:
-    raw = config.get("stale_tasks") if hasattr(config, "get") else None
-    data = OmegaConf.to_container(raw, resolve=False) if raw is not None else {}
-    if not isinstance(data, dict):
-        data = {}
-
-    defaults = StaleTaskConfig()
-    config_data = data.get("config") if isinstance(data.get("config"), Mapping) else {}
-    if not isinstance(config_data, Mapping):
-        config_data = {}
-
-    return {
-        "oldAfterDays": config_data.get("old_after_days", defaults.old_after_days),
-        "veryOldAfterDays": config_data.get(
-            "very_old_after_days",
-            defaults.very_old_after_days,
-        ),
-        "warningLabel": config_data.get("old_label", defaults.old_label),
-        "veryOldLabel": config_data.get("very_old_label", defaults.very_old_label),
-        "deleteAfterWarningDays": config_data.get(
-            "delete_after_warning_days",
-            defaults.delete_after_warning_days,
-        ),
-        "dryRun": bool(data.get("dry_run", True)),
-        "maxUpdatesPerTick": data.get("max_updates_per_tick", 25),
-    }
 
 
 def dashboard_settings_payload(

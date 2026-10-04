@@ -8,7 +8,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 STATE_DIR="${DASHBOARD_STATE_DIR:-${REPO_ROOT}/.cache/todoist-assistant/dashboard}"
 PID_DIR="${DASHBOARD_PID_DIR:-${STATE_DIR}/pids}"
 API_LOG_FILE="${STATE_DIR}/api.log"
-OBSERVER_LOG_FILE="${STATE_DIR}/observer.log"
 FRONTEND_LOG_FILE="${STATE_DIR}/frontend.log"
 
 FRONTEND_PORT="${DASHBOARD_FRONTEND_PORT:-3000}"
@@ -214,31 +213,17 @@ ensure_port_free() {
 cleanup_failed_launch() {
     log_note "Dashboard startup failed. Recent logs:"
     print_recent_log "API" "${API_LOG_FILE}" 20
-    print_recent_log "Observer" "${OBSERVER_LOG_FILE}" 20
     print_recent_log "Frontend" "${FRONTEND_LOG_FILE}" 20
     stop_pid_target "${PID_DIR}/frontend.pid" "Frontend"
-    stop_pid_target "${PID_DIR}/observer.pid" "Observer"
     stop_pid_target "${PID_DIR}/api.pid" "API"
 }
 
-backend_env_value() {
-    local backend="${1}"
-    case "${backend}" in
-        raw) echo "disabled" ;;
-        codex) echo "codex" ;;
-        *) echo "disabled" ;;
-    esac
-}
-
 start_dashboard() {
-    local backend="${1}"
-    local ai_backend
-    ai_backend="$(backend_env_value "${backend}")"
-    log_note "Launching dashboard stack (backend=${backend})..."
-    for service in api observer frontend; do
+    log_note "Launching dashboard stack..."
+    for service in api frontend; do
         clear_stale_pid "${PID_DIR}/${service}.pid"
     done
-    if is_running "${PID_DIR}/api.pid" || is_running "${PID_DIR}/observer.pid" || is_running "${PID_DIR}/frontend.pid"; then
+    if is_running "${PID_DIR}/api.pid" || is_running "${PID_DIR}/frontend.pid"; then
         echo "Dashboard stack is already running. Use make stop_dashboard first."
         return 1
     fi
@@ -250,17 +235,10 @@ start_dashboard() {
     trap cleanup_failed_launch ERR
 
     log_note "Starting API on 127.0.0.1:${API_PORT}..."
-    nohup env TODOIST_AGENT_BACKEND="${ai_backend}" setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
+    nohup setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
     local api_pid="$!"
     echo "${api_pid}" > "${PID_DIR}/api.pid"
     wait_for_process "${api_pid}" "API"
-
-    log_note "Starting observer..."
-    nohup env HYDRA_FULL_ERROR=1 TODOIST_AGENT_BACKEND="${ai_backend}" setsid uv run python3 -m todoist.run_observer --config-dir configs --config-name automations </dev/null > "${OBSERVER_LOG_FILE}" 2>&1 &
-    local observer_pid="$!"
-    echo "${observer_pid}" > "${PID_DIR}/observer.pid"
-    wait_for_process "${observer_pid}" "Observer"
-    print_recent_log "Observer" "${OBSERVER_LOG_FILE}" 8
 
     wait_for_api
     print_recent_log "API" "${API_LOG_FILE}" 8
@@ -276,15 +254,8 @@ start_dashboard() {
 
     trap - ERR
 
-    log_note "Dashboard running (backend=${backend})."
+    log_note "Dashboard running."
     echo "  API:      http://127.0.0.1:${API_PORT}"
-    if [[ "${backend}" == "raw" ]]; then
-        echo "  Review:   disabled"
-        echo "  Observer: enabled"
-    else
-        echo "  Review:   Codex on demand"
-        echo "  Observer: enabled"
-    fi
     echo "  Frontend: http://127.0.0.1:${FRONTEND_PORT}"
     echo "  Logs:     ${STATE_DIR}"
 }
@@ -293,13 +264,12 @@ stop_dashboard() {
     local stopped=0
     log_note "Stopping dashboard stack..."
 
-    for service in frontend observer api; do
+    for service in frontend api; do
         if [[ -f "${PID_DIR}/${service}.pid" ]]; then
             stopped=1
         fi
     done
     stop_pid_target "${PID_DIR}/frontend.pid" "Frontend"
-    stop_pid_target "${PID_DIR}/observer.pid" "Observer"
     stop_pid_target "${PID_DIR}/api.pid" "API"
 
     if [[ ${stopped} -eq 0 ]]; then
@@ -311,21 +281,14 @@ stop_dashboard() {
 
 main() {
     local command="${1:-}"
-    local backend="${2:-raw}"
 
     case "${command}" in
-        start)
-            if [[ "${backend}" != "raw" && "${backend}" != "codex" ]]; then
-                echo "Usage: $0 start [raw|codex]"
-                exit 1
-            fi
-            start_dashboard "${backend}"
-            ;;
+        start) start_dashboard ;;
         stop)
             stop_dashboard
             ;;
         *)
-            echo "Usage: $0 {start [raw|codex]|stop}"
+            echo "Usage: $0 {start|stop}"
             exit 1
             ;;
     esac

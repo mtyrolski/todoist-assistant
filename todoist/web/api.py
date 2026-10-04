@@ -22,8 +22,6 @@ import time
 
 import pandas as pd
 import numpy as np
-import hydra
-import httpx
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from todoist.database.base import Database
@@ -45,12 +43,8 @@ from todoist.dashboard.plots import (
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
-from todoist.automations.activity import Activity
-from todoist.automations.base import Automation
-from todoist.automations.observer import AutomationObserver
 from todoist.dashboard.settings import (
     load_dashboard_config,
-    observer_settings_payload,
     resolve_dashboard_config_path,
 )
 from todoist.web.dashboard_payload import (
@@ -61,7 +55,6 @@ from todoist.web.dashboard_payload import (
     normalize_activity_df as _normalize_activity_df,
     normalize_plot_events as _normalize_plot_events,
 )
-from todoist.web.routes.admin_automations import router as _admin_automations_router
 from todoist.web.routes.api_routes import router as _api_routes_router
 from todoist.web.api_components.logs import (
     RuntimeLogSpec as _RuntimeLogSpec,
@@ -91,24 +84,17 @@ from todoist.web.api_components.runtime import (
 )
 from todoist.web.api_components.settings import (
     dashboard_settings_payload as _component_dashboard_settings_payload,
-    multiplication_settings_payload as _multiplication_settings_payload,
-    stale_tasks_settings_payload as _stale_tasks_settings_payload,
 )
 from todoist.web.api_components.configuration import (
     read_yaml_config as _read_yaml_config,
     save_yaml_config as _save_yaml_config,
 )
 from todoist.web.api_components import dashboard_runtime as _dashboard_runtime_component
-from todoist.web.api_components import (
-    automation_runtime as _automation_runtime_component,
-)
 from todoist.core.utils import (
     Cache,
     LocalStorageError,
-    automation_log_path,
     configure_runtime_logging,
     get_log_level,
-    load_config,
     resolve_cache_dir,
     set_tqdm_progress_callback,
     get_tqdm_progress_callback,
@@ -117,7 +103,7 @@ from todoist.core.env import EnvVar
 from dotenv import dotenv_values, set_key, unset_key
 from todoist.core.version import get_version
 
-configure_runtime_logging(log_path=automation_log_path())
+configure_runtime_logging()
 
 # FastAPI application powering the new web dashboard.
 app = FastAPI(title="Todoist Dashboard API", version=get_version())
@@ -130,7 +116,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(_admin_automations_router)
 app.include_router(_api_routes_router)
 
 
@@ -205,7 +190,6 @@ _activity_backfill_attempted = False
 _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
-_JOBS_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
 _DASHBOARD_STATE_SCHEMA_VERSION = 3
@@ -233,7 +217,6 @@ def _now_iso() -> str:
 
 _DATA_DIR = _resolve_data_dir()
 _CONFIG_DIR = _resolve_config_dir()
-_AUTOMATIONS_PATH = _CONFIG_DIR / "automations.yaml"
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
 
 
@@ -273,20 +256,6 @@ def _resolve_timezone_status() -> dict[str, Any]:
     return payload
 
 
-@dataclass
-class _AdminJob:
-    id: str
-    kind: str
-    status: str  # queued | running | done | failed
-    created_at: str
-    started_at: str | None = None
-    finished_at: str | None = None
-    result: Any | None = None
-    error: str | None = None
-
-
-_JOBS: dict[str, _AdminJob] = {}
-
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
 
 
@@ -312,45 +281,6 @@ del _component_wrapper_name
 _ensure_state = _make_dashboard_runtime_wrapper("_ensure_state")
 _progress_snapshot = _make_dashboard_runtime_wrapper("_progress_snapshot")
 _service_statuses = _make_dashboard_runtime_wrapper("_service_statuses")
-
-
-def _call_automation_runtime(name: str, *args: Any, **kwargs: Any) -> Any:
-    _automation_runtime_component._sync_api_globals()
-    return getattr(_automation_runtime_component, name)(*args, **kwargs)
-
-
-def _make_automation_runtime_wrapper(name: str):
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        return _call_automation_runtime(name, *args, **kwargs)
-
-    _wrapper.__name__ = name
-    _wrapper._component_wrapper_for = name
-    return _wrapper
-
-
-_AUTOMATION_RUNTIME_EXPORTS = (
-    "_serialize_dt",
-    "_run_automation_sync",
-    "_run_all_automations_sync",
-    "_load_automations",
-    "_available_automation_keys",
-    "_automation_ref",
-    "_default_enabled_automation_keys",
-    "_configured_enabled_automation_keys",
-    "_enabled_automation_keys",
-    "_automation_metadata_for_key",
-    "_load_automation_inventory",
-    "_save_enabled_automations",
-    "_set_automation_enabled",
-    "_restart_dashboard_observer_if_managed",
-    "_automation_run_signal_metadata",
-    "_automation_launch_metadata",
-    "_load_observer_state",
-    "_serialize_observer_state",
-    "_build_observer",
-)
-for _name in _AUTOMATION_RUNTIME_EXPORTS:
-    globals()[_name] = _make_automation_runtime_wrapper(_name)
 
 
 def _log_files() -> list[dict[str, Any]]:

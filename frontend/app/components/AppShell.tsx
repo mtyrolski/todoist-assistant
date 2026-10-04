@@ -14,14 +14,11 @@ const NAV_GROUPS = [
     ]
   },
   {
-    title: "Automation",
-    items: [{ href: "/multiplication-labels", label: "Task Multiplication", hint: "Expand labelled work safely" }]
-  },
-  {
     title: "Operations",
     items: [
+      { href: "/project-adjustments", label: "Project Adjustments", hint: "Edit project hierarchy" },
       { href: "/live-logs", label: "Live Logs", hint: "Read-only runtime inspection" },
-      { href: "/control-panel", label: "Control Panel", hint: "Runs, settings, and status" }
+      { href: "/control-panel", label: "Control Panel", hint: "Settings and status" }
     ]
   }
 ];
@@ -43,7 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
           <div>
             <p className="brandTitle">Todoist Assistant</p>
-            <p className="brandTag">Local insights, automations, and AI workflows</p>
+            <p className="brandTag">Local Todoist insights</p>
           </div>
         </Link>
 

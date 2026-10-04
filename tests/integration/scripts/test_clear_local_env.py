@@ -28,8 +28,8 @@ def test_clear_local_env_removes_source_of_truth_runtime_files(tmp_path, monkeyp
     (cache_dir / "nested").mkdir(parents=True, exist_ok=True)
     (cache_dir / "nested" / "cache.txt").write_text("cache", encoding="utf-8")
     (cache_dir / "activity.joblib").write_text("activity", encoding="utf-8")
-    (cache_dir / "automation_run_signals.joblib").write_text(
-        "signals", encoding="utf-8"
+    (cache_dir / "legacy_cache.joblib").write_text(
+        "legacy", encoding="utf-8"
     )
     (data_dir / "cache" / "nested").mkdir(parents=True, exist_ok=True)
     (data_dir / "cache" / "nested" / "cache.txt").write_text("cache", encoding="utf-8")

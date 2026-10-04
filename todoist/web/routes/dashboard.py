@@ -3,15 +3,10 @@
 
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
-import asyncio
-from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal
-from uuid import uuid4
 
 from fastapi import APIRouter
-from loguru import logger
 
 from todoist.dashboard._plot_task_counts import plot_task_count_trend
 from todoist.dashboard.plots import (
@@ -24,9 +19,6 @@ from todoist.dashboard.plots import (
     plot_task_lifespans,
     plot_weekly_completion_trend,
 )
-from todoist.dashboard.executive_review import review_context
-from todoist.core.runtime_env import load_runtime_env_values, resolve_llm_backend
-from todoist.llm.factory import build_codex_chat_model
 from todoist.database.dataframe import (
     get_adjusting_archived_parent_projects,
     get_adjusting_mapping,
@@ -53,20 +45,7 @@ from todoist.web.routes.common import _sync_api_globals
 Granularity = Literal["W", "ME", "3ME"]
 
 
-ReviewStatus = Literal["running", "completed", "failed"]
 router = APIRouter()
-
-
-@dataclass
-class _ExecutiveReviewRun:
-    id: str
-    status: ReviewStatus
-    summary: str | None = None
-    detail: str | None = None
-
-
-_EXECUTIVE_REVIEW_RUN: _ExecutiveReviewRun | None = None
-_EXECUTIVE_REVIEW_TASKS: set[asyncio.Task[None]] = set()
 
 
 @router.get("/api/dashboard/project-timeline", tags=["dashboard"])
@@ -108,111 +87,6 @@ async def project_timeline(
     return dict(payload)
 
 
-def _executive_review_prompt(context: dict[str, Any]) -> str:
-    return (
-        "Write a concise executive review of this Todoist activity snapshot. "
-        "Use only the supplied evidence. Compare the latest seven days with the prior seven days, "
-        "identify momentum, work concentration, stalled or overloaded projects, and recommend one "
-        "next-focus flow with at most three steps. Do not create or modify anything. "
-        "Use short labelled lines and bullets, without Markdown heading syntax.\n\n"
-        f"Snapshot from local activity.joblib and active Todoist projects:\n{context}"
-    )
-
-
-def _review_payload(run: _ExecutiveReviewRun | None) -> dict[str, Any]:
-    if run is None:
-        return {
-            "enabled": True,
-            "runId": None,
-            "status": "idle",
-            "summary": None,
-            "loading": False,
-            "cached": False,
-        }
-    return {
-        "enabled": True,
-        "runId": run.id,
-        "status": run.status,
-        "summary": run.summary,
-        "detail": run.detail,
-        "loading": run.status == "running",
-        "cached": run.status == "completed",
-    }
-
-
-def _finish_review(
-    run_id: str,
-    status: Literal["completed", "failed"],
-    *,
-    summary: str | None = None,
-    detail: str | None = None,
-) -> None:
-    if _EXECUTIVE_REVIEW_RUN is None or _EXECUTIVE_REVIEW_RUN.id != run_id:
-        return
-    _EXECUTIVE_REVIEW_RUN.status = status
-    _EXECUTIVE_REVIEW_RUN.summary = summary
-    _EXECUTIVE_REVIEW_RUN.detail = detail
-
-
-async def _generate_executive_review(run_id: str) -> None:
-    try:
-        await _ensure_state(refresh=False)
-        if _state.df_activity is None or _state.active_projects is None:
-            raise RuntimeError("Dashboard data is unavailable.")
-        context = review_context(
-            _normalize_activity_df(_state.df_activity), _state.active_projects
-        )
-        model = await asyncio.to_thread(
-            build_codex_chat_model,
-            load_runtime_env_values(_resolve_env_path()),
-            cwd=_REPO_ROOT,
-        )
-        summary = await asyncio.to_thread(
-            model.chat,
-            [{"role": "user", "content": _executive_review_prompt(context)}],
-        )
-        _finish_review(run_id, "completed", summary=summary)
-    except Exception as exc:
-        logger.exception("Codex executive review failed")
-        _finish_review(
-            run_id,
-            "failed",
-            detail=f"Codex could not generate the review: {str(exc)[:300]}",
-        )
-
-
-@router.post("/api/dashboard/executive_review", tags=["dashboard"])
-async def executive_review(refresh: bool = False) -> dict[str, Any]:
-    _sync_api_globals(globals())
-    del refresh  # The flag requests a new review; review input stays cache-only.
-    if resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd()) != "codex":
-        return {
-            "enabled": False,
-            "summary": None,
-            "detail": "Start with make dashboard_codex to generate the executive review.",
-        }
-
-    global _EXECUTIVE_REVIEW_RUN  # pylint: disable=global-statement
-    if _EXECUTIVE_REVIEW_RUN and _EXECUTIVE_REVIEW_RUN.status == "running":
-        return _review_payload(_EXECUTIVE_REVIEW_RUN)
-    _EXECUTIVE_REVIEW_RUN = _ExecutiveReviewRun(str(uuid4()), "running")
-    payload = _review_payload(_EXECUTIVE_REVIEW_RUN)
-
-    task = asyncio.create_task(_generate_executive_review(_EXECUTIVE_REVIEW_RUN.id))
-    _EXECUTIVE_REVIEW_TASKS.add(task)
-    task.add_done_callback(_EXECUTIVE_REVIEW_TASKS.discard)
-    return payload
-
-
-@router.get("/api/dashboard/executive_review", tags=["dashboard"])
-async def executive_review_status() -> dict[str, Any]:
-    _sync_api_globals(globals())
-    backend = resolve_llm_backend(repo_root=_REPO_ROOT, cwd=Path.cwd())
-    payload = _review_payload(_EXECUTIVE_REVIEW_RUN)
-    payload["enabled"] = backend == "codex"
-    return payload
-
-
 @router.get("/api/dashboard/status", tags=["dashboard"])
 async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     _sync_api_globals(globals())
@@ -221,21 +95,9 @@ async def dashboard_status(refresh: bool = False) -> dict[str, Any]:
     """
     # Intentionally ignore refresh: this endpoint must stay non-blocking and avoid Todoist API calls.
     _ = refresh
-    dashboard_config = load_dashboard_config(_DASHBOARD_CONFIG_PATH)
-    observer_settings = observer_settings_payload(
-        dashboard_config, path=_DASHBOARD_CONFIG_PATH
-    )
     return {
         "services": _service_statuses(),
-        "configurableItems": [
-            {
-                "key": "observer",
-                "label": "Dashboard observer",
-                "icon": "wrench",
-                "configPath": observer_settings["configPath"],
-                "anchor": "observer-control",
-            }
-        ],
+        "configurableItems": [],
         "apiCache": {
             "lastRefresh": datetime.fromtimestamp(_state.last_refresh_s).isoformat(
                 timespec="seconds"

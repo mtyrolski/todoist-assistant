@@ -41,20 +41,6 @@ def runtime_log_specs() -> tuple[RuntimeLogSpec, ...]:
             description="Next.js dashboard server output.",
             relative_path="dashboard/frontend.log",
         ),
-        RuntimeLogSpec(
-            key="observer",
-            label="Observer",
-            category="observer",
-            description="Background observer polling and automation trigger output.",
-            relative_path="dashboard/observer.log",
-        ),
-        RuntimeLogSpec(
-            key="automation",
-            label="Automation Jobs",
-            category="automation",
-            description="Manual and API-triggered automation runs, including activity sync phases.",
-            relative_path="automation.log",
-        ),
     )
 
 

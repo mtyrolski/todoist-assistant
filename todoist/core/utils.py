@@ -16,11 +16,8 @@ from pickle import HIGHEST_PROTOCOL, UnpicklingError
 from typing import Any, Callable, Generic, KeysView, Type, TypeVar, cast
 from zlib import error as ZlibError
 
-from hydra import compose, initialize, initialize_config_dir
-from hydra.core.global_hydra import GlobalHydra
 from joblib import dump, load
 from loguru import logger
-from omegaconf import DictConfig
 
 from todoist.core.env import EnvVar
 
@@ -28,6 +25,11 @@ try:  # pragma: no cover - platform-specific import
     import fcntl
 except ImportError:  # pragma: no cover - Windows
     fcntl = None
+
+try:  # pragma: no cover - Windows-specific import
+    import msvcrt
+except ImportError:  # pragma: no cover - Unix
+    msvcrt = None
 
 T = TypeVar("T")
 LOCAL_STORAGE_EXCEPTIONS = (
@@ -50,20 +52,13 @@ MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.3"
 CacheStorageSpec = tuple[str, Callable[[], Any]]
 CACHE_STORAGE_REGISTRY: dict[str, CacheStorageSpec] = {
     "activity": ("activity.joblib", set),
-    "observer_state": ("observer_state.joblib", dict),
-    "integration_launches": ("integration_launches.joblib", dict),
-    "automation_launches": ("automation_launches.joblib", dict),
-    "automation_run_signals": ("automation_run_signals.joblib", dict),
-    "stale_task_warnings": ("stale_task_warnings.joblib", dict),
-    "multiplication_label_usage": ("multiplication_label_usage.joblib", dict),
-    "habit_tracker_posts": ("habit_tracker_posts.joblib", dict),
     "dashboard_state": ("dashboard_state.joblib", dict),
     "archived_activity_scans": ("archived_activity_scans.joblib", dict),
 }
 RUNTIME_CACHE_FILENAMES: tuple[str, ...] = tuple(
     filename for filename, _default_factory in CACHE_STORAGE_REGISTRY.values()
 )
-RUNTIME_LOG_FILENAMES: tuple[str, ...] = ("automation.log",)
+RUNTIME_LOG_FILENAMES: tuple[str, ...] = ()
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = (
     RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
 )
@@ -173,13 +168,6 @@ def runtime_file_path(filename: str, cache_dir: str | None = None) -> str:
     return str(cache_root / filename)
 
 
-def automation_log_path(cache_dir: str | None = None) -> str:
-    resolved_cache_dir = resolve_cache_dir(cache_dir)
-    Path(resolved_cache_dir).mkdir(parents=True, exist_ok=True)
-    migrate_legacy_runtime_files(resolved_cache_dir)
-    return runtime_file_path("automation.log", cache_dir=resolved_cache_dir)
-
-
 def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
     raw = getenv(str(EnvVar.LOG_LEVEL), default)
     normalized = str(raw).strip().upper() if raw is not None else default
@@ -192,29 +180,8 @@ def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
     return default.upper()
 
 
-def _should_isolate_runtime_log_path_for_pytest(resolved_log_path: str | None) -> bool:
-    if resolved_log_path is None:
-        return False
-    if "pytest" not in sys.modules:
-        return False
-    if getenv(str(EnvVar.CACHE_DIR)):
-        return False
-
-    default_runtime_log = str(
-        (Path.cwd() / DEFAULT_CACHE_SUBDIR / "automation.log").resolve()
-    )
-    return resolved_log_path == default_runtime_log
-
-
 def _resolve_runtime_log_path(log_path: str | None) -> str | None:
-    resolved_log_path = str(Path(log_path).expanduser().resolve()) if log_path else None
-    if not _should_isolate_runtime_log_path_for_pytest(resolved_log_path):
-        return resolved_log_path
-
-    isolated_root = (
-        Path(tempfile.gettempdir()) / "todoist-assistant-pytest" / str(os.getpid())
-    )
-    return str((isolated_root / "automation.log").resolve())
+    return str(Path(log_path).expanduser().resolve()) if log_path else None
 
 
 def configure_runtime_logging(
@@ -387,6 +354,34 @@ class LocalStorageError(Exception):
         logger.error(f"LocalStorageError: {message}")
 
 
+@contextmanager
+def exclusive_file_lock(path: Path):
+    """Lock a byte across processes on Windows or the whole file on Unix."""
+    with path.open("a+b") as lock_file:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        elif msvcrt is not None:
+            lock_file.seek(0, os.SEEK_END)
+            if lock_file.tell() == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            while True:
+                lock_file.seek(0)
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.1)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 class LocalStorage(Generic[T]):
     def __init__(self, path: str, resource_class: Callable[[], T]) -> None:
         self.path = path
@@ -407,17 +402,8 @@ class LocalStorage(Generic[T]):
         with _LOCAL_STORAGE_LOCKS_GUARD:
             thread_lock = _LOCAL_STORAGE_LOCKS.setdefault(path, RLock())
         with thread_lock:
-            lock_file = None
-            try:
-                lock_file = open(f"{path}.lock", "a+b")
-                if fcntl is not None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            with exclusive_file_lock(Path(f"{path}.lock")):
                 yield
-            finally:
-                if lock_file is not None:
-                    if fcntl is not None:
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                    lock_file.close()
 
     def _load_unlocked(self) -> T:
         if not exists(self.path):
@@ -772,16 +758,6 @@ def with_retry(
             f"Failed to execute {operation_name} after {max_attempts} retry attempts"
         )
     return result
-
-
-def load_config(config_name: str, config_path: str) -> DictConfig:
-    GlobalHydra.instance().clear()
-    if os.path.isabs(config_path):
-        initialize_config_dir(config_dir=config_path)
-    else:
-        initialize(config_path=config_path)
-    config: DictConfig = compose(config_name=config_name)
-    return config
 
 
 TODOIST_COLOR_NAME_TO_RGB: dict[str, str] = {

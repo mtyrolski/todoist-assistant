@@ -57,12 +57,7 @@ def test_runtime_logs_only_return_explicit_allowlist(
     payload = res.json()
 
     ids = [item["id"] for item in payload["sources"]]
-    assert ids == [
-        "api",
-        "frontend",
-        "observer",
-        "automation",
-    ]
+    assert ids == ["api", "frontend"]
     assert "rogue" not in ids
     assert all(item["inspectOnly"] is True for item in payload["sources"])
 
@@ -72,7 +67,7 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
 ) -> None:
     cache_dir = tmp_path / "cache"
     dashboard_dir = _dashboard_log_dir(cache_dir)
-    (dashboard_dir / "observer.log").write_text(
+    (dashboard_dir / "api.log").write_text(
         "line-1\nline-2\nline-3\n", encoding="utf-8"
     )
 
@@ -80,10 +75,10 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
     monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
 
     client = api_client
-    ok = client.get("/api/runtime/logs/read?source=observer&tail_lines=2&page=1")
+    ok = client.get("/api/runtime/logs/read?source=api&tail_lines=2&page=1")
     assert ok.status_code == 200
     payload = ok.json()
-    assert payload["source"] == "observer"
+    assert payload["source"] == "api"
     assert payload["inspectOnly"] is True
     assert payload["content"] == "line-2\nline-3\n"
 
@@ -99,7 +94,6 @@ def test_admin_logs_lists_explicit_runtime_sources(
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "api.log").write_text("api ready\n", encoding="utf-8")
-    (tmp_path / "automation.log").write_text("automation ready\n", encoding="utf-8")
     (tmp_path / "dashboard" / "unexpected.log").write_text(
         "should not be listed\n", encoding="utf-8"
     )
@@ -108,16 +102,9 @@ def test_admin_logs_lists_explicit_runtime_sources(
     assert res.status_code == 200
     payload = res.json()
 
-    assert [item["source"] for item in payload["logs"]] == [
-        "api",
-        "frontend",
-        "observer",
-        "automation",
-    ]
+    assert [item["source"] for item in payload["logs"]] == ["api", "frontend"]
     assert payload["logs"][0]["available"] is True
     assert payload["logs"][0]["path"] == "dashboard/api.log"
-    assert payload["logs"][-1]["available"] is True
-    assert payload["logs"][-1]["path"] == "automation.log"
     assert all(item["path"] != "dashboard/unexpected.log" for item in payload["logs"])
 
 
@@ -128,19 +115,19 @@ def test_admin_read_log_uses_named_runtime_source(
     monkeypatch.chdir(tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
-    (dashboard_dir / "observer.log").write_text("line-a\nline-b\n", encoding="utf-8")
+    (dashboard_dir / "api.log").write_text("line-a\nline-b\n", encoding="utf-8")
 
     client = api_client
     res = client.get(
         "/api/admin/logs/read",
-        params={"source": "observer", "tail_lines": 20, "page": 1},
+        params={"source": "api", "tail_lines": 20, "page": 1},
     )
     assert res.status_code == 200
     payload = res.json()
 
-    assert payload["source"] == "observer"
-    assert payload["label"] == "Observer"
-    assert payload["path"] == "dashboard/observer.log"
+    assert payload["source"] == "api"
+    assert payload["label"] == "Backend API"
+    assert payload["path"] == "dashboard/api.log"
     assert "line-a" in payload["content"]
     assert payload["totalLines"] == 2
 
@@ -158,7 +145,6 @@ def test_runtime_logs_lists_curated_sources(
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
-    (tmp_path / "automation.log").write_text("automation line\n", encoding="utf-8")
 
     res = api_client.get("/api/runtime/logs")
     assert res.status_code == 200
@@ -169,7 +155,7 @@ def test_runtime_logs_lists_curated_sources(
     assert by_id["api"]["available"] is True
     assert by_id["api"]["inspectOnly"] is True
     assert by_id["frontend"]["available"] is False
-    assert by_id["automation"]["available"] is True
+    assert set(by_id) == {"api", "frontend"}
 
 
 def test_runtime_read_log_rejects_removed_triton_source(

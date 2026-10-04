@@ -33,12 +33,8 @@ type ApiErrorResponse = {
   detail?: string;
 };
 
-type Variant = "wide" | "embedded";
-
 type Props = {
-  variant?: Variant;
   showWhenEmpty?: boolean;
-  onAfterSave?: () => void;
 };
 
 const HELP_TEXT = `**Project hierarchy adjustments**
@@ -70,7 +66,7 @@ function isRetryableFetchError(message: string): boolean {
   return /invalid json response|failed to fetch|networkerror|econnrefused|socket hang up|econnreset/i.test(message);
 }
 
-export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = false, onAfterSave }: Props) {
+export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
   const [adjustments, setAdjustments] = useState<ProjectAdjustmentsResponse | null>(null);
   const [adjustmentFile, setAdjustmentFile] = useState("");
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
@@ -419,7 +415,6 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       }
       await loadAdjustments(adjustmentFile, false, true);
       setNotice("Mappings saved. Refresh dashboard data separately when you want charts recalculated.");
-      onAfterSave?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save adjustments");
     } finally {
@@ -427,15 +422,12 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     }
   };
 
-  const wrapperClass =
-    variant === "embedded" ? "card cardInner adjustmentsBoard" : "card adjustmentsBoard adjustmentsBoardWide";
-
   if (!showWhenEmpty && !loading && adjustments && unmappedProjects.length === 0) {
     return null;
   }
 
   return (
-    <section className={wrapperClass}>
+    <section className="card adjustmentsBoard adjustmentsBoardWide">
       <header className="adjustmentsHeader">
         <div>
           <p className="eyebrow">Project adjustments</p>
@@ -450,11 +442,11 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         </div>
         <div className="adjustmentsHeaderActions">
           <div className="control" style={{ margin: 0 }}>
-            <label className="muted tiny" htmlFor={`adjustment-file-${variant}`}>
+            <label className="muted tiny" htmlFor="adjustment-file">
               Mapping file
             </label>
             <select
-              id={`adjustment-file-${variant}`}
+              id="adjustment-file"
               value={adjustmentFile}
               onChange={(e) => loadAdjustments(e.target.value, false, true)}
               className="select"

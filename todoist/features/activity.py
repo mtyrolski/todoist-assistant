@@ -1,20 +1,13 @@
 from collections.abc import Iterable, Mapping
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator
 
 import typer
 from loguru import logger
 
 from todoist.core.types import Event
-from todoist.core.utils import Cache
+from todoist.core.utils import Cache, exclusive_file_lock
 from todoist.database.base import Database
-
-try:  # pragma: no cover - platform-specific import
-    import fcntl
-except ImportError:  # pragma: no cover - Windows
-    fcntl = None
 
 EventCollection = set[Event]
 NWEEKSMAX = 520  # 10 years
@@ -64,21 +57,13 @@ def merge_activity_cache(
     return (cache or Cache()).activity.update(_merge)
 
 
-@contextmanager
-def activity_sync_lock(*, cache: Cache | None = None) -> Iterator[None]:
+def activity_sync_lock(*, cache: Cache | None = None):
     """Serialize activity API syncs across threads and dashboard processes."""
 
     activity_path = Path((cache or Cache()).activity.path)
     lock_path = activity_path.with_name(f"{activity_path.stem}.sync.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as lock_file:
-        if fcntl is not None:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    return exclusive_file_lock(lock_path)
 
 
 def load_valid_events(events: object) -> EventCollection:
