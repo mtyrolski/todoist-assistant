@@ -5,7 +5,7 @@ class TodoistAssistant < Formula
 
   desc "Local-first Todoist automation and analytics assistant"
   homepage "https://github.com/mtyrolski/todoist-assistant"
-  version "0.4.0"
+  version "0.4.1"
   tarball = ENV["TODOIST_BREW_TARBALL"]
   if tarball && !tarball.empty?
     tarball_path = Pathname.new(tarball).realpath
