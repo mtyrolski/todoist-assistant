@@ -817,6 +817,12 @@ export function DashboardView({
           {eventPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
+          <PlotCard
+            title="Active Tasks by Priority"
+            figure={figures.taskCountTrend}
+            height={420}
+            help={PLOT_HELP.taskCountTrend}
+          />
         </section>
       ) : null}
 

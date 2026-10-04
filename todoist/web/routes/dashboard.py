@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter
 from loguru import logger
 
+from todoist.dashboard._plot_task_counts import plot_task_count_trend
 from todoist.dashboard.plots import (
     build_project_lifecycle_data,
     cumsum_completed_tasks_periodically,
@@ -30,6 +31,7 @@ from todoist.database.dataframe import (
     get_adjusting_archived_parent_projects,
     get_adjusting_mapping,
 )
+from todoist.features.activity import load_activity_cache
 from todoist.features.habit_tracker import extract_tracked_habit_tasks
 from todoist.features.stats import p1_tasks, p2_tasks, p3_tasks, p4_tasks
 from todoist.web.dashboard_payload import (
@@ -49,6 +51,8 @@ from todoist.web.dashboard_payload import (
 from todoist.web.routes.common import _sync_api_globals
 
 Granularity = Literal["W", "ME", "3ME"]
+
+
 ReviewStatus = Literal["running", "completed", "failed"]
 router = APIRouter()
 
@@ -406,8 +410,18 @@ async def dashboard_home(
             beg=beg_range,
             end=end_range,
         )
+        task_count_trend_fig = _apply_date_axis_viewport(
+            plot_task_count_trend(
+                active_projects,
+                load_activity_cache(),
+                today=today,
+            ),
+            beg=beg_range,
+            end=end_range,
+        )
         figures = {
             "weeklyCompletionTrend": _fig_to_dict(weekly_completion_fig),
+            "taskCountTrend": _fig_to_dict(task_count_trend_fig),
             "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
             "completedTasksPeriodically": _fig_to_dict(completed_periodic_fig),
             "cumsumCompletedTasksPeriodically": _fig_to_dict(cumsum_completed_fig),

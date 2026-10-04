@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 import todoist.web.api as web_api
+import todoist.web.routes.dashboard as dashboard_routes
 
 # pylint: disable=protected-access
 
@@ -15,6 +16,12 @@ def _stub_all_figures(monkeypatch) -> None:
     monkeypatch.setattr(
         web_api, "plot_weekly_completion_trend", lambda *args, **kwargs: go.Figure()
     )
+    monkeypatch.setattr(
+        dashboard_routes,
+        "plot_task_count_trend",
+        lambda *args, **kwargs: go.Figure(),
+    )
+    monkeypatch.setattr(dashboard_routes, "load_activity_cache", set)
     monkeypatch.setattr(
         web_api, "plot_task_lifespans", lambda *args, **kwargs: go.Figure()
     )

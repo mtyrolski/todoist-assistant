@@ -9,6 +9,7 @@ export type Granularity = "W" | "ME" | "3ME";
 
 export type DashboardFigures = {
   weeklyCompletionTrend?: PlotlyFigure;
+  taskCountTrend?: PlotlyFigure;
   taskLifespans?: PlotlyFigure;
   completedTasksPeriodically?: PlotlyFigure;
   cumsumCompletedTasksPeriodically?: PlotlyFigure;

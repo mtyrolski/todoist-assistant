@@ -48,6 +48,8 @@ export const DEFAULT_INSIGHT_HELP = `Insight
 Quick highlight computed from recent activity.`;
 
 export const PLOT_HELP = {
+  taskCountTrend: `Active task counts by date
+Reconstructed daily from cached Todoist activity and today's active tasks, shown for the selected dashboard range on a softened scale. Older events without priority metadata are counted as normal priority, so historical totals are more exact than the priority split.`,
   weeklyCompletionTrend: `Weekly completion trend
 Normalized cumulative completion pace by weekday.
 

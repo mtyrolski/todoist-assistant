@@ -312,6 +312,22 @@ def test_dashboard_home_requires_beg_and_end(monkeypatch, api_client) -> None:
     assert res.status_code == 400
 
 
+def test_task_count_trend_uses_selected_dashboard_viewport(
+    monkeypatch, api_client
+) -> None:
+    _set_dashboard_df(monkeypatch, _single_event_df())
+
+    res = _home(
+        api_client,
+        "beg=2025-01-01&end=2025-01-15&granularity=W",
+    )
+
+    assert res.status_code == 200
+    xaxis = res.json()["figures"]["taskCountTrend"]["layout"]["xaxis"]
+    assert xaxis["range"] == ["2025-01-01T00:00:00", "2025-01-16T00:00:00"]
+    assert xaxis["rangeslider"]["visible"] is True
+
+
 def test_dashboard_home_last_completed_week_parent_share(
     monkeypatch, api_client
 ) -> None:
