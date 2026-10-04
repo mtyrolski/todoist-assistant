@@ -5,7 +5,7 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
@@ -578,6 +578,56 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     return True
 
 
+def _project_refresh_baseline(*, demo_mode: bool) -> tuple[list[Project] | None, float]:
+    """Reuse project tasks even when a new activity event invalidates plot data."""
+    if (
+        _state.active_projects is not None
+        and _state.demo_mode == demo_mode
+        and _state.last_refresh_s > 0
+    ):
+        return _state.active_projects, _state.last_refresh_s
+
+    try:
+        payload = Cache().dashboard_state.load()
+    except LocalStorageError:
+        return None, 0.0
+    if not isinstance(payload, dict):
+        return None, 0.0
+    if payload.get("version") != _DASHBOARD_STATE_SCHEMA_VERSION:
+        return None, 0.0
+    if bool(payload.get("demo_mode", False)) != demo_mode:
+        return None, 0.0
+    if (
+        demo_mode
+        and payload.get("demo_state_version") != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION
+    ):
+        return None, 0.0
+    projects = payload.get("active_projects")
+    refreshed_at = payload.get("last_refresh_s")
+    if not isinstance(projects, list) or not all(
+        isinstance(project, Project) for project in projects
+    ):
+        return None, 0.0
+    if not isinstance(refreshed_at, (int, float)) or refreshed_at <= 0:
+        return None, 0.0
+    return projects, float(refreshed_at)
+
+
+def _project_ids_changed_since(events: set[Event], refreshed_at: float) -> set[str]:
+    """Include cached events synced by another process since the project snapshot."""
+    if refreshed_at <= 0:
+        return set()
+    cutoff = datetime.fromtimestamp(refreshed_at, timezone.utc) - timedelta(days=1)
+
+    def _after_cutoff(event: Event) -> bool:
+        event_date = event.date
+        if event_date.tzinfo is None:
+            event_date = event_date.replace(tzinfo=timezone.utc)
+        return event_date.astimezone(timezone.utc) >= cutoff
+
+    return activity_project_ids(event for event in events if _after_cutoff(event))
+
+
 def _activity_fetch_window_config() -> tuple[int, int]:
     """Bound history scans while keeping sync configuration independent of jobs."""
     return 10, 2
@@ -602,6 +652,9 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             detail="Checking activity changes before reconciling projects",
         )
         dbio = Database(".env")
+        previous_projects, previous_refresh_s = _project_refresh_baseline(
+            demo_mode=demo_mode
+        )
 
         try:
             cached_events = load_activity_cache()
@@ -677,6 +730,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 globals()["_activity_backfill_attempted"] = backfill_attempted
 
         changed_project_ids = activity_project_ids(recent_events)
+        if previous_projects is not None:
+            changed_project_ids.update(
+                _project_ids_changed_since(cached_events, previous_refresh_s)
+            )
         _set_progress_sync(
             "Reconciling project data",
             step=1,
@@ -685,11 +742,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 "checking the account project list"
             ),
         )
-        previous_projects = (
-            _state.active_projects
-            if activity_sync_succeeded and had_activity_boundary and not demo_mode
-            else None
-        )
+        if not activity_sync_succeeded or not had_activity_boundary or demo_mode:
+            previous_projects = None
         active_projects = dbio.fetch_projects_incrementally(
             previous_projects,
             changed_project_ids,

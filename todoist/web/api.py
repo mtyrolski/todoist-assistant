@@ -198,6 +198,7 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {
     "Checking Todoist updates": 1,
     "Querying project data": 1,
+    "Fetching initial project data": 1,
     "Querying changed project data": 1,
     "Reconciling project data": 1,
     "Checking activity cache": 1,

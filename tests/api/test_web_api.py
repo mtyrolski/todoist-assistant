@@ -1,12 +1,13 @@
 """Tests for FastAPI dashboard home endpoints."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import cast
 
 import pandas as pd
 import plotly.graph_objects as go
 
 from tests.factories import make_project, make_project_entry, make_task
+from tests.unit.database.helpers import make_event
 from tests.web_api_helpers import (
     _clear_dashboard_state,
     _set_state_with_df,
@@ -160,6 +161,49 @@ def test_load_state_from_disk_cache_rejects_stale_activity_signature(
     _clear_dashboard_state()
     loaded = web_api._load_state_from_disk_cache(demo_mode=False)
     assert loaded is False
+
+
+def test_project_refresh_reuses_snapshot_when_activity_signature_changes(
+    monkeypatch, tmp_path
+) -> None:
+    cache = _dashboard_cache(monkeypatch, tmp_path)
+    project = make_project(project_id="cached")
+    refreshed_at = datetime.now(timezone.utc).timestamp() - 3600
+    _save_dashboard_snapshot(
+        cache, active_projects=[project], last_refresh_s=refreshed_at
+    )
+    cache.activity.save({make_event("new-event")})
+    _clear_dashboard_state()
+
+    assert web_api._load_state_from_disk_cache(demo_mode=False) is False
+    projects, snapshot_time = web_api._call_dashboard_runtime(
+        "_project_refresh_baseline", demo_mode=False
+    )
+
+    assert projects is not None
+    assert [item.id for item in projects] == ["cached"]
+    assert snapshot_time == refreshed_at
+
+
+def test_project_refresh_counts_events_since_snapshot_even_if_already_cached() -> None:
+    refreshed_at = datetime.now(timezone.utc).timestamp() - 3600
+    changed = make_event(
+        "changed",
+        date=datetime.now(timezone.utc),
+        parent_project_id="changed-project",
+    )
+    old = make_event(
+        "old",
+        date=datetime.now(timezone.utc) - timedelta(days=4),
+        parent_project_id="old-project",
+    )
+
+    project_ids = web_api._call_dashboard_runtime(
+        "_project_ids_changed_since", {changed, old}, refreshed_at
+    )
+
+    assert "changed-project" in project_ids
+    assert "old-project" not in project_ids
 
 
 def test_in_memory_dashboard_state_rejects_changed_activity_signature(

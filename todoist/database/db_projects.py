@@ -228,6 +228,11 @@ class DatabaseProjects:
         entries_to_refresh = [
             entry for entry in project_entries if str(entry.id) in refresh_ids
         ]
+        progress_desc = (
+            "Querying changed project data"
+            if previous_by_id
+            else "Fetching initial project data"
+        )
         if entries_to_refresh:
             max_workers = min(get_max_concurrent_requests(), len(entries_to_refresh))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -251,7 +256,7 @@ class DatabaseProjects:
                         tasks = list(previous.tasks) if previous else []
                     refreshed_tasks[project_id] = tasks
                     report_tqdm_progress(
-                        "Querying changed project data",
+                        progress_desc,
                         completed,
                         len(entries_to_refresh),
                         "project",
