@@ -2312,17 +2312,13 @@ textarea.textInput {
 
 .adjustmentsDnD {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
-  align-items: flex-start;
 }
 
 .adjustmentsPool {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
-  min-height: 0;
-  max-height: clamp(20rem, 58vh, 38rem);
 }
 
 .adjustmentsDropzone {
@@ -2345,24 +2341,29 @@ textarea.textInput {
 .adjustmentsTiles {
   display: grid;
   gap: 8px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   align-content: flex-start;
-  padding-right: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
 }
 
 .adjustmentsTile {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
   font-size: 13px;
   cursor: grab;
+}
+
+.adjustmentsTile > span {
+  min-width: 0;
+  flex: 1 1 12rem;
+  overflow-wrap: anywhere;
 }
 
 .adjustmentsTileCompact {
@@ -2377,7 +2378,7 @@ textarea.textInput {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .adjustmentsTiles.isDragOver,
@@ -2390,23 +2391,48 @@ textarea.textInput {
 
 .adjustmentsBuckets {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  align-items: flex-start;
+  align-items: start;
 }
 
 .adjustmentsBucket {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
-  min-height: 160px;
-  max-height: clamp(18rem, 52vh, 34rem);
+  display: block;
+  min-width: 0;
 }
 
 .adjustmentsBucketHeader {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.adjustmentsBucketHeader::-webkit-details-marker {
+  display: none;
+}
+
+.adjustmentsBucketHeader::before {
+  content: "▸";
+  color: var(--muted);
+}
+
+.adjustmentsBucket[open] > .adjustmentsBucketHeader::before {
+  content: "▾";
+}
+
+.adjustmentsBucketHeader > div {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.adjustmentsBucketCount {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .bucketTitle {
@@ -2418,11 +2444,12 @@ textarea.textInput {
 .adjustmentsBucketBody {
   display: grid;
   gap: 8px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   align-content: flex-start;
-  padding-right: 4px;
+  margin-top: 14px;
+}
+
+.adjustmentsRemoveParent {
+  justify-self: start;
 }
 
 .adjustmentsBucketEmpty {

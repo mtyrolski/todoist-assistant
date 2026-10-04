@@ -79,6 +79,7 @@ export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
   const [loadingHint, setLoadingHint] = useState<string | null>(null);
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
   const [dragOverZone, setDragOverZone] = useState<string | null>(null);
+  const [expandedBuckets, setExpandedBuckets] = useState<Record<string, boolean>>({});
   const retryAttempts = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draggedProjectRef = useRef<string | null>(null);
@@ -535,14 +536,16 @@ export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
                           {remappableActiveRoots.includes(name) ? " (active root)" : ""}
                         </span>
                         <div className="adjustmentsTileActions">
-                          <button
-                            className="button buttonSmall buttonGhost"
-                            type="button"
-                            onClick={() => addParent(name)}
-                            disabled={isParent}
-                          >
-                            {isParent ? "Parent" : "Make parent"}
-                          </button>
+                          {archivedProjects.includes(name) ? (
+                            <button
+                              className="button buttonSmall buttonGhost"
+                              type="button"
+                              onClick={() => addParent(name)}
+                              disabled={isParent}
+                            >
+                              {isParent ? "Parent" : "Make parent"}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -569,31 +572,37 @@ export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
                       ? "Archived parent"
                       : "Custom target";
                   return (
-                    <div
+                    <details
                       key={bucket.name}
                       className={`card cardInner adjustmentsBucket ${dragOverZone === zone ? "isDragOver" : ""}`}
+                      open={expandedBuckets[bucket.name] ?? items.length <= 8}
+                      onToggle={(event) => {
+                        const expanded = event.currentTarget.open;
+                        setExpandedBuckets((prev) => prev[bucket.name] === expanded ? prev : { ...prev, [bucket.name]: expanded });
+                      }}
                       onDragOver={handleDragOverZone(zone)}
                       onDragLeave={handleDragLeaveZone(zone)}
                       onDrop={handleDropOnBucket(bucket.name)}
                     >
-                      <div className="adjustmentsBucketHeader">
+                      <summary className="adjustmentsBucketHeader">
                         <div>
                           <p className="bucketTitle">{bucket.name}</p>
                           <p className="muted tiny" style={{ margin: 0 }}>
                             {meta}
                           </p>
                         </div>
+                        <span className="adjustmentsBucketCount">{items.length} {items.length === 1 ? "project" : "projects"}</span>
+                      </summary>
+                      <div className="adjustmentsBucketBody">
                         {bucket.removable ? (
                           <button
-                            className="button buttonSmall buttonGhost"
+                            className="button buttonSmall buttonGhost adjustmentsRemoveParent"
                             type="button"
                             onClick={() => removeParent(bucket.name)}
                           >
                             Remove parent
                           </button>
                         ) : null}
-                      </div>
-                      <div className="adjustmentsBucketBody">
                         {items.length ? (
                           items.map(({ project: name, provenance }) => (
                             <div
@@ -622,10 +631,10 @@ export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
                                       })
                                     }
                                   >
-                                    Use automatic
+                                    Remove override
                                   </button>
                                 ) : null}
-                                {!parentSet.has(name) ? (
+                                {archivedProjects.includes(name) && !parentSet.has(name) ? (
                                   <button
                                     className="button buttonSmall buttonGhost"
                                     type="button"
@@ -643,7 +652,7 @@ export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
                           </div>
                         )}
                       </div>
-                    </div>
+                    </details>
                   );
                 })
               ) : (
