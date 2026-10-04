@@ -3,7 +3,7 @@ require "digest"
 class TodoistAssistant < Formula
   include Language::Python::Virtualenv
 
-  desc "Local-first Todoist automation and analytics assistant"
+  desc "Local Todoist analytics assistant"
   homepage "https://github.com/mtyrolski/todoist-assistant"
   version "0.4.1"
   tarball = ENV["TODOIST_BREW_TARBALL"]
@@ -70,7 +70,7 @@ class TodoistAssistant < Formula
 
   def caveats
     <<~EOS
-      The Homebrew formula installs the CLI only. The web dashboard and LLM
+      The Homebrew formula installs the CLI only. The web dashboard
       dependencies are not bundled. Use the source checkout to run the full
       dashboard stack.
     EOS

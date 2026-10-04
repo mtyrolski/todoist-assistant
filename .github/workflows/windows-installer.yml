@@ -1,12 +1,6 @@
 name: Windows Installer
 
 on:
-  push:
-    branches: [ main ]
-    tags:
-      - '*'
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -54,10 +48,7 @@ jobs:
         shell: powershell
         run: |
           uv sync --locked --group build
-          if ($LASTEXITCODE -ne 0) {
-            uv sync --group build
-            if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
-          }
+          if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
 
       - name: Ensure python3 shim for uv run
         shell: powershell

@@ -2,7 +2,7 @@
 
 The core package contains the local Todoist data layer: API access, database
 persistence, shared types, and activity helpers. It intentionally excludes the
-dashboard, frontend, plots, and Codex review integration.
+dashboard, frontend, and plots.
 
 Install from a checkout:
 
@@ -16,4 +16,4 @@ Build distributable artifacts:
 uv build core
 ```
 
-Use the main package when you need the local dashboard or automations.
+Use the main package when you need the local dashboard.

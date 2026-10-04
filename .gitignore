@@ -82,3 +82,6 @@ img/icon.ico
 packaging/macos/TodoistAssistant.icns
 .github/copilot-instructions.md
 .codex
+
+# TypeScript incremental builds
+*.tsbuildinfo

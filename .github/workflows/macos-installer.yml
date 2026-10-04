@@ -1,12 +1,6 @@
 name: macOS Installer
 
 on:
-  push:
-    branches: [ main ]
-    tags:
-      - '*'
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -117,7 +111,7 @@ jobs:
               delay=$((delay * 2))
             done
           }
-          retry 3 5 uv sync --locked --group build --extra macos || retry 3 5 uv sync --group build --extra macos
+          retry 3 5 uv sync --locked --group build
 
       - name: Ensure python3 shim for uv run
         run: |

@@ -1,24 +1,12 @@
 # Todoist Assistant
 
-Todoist Assistant is a local dashboard and small automation toolkit for Todoist.
-It keeps a local activity cache, shows what changed, and helps turn an overloaded
-task list into a clear next step.
-
-## What it includes
-
-- A dashboard for activity, priorities, project hierarchy, and completion trends
-- A project timeline showing weekly activity across the history cached for your account
-- Task Multiplication for expanding labelled work into a finite set of copies
-- Habit tracking and stale-task maintenance automations
-- Continuous observer sync for scheduled local automations
-- An optional, read-only Codex executive review of cached activity and active projects
+Todoist Assistant is a local dashboard for Todoist activity and project history. It stores fetched activity on disk and uses that cache to build charts, priorities, project hierarchy views, and the project timeline.
 
 ![Dashboard overview](img/fig1.png)
 
 ## Quick start
 
-Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js 20+, and a
-Todoist API token.
+Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js 20+, and a Todoist API token.
 
 ```bash
 git clone https://github.com/mtyrolski/todoist-assistant.git
@@ -29,54 +17,28 @@ make setup
 make dashboard
 ```
 
-Open the dashboard at <http://127.0.0.1:3000>.
-
-Useful commands:
+Open <http://127.0.0.1:3000>. The dashboard refreshes cached activity when needed. You can also fetch activity explicitly:
 
 ```bash
-make dashboard         # normal dashboard; no Codex request
-make dashboard_codex   # enables the on-demand executive review
-make update_env        # refresh local Todoist data
-make run_observer      # keep cache and short automations current
-make test_all          # complete test suite
+make sync          # incremental activity sync
+make sync_history  # incremental sync plus older history backfill
+make stop_dashboard
 ```
 
-The executive review runs only when requested from the dashboard. It sends a compact
-snapshot derived from `activity.joblib` and active projects to the local Codex CLI
-in read-only mode; it never changes Todoist. It compares the last week with the
-previous week, considers completion timing and project concentration, and recommends
-one focused next step. The project timeline provides the underlying parent-project
-and subproject history directly in the dashboard.
+Activity updates use a one-day overlap, fetch all pages in the range, and merge under a file lock. History windows are checkpointed on disk. Project adjustments are a full-width page under Operations; they preserve archived project mappings locally.
 
-## Scope and data
-
-The dashboard uses the local cache after sync. Todoist is contacted to refresh that
-cache, not for routine chart rendering. Keep `.env` private: it contains your
-Todoist token. The default dashboard does not require Codex. To use the review,
-install and authenticate the Codex CLI, then start `make dashboard_codex`.
-
-## Project layout
-
-- `todoist/` — Python application, cache, API, dashboard and automations
-- `frontend/` — Next.js dashboard
-- `configs/` — dashboard and automation configuration
-- `core/` — core-only Python package
-- `tests/` — unit, API, integration, and packaging checks
-
-## Packaging
-
-Windows and macOS packaging remains supported; see [Windows installer notes](docs/windows_installer.md).
-
-## Verification
+## Development
 
 ```bash
 uv sync --locked
-make test_all
-```
-
-For focused frontend checks:
-
-```bash
+make test
+npm --prefix frontend ci
 npm --prefix frontend run lint
 npm --prefix frontend run build
 ```
+
+The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The planned Android app is a standalone native client with its own local data store; the current Python and Next.js desktop dashboard is not an Android APK. See [Android direction](docs/ANDROID.md).
+
+## Packaging
+
+Windows and macOS packaging remains available through manually triggered workflows; see [Windows installer notes](docs/windows_installer.md).
