@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from tests.factories import make_project, make_project_entry
+from tests.factories import make_project, make_project_entry, make_task, make_task_entry
 from tests.unit.database.helpers import project_payload
 from todoist.api import TodoistEndpoints
 from todoist.api.client import RequestSpec
@@ -187,3 +187,42 @@ def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(
 
     assert mapping["orphan"].id == "remote_root"
     mock_fetch_project_by_id.assert_called_once_with("missing_parent", True)
+
+
+def test_fetch_projects_incrementally_reuses_unchanged_and_refreshes_changed(
+    db_projects,
+):
+    previous_a = make_project(
+        project_id="a",
+        tasks=[make_task("old-a", project_id="a")],
+    )
+    previous_b = make_project(
+        project_id="b",
+        tasks=[make_task("old-b", project_id="b")],
+    )
+    entries = [
+        make_project_entry(project_id="a", name="A renamed"),
+        make_project_entry(project_id="b", name="B"),
+        make_project_entry(project_id="c", name="C"),
+    ]
+
+    def _tasks(project_id: str):
+        return [make_task_entry(f"new-{project_id}", project_id=project_id)]
+
+    with (
+        patch.object(db_projects, "_fetch_projects_data", return_value=entries),
+        patch.object(
+            db_projects, "fetch_project_tasks", side_effect=_tasks
+        ) as fetch_tasks,
+    ):
+        projects = db_projects.fetch_projects_incrementally(
+            [previous_a, previous_b],
+            {"b"},
+        )
+
+    by_id = {project.id: project for project in projects}
+    assert by_id["a"].project_entry.name == "A renamed"
+    assert [task.id for task in by_id["a"].tasks] == ["old-a"]
+    assert [task.id for task in by_id["b"].tasks] == ["new-b"]
+    assert [task.id for task in by_id["c"].tasks] == ["new-c"]
+    assert {call.args[0] for call in fetch_tasks.call_args_list} == {"b", "c"}

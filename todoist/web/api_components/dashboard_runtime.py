@@ -10,10 +10,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
-from todoist.database.base import Database
 from todoist.core.types import Event, Project
+from todoist.database.base import Database
 from todoist.features.activity import (
     activity_history_boundary,
+    activity_project_ids,
     activity_sync_lock,
     load_activity_cache,
     merge_activity_cache,
@@ -598,19 +599,21 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
     error: str | None = None
     history_scan_succeeded = False
     backfill_attempted = bool(globals().get("_activity_backfill_attempted", False))
+    recent_events: set[Event] = set()
+    activity_sync_succeeded = False
     try:
         _set_progress_sync(
             "Checking Todoist updates",
             step=1,
-            detail="Refreshing project and task data from Todoist",
+            detail="Checking activity changes before reconciling projects",
         )
         dbio = Database(".env")
-        dbio.pull()
 
         try:
             cached_events = load_activity_cache()
         except LocalStorageError:
             cached_events = set()
+        had_activity_boundary = bool(cached_events)
         _set_progress_sync(
             "Checking activity cache",
             step=1,
@@ -622,11 +625,17 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 _set_progress_sync(
                     "Fetching recent activity",
                     step=1,
-                    detail="Refreshing the newest activity pages",
+                    detail="Fetching changes with a one-day overlap",
                 )
                 with activity_sync_lock():
-                    recent_events = set(dbio.fetch_activity_recent(max_pages=2))
+                    recent_events = set(
+                        dbio.fetch_activity_incremental(
+                            set(cached_events),
+                            overlap_days=1,
+                        )
+                    )
                 cached_events = merge_activity_cache(recent_events)
+                activity_sync_succeeded = True
                 logger.info(
                     "Activity sync recent phase complete: fetched={}; cached={}",
                     len(recent_events),
@@ -684,6 +693,26 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     backfill_attempted = True
                 globals()["_activity_backfill_attempted"] = backfill_attempted
 
+        changed_project_ids = activity_project_ids(recent_events)
+        _set_progress_sync(
+            "Reconciling project data",
+            step=1,
+            detail=(
+                f"Refreshing {len(changed_project_ids)} changed project(s) and "
+                "checking the account project list"
+            ),
+        )
+        previous_projects = (
+            _state.active_projects
+            if activity_sync_succeeded and had_activity_boundary and not demo_mode
+            else None
+        )
+        active_projects = dbio.fetch_projects_incrementally(
+            previous_projects,
+            changed_project_ids,
+        )
+        archived_projects = dbio.fetch_archived_projects()
+
         if _resolve_api_key():
             try:
                 try:
@@ -722,8 +751,6 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             step=3,
             detail="Loading metadata and caches",
         )
-        active_projects = dbio.fetch_projects(include_tasks=True)
-        archived_projects = dbio.fetch_archived_projects()
 
         if demo_mode and not dbio.is_anonymized:
             from todoist.database.demo import (

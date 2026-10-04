@@ -5,8 +5,8 @@ from threading import Lock
 from time import sleep
 from unittest.mock import patch
 
-from todoist.core.utils import set_tqdm_progress_callback
 from tests.unit.database.helpers import event_payload, make_event
+from todoist.core.utils import set_tqdm_progress_callback
 
 ProgressCall = tuple[
     str,
@@ -394,3 +394,40 @@ def test_fetch_activity_signature(db_activity):
     assert "starting_page" in params
     assert signature.parameters["max_pages"].default == 4
     assert signature.parameters["starting_page"].default == 0
+
+
+def test_fetch_activity_incremental_uses_previous_calendar_day_overlap(db_activity):
+    cached = make_event(
+        "known-event",
+        date=dt.datetime(2026, 10, 2, 18, 45, tzinfo=timezone.utc),
+        event_date="2026-10-02T18:45:00Z",
+    )
+    new_event = make_event("new-event")
+
+    with patch.object(
+        db_activity, "_fetch_activity_range", return_value=[new_event]
+    ) as fetch_range:
+        result = db_activity.fetch_activity_incremental(
+            {cached},
+            date_to=datetime(2026, 10, 3, 10, tzinfo=timezone.utc),
+        )
+
+    assert result == [new_event]
+    assert fetch_range.call_args.kwargs["date_from"] == datetime(
+        2026, 10, 1, tzinfo=timezone.utc
+    )
+    assert fetch_range.call_args.kwargs["date_to"] == datetime(
+        2026, 10, 3, 10, tzinfo=timezone.utc
+    )
+    assert fetch_range.call_args.kwargs["events_already_fetched"] == {cached}
+
+
+def test_fetch_activity_incremental_falls_back_without_cached_boundary(db_activity):
+    event = make_event("new-event")
+    with patch.object(
+        db_activity, "fetch_activity_recent", return_value=[event]
+    ) as fetch_recent:
+        result = db_activity.fetch_activity_incremental(set())
+
+    assert result == [event]
+    fetch_recent.assert_called_once_with(max_pages=2)

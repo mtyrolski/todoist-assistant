@@ -1,15 +1,15 @@
+from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
+import typer
 from loguru import logger
 
-from todoist.database.base import Database
 from todoist.core.types import Event
-import typer
-
 from todoist.core.utils import Cache
+from todoist.database.base import Database
 
 try:  # pragma: no cover - platform-specific import
     import fcntl
@@ -96,6 +96,39 @@ def load_valid_events(events: object) -> EventCollection:
 def activity_history_boundary(events: EventCollection) -> datetime | None:
     dates = [event.date for event in events if isinstance(event.date, datetime)]
     return min(dates) if dates else None
+
+
+def activity_project_ids(events: Iterable[Event]) -> set[str]:
+    """Return project IDs directly or indirectly referenced by activity events."""
+
+    project_ids: set[str] = set()
+
+    def _collect(value: object, *, key: str = "") -> None:
+        normalized_key = key.lower()
+        if isinstance(value, Mapping):
+            for nested_key, nested_value in value.items():
+                _collect(nested_value, key=str(nested_key))
+            return
+        if isinstance(value, (list, tuple, set)):
+            for nested_value in value:
+                _collect(nested_value, key=key)
+            return
+        if (
+            value is not None
+            and "project" in normalized_key
+            and normalized_key.endswith("id")
+        ):
+            project_ids.add(str(value))
+
+    for event in events:
+        entry = event.event_entry
+        for project_id in (entry.parent_project_id, entry.v2_parent_project_id):
+            if project_id:
+                project_ids.add(str(project_id))
+        if entry.object_type == "project" and entry.object_id:
+            project_ids.add(str(entry.object_id))
+        _collect(entry.extra_data)
+    return project_ids
 
 
 def needs_activity_history(events: EventCollection) -> bool:

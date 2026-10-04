@@ -4,15 +4,15 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from todoist.features.stats import extract_task_due_date
-from todoist.core.types import Event, EventEntry
 from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
 from todoist.api.client import EndpointCallResult
+from todoist.core.types import Event, EventEntry
 from todoist.core.utils import (
     get_max_concurrent_requests,
     report_tqdm_progress,
     safe_instantiate_entry,
 )
+from todoist.features.stats import extract_task_due_date
 
 ACTIVITY_PAGE_LIMIT = 100
 
@@ -257,6 +257,60 @@ class DatabaseActivity:
 
         logger.info("Activity sync mode=recent; pages={}", max_pages)
         return self.fetch_activity(max_pages=max_pages)
+
+    def fetch_activity_incremental(
+        self,
+        events_already_fetched: set[Event],
+        *,
+        overlap_days: int = 1,
+        date_to: datetime | None = None,
+        progress_desc: str = "Fetching recent activity",
+    ) -> list[Event]:
+        """Fetch activity since the newest cached event with a calendar-day overlap.
+
+        The overlap makes routine syncs resilient to delayed or reordered activity
+        records. The range is paginated without a page cap, so a busy account cannot
+        silently lose events between dashboard refreshes.
+        """
+        if overlap_days < 0:
+            raise ValueError("overlap_days must be non-negative")
+        if not events_already_fetched:
+            logger.info("Activity sync mode=recent; no cached boundary")
+            return self.fetch_activity_recent(max_pages=2)
+
+        def _event_date_utc(event: Event) -> datetime:
+            event_date = event.date
+            if event_date.tzinfo is None:
+                return event_date.replace(tzinfo=timezone.utc)
+            return event_date.astimezone(timezone.utc)
+
+        newest_event = max(events_already_fetched, key=_event_date_utc)
+        newest_date = newest_event.date
+        if newest_date.tzinfo is None:
+            newest_date = newest_date.replace(tzinfo=timezone.utc)
+        else:
+            newest_date = newest_date.astimezone(timezone.utc)
+
+        range_end = date_to or datetime.now(timezone.utc)
+        if range_end.tzinfo is None:
+            range_end = range_end.replace(tzinfo=timezone.utc)
+        else:
+            range_end = range_end.astimezone(timezone.utc)
+        range_start = newest_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        range_start -= timedelta(days=overlap_days)
+
+        logger.info(
+            "Activity sync mode=incremental; newest_cached_id={}; range=[{} .. {})",
+            newest_event.id,
+            range_start.isoformat(),
+            range_end.isoformat(),
+        )
+        return self._fetch_activity_range(
+            date_from=range_start,
+            date_to=range_end,
+            events_already_fetched=events_already_fetched,
+            progress_desc=progress_desc,
+        )
 
     def fetch_activity_history(
         self,

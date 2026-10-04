@@ -1,21 +1,22 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 from loguru import logger
 from tqdm import tqdm
-from functools import partial
-from todoist.core.types import Project, Task, ProjectEntry, TaskEntry
+
+from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
+from todoist.api.client import EndpointCallResult
+from todoist.core.types import Project, ProjectEntry, Task, TaskEntry
 from todoist.core.utils import (
+    RETRY_MAX_ATTEMPTS,
     TODOIST_COLOR_NAME_TO_RGB,
+    get_max_concurrent_requests,
+    report_tqdm_progress,
     safe_instantiate_entry,
     try_n_times,
     with_retry,
-    RETRY_MAX_ATTEMPTS,
-    report_tqdm_progress,
-    get_max_concurrent_requests,
 )
-from todoist.api import RequestSpec, TodoistAPIClient, TodoistEndpoints
-from todoist.api.client import EndpointCallResult
 
 
 class DatabaseProjects:
@@ -190,6 +191,94 @@ class DatabaseProjects:
 
         self.projects_cache = [project for project in ordered_results if project]
         return self.projects_cache
+
+    def fetch_projects_incrementally(
+        self,
+        previous_projects: list[Project] | None,
+        changed_project_ids: set[str],
+    ) -> list[Project]:
+        """Reconcile the active project list and refresh tasks only where needed."""
+        project_entries = self._fetch_projects_data()
+        previous_by_id = {
+            str(project.id): project for project in (previous_projects or [])
+        }
+        current_ids = {str(entry.id) for entry in project_entries}
+        refresh_ids = {
+            str(project_id)
+            for project_id in changed_project_ids
+            if str(project_id) in current_ids
+        }
+        refresh_ids.update(current_ids - set(previous_by_id))
+
+        if not previous_by_id:
+            refresh_ids = current_ids
+
+        refreshed_tasks: dict[str, list[Task]] = {}
+
+        def _fetch_tasks(project: ProjectEntry) -> tuple[str, list[Task]]:
+            task_entries = with_retry(
+                partial(self.fetch_project_tasks, project.id),
+                operation_name=f"fetch project {project.id}",
+                max_attempts=RETRY_MAX_ATTEMPTS,
+            )
+            return str(project.id), [
+                Task(id=task.id, task_entry=task) for task in task_entries
+            ]
+
+        entries_to_refresh = [
+            entry for entry in project_entries if str(entry.id) in refresh_ids
+        ]
+        if entries_to_refresh:
+            max_workers = min(get_max_concurrent_requests(), len(entries_to_refresh))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_fetch_tasks, entry): entry
+                    for entry in entries_to_refresh
+                }
+                for completed, future in enumerate(as_completed(futures), start=1):
+                    entry = futures[future]
+                    try:
+                        project_id, tasks = future.result(timeout=60)
+                    except (RuntimeError, ValueError, OSError) as exc:
+                        logger.error(
+                            "Failed incrementally refreshing project {}: {}: {}",
+                            entry.id,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        project_id = str(entry.id)
+                        previous = previous_by_id.get(project_id)
+                        tasks = list(previous.tasks) if previous else []
+                    refreshed_tasks[project_id] = tasks
+                    report_tqdm_progress(
+                        "Querying changed project data",
+                        completed,
+                        len(entries_to_refresh),
+                        "project",
+                    )
+
+        reconciled: list[Project] = []
+        for entry in project_entries:
+            project_id = str(entry.id)
+            previous = previous_by_id.get(project_id)
+            tasks = refreshed_tasks.get(
+                project_id,
+                list(previous.tasks) if previous is not None else [],
+            )
+            reconciled.append(self._project_from_entry(entry, tasks=tasks))
+
+        removed_count = len(set(previous_by_id) - current_ids)
+        logger.info(
+            "Reconciled active projects: total={}, refreshed={}, reused={}, removed={}",
+            len(reconciled),
+            len(entries_to_refresh),
+            len(reconciled) - len(entries_to_refresh),
+            removed_count,
+        )
+        self.projects_cache = reconciled
+        self.mapping_project_id_to_root_cache = None
+        self.mapping_project_name_to_color = None
+        return reconciled
 
     @staticmethod
     def _project_from_entry(
