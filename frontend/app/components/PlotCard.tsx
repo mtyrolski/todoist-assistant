@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { PlotParams } from "react-plotly.js";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { InfoTip } from "./InfoTip";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
@@ -17,12 +17,14 @@ export function PlotCard({
   title,
   figure,
   help,
+  actions,
   height = 420,
   interactive = false
 }: {
   title: string;
   figure: PlotlyFigure | null | undefined;
   help?: string;
+  actions?: ReactNode;
   height?: number | string;
   interactive?: boolean;
 }) {
@@ -39,6 +41,7 @@ export function PlotCard({
           <h2>{title}</h2>
           {help ? <InfoTip label={`About ${title}`} content={help} /> : null}
         </div>
+        {actions}
       </header>
       <div
         className={`cardBody${fillHeight ? " cardBodyFill" : ""}`}

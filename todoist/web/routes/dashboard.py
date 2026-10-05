@@ -48,6 +48,62 @@ Granularity = Literal["W", "ME", "3ME"]
 router = APIRouter()
 
 
+@router.get("/api/dashboard/hierarchy-playback", tags=["dashboard"])
+async def hierarchy_playback(
+    weeks: int = 12,
+    beg: str | None = None,
+    end: str | None = None,
+) -> dict[str, Any]:
+    """Build cumulative hierarchy snapshots on demand for the selected period."""
+    _sync_api_globals(globals())
+    await _ensure_state(refresh=False)
+    activity = _state.df_activity
+    active_projects = _state.active_projects
+    project_colors = _state.project_colors
+    if activity is None or active_projects is None or project_colors is None:
+        return {"error": "Dashboard data unavailable.", "frames": []}
+
+    activity = _normalize_activity_df(activity)
+    range_beg, range_end = _compute_plot_range(
+        activity, weeks=weeks, beg=beg, end=end
+    )
+    mappings = get_adjusting_mapping()
+    archived_parents = get_adjusting_archived_parent_projects()
+    cache_key = (
+        "hierarchy-playback",
+        range_beg.isoformat(),
+        range_end.isoformat(),
+        tuple(sorted(mappings.items())),
+        tuple(sorted(archived_parents)),
+    )
+    cached = _state.home_payload_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    frame_count = min(16, max(1, (range_end.date() - range_beg.date()).days))
+    span = range_end - range_beg
+    projects = [*active_projects, *(_state.archived_projects or [])]
+    frames = []
+    for index in range(1, frame_count + 1):
+        frame_end = range_beg + span * index / frame_count
+        figure = plot_active_project_hierarchy(
+            activity,
+            range_beg,
+            frame_end,
+            projects,
+            project_colors,
+            project_mappings=mappings,
+            archived_parent_projects=archived_parents,
+        )
+        frames.append({
+            "date": (frame_end - timedelta(microseconds=1)).date().isoformat(),
+            "figure": _fig_to_dict(figure),
+        })
+    payload = {"frames": frames}
+    _state.home_payload_cache[cache_key] = payload
+    return payload
+
+
 @router.get("/api/dashboard/project-timeline", tags=["dashboard"])
 async def project_timeline(
     weeks: int = 0,
@@ -285,6 +341,9 @@ async def dashboard_home(
             "weeklyCompletionTrend": _fig_to_dict(weekly_completion_fig),
             "taskCountTrend": _fig_to_dict(task_count_trend_fig),
             "taskLifespans": _fig_to_dict(plot_task_lifespans(df_activity)),
+            "taskLifespansPeriod": _fig_to_dict(
+                plot_task_lifespans(df_activity, beg_range, end_range)
+            ),
             "completedTasksPeriodically": _fig_to_dict(completed_periodic_fig),
             "cumsumCompletedTasksPeriodically": _fig_to_dict(cumsum_completed_fig),
             "heatmapEventsByDayHour": _fig_to_dict(

@@ -109,6 +109,47 @@ def test_project_timeline_endpoint_returns_structured_archived_history(
     assert full_history["range"]["start"] == "2026-08-18"
 
 
+def test_hierarchy_playback_builds_cumulative_frames_on_demand(
+    monkeypatch, api_client
+) -> None:
+    activity = _event_df([
+        {
+            "date": "2026-08-02",
+            "id": "e1",
+            "title": "done",
+            "type": "completed",
+            "parent_project_id": "root",
+            "parent_project_name": "Product",
+            "root_project_name": "Product",
+            "task_id": "1",
+        }
+    ])
+    _set_dashboard_df(monkeypatch, activity)
+    web_api._state.active_projects = [make_project(project_id="root")]
+    web_api._state.archived_projects = []
+    web_api._state.project_colors = {}
+    web_api._state.home_payload_cache = {}
+    windows = []
+
+    def capture_frame(df, beg, end, *args, **kwargs):
+        windows.append((beg, end))
+        return go.Figure()
+
+    monkeypatch.setattr(web_api, "plot_active_project_hierarchy", capture_frame)
+    response = api_client.get(
+        "/api/dashboard/hierarchy-playback?beg=2026-08-01&end=2026-08-14"
+    )
+
+    assert response.status_code == 200
+    frames = response.json()["frames"]
+    assert len(frames) == 14
+    assert all(beg == windows[0][0] for beg, _ in windows)
+    assert windows[0][1] < windows[-1][1]
+    assert frames[-1]["date"] == "2026-08-14"
+    api_client.get("/api/dashboard/hierarchy-playback?beg=2026-08-01&end=2026-08-14")
+    assert len(windows) == 14
+
+
 def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)

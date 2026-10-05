@@ -11,6 +11,7 @@ export type DashboardFigures = {
   weeklyCompletionTrend?: PlotlyFigure;
   taskCountTrend?: PlotlyFigure;
   taskLifespans?: PlotlyFigure;
+  taskLifespansPeriod?: PlotlyFigure;
   completedTasksPeriodically?: PlotlyFigure;
   cumsumCompletedTasksPeriodically?: PlotlyFigure;
   heatmapEventsByDayHour?: PlotlyFigure;

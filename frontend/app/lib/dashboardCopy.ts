@@ -57,7 +57,7 @@ Normalized cumulative completion pace by weekday.
 - Optional 6w / 12w / 24w baselines can be toggled in the legend.
 - Current week hover shows raw cumulative task counts (no forecast).`,
   taskLifespans: `Task Lifespans
-Account-lifetime distribution of time between task creation and completion. Recent completions carry more weight.`,
+Time between task creation and completion. Each completed task counts equally. Use Selected period to include tasks completed in the dashboard date range; All time includes the full recorded history.`,
   completedTasksPeriodically: `Periodically Completed Tasks
 Completed tasks per project for each period in the selected range.`,
   cumsumCompletedTasksPeriodically: `Cumulative Completed Tasks

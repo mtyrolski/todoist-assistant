@@ -1759,6 +1759,33 @@ textarea.textInput {
   flex-wrap: wrap;
 }
 
+.hierarchyPlaybackControls,
+.plotRangeActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cardHeader:has(.plotRangeActions) {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.plotRangeActions {
+  margin-left: auto;
+}
+
+.plotRangeActions .isSelected {
+  border-color: rgba(106, 227, 255, 0.65);
+  background: rgba(106, 227, 255, 0.16);
+}
+
+.hierarchyPlaybackSlider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
 .hierarchyCardLead {
   font-size: 12px;
   line-height: 1.55;

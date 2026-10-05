@@ -97,6 +97,30 @@ def test_plot_task_lifespans_with_valid_data(
     assert fig.layout.legend is not None
 
 
+def test_lifespan_period_filters_completion_not_creation() -> None:
+    events = _events_df([
+        *_task_pair("earlier", timedelta(hours=1), start=BASE_DATE),
+        *_task_pair("spanning", timedelta(days=5), start=BASE_DATE),
+        *_task_pair("spanning-later", timedelta(days=5, hours=6), start=BASE_DATE),
+    ])
+
+    figure = plot_task_lifespans(
+        events,
+        BASE_DATE + timedelta(days=4),
+        BASE_DATE + timedelta(days=6),
+    )
+
+    assert _traces(figure)
+    assert "No Tasks" not in figure.layout.title.text
+
+    empty = plot_task_lifespans(
+        events,
+        BASE_DATE + timedelta(days=6),
+        BASE_DATE + timedelta(days=7),
+    )
+    assert not _traces(empty)
+
+
 @pytest.mark.parametrize(
     ("df", "title_fragment"),
     [
@@ -181,7 +205,7 @@ def test_plot_task_lifespans_time_unit_selection(
     assert any(unit in tick_labels for unit in expected_units)
 
 
-def test_plot_task_lifespans_weights_recent_completions_more() -> None:
+def test_plot_task_lifespans_counts_old_and_recent_completions_equally() -> None:
     old_events = [
         event
         for index in range(100)
@@ -200,6 +224,6 @@ def test_plot_task_lifespans_weights_recent_completions_more() -> None:
     fig = plot_task_lifespans(_events_df([*old_events, *recent_events]))
 
     assert sorted(float(shape.x0) for shape in fig.layout.shapes)[-1] == pytest.approx(
-        30.0
+        1.0
     )
-    assert "Recency-weighted frequency" in [str(trace.name) for trace in _traces(fig)]
+    assert "Smoothed frequency" in [str(trace.name) for trace in _traces(fig)]
