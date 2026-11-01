@@ -4,12 +4,14 @@ import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /** Only visible rows allocate Views, even for accounts with thousands of tasks. */
-final class DashboardAdapter extends RecyclerView.Adapter<DashboardAdapter.Holder> {
+final class DashboardAdapter extends ListAdapter<DashboardAdapter.Row, DashboardAdapter.Holder> {
   static final class Row {
     final String title, subtitle;
     final int color;
@@ -51,49 +53,29 @@ final class DashboardAdapter extends RecyclerView.Adapter<DashboardAdapter.Holde
     }
   }
 
-  private final List<Row> rows = new ArrayList<>();
+  DashboardAdapter() {
+    super(
+        new DiffUtil.ItemCallback<Row>() {
+          @Override
+          public boolean areItemsTheSame(Row old, Row value) {
+            return old.title.equals(value.title);
+          }
 
-  void submit(List<Row> next) {
-    List<Row> previous = new ArrayList<>(rows);
-    var diff =
-        androidx.recyclerview.widget.DiffUtil.calculateDiff(
-            new androidx.recyclerview.widget.DiffUtil.Callback() {
-              @Override
-              public int getOldListSize() {
-                return previous.size();
-              }
-
-              @Override
-              public int getNewListSize() {
-                return next.size();
-              }
-
-              @Override
-              public boolean areItemsTheSame(int oldPosition, int newPosition) {
-                return previous.get(oldPosition).title.equals(next.get(newPosition).title);
-              }
-
-              @Override
-              public boolean areContentsTheSame(int oldPosition, int newPosition) {
-                Row old = previous.get(oldPosition), value = next.get(newPosition);
-                return old.title.equals(value.title)
-                    && old.subtitle.equals(value.subtitle)
-                    && old.color == value.color
-                    && old.heading == value.heading
-                    && old.action == value.action
-                    && old.chart == value.chart
-                    && old.selectedWeek == value.selectedWeek;
-              }
-            },
-            false);
-    rows.clear();
-    rows.addAll(next);
-    diff.dispatchUpdatesTo(this);
+          @Override
+          public boolean areContentsTheSame(Row old, Row value) {
+            return old.title.equals(value.title)
+                && old.subtitle.equals(value.subtitle)
+                && old.color == value.color
+                && old.heading == value.heading
+                && Objects.equals(old.action, value.action)
+                && Objects.equals(old.chart, value.chart)
+                && old.selectedWeek == value.selectedWeek;
+          }
+        });
   }
 
-  @Override
-  public int getItemCount() {
-    return rows.size();
+  void submit(List<Row> next) {
+    submitList(next);
   }
 
   @Override
@@ -111,7 +93,7 @@ final class DashboardAdapter extends RecyclerView.Adapter<DashboardAdapter.Holde
 
   @Override
   public void onBindViewHolder(Holder holder, int position) {
-    Row row = rows.get(position);
+    Row row = getItem(position);
     Context context = holder.box.getContext();
     LinearLayout box = holder.box;
     box.removeAllViews();

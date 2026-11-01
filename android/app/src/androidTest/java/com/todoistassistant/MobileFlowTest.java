@@ -98,6 +98,16 @@ public class MobileFlowTest {
     device.setOrientationLeft();
     assertTrue(device.wait(Until.hasObject(By.text("Back to my data")), 8000));
     assertTrue(device.wait(Until.hasObject(By.text("release")), 8000));
+    var results = device.findObject(By.clazz("androidx.recyclerview.widget.RecyclerView"));
+    assertNotNull(results);
+    assertTrue(
+        "Task results must remain usable in landscape", results.getVisibleBounds().height() > 160);
+    device.findObject(By.desc("Search tasks, projects or activity")).click();
+    device.waitForIdle();
+    results = device.findObject(By.clazz("androidx.recyclerview.widget.RecyclerView"));
+    assertNotNull(results);
+    assertTrue(
+        "The keyboard must not hide all task results", results.getVisibleBounds().height() > 160);
   }
 
   @Test

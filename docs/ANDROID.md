@@ -34,10 +34,10 @@ Changing an API token for the same Todoist account preserves history; changing a
 
 ## Counting contract and current scope
 
-Both clients derive completion counts from cached events. An ordinary `uncompleted` event cancels the preceding outstanding completion of that task at its original date. Recurring occurrences survive resets. Undo actions are also displayed separately. See [completion rules](COMPLETIONS.md).
+Both clients count cached events. An ordinary undo cancels the preceding completion at its original date. Recurring occurrences survive resets, and undo actions remain in activity history.
 
 The Android app renders a native weekly total chart, project contribution breakdowns, forecasts, active priority counts, local attention rules, searchable/filterable active projects/tasks and recent activity. A retained ViewModel owns network/IO work, and a RecyclerView creates only visible rows. Full desktop Plotly views, lifespan analysis, hierarchy playback, project timeline and project adjustment editing remain desktop features. Android alert preferences and history are local to the device; desktop joblib caches and Python adjustment files are not imported.
 
-Verification includes API 35 emulator interaction tests for onboarding, offline demo, rotation, searching/filtering, rule persistence, token validation, Keystore encryption, credential isolation, atomic rollback and sync cancellation. The workflow runs interaction tests on API 26 and API 35. A physical phone has not been tested.
+The workflow tests API 26, 35 and 37.0 at 1440×3120, density 560 and font scale 130%, including search, rotation, keyboard layout, settings, encrypted storage and sync cancellation. This covers a Galaxy S25 Ultra screen configuration on standard Android; it does not emulate Samsung One UI. No physical Samsung was connected during development.
 
 Run JVM checks and packaging with `make build_android`. Format Java with `./android/gradlew -p android spotlessApply`. With an emulator running, run `./android/gradlew -p android connectedDebugAndroidTest`. Interaction tests reset test-account data; use a dedicated emulator, not a phone containing your saved account.

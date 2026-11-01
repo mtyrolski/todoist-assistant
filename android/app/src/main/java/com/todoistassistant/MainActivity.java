@@ -7,7 +7,7 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.View;
-import android.view.WindowInsets;
+import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -18,6 +18,9 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import androidx.activity.ComponentActivity;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -58,6 +61,7 @@ public class MainActivity extends ComponentActivity {
   @Override
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
+    WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
     if (saved != null) {
       tab = saved.getInt("tab");
       allContributions = saved.getBoolean("allContributions");
@@ -97,23 +101,13 @@ public class MainActivity extends ComponentActivity {
   private void createScreen() {
     LinearLayout root = Ui.column(this);
     root.setBackgroundColor(Ui.BG);
-    root.setOnApplyWindowInsetsListener(
-        (view, insets) -> {
-          if (android.os.Build.VERSION.SDK_INT >= 30) {
-            var bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-          } else
-            view.setPadding(
-                insets.getSystemWindowInsetLeft(),
-                insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(),
-                insets.getSystemWindowInsetBottom());
-          return insets;
-        });
     LinearLayout header = Ui.column(this);
-    header.setPadding(dp(20), dp(18), dp(20), dp(8));
-    header.addView(Ui.text(this, "TODOIST ASSISTANT", 11, Ui.ACCENT, true));
-    header.addView(Ui.text(this, "Activity & focus", 27, Ui.TEXT, true), Ui.space(this, 4));
+    boolean compact = getResources().getConfiguration().screenHeightDp < 600;
+    header.setPadding(dp(20), dp(compact ? 6 : 18), dp(20), dp(8));
+    if (!compact) {
+      header.addView(Ui.text(this, "TODOIST ASSISTANT", 11, Ui.ACCENT, true));
+      header.addView(Ui.text(this, "Activity & focus", 27, Ui.TEXT, true), Ui.space(this, 4));
+    }
     timestamp = Ui.text(this, "Your day, at a glance", 12, Ui.MUTED, false);
     header.addView(timestamp, Ui.space(this, 5));
     LinearLayout actions = new LinearLayout(this);
@@ -162,6 +156,7 @@ public class MainActivity extends ComponentActivity {
     search.setTextColor(Ui.TEXT);
     search.setHintTextColor(Ui.MUTED);
     search.setInputType(InputType.TYPE_CLASS_TEXT);
+    search.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
     search.setPadding(dp(12), 0, dp(12), 0);
     search.setBackground(Ui.rounded(this, Ui.CARD, Ui.BORDER, 12));
     search.setContentDescription("Search tasks, projects or activity");
@@ -218,6 +213,20 @@ public class MainActivity extends ComponentActivity {
     list.setClipToPadding(false);
     list.setPadding(0, 0, 0, dp(20));
     root.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+    ViewCompat.setOnApplyWindowInsetsListener(
+        root,
+        (view, insets) -> {
+          var bars =
+              insets.getInsets(
+                  WindowInsetsCompat.Type.systemBars()
+                      | WindowInsetsCompat.Type.displayCutout()
+                      | WindowInsetsCompat.Type.ime());
+          view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+          boolean typing = insets.isVisible(WindowInsetsCompat.Type.ime());
+          header.setVisibility(typing ? View.GONE : View.VISIBLE);
+          navigation.setVisibility(typing ? View.GONE : View.VISIBLE);
+          return insets;
+        });
     setContentView(root);
   }
 
