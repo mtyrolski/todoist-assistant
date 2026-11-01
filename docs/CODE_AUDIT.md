@@ -19,7 +19,7 @@ Audit performed on 2026-11-01 while fixing completion accounting, chart forecast
 
 The app previously installed Plotly's source package and its build/rendering dependency tree, although React only loaded its prebuilt browser distribution. It now uses the official full minified distribution at **Plotly.js 4.0.0**, matching the renderer bundled with the locked Python Plotly 7.0.0, through the supported React factory. An npm alias satisfies the React peer requirement without installing a second source package. There is one shared lazy Plot component.
 
-This reduces lockfile package entries from **409 to 67**, including platform optional packages. The installed count varies by platform. Heatmaps, sunbursts and the rest of the full Plotly trace set remain available. The old JavaScript 2.x renderer did not understand the binary numeric arrays emitted by the current Python serializer; it could mount empty traces without an exception. `scripts/check_versions.py` now checks renderer major compatibility in CI. The renderer update fixes that compatibility issue as well as removing source/build dependencies. The factory integration follows [Plotly's custom bundle instructions](https://github.com/plotly/react-plotly.js#customizing-the-plotlyjs-bundle).
+The renderer cleanup reduced lockfile package entries from **409 to 67**, including platform optional packages. Adding Playwright browser checks subsequently brought the count to **70**; production dependencies did not grow. The installed count varies by platform. Heatmaps, sunbursts and the rest of the full Plotly trace set remain available. The old JavaScript 2.x renderer did not understand the binary numeric arrays emitted by the current Python serializer; it could mount empty traces without an exception. `scripts/check_versions.py` now checks renderer major compatibility in CI. The renderer update fixes that compatibility issue as well as removing source/build dependencies. The factory integration follows [Plotly's custom bundle instructions](https://github.com/plotly/react-plotly.js#customizing-the-plotlyjs-bundle).
 
 Next.js was updated within the 15.5 line, from 15.5.14 to 15.5.28. PostCSS 8.5.32 and Sharp 0.35.5 overrides address the remaining transitive advisories. The resulting `npm audit` reports **0 vulnerabilities** at audit time. The TypeScript lint command remains active; Next's separate ESLint build hook is disabled because this repository does not configure ESLint.
 
@@ -35,6 +35,12 @@ Next.js was updated within the 15.5 line, from 15.5.14 to 15.5.28. PostCSS 8.5.3
 
 - Separate API dependencies explicitly rather than passing module globals, then remove associated Ruff exceptions.
 - Replace growing mobile JSON snapshots with an indexed on-device store if long histories make loading/syncing slow. Desktop joblib and Android JSON caches are intentionally separate formats.
-- Add mobile device/emulator interaction tests and release signing before distributing production Android builds.
+- Configure release signing before distributing production Android builds. Emulator interaction tests are now included in CI; see [verification](QUALITY.md).
+
+## Follow-up cleanup
+
+Dashboard settings now use one typed, validated patch boundary and one frontend draft model. Partial updates run under a lock instead of overwriting concurrent edits. Native Android separates transport, sync, credential-bound persistence, background lifecycle, projections and rendering. Unused duplicate project completion maps and project name fields were removed. Java formatting is checked in the Android build; desktop date parsing no longer depends on `dateutil.parser`, while pandas still uses python-dateutil transitively.
+
+Next.js owns `next-env.d.ts`; it is ignored rather than committed with different production/test output paths. Browser tests use their own output directory so they do not overwrite production assets.
 
 Do not remove further modules solely because they lack an obvious direct import: compatibility exports, module entrypoints, packaging scripts and dynamically injected helpers are active in this repository.

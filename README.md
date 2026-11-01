@@ -34,12 +34,17 @@ uv sync --locked
 make test
 npm --prefix frontend ci
 npm --prefix frontend run lint
+npm --prefix frontend test
 npm --prefix frontend run build
+npm --prefix frontend exec -- playwright install chromium
+npm --prefix frontend run test:e2e
 ```
 
 The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The Android app is a standalone native client with its own local event cache. Build an installable APK with `make build_android`, or download the artifact from the Android APK workflow. See [Android build and usage](docs/ANDROID.md).
 
 Completion charts reconcile ordinary undo actions from the same event cache and keep recurring occurrences. Undo actions have a separate metric and activity trace. See [completion and forecast rules](docs/COMPLETIONS.md).
+
+The dashboard serves saved data immediately and refreshes stale data in the background. An open page checks for updates every minute. Failed syncs keep the last view and show a warning. Settings validate before writing and preserve your draft on failure. See [verification and known limits](docs/QUALITY.md) and the [code audit](docs/CODE_AUDIT.md).
 
 ## Packaging
 
