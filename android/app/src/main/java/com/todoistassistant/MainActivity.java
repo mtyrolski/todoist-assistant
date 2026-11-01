@@ -1,291 +1,736 @@
 package com.todoistassistant;
 
-import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.SharedPreferences;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Paint;
 import android.os.Bundle;
+import android.os.Parcelable;
+import android.text.Editable;
 import android.text.InputType;
-import android.util.AtomicFile;
+import android.text.TextWatcher;
 import android.view.View;
 import android.view.WindowInsets;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
-import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.time.DayOfWeek;
-import java.time.Duration;
-import java.time.Instant;
+import androidx.activity.ComponentActivity;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import java.util.Locale;
+import java.util.Set;
 
-public class MainActivity extends Activity {
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final int background = Color.rgb(17, 19, 24), foreground = Color.rgb(232, 236, 242);
-    private final int accent = Color.rgb(97, 244, 179);
-    private JSONObject snapshot = new JSONObject();
-    private LinearLayout content;
-    private TextView status;
-    private Button refresh;
-    private TokenStore tokens;
-    private boolean syncing;
-    private int generation;
-    private AtomicFile cache;
+public class MainActivity extends ComponentActivity {
+  private DashboardViewModel model;
+  private DashboardViewModel.State state;
+  private DashboardAdapter adapter;
+  private RecyclerView list;
+  private LinearLayoutManager layout;
+  private TextView status, timestamp;
+  private ProgressBar progress;
+  private Button sync, cancel;
+  private EditText search;
+  private Spinner priority;
+  private LinearLayout filters;
+  private final Button[] tabs = new Button[3];
+  private final String[] queries = {"", "", ""};
+  private final Set<String> expanded = new HashSet<>();
+  private final android.os.Handler handler =
+      new android.os.Handler(android.os.Looper.getMainLooper());
+  private final Runnable updateSearch = () -> rebuildRows(false);
+  private int tab, priorityValue, selectedWeek = 8;
+  private boolean allContributions, changingSearch;
+  private Parcelable restoredScroll;
+  private DashboardModel renderedModel;
+  private boolean renderedLoading;
 
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
-        tokens = new TokenStore(this);
-        cache = new AtomicFile(new File(getFilesDir(), "dashboard-v1.json"));
-        try {
-            snapshot = new JSONObject(new String(cache.readFully(), StandardCharsets.UTF_8));
-        } catch (Exception ignored) { /* First launch or damaged cache: sync can recover. */ }
-        render();
-        try { if (!tokens.load().isEmpty()) sync(tokens.load(), false); }
-        catch (Exception exception) { status.setText("Token could not be unlocked. Open Settings to enter it again."); }
+  @Override
+  public void onCreate(Bundle saved) {
+    super.onCreate(saved);
+    if (saved != null) {
+      tab = saved.getInt("tab");
+      priorityValue = saved.getInt("priority");
+      selectedWeek = saved.getInt("week", 8);
+      String[] stored = saved.getStringArray("queries");
+      if (stored != null) System.arraycopy(stored, 0, queries, 0, Math.min(3, stored.length));
+      ArrayList<String> opened = saved.getStringArrayList("expanded");
+      if (opened != null) expanded.addAll(opened);
+      restoredScroll = saved.getParcelable("scroll");
     }
+    model = new ViewModelProvider(this).get(DashboardViewModel.class);
+    createScreen();
+    model
+        .state()
+        .observe(
+            this,
+            value -> {
+              state = value;
+              renderState();
+            });
+    getOnBackPressedDispatcher()
+        .addCallback(
+            this,
+            new androidx.activity.OnBackPressedCallback(true) {
+              @Override
+              public void handleOnBackPressed() {
+                if (tab != 0) selectTab(0);
+                else {
+                  setEnabled(false);
+                  getOnBackPressedDispatcher().onBackPressed();
+                }
+              }
+            });
+  }
 
-    private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
-    private TextView text(String value, int size) {
-        TextView view = new TextView(this);
-        view.setText(value); view.setTextSize(size); view.setTextColor(foreground);
-        view.setPadding(0, dp(8), 0, dp(8));
-        content.addView(view);
-        return view;
-    }
-    private Button button(String value, View.OnClickListener action) {
-        Button button = new Button(this); button.setText(value); button.setAllCaps(false);
-        button.setOnClickListener(action); content.addView(button); return button;
-    }
-    private void heading(String value) { text(value, 23).setTextColor(accent); }
-    private JSONArray array(String key) { return snapshot.optJSONArray(key) == null ? new JSONArray() : snapshot.optJSONArray(key); }
-
-    private void render() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true); scroll.setBackgroundColor(background);
-        content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(24), dp(20), dp(24));
-        scroll.addView(content);
-        // Android 15 draws edge-to-edge; keep content out of status/navigation bars.
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (android.os.Build.VERSION.SDK_INT >= 30) {
-                var bars = insets.getInsets(WindowInsets.Type.systemBars());
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-            } else view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets;
+  private void createScreen() {
+    LinearLayout root = Ui.column(this);
+    root.setBackgroundColor(Ui.BG);
+    root.setOnApplyWindowInsetsListener(
+        (view, insets) -> {
+          if (android.os.Build.VERSION.SDK_INT >= 30) {
+            var bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+          } else
+            view.setPadding(
+                insets.getSystemWindowInsetLeft(),
+                insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(),
+                insets.getSystemWindowInsetBottom());
+          return insets;
         });
-        setContentView(scroll);
-        text("Todoist Assistant", 30);
-        status = text(snapshot.has("syncedAt") ? "Saved on device · " + snapshot.optString("syncedAt") : "Enter your Todoist API token in Settings to start.", 14);
-        refresh = button(syncing ? "Syncing…" : "Sync now", view -> {
-            try { String token = tokens.load(); if (token.isEmpty()) settings(); else sync(token, false); }
-            catch (Exception exception) { status.setText("Could not unlock the saved token. Enter it again in Settings."); }
+    LinearLayout header = Ui.column(this);
+    header.setPadding(dp(20), dp(18), dp(20), dp(8));
+    header.addView(Ui.text(this, "TODOIST ASSISTANT", 11, Ui.ACCENT, true));
+    header.addView(Ui.text(this, "Activity & focus", 27, Ui.TEXT, true), Ui.space(this, 4));
+    timestamp = Ui.text(this, "Your day, at a glance", 12, Ui.MUTED, false);
+    header.addView(timestamp, Ui.space(this, 5));
+    LinearLayout actions = new LinearLayout(this);
+    sync =
+        Ui.button(
+            this,
+            "Connect Todoist",
+            view -> {
+              if (state != null && state.demo) model.exitDemo();
+              else if (state != null && state.connected) model.sync("");
+              else tokenDialog();
+            },
+            true);
+    actions.addView(sync, new LinearLayout.LayoutParams(0, dp(46), 1));
+    Button settings = Ui.button(this, "Settings", view -> settings(), false);
+    LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(-2, dp(46));
+    settingsParams.leftMargin = dp(10);
+    actions.addView(settings, settingsParams);
+    header.addView(actions, Ui.space(this, 14));
+    status = Ui.text(this, "", 12, Ui.MUTED, false);
+    status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+    header.addView(status, Ui.space(this, 8));
+    progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+    progress.setIndeterminate(true);
+    header.addView(progress, new LinearLayout.LayoutParams(-1, dp(3)));
+    cancel = Ui.button(this, "Cancel sync", view -> model.cancelSync(), false);
+    header.addView(cancel, Ui.space(this, 6));
+    root.addView(header);
+    LinearLayout navigation = new LinearLayout(this);
+    navigation.setPadding(dp(18), dp(6), dp(18), dp(8));
+    String[] labels = {"Overview", "Projects", "Activity"};
+    for (int i = 0; i < tabs.length; i++) {
+      final int selected = i;
+      tabs[i] = Ui.button(this, labels[i], view -> selectTab(selected), false);
+      tabs[i].setPadding(0, 0, 0, 0);
+      LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
+      if (i > 0) params.leftMargin = dp(6);
+      navigation.addView(tabs[i], params);
+    }
+    root.addView(navigation);
+    filters = new LinearLayout(this);
+    filters.setPadding(dp(18), 0, dp(18), dp(10));
+    search = new EditText(this);
+    search.setSingleLine(true);
+    search.setTextSize(14);
+    search.setTextColor(Ui.TEXT);
+    search.setHintTextColor(Ui.MUTED);
+    search.setInputType(InputType.TYPE_CLASS_TEXT);
+    search.setPadding(dp(12), 0, dp(12), 0);
+    search.setBackground(Ui.rounded(this, Ui.CARD, Ui.BORDER, 12));
+    search.setContentDescription("Search tasks, projects or activity");
+    filters.addView(search, new LinearLayout.LayoutParams(0, dp(48), 1));
+    priority = new Spinner(this);
+    priority.setAdapter(
+        new ArrayAdapter<>(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            new String[] {"All", "P1", "P2", "P3", "P4"}));
+    priority.setContentDescription("Filter task priority");
+    LinearLayout.LayoutParams filterParams = new LinearLayout.LayoutParams(dp(85), dp(48));
+    filterParams.leftMargin = dp(6);
+    filters.addView(priority, filterParams);
+    priority.setSelection(priorityValue == 0 ? 0 : 5 - priorityValue);
+    priority.setOnItemSelectedListener(
+        new android.widget.AdapterView.OnItemSelectedListener() {
+          @Override
+          public void onItemSelected(
+              android.widget.AdapterView<?> parent, View view, int position, long id) {
+            int next = position == 0 ? 0 : 5 - position;
+            if (priorityValue != next) {
+              priorityValue = next;
+              rebuildRows(true);
+            }
+          }
+
+          @Override
+          public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });
-        refresh.setEnabled(!syncing);
-        button("Settings", view -> settings());
-        if (!snapshot.has("tasks")) return;
-        try { dashboard(); }
-        catch (Exception exception) { text("Saved data could not be displayed. Sync again to recover it.", 16); }
-    }
+    search.addTextChangedListener(
+        new TextWatcher() {
+          @Override
+          public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
 
-    private List<CompletionLedger.Event> completions() throws Exception {
-        List<CompletionLedger.Event> events = new ArrayList<>();
-        JSONArray activity = array("activities");
-        for (int i = 0; i < activity.length(); i++) {
-            JSONObject item = activity.getJSONObject(i);
-            if (!item.optString("object_type").equals("item")) continue;
-            JSONObject extra = item.optJSONObject("extra_data");
-            if (extra == null) extra = new JSONObject();
-            JSONObject due = extra.optJSONObject("due");
-            boolean recurring = extra.optBoolean("is_recurring") || extra.optBoolean("sub_tasks_reset") ||
-                (due != null && due.optBoolean("is_recurring"));
-            events.add(new CompletionLedger.Event(item.getString("id"), item.getString("object_id"),
-                item.getString("event_type"), Instant.parse(item.getString("event_date")), recurring));
-        }
-        return CompletionLedger.effective(events);
-    }
+          @Override
+          public void onTextChanged(CharSequence s, int start, int before, int count) {
+            if (changingSearch) return;
+            queries[tab] = s.toString();
+            handler.removeCallbacks(updateSearch);
+            handler.postDelayed(updateSearch, 180);
+          }
 
-    private void dashboard() throws Exception {
-        JSONArray tasks = array("tasks"), projects = array("projects"), activity = array("activities");
-        Map<String, String> projectNames = new HashMap<>();
-        for (int i = 0; i < projects.length(); i++) {
-            JSONObject project = projects.getJSONObject(i);
-            projectNames.put(project.getString("id"), project.getString("name"));
-        }
-        int[] priorities = new int[4];
-        int fire = 0;
-        for (int i = 0; i < tasks.length(); i++) {
-            JSONObject task = tasks.getJSONObject(i);
-            priorities[4 - Math.max(1, Math.min(4, task.optInt("priority", 1)))]++;
-            JSONArray labels = task.optJSONArray("labels");
-            if (labels != null) for (int j = 0; j < labels.length(); j++)
-                if (labels.getString(j).trim().toLowerCase(java.util.Locale.ROOT).startsWith("fire")) { fire++; break; }
-        }
-        SharedPreferences rules = getSharedPreferences("rules", MODE_PRIVATE);
-        int urgent = (rules.getBoolean("p1", true) ? priorities[0] : 0) + (rules.getBoolean("p2", true) ? priorities[1] : 0);
-        heading("Active tasks");
-        TextView urgency = text(rules.getBoolean("fire", true) && fire > 0 ? "Urgent · " + fire + " fire tasks" :
-            urgent > 0 ? "Attention needed · " + urgent + " priority tasks" : "All clear", 20);
-        urgency.setTextColor(rules.getBoolean("fire", true) && fire > 0 ? Color.rgb(255, 119, 119) : urgent > 0 ? Color.rgb(244, 211, 94) : accent);
-        text(tasks.length() + " active  ·  P1 " + priorities[0] + "  ·  P2 " + priorities[1] + "  ·  P3 " + priorities[2] + "  ·  P4 " + priorities[3], 16);
-
-        heading("Completed from local history");
-        List<CompletionLedger.Event> effective = completions();
-        LocalDate monday = LocalDate.now().with(DayOfWeek.MONDAY);
-        int[] weeks = new int[9];
-        for (CompletionLedger.Event event : effective) {
-            long days = java.time.temporal.ChronoUnit.DAYS.between(monday.minusWeeks(8), event.date.atZone(ZoneId.systemDefault()).toLocalDate());
-            if (days >= 0 && days < 63) weeks[(int) (days / 7)]++;
-        }
-        // Estimate at the last successful sync, never advance stale/offline data to today's pace.
-        Instant asOf = Instant.parse(snapshot.getString("syncedAt"));
-        Instant begin = monday.atStartOfDay(ZoneId.systemDefault()).toInstant();
-        Instant end = monday.plusWeeks(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
-        double fraction = Duration.between(begin, asOf).toMillis() / (double) Duration.between(begin, end).toMillis();
-        double[] history = new double[8];
-        for (int i = 0; i < 8; i++) history[i] = weeks[i];
-        int forecast = fraction <= 0 ? weeks[8] : Forecast.total(weeks[8], history, fraction);
-        text("This week so far: " + weeks[8] + (fraction <= 0 ? "  ·  sync needed" : "  ·  forecast: " + forecast), 20);
-        text("Ordinary completions are cancelled when undone; recurring occurrences remain counted. History starts " + snapshot.optString("historyStart") + ".", 14);
-        View chart = new WeeklyChart(weeks, forecast, monday);
-        chart.setContentDescription("Weekly completed tasks, last nine weeks. This week " + weeks[8] + ", forecast " + forecast);
-        content.addView(chart, new LinearLayout.LayoutParams(-1, dp(240)));
-        for (int i = 8; i >= 5; i--) text(monday.minusWeeks(8 - i) + " · " + weeks[i] + " completed", 15);
-
-        int undone = 0;
-        for (int i = 0; i < activity.length(); i++) {
-            JSONObject item = activity.getJSONObject(i);
-            if (item.optString("event_type").equals("uncompleted") &&
-                !Instant.parse(item.getString("event_date")).atZone(ZoneId.systemDefault()).toLocalDate().isBefore(monday)) undone++;
-        }
-        text("Undone completions this week: " + undone, 16);
-        heading("Projects and tasks");
-        for (int i = 0; i < projects.length(); i++) {
-            JSONObject project = projects.getJSONObject(i);
-            String id = project.getString("id");
-            List<JSONObject> projectTasks = new ArrayList<>();
-            for (int j = 0; j < tasks.length(); j++) if (tasks.getJSONObject(j).optString("project_id").equals(id)) projectTasks.add(tasks.getJSONObject(j));
-            projectTasks.sort(Comparator.comparingInt(task -> -task.optInt("priority", 1)));
-            String parent = projectNames.get(project.optString("parent_id"));
-            String title = (parent == null ? "" : parent + " / ") + project.getString("name");
-            Button toggle = button(title + " · " + projectTasks.size(), null);
-            TextView details = text("", 16);
-            StringBuilder lines = new StringBuilder();
-            for (JSONObject task : projectTasks) {
-                JSONObject due = task.optJSONObject("due");
-                lines.append("P").append(5 - task.optInt("priority", 1)).append("  ").append(task.optString("content"));
-                if (due != null) lines.append("\nDue: ").append(due.optString("date"));
-                lines.append("\n\n");
-            }
-            details.setText(lines.length() == 0 ? "No active tasks" : lines.toString().trim());
-            details.setVisibility(View.GONE);
-            toggle.setOnClickListener(view -> details.setVisibility(details.getVisibility() == View.GONE ? View.VISIBLE : View.GONE));
-        }
-        heading("Recent activity");
-        List<JSONObject> recent = new ArrayList<>();
-        for (int i = 0; i < activity.length(); i++) recent.add(activity.getJSONObject(i));
-        recent.sort(Comparator.comparing((JSONObject event) -> event.optString("event_date")).reversed());
-        for (int i = 0; i < Math.min(30, recent.size()); i++) {
-            JSONObject event = recent.get(i), extra = event.optJSONObject("extra_data");
-            text(event.optString("event_type") + " · " + (extra == null ? "" : extra.optString("content", extra.optString("name"))) +
-                "\n" + event.optString("event_date"), 15);
-        }
-    }
-
-    private void settings() {
-        EditText input = new EditText(this);
-        input.setHint("Todoist API token (leave blank to keep current)");
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        new AlertDialog.Builder(this).setTitle("Connect Todoist").setView(input)
-            .setMessage("Token stays encrypted on this device. Sync only reads Todoist; cached data works offline.")
-            .setPositiveButton("Save and sync", (dialog, which) -> {
-                String token = input.getText().toString().trim();
-                if (!token.isEmpty()) sync(token, true);
-            }).setNeutralButton("Alert rules", (dialog, which) -> rules())
-            .setNegativeButton("Disconnect and clear data", (dialog, which) -> {
-                generation++; syncing = false; tokens.clear(); cache.delete(); snapshot = new JSONObject(); render();
-            }).show();
-    }
-    private void rules() {
-        SharedPreferences prefs = getSharedPreferences("rules", MODE_PRIVATE);
-        String[] keys = {"fire", "p1", "p2"};
-        boolean[] checked = {prefs.getBoolean("fire", true), prefs.getBoolean("p1", true), prefs.getBoolean("p2", true)};
-        new AlertDialog.Builder(this).setTitle("Local alert rules")
-            .setMultiChoiceItems(new String[] {"Red alert for fire labels", "Attention for P1", "Attention for P2"}, checked,
-                (dialog, index, value) -> checked[index] = value)
-            .setPositiveButton("Save", (dialog, which) -> {
-                var edit = prefs.edit(); for (int i = 0; i < keys.length; i++) edit.putBoolean(keys[i], checked[i]); edit.apply(); render();
-            }).setNegativeButton("Cancel", null).show();
-    }
-    private void sync(String token, boolean newAccount) {
-        if (syncing) return;
-        syncing = true; refresh.setEnabled(false); refresh.setText("Syncing…");
-        status.setText("Fetching Todoist data. Saved data stays available while syncing.");
-        int request = ++generation;
-        JSONObject previous = newAccount ? new JSONObject() : snapshot;
-        worker.execute(() -> {
-            try {
-                JSONObject next = new TodoistClient(token).snapshot(previous);
-                runOnUiThread(() -> {
-                    if (isDestroyed() || request != generation) return;
-                    try {
-                        tokens.save(token);
-                        var output = cache.startWrite();
-                        try { output.write(next.toString().getBytes(StandardCharsets.UTF_8)); cache.finishWrite(output); }
-                        catch (Exception error) { cache.failWrite(output); throw error; }
-                        snapshot = next; syncing = false; render();
-                    } catch (Exception exception) { failed("Could not save data on this device. Try syncing again."); }
-                });
-            } catch (Exception exception) {
-                runOnUiThread(() -> { if (!isDestroyed() && request == generation) failed(exception.getMessage()); });
-            }
+          @Override
+          public void afterTextChanged(Editable value) {}
         });
-    }
-    private void failed(String message) {
-        syncing = false; refresh.setEnabled(true); refresh.setText("Sync now");
-        status.setText("Sync failed: " + message + " Saved data is unchanged.");
-    }
-    @Override protected void onDestroy() { generation++; worker.shutdownNow(); super.onDestroy(); }
+    root.addView(filters);
+    list = new RecyclerView(this);
+    layout = new LinearLayoutManager(this);
+    list.setLayoutManager(layout);
+    adapter = new DashboardAdapter();
+    list.setAdapter(adapter);
+    list.setItemAnimator(null);
+    list.setClipToPadding(false);
+    list.setPadding(0, 0, 0, dp(20));
+    root.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+    setContentView(root);
+  }
 
-    private final class WeeklyChart extends View {
-        private final int[] weeks;
-        private final int forecast;
-        private final LocalDate monday;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        WeeklyChart(int[] weeks, int forecast, LocalDate monday) { super(MainActivity.this); this.weeks = weeks; this.forecast = forecast; this.monday = monday; }
-        @Override protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            int max = Math.max(1, forecast);
-            for (int count : weeks) max = Math.max(max, count);
-            float left = dp(24), right = getWidth() - dp(24), top = dp(24), bottom = getHeight() - dp(44);
-            paint.setStrokeWidth(dp(2)); paint.setColor(Color.rgb(244, 211, 94)); paint.setTextSize(dp(11));
-            float lastX = 0, lastY = 0;
-            for (int i = 0; i < weeks.length; i++) {
-                float x = left + (right - left) * i / 8, y = bottom - (bottom - top) * weeks[i] / max;
-                if (i > 0) canvas.drawLine(lastX, lastY, x, y, paint);
-                paint.setStyle(i == 8 ? Paint.Style.STROKE : Paint.Style.FILL);
-                canvas.drawCircle(x, y, dp(i == 8 ? 6 : 3), paint);
-                paint.setStyle(Paint.Style.FILL);
-                canvas.drawText(String.valueOf(weeks[i]), x - dp(9), y - dp(10), paint);
-                if (i % 2 == 0) canvas.drawText(monday.minusWeeks(8 - i).toString().substring(5), x - dp(15), bottom + dp(25), paint);
-                lastX = x; lastY = y;
-            }
-            float forecastY = bottom - (bottom - top) * forecast / max;
-            canvas.drawCircle(right, forecastY, dp(6), paint);
-        }
+  private void selectTab(int next) {
+    tab = next;
+    changingSearch = true;
+    search.setText(queries[tab]);
+    changingSearch = false;
+    renderNavigation();
+    rebuildRows(true);
+  }
+
+  private void renderNavigation() {
+    for (int i = 0; i < tabs.length; i++) {
+      tabs[i].setTextColor(tab == i ? Ui.BG : Ui.MUTED);
+      tabs[i].setBackgroundTintList(
+          android.content.res.ColorStateList.valueOf(tab == i ? Ui.ACCENT : Ui.CARD));
+      tabs[i].setSelected(tab == i);
     }
+    filters.setVisibility(
+        tab == 0 || state == null || state.model == null ? View.GONE : View.VISIBLE);
+    priority.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
+    search.setHint(tab == 1 ? "Search tasks, projects, labels" : "Search recent activity");
+  }
+
+  private void renderState() {
+    if (state == null) return;
+    boolean busy = state.loading || state.syncing;
+    sync.setEnabled(!busy);
+    sync.setText(
+        state.demo
+            ? "Back to my data"
+            : state.syncing ? "Syncing…" : state.connected ? "Sync now" : "Connect Todoist");
+    status.setText(state.message);
+    status.setVisibility(state.message.isEmpty() ? View.GONE : View.VISIBLE);
+    progress.setVisibility(busy ? View.VISIBLE : View.GONE);
+    cancel.setVisibility(state.syncing ? View.VISIBLE : View.GONE);
+    if (state.model == null) timestamp.setText("Private on your device · works offline");
+    else
+      timestamp.setText(
+          (state.demo ? "DEMO · " : "Saved · ")
+              + DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+                  .format(state.model.syncedAt.atZone(ZoneId.systemDefault())));
+    if (!search.getText().toString().equals(queries[tab])) {
+      changingSearch = true;
+      search.setText(queries[tab]);
+      changingSearch = false;
+    }
+    renderNavigation();
+    if (adapter.getItemCount() == 0
+        || renderedModel != state.model
+        || renderedLoading != state.loading) {
+      renderedModel = state.model;
+      renderedLoading = state.loading;
+      rebuildRows(false);
+    }
+  }
+
+  private void rebuildRows(boolean top) {
+    if (state == null) return;
+    List<DashboardAdapter.Row> rows = new ArrayList<>();
+    if (state.model == null) {
+      rows.add(
+          card(
+              "Make your week visible",
+              "See your progress, find the work that needs attention, and browse projects from one place.",
+              Ui.TEXT,
+              this::tokenDialog));
+      rows.add(
+          card(
+              "Connect your Todoist account",
+              "Use your API token. The app only reads Todoist; your saved history stays on this device.",
+              Ui.ACCENT,
+              this::tokenDialog));
+      rows.add(
+          card(
+              "Explore a demo",
+              "Try the dashboard offline before connecting your account.",
+              Ui.TEXT,
+              () -> model.showDemo()));
+      if (state.loading) rows.add(card("Opening your history…", "", Ui.MUTED, null));
+    } else if (tab == 0) overview(rows, state.model);
+    else if (tab == 1) projects(rows, state.model);
+    else activity(rows, state.model);
+    Parcelable scroll = top ? null : layout.onSaveInstanceState();
+    adapter.submit(rows);
+    if (top) list.scrollToPosition(0);
+    else if (restoredScroll != null) {
+      layout.onRestoreInstanceState(restoredScroll);
+      restoredScroll = null;
+    } else if (scroll != null) layout.onRestoreInstanceState(scroll);
+  }
+
+  private DashboardAdapter.Row card(String title, String detail, int color, Runnable action) {
+    return new DashboardAdapter.Row(title, detail, color, false, action);
+  }
+
+  private DashboardAdapter.Row heading(String title) {
+    return new DashboardAdapter.Row(title, "", Ui.MUTED, true, null);
+  }
+
+  private void overview(List<DashboardAdapter.Row> rows, DashboardModel data) {
+    AlertRules rules =
+        AlertRules.read(getSharedPreferences("rules", MODE_PRIVATE).getString("config", ""));
+    AlertRules.Status alert = rules.evaluate(data.tasks, LocalDate.now(), ZoneId.systemDefault());
+    rows.add(heading("FOCUS TODAY"));
+    rows.add(
+        card(
+            !rules.enabled
+                ? "Monitoring paused"
+                : alert.level == 2
+                    ? "Urgent attention needed"
+                    : alert.level == 1 ? "Attention needed" : "All clear",
+            !rules.enabled
+                ? "Turn on the rules you want in Settings."
+                : alert.matches
+                    + " matching tasks · fire "
+                    + alert.fire
+                    + " · priority "
+                    + alert.priority
+                    + " · due "
+                    + alert.due
+                    + " · deadline "
+                    + alert.deadline,
+            alert.level == 2 ? Ui.DANGER : alert.level == 1 ? Ui.WARN : Ui.ACCENT,
+            this::rulesDialog));
+    rows.add(
+        card(
+            data.tasks.size() + " active tasks",
+            "P1 "
+                + data.priorities[0]
+                + "   ·   P2 "
+                + data.priorities[1]
+                + "   ·   P3 "
+                + data.priorities[2]
+                + "   ·   P4 "
+                + data.priorities[3]
+                + "\nBrowse projects and filter your priorities →",
+            Ui.TEXT,
+            () -> selectTab(1)));
+    if (!data.historyAvailable) {
+      rows.add(card("Completion history unavailable", data.historyWarning, Ui.WARN, null));
+      return;
+    }
+    if (!data.historyWarning.isEmpty())
+      rows.add(card("History refresh notice", data.historyWarning, Ui.WARN, null));
+    rows.add(heading("YOUR WEEK"));
+    rows.add(
+        card(
+            data.weeks[8] + " completed so far",
+            data.forecastAvailable
+                ? "Forecast: " + data.forecast + " by Sunday · estimated at the last sync"
+                : "No sync this week yet. Refresh to see current progress.",
+            Ui.YELLOW,
+            null));
+    rows.add(
+        new DashboardAdapter.Row(
+            data,
+            selectedWeek,
+            week -> {
+              selectedWeek = week;
+              allContributions = false;
+              rebuildRows(false);
+            }));
+    rows.add(heading("WEEK OF " + data.weekStart.minusWeeks(8 - selectedWeek)));
+    rows.add(
+        card(
+            data.weeks[selectedWeek] + " completed tasks",
+            selectedWeek == 8
+                ? "Current week · completed tasks remain separate from estimates."
+                : "Completed calendar week · Monday to Sunday",
+            Ui.TEXT,
+            null));
+    var contributions = data.weeklyProjects.get(selectedWeek);
+    int shown = 0;
+    for (var entry : contributions.entrySet()) {
+      if (!allContributions && shown++ >= 6) break;
+      rows.add(card(entry.getKey(), entry.getValue() + " completed", Ui.TEXT, null));
+    }
+    if (contributions.isEmpty())
+      rows.add(
+          card(
+              "No completions recorded",
+              "There are no effective completions for this week in your saved history.",
+              Ui.MUTED,
+              null));
+    if (!allContributions && contributions.size() > 6)
+      rows.add(
+          card(
+              "Show all " + contributions.size() + " projects",
+              "",
+              Ui.ACCENT,
+              () -> {
+                allContributions = true;
+                rebuildRows(false);
+              }));
+    rows.add(
+        card(
+            data.undone + " undone completions this week",
+            "Undo actions are recorded separately. Ordinary undone completions are removed from their original period; recurring occurrences stay counted.",
+            Ui.MUTED,
+            () -> {
+              queries[2] = "uncompleted";
+              selectTab(2);
+            }));
+    rows.add(heading("SAVED ON THIS DEVICE"));
+    rows.add(
+        card(
+            data.eventCount + " activity records",
+            "History from "
+                + data.historyStart.substring(0, 10)
+                + ". Older periods need recorded history; missing history is never filled with invented counts.",
+            Ui.MUTED,
+            null));
+  }
+
+  private void projects(List<DashboardAdapter.Row> rows, DashboardModel data) {
+    String query = queries[1].trim().toLowerCase(Locale.ROOT);
+    int found = 0;
+    rows.add(heading("PROJECTS & TASKS"));
+    for (var project : data.projects) {
+      List<DashboardModel.Task> matches = new ArrayList<>();
+      boolean projectMatch = project.path.toLowerCase(Locale.ROOT).contains(query);
+      for (var task : project.tasks)
+        if ((priorityValue == 0 || priorityValue == task.priority)
+            && (projectMatch || task.searchText().contains(query))) matches.add(task);
+      if (matches.isEmpty() && (!query.isEmpty() || priorityValue != 0)) continue;
+      boolean filtered = !query.isEmpty() || priorityValue != 0;
+      boolean open = expanded.contains(project.id) || filtered;
+      rows.add(
+          card(
+              (open ? "▾  " : "▸  ") + project.path,
+              matches.size()
+                  + (filtered
+                      ? " matching tasks"
+                      : " tasks · tap to " + (open ? "collapse" : "expand")),
+              Ui.TEXT,
+              filtered
+                  ? null
+                  : () -> {
+                    if (!expanded.add(project.id)) expanded.remove(project.id);
+                    rebuildRows(false);
+                  }));
+      found += matches.size();
+      if (open)
+        for (var task : matches)
+          rows.add(
+              card(
+                  "P" + (5 - task.priority) + "  " + task.content,
+                  (task.due.isEmpty() ? "No due date" : "Due " + task.due)
+                      + (task.deadline.isEmpty() ? "" : " · deadline " + task.deadline),
+                  task.priority == 4 ? Ui.DANGER : task.priority == 3 ? Ui.WARN : Ui.TEXT,
+                  () -> taskDetails(task)));
+    }
+    rows.add(
+        1,
+        card(
+            found + " matching tasks",
+            "Search includes project paths and labels. Priority filters apply to every project.",
+            Ui.MUTED,
+            null));
+    if (rows.size() == 2)
+      rows.add(
+          card("No tasks match", "Try another search or choose All priorities.", Ui.TEXT, null));
+  }
+
+  private void activity(List<DashboardAdapter.Row> rows, DashboardModel data) {
+    if (!data.historyAvailable) {
+      rows.add(card("Activity unavailable", data.historyWarning, Ui.WARN, null));
+      return;
+    }
+    rows.add(heading("RECENT ACTIVITY · UP TO 200 EVENTS"));
+    String query = queries[2].trim().toLowerCase(Locale.ROOT);
+    for (var event : data.recent) {
+      if (!(event.kind + " " + event.content + " " + event.project)
+          .toLowerCase(Locale.ROOT)
+          .contains(query)) continue;
+      String when =
+          DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)
+              .format(event.date.atZone(ZoneId.systemDefault()));
+      rows.add(
+          card(
+              event.kind.equals("uncompleted")
+                  ? "Undone completion"
+                  : event.kind.isEmpty()
+                      ? "Activity"
+                      : event.kind.substring(0, 1).toUpperCase(Locale.ROOT)
+                          + event.kind.substring(1),
+              event.content + "\n" + event.project + " · " + when,
+              event.kind.equals("uncompleted") ? Ui.WARN : Ui.TEXT,
+              null));
+    }
+    if (rows.size() == 1)
+      rows.add(
+          card(
+              "No activity matches",
+              "Try another search, or sync to refresh your history.",
+              Ui.MUTED,
+              null));
+  }
+
+  private void taskDetails(DashboardModel.Task task) {
+    TextView body =
+        Ui.text(
+            this,
+            task.content
+                + "\n\n"
+                + task.project
+                + "\nPriority P"
+                + (5 - task.priority)
+                + (task.due.isEmpty() ? "" : "\nDue: " + task.due)
+                + (task.deadline.isEmpty() ? "" : "\nDeadline: " + task.deadline)
+                + (task.labels.isEmpty() ? "" : "\nLabels: " + String.join(", ", task.labels)),
+            16,
+            Ui.TEXT,
+            false);
+    body.setTextIsSelectable(true);
+    body.setPadding(dp(24), dp(12), dp(24), dp(12));
+    new AlertDialog.Builder(this)
+        .setTitle("Task details")
+        .setView(body)
+        .setPositiveButton("Close", null)
+        .show();
+  }
+
+  private void settings() {
+    List<String> options =
+        new ArrayList<>(
+            java.util.Arrays.asList("Connect or update token", "Alert rules", "Explore demo"));
+    if (state != null && state.connected) options.add("Disconnect and clear local data");
+    new AlertDialog.Builder(this)
+        .setTitle("Settings")
+        .setItems(
+            options.toArray(new String[0]),
+            (dialog, which) -> {
+              if (which == 0) tokenDialog();
+              else if (which == 1) rulesDialog();
+              else if (which == 2) model.showDemo();
+              else
+                new AlertDialog.Builder(this)
+                    .setTitle("Disconnect this device?")
+                    .setMessage(
+                        "This removes the saved token and history from this device. Your Todoist tasks are unchanged.")
+                    .setPositiveButton(
+                        "Disconnect",
+                        (confirm, choice) -> {
+                          expanded.clear();
+                          model.disconnect();
+                        })
+                    .setNegativeButton("Keep data", null)
+                    .show();
+            })
+        .setNegativeButton("Close", null)
+        .show();
+  }
+
+  private void tokenDialog() {
+    EditText input = new EditText(this);
+    input.setSingleLine(true);
+    input.setTextColor(Ui.TEXT);
+    input.setHint("Paste Todoist API token");
+    input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+    input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+    LinearLayout box = Ui.column(this);
+    box.setPadding(dp(24), dp(8), dp(24), 0);
+    box.addView(input);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("Connect Todoist")
+            .setMessage(
+                "Find your API token in Todoist Settings → Integrations → Developer. Requests are read-only; the token stays encrypted on this device. Updating a token for the same account keeps its history.")
+            .setView(box)
+            .setPositiveButton("Connect and sync", null)
+            .setNegativeButton("Cancel", null)
+            .create();
+    dialog.setOnShowListener(
+        view ->
+            dialog
+                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(
+                    button -> {
+                      String value = input.getText().toString().trim();
+                      if (value.isEmpty()) {
+                        input.setError("Enter an API token");
+                        return;
+                      }
+                      if (state != null && (state.syncing || state.loading)) {
+                        input.setError("Wait for the current operation or cancel it first");
+                        return;
+                      }
+                      model.sync(value);
+                      input.setText("");
+                      dialog.dismiss();
+                    }));
+    dialog.show();
+  }
+
+  private CheckBox check(LinearLayout box, String label, boolean value) {
+    CheckBox check = new CheckBox(this);
+    check.setText(label);
+    check.setTextColor(Ui.TEXT);
+    check.setChecked(value);
+    box.addView(check);
+    return check;
+  }
+
+  private EditText number(LinearLayout box, String label, int value) {
+    box.addView(Ui.text(this, label, 13, Ui.MUTED, false), Ui.space(this, 8));
+    EditText input = new EditText(this);
+    input.setInputType(InputType.TYPE_CLASS_NUMBER);
+    input.setText(String.valueOf(value));
+    input.setSingleLine(true);
+    input.setTextColor(Ui.TEXT);
+    box.addView(input);
+    return input;
+  }
+
+  private void rulesDialog() {
+    AlertRules rules =
+        AlertRules.read(getSharedPreferences("rules", MODE_PRIVATE).getString("config", ""));
+    LinearLayout box = Ui.column(this);
+    box.setPadding(dp(20), dp(8), dp(20), dp(16));
+    CheckBox enabled = check(box, "Enable attention monitoring", rules.enabled),
+        fire = check(box, "Red alert for fire labels", rules.fire);
+    box.addView(
+        Ui.text(this, "Fire labels (exact names, separated by commas)", 13, Ui.MUTED, false));
+    EditText labels = new EditText(this);
+    labels.setTextColor(Ui.TEXT);
+    labels.setText(rules.fireLabels);
+    box.addView(labels);
+    CheckBox priorities = check(box, "Attention for selected priorities", rules.priority);
+    CheckBox[] selected = new CheckBox[4];
+    for (int i = 0; i < 4; i++)
+      selected[i] = check(box, "P" + (i + 1), rules.priorities.contains(4 - i));
+    EditText priorityMin = number(box, "Minimum priority matches", rules.priorityMin);
+    CheckBox due = check(box, "Attention for overdue and upcoming due dates", rules.due);
+    EditText dueDays = number(box, "Due within days (0 = today and overdue)", rules.dueDays),
+        dueMin = number(box, "Minimum due matches", rules.dueMin);
+    CheckBox deadline = check(box, "Attention for overdue and upcoming deadlines", rules.deadline);
+    EditText deadlineDays = number(box, "Deadline within days", rules.deadlineDays),
+        deadlineMin = number(box, "Minimum deadline matches", rules.deadlineMin);
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(box);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("Attention rules · this device")
+            .setView(scroll)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create();
+    dialog.setOnShowListener(
+        view ->
+            dialog
+                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(
+                    button -> {
+                      try {
+                        rules.priorityMin = positive(priorityMin, 1);
+                        rules.dueDays = positive(dueDays, 0);
+                        rules.dueMin = positive(dueMin, 1);
+                        rules.deadlineDays = positive(deadlineDays, 0);
+                        rules.deadlineMin = positive(deadlineMin, 1);
+                      } catch (IllegalArgumentException invalid) {
+                        return;
+                      }
+                      rules.enabled = enabled.isChecked();
+                      rules.fire = fire.isChecked();
+                      rules.fireLabels = labels.getText().toString();
+                      rules.priority = priorities.isChecked();
+                      rules.due = due.isChecked();
+                      rules.deadline = deadline.isChecked();
+                      rules.priorities.clear();
+                      for (int i = 0; i < selected.length; i++)
+                        if (selected[i].isChecked()) rules.priorities.add(4 - i);
+                      getSharedPreferences("rules", MODE_PRIVATE)
+                          .edit()
+                          .putString("config", rules.json())
+                          .apply();
+                      rebuildRows(false);
+                      dialog.dismiss();
+                    }));
+    dialog.show();
+  }
+
+  private int positive(EditText field, int minimum) {
+    try {
+      int value = Integer.parseInt(field.getText().toString());
+      if (value < minimum || value > 100000) throw new NumberFormatException();
+      return value;
+    } catch (NumberFormatException invalid) {
+      field.setError("Enter a whole number from " + minimum + " to 100000");
+      field.requestFocus();
+      throw new IllegalArgumentException(invalid);
+    }
+  }
+
+  private int dp(float value) {
+    return Ui.dp(this, value);
+  }
+
+  @Override
+  protected void onSaveInstanceState(Bundle out) {
+    out.putInt("tab", tab);
+    out.putInt("priority", priorityValue);
+    out.putInt("week", selectedWeek);
+    out.putStringArray("queries", queries);
+    out.putStringArrayList("expanded", new ArrayList<>(expanded));
+    out.putParcelable("scroll", layout.onSaveInstanceState());
+    super.onSaveInstanceState(out);
+  }
+
+  @Override
+  protected void onDestroy() {
+    handler.removeCallbacks(updateSearch);
+    super.onDestroy();
+  }
 }

@@ -1,85 +1,165 @@
 package com.todoistassistant;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-/** Read-only API client. All requests stay on the worker thread. */
+/** Assemble an account-scoped snapshot; callers commit only a fully fetched result. */
 final class TodoistClient {
-    private final String token;
-    TodoistClient(String token) { this.token = token; }
+  interface Progress {
+    void update(String message);
+  }
 
-    JSONObject get(String path) throws Exception {
-        HttpURLConnection connection = (HttpURLConnection) URI.create("https://api.todoist.com/api/v1/" + path).toURL().openConnection();
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(30000);
-        connection.setInstanceFollowRedirects(false);
-        connection.setRequestProperty("Authorization", "Bearer " + token);
-        try {
-            int status = connection.getResponseCode();
-            if (status == 401 || status == 403) throw new IOException("Todoist rejected the token. Check API access in Settings.");
-            if (status == 429) throw new IOException("Todoist rate limit reached. Try syncing again later.");
-            if (status != 200) throw new IOException("Todoist request failed (HTTP " + status + ").");
-            try (var stream = connection.getInputStream()) {
-                var output = new java.io.ByteArrayOutputStream();
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = stream.read(buffer)) != -1) output.write(buffer, 0, read);
-                return new JSONObject(output.toString(StandardCharsets.UTF_8.name()));
-            }
-        } finally { connection.disconnect(); }
+  private final ApiTransport transport;
+  private final Clock clock;
+  private final Progress progress;
+
+  TodoistClient(ApiTransport transport, Clock clock, Progress progress) {
+    this.transport = transport;
+    this.clock = clock;
+    this.progress = progress;
+  }
+
+  JSONArray list(String path, String label) throws Exception {
+    JSONArray all = new JSONArray();
+    Set<String> cursors = new HashSet<>();
+    String cursor = "";
+    int pages = 0;
+    do {
+      if (Thread.currentThread().isInterrupted()) throw new SyncCancelledException();
+      JSONObject page =
+          transport.get(
+              path
+                  + (path.contains("?") ? "&" : "?")
+                  + "limit=100"
+                  + (cursor.isEmpty() ? "" : "&cursor=" + encode(cursor)));
+      JSONArray items = page.getJSONArray("results");
+      for (int i = 0; i < items.length(); i++) all.put(items.getJSONObject(i));
+      progress.update(label + " · " + all.length() + " records · page " + ++pages);
+      Object next = page.opt("next_cursor");
+      cursor = next == null || next == JSONObject.NULL ? "" : String.valueOf(next);
+      if (!cursor.isEmpty() && !cursors.add(cursor))
+        throw new IOException("Todoist repeated a page. Retry sync to recover safely.");
+    } while (!cursor.isEmpty());
+    return all;
+  }
+
+  JSONObject snapshot(JSONObject previous, boolean trustLegacyOwner) throws Exception {
+    Instant started = clock.instant();
+    progress.update("Checking your account…");
+    JSONObject user = transport.get("user");
+    String userId = String.valueOf(user.get("id"));
+    if (userId.trim().isEmpty() || userId.equals("null"))
+      throw new IOException("Todoist returned an invalid account identity.");
+    boolean sameAccount =
+        userId.equals(previous.optString("userId"))
+            || (!previous.has("userId") && trustLegacyOwner);
+    JSONObject baseline = sameAccount ? previous : new JSONObject();
+    JSONObject data = new JSONObject();
+    data.put("userId", userId);
+    data.put("projects", list("projects", "Loading projects"));
+    data.put("tasks", list("tasks", "Loading active tasks"));
+    JSONArray archived = new JSONArray();
+    String namesSynced = baseline.optString("projectNamesSyncedAt", "1970-01-01T00:00:00Z");
+    if (Duration.between(Instant.parse(namesSynced), started).toHours() >= 24) {
+      try {
+        archived = list("projects/archived", "Loading archived project names");
+        namesSynced = started.toString();
+      } catch (SyncCancelledException cancelled) {
+        throw cancelled;
+      } catch (IOException unavailable) {
+        data.put(
+            "metadataWarning",
+            "Some archived project names are unavailable. Their completions remain included.");
+      }
     }
-
-    JSONArray list(String path) throws Exception {
-        JSONArray all = new JSONArray();
-        String cursor = "";
-        Set<String> seen = new HashSet<>();
-        do {
-            JSONObject page = get(path + (path.contains("?") ? "&" : "?") + "limit=100" +
-                (cursor.isEmpty() ? "" : "&cursor=" + URLEncoder.encode(cursor, StandardCharsets.UTF_8.name())));
-            JSONArray items = page.getJSONArray("results");
-            for (int i = 0; i < items.length(); i++) all.put(items.get(i));
-            cursor = page.optString("next_cursor", "");
-            if (cursor.equals("null")) cursor = "";
-            if (!cursor.isEmpty() && !seen.add(cursor)) throw new IOException("Todoist returned a repeated pagination cursor.");
-        } while (!cursor.isEmpty());
-        return all;
+    data.put("projectNamesSyncedAt", namesSynced);
+    data.put("knownProjects", knownProjects(baseline, archived, data.getJSONArray("projects")));
+    Map<String, JSONObject> merged = new LinkedHashMap<>();
+    Instant since =
+        ZonedDateTime.now(clock)
+            .minusWeeks(12)
+            .with(DayOfWeek.MONDAY)
+            .toLocalDate()
+            .atStartOfDay(clock.getZone())
+            .toInstant();
+    JSONArray cached = baseline.optJSONArray("activities");
+    Instant newest = null;
+    if (cached != null)
+      for (int i = 0; i < cached.length(); i++) {
+        JSONObject item = cached.getJSONObject(i);
+        Instant time = Instant.parse(item.getString("event_date"));
+        merged.put(item.getString("id"), item);
+        if (!time.isAfter(started) && (newest == null || time.isAfter(newest))) newest = time;
+      }
+    if (newest != null) since = newest.minus(Duration.ofDays(1));
+    try {
+      JSONArray fetched =
+          list(
+              "activities?date_from="
+                  + encode(since.toString())
+                  + "&date_to="
+                  + encode(started.toString()),
+              "Syncing activity");
+      for (int i = 0; i < fetched.length(); i++) {
+        JSONObject item = fetched.getJSONObject(i);
+        Instant.parse(item.getString("event_date"));
+        merged.put(item.getString("id"), item);
+      }
+      data.put("activitySyncedAt", started.toString());
+    } catch (DataAccessException unavailable) {
+      data.put(
+          "activitySyncedAt",
+          baseline.optString(
+              "activitySyncedAt", baseline.optString("syncedAt", started.toString())));
+      data.put(
+          "activityUnavailable",
+          !baseline.has("syncedAt") || baseline.optBoolean("activityUnavailable"));
+      data.put(
+          "activityWarning",
+          "Activity access is unavailable for this account. Tasks and projects are saved; completion history was not refreshed.");
     }
+    data.put("activities", new JSONArray(merged.values()));
+    data.put("historyStart", baseline.optString("historyStart", since.toString()));
+    // The API range ended at 'started', not at the later time the last page arrived.
+    data.put("syncedAt", started.toString());
+    data.put("schemaVersion", 2);
+    return data;
+  }
 
-    JSONObject snapshot(JSONObject previous) throws Exception {
-        JSONObject data = new JSONObject();
-
-        data.put("projects", list("projects"));
-        data.put("tasks", list("tasks"));
-        java.time.Instant since = java.time.ZonedDateTime.now().minusWeeks(12)
-            .with(java.time.DayOfWeek.MONDAY).toLocalDate().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant();
-        JSONArray cached = previous.optJSONArray("activities");
-        java.util.Map<String, JSONObject> merged = new java.util.LinkedHashMap<>();
-        java.time.Instant newest = null;
-        if (cached != null) for (int i = 0; i < cached.length(); i++) {
-            JSONObject item = cached.getJSONObject(i);
-            merged.put(item.getString("id"), item);
-            java.time.Instant time = java.time.Instant.parse(item.getString("event_date"));
-            if (newest == null || time.isAfter(newest)) newest = time;
-        }
-        if (newest != null) since = newest.minus(java.time.Duration.ofDays(1));
-        data.put("historyStart", previous.optString("historyStart", since.toString()));
-        JSONArray fetched = list("activities?date_from=" +
-            URLEncoder.encode(since.toString(), StandardCharsets.UTF_8.name()) + "&date_to=" +
-            URLEncoder.encode(java.time.Instant.now().toString(), StandardCharsets.UTF_8.name()));
-        for (int i = 0; i < fetched.length(); i++) {
-            JSONObject item = fetched.getJSONObject(i);
-            merged.put(item.getString("id"), item);
-        }
-        data.put("activities", new JSONArray(merged.values()));
-        data.put("syncedAt", java.time.Instant.now().toString());
-        data.put("schemaVersion", 1);
-        return data;
+  private static JSONArray knownProjects(JSONObject baseline, JSONArray archived, JSONArray current)
+      throws Exception {
+    Map<String, JSONObject> known = new LinkedHashMap<>();
+    JSONArray old = baseline.optJSONArray("knownProjects");
+    if (old == null) old = baseline.optJSONArray("projects");
+    if (old != null)
+      for (int i = 0; i < old.length(); i++) {
+        JSONObject project = old.getJSONObject(i);
+        known.put(project.getString("id"), project);
+      }
+    for (int i = 0; i < archived.length(); i++) {
+      JSONObject project = archived.getJSONObject(i);
+      known.put(project.getString("id"), project);
     }
+    for (int i = 0; i < current.length(); i++) {
+      JSONObject project = current.getJSONObject(i);
+      known.put(project.getString("id"), project);
+    }
+    return new JSONArray(known.values());
+  }
+
+  private static String encode(String value) throws Exception {
+    return URLEncoder.encode(value, StandardCharsets.UTF_8.name());
+  }
 }

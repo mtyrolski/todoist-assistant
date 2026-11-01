@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:icon="@drawable/ic_launcher" android:dataExtractionRules="@xml/data_extraction_rules" android:label="Todoist Assistant" android:theme="@style/AppTheme"
-        android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
+        android:allowBackup="false" android:fullBackupContent="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

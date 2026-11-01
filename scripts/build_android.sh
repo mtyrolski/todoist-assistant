@@ -11,7 +11,7 @@ if [ -z "$android_sdk" ] && [ ! -f "$repo_root/android/local.properties" ]; then
     exit 1
 fi
 "$repo_root/android/gradlew" -p "$repo_root/android" --no-daemon \
-    :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "$@"
+    :app:spotlessJavaCheck :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "$@"
 mkdir -p "$repo_root/dist/android"
 cp "$repo_root/android/app/build/outputs/apk/debug/app-debug.apk" "$repo_root/dist/android/todoist-assistant-debug.apk"
 echo "Installable APK: $repo_root/dist/android/todoist-assistant-debug.apk"
