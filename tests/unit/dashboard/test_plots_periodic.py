@@ -727,3 +727,44 @@ def test_periodic_baseline_includes_wholly_empty_weeks():
         granularity="W",
     )
     assert counts["Project A"].tolist() == [1, 0, 0, 1]
+
+
+def test_quarterly_counts_use_calendar_quarter_boundaries():
+    _, counts = _prepare_completed_periodic_frame(
+        _completed_df(
+            [
+                ("2026-02-01", "Project A", "a", "A"),
+                ("2026-04-01", "Project A", "b", "B"),
+            ]
+        ),
+        beg_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 5, 1),
+        granularity="3ME",
+    )
+    assert counts.index.tolist() == [
+        pd.Timestamp("2026-03-31"),
+        pd.Timestamp("2026-06-30"),
+    ]
+    assert counts["Project A"].tolist() == [1, 1]
+
+
+def test_project_forecast_history_includes_recent_idle_weeks():
+    from todoist.dashboard._plot_periodic import (
+        _history_totals_for_project,
+        _PeriodicForecastContext,
+        _PERIODIC_CONFIG,
+    )
+
+    values = pd.Series(
+        [8, 0, 0, 0], index=pd.date_range("2026-10-11", periods=4, freq="W")
+    )
+    context = _PeriodicForecastContext(
+        datetime(2026, 11, 1),
+        datetime(2026, 10, 26),
+        datetime(2026, 11, 1, 23, 59),
+        datetime(2026, 10, 31),
+        True,
+    )
+    assert _history_totals_for_project(
+        values=values, series=values.iloc[:1], context=context, config=_PERIODIC_CONFIG
+    ) == [8, 0, 0]

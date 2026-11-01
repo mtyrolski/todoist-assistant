@@ -215,9 +215,10 @@ def _prepare_completed_periodic_frame(
         end_date=visibility_end,
         always_visible_projects=always_visible_projects,
     )
+    resample_frequency = "QE-DEC" if granularity == "3ME" else granularity
     df_periodic = cast(
         pd.DataFrame,
-        df_completed.groupby([period_grouper(granularity), "root_project_name"])
+        df_completed.groupby([period_grouper(resample_frequency), "root_project_name"])
         .size()
         .unstack("root_project_name")
         .sort_index(),
@@ -226,7 +227,9 @@ def _prepare_completed_periodic_frame(
         # Groupby/unstack omits wholly empty periods. They still belong in the baseline.
         df_periodic = df_periodic.reindex(
             pd.date_range(
-                df_periodic.index.min(), df_periodic.index.max(), freq=granularity
+                df_periodic.index.min(),
+                df_periodic.index.max(),
+                freq=resample_frequency,
             ),
             fill_value=0,
         ).fillna(0)
@@ -565,10 +568,16 @@ def _history_totals_for_project(
     source = (
         values.diff().fillna(values).fillna(0)
         if config.cumulative
-        else series.fillna(0)
+        else values.fillna(0)
     )
     return (
-        cast(pd.Series, source[source.index < pd.Timestamp(context.current_label)])
+        cast(
+            pd.Series,
+            source[
+                (source.index >= series.index.min())
+                & (source.index < pd.Timestamp(context.current_label))
+            ],
+        )
         .astype(float)
         .tolist()
     )
