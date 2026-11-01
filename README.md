@@ -44,7 +44,7 @@ The Python data and sync code is separate from the web API and frontend. Plots r
 
 Completion charts reconcile ordinary undo actions from the same event cache and keep recurring occurrences. Undo actions remain in activity history. See [completion and forecast rules](docs/COMPLETIONS.md).
 
-The dashboard serves saved data immediately and refreshes stale data in the background. An open page checks for updates every minute. Failed syncs keep the last view and show a warning. Settings validate before writing and preserve your draft on failure. See [verification and known limits](docs/QUALITY.md) and the [code audit](docs/CODE_AUDIT.md).
+The dashboard refreshes saved data in the background every minute. Failed syncs keep the last view and show a warning.
 
 ## Packaging
 
