@@ -227,9 +227,7 @@ def test_evaluate_urgency_status_respects_custom_settings() -> None:
     assert status["state"] == "warn"
     assert status["badgeLabel"] == "Heads up"
     assert status["total"] == 2
-    _assert_counts_include(
-        status, fireTasks=0, p1Tasks=1, priorityTasks=1, dueTasks=1
-    )
+    _assert_counts_include(status, fireTasks=0, p1Tasks=1, priorityTasks=1, dueTasks=1)
     assert status["visibleChips"] == ["p1Tasks", "dueTasks"]
     assert (
         status["summary"]
@@ -277,3 +275,29 @@ def test_evaluate_urgency_status_supports_multi_labels_and_minimum_thresholds() 
         dueTasks=1,
         deadlineTasks=1,
     )
+
+
+def test_urgency_honors_loaded_yaml_rules_and_empty_selections():
+    from omegaconf import OmegaConf
+
+    projects = [
+        make_project(tasks=[make_task("a", priority=4, labels=[FIRE_TASK_LABEL])])
+    ]
+    settings = OmegaConf.create(
+        {
+            "fire_labels": [],
+            "warn_priority_thresholds": [],
+            "warn_on_due": False,
+            "warn_on_deadline": False,
+        }
+    )
+    assert evaluate_urgency_status(projects, settings=settings)["state"] == "good"
+    settings.fire_labels = [FIRE_TASK_LABEL]
+    settings.danger_summary_label = "Custom red alert"
+    status = evaluate_urgency_status(projects, settings=settings)
+    assert status["state"] == "danger"
+    assert status["title"] == "Custom red alert"
+    settings.danger_on_fire_label = False
+    settings.warn_priority_thresholds = [4]
+    settings.warn_priority_min_count = 2
+    assert evaluate_urgency_status(projects, settings=settings)["state"] == "good"

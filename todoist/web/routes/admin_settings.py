@@ -377,4 +377,5 @@ async def admin_update_dashboard_settings(
     if "plotEvents" in payload:
         config["plot_events"] = normalized_events
     await _save_config(_DASHBOARD_CONFIG_PATH, config)
+    _state.home_payload_cache.clear()
     return _dashboard_settings_response(config, saved=True)

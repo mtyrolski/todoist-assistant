@@ -1,6 +1,5 @@
 """Tests for FastAPI admin endpoints."""
 
-
 import pytest
 
 import todoist.database.dataframe as dataframe_module
@@ -405,3 +404,32 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(
 )
 def test_removed_runtime_features_have_no_routes(api_client, path: str) -> None:
     assert api_client.get(path).status_code == 404
+
+
+def test_dashboard_settings_create_directory_and_invalidate_home(
+    monkeypatch, tmp_path, api_client
+):
+    path = tmp_path / "new-configs" / "dashboard.yaml"
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", path)
+    monkeypatch.setattr(
+        web_api._state, "home_payload_cache", {("home",): {"stale": True}}
+    )
+    response = api_client.put(
+        "/api/admin/dashboard/settings",
+        json={
+            "fireLabels": [],
+            "warnPriorityThresholds": [],
+            "dangerOnFireLabel": False,
+            "warnOnPriority": False,
+            "warnOnDue": False,
+            "warnOnDeadline": False,
+        },
+    )
+    assert response.status_code == 200
+    assert web_api._state.home_payload_cache == {}
+    reread = api_client.get("/api/admin/dashboard/settings").json()["settings"]
+    assert reread["fireLabels"] == []
+    assert reread["warnPriorityThresholds"] == []
+    assert reread["dangerOnFireLabel"] is False
+    assert reread["warnOnPriority"] is False
+    assert path.exists()

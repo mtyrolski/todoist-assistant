@@ -6,6 +6,10 @@ import { InfoTip } from "./InfoTip";
 type DashboardSettingsResponse = {
   settings: {
     enabled: boolean;
+    dangerOnFireLabel: boolean;
+    warnOnPriority: boolean;
+    warnOnDue: boolean;
+    warnOnDeadline: boolean;
     fireLabel: string;
     fireLabels: string[];
     warnPriorityThresholds: number[];
@@ -47,8 +51,11 @@ const PRIORITY_OPTIONS = [
 
 async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text();
-  if (!text) return {} as T;
-  return JSON.parse(text) as T;
+  let payload;
+  try { payload = text ? JSON.parse(text) : {}; }
+  catch { throw new Error(`Server returned an invalid response (${res.status})`); }
+  if (!res.ok) throw new Error(payload.detail || `Request failed (${res.status})`);
+  return payload as T;
 }
 
 export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => void }) {
@@ -58,6 +65,7 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
   const [notice, setNotice] = useState<string | null>(null);
   const [configPath, setConfigPath] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
+  const [rules, setRules] = useState({ dangerOnFireLabel: true, warnOnPriority: true, warnOnDue: true, warnOnDeadline: true });
   const [fireLabels, setFireLabels] = useState<string[]>(["fire"]);
   const [labelOptions, setLabelOptions] = useState<string[]>([]);
   const [warnPriorityThresholds, setWarnPriorityThresholds] = useState<number[]>([4, 3]);
@@ -79,8 +87,9 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
         throw new Error("Failed to load dashboard settings");
       }
       setEnabled(payload.settings.enabled);
+      setRules({ dangerOnFireLabel: payload.settings.dangerOnFireLabel, warnOnPriority: payload.settings.warnOnPriority, warnOnDue: payload.settings.warnOnDue, warnOnDeadline: payload.settings.warnOnDeadline });
       setFireLabels(
-        payload.settings.fireLabels.length ? payload.settings.fireLabels : [payload.settings.fireLabel].filter(Boolean)
+        payload.settings.fireLabels
       );
       setWarnPriorityThresholds(payload.settings.warnPriorityThresholds);
       setWarnPriorityMinCount(String(payload.settings.warnPriorityMinCount));
@@ -128,6 +137,7 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled,
+          ...rules,
           fireLabels,
           fireLabel: fireLabels[0] ?? "",
           warnPriorityThresholds,
@@ -150,7 +160,8 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
         throw new Error("Failed to save dashboard settings");
       }
       setEnabled(payload.settings.enabled);
-      setFireLabels(payload.settings.fireLabels.length ? payload.settings.fireLabels : [payload.settings.fireLabel].filter(Boolean));
+      setRules({ dangerOnFireLabel: payload.settings.dangerOnFireLabel, warnOnPriority: payload.settings.warnOnPriority, warnOnDue: payload.settings.warnOnDue, warnOnDeadline: payload.settings.warnOnDeadline });
+      setFireLabels(payload.settings.fireLabels);
       setWarnPriorityThresholds(payload.settings.warnPriorityThresholds);
       setWarnPriorityMinCount(String(payload.settings.warnPriorityMinCount));
       setWarnDueWithinDays(String(payload.settings.warnDueWithinDays));
@@ -197,6 +208,17 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
             <span className="fieldLabel">Urgency monitor enabled</span>
             <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
           </label>
+          {([
+            ["dangerOnFireLabel", "Red alert for fire labels"],
+            ["warnOnPriority", "Attention needed for selected priorities"],
+            ["warnOnDue", "Attention needed for due dates"],
+            ["warnOnDeadline", "Attention needed for deadlines"]
+          ] as const).map(([key, label]) => (
+            <label className="field" key={key}>
+              <span className="fieldLabel">{label}</span>
+              <input type="checkbox" checked={rules[key]} onChange={(event) => setRules((current) => ({ ...current, [key]: event.target.checked }))} />
+            </label>
+          ))}
           <label className="field">
             <span className="fieldLabel">Fire labels</span>
             <select

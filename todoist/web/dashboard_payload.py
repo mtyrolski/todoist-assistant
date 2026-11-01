@@ -120,14 +120,14 @@ def _task_due_within_days(
 
 
 def _normalize_urgency_settings(
-    settings: dict[str, Any] | None,
+    settings: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     normalized = dict(DEFAULT_URGENCY_SETTINGS)
-    if not isinstance(settings, dict):
+    if not isinstance(settings, Mapping):
         return normalized
     normalized.update(settings)
     badge_labels = settings.get("badge_labels")
-    if isinstance(badge_labels, dict):
+    if isinstance(badge_labels, Mapping):
         normalized["badge_labels"] = {
             key: str(
                 badge_labels.get(key) or DEFAULT_URGENCY_SETTINGS["badge_labels"][key]
@@ -135,12 +135,12 @@ def _normalize_urgency_settings(
             for key in ("good", "warn", "danger")
         }
     thresholds = settings.get("warn_priority_thresholds")
-    if isinstance(thresholds, list):
+    if isinstance(thresholds, Sequence) and not isinstance(thresholds, str):
         normalized["warn_priority_thresholds"] = tuple(
             int(value) for value in thresholds if str(value).strip()
         )
     fire_labels = settings.get("fire_labels")
-    if isinstance(fire_labels, list):
+    if isinstance(fire_labels, Sequence) and not isinstance(fire_labels, str):
         normalized["fire_labels"] = tuple(
             str(value).strip() for value in fire_labels if str(value).strip()
         )
@@ -224,7 +224,7 @@ def evaluate_urgency_status(
     active_projects: Sequence[Project] | None,
     *,
     today: date | None = None,
-    settings: dict[str, Any] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     reference_day = today or datetime.now().date()
     urgency_settings = _normalize_urgency_settings(settings)
