@@ -141,6 +141,16 @@ def test_extract_task_due_date_cases(due, expected: datetime | None):
     assert extract_task_due_date(due) == expected
 
 
-def test_extract_task_due_date_missing_date_key_raises():
-    with pytest.raises(KeyError):
-        extract_task_due_date({"is_recurring": False, "timezone": "UTC"})
+def test_extract_task_due_date_missing_date_key_is_unknown():
+    assert extract_task_due_date({"not_date": "2024-01-15"}) is None
+
+
+@pytest.mark.parametrize("due", [{}, {"date": None}, {"date": 123}, {"date": ""}])
+def test_incomplete_due_objects_do_not_break_dashboard_rules(due):
+    assert extract_task_due_date(due) is None
+
+
+def test_iso_dates_with_offsets_keep_the_tasks_calendar_date():
+    assert extract_task_due_date({"date": "2026-11-01T23:30:00-08:00"}) == datetime(
+        2026, 11, 1, 23, 30
+    )

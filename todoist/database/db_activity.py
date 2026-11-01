@@ -12,7 +12,6 @@ from todoist.core.utils import (
     report_tqdm_progress,
     safe_instantiate_entry,
 )
-from todoist.features.stats import extract_task_due_date
 
 ACTIVITY_PAGE_LIMIT = 100
 
@@ -659,7 +658,15 @@ class DatabaseActivity:
     def _events_from_entries(entries: list[EventEntry]) -> list[Event]:
         events: list[Event] = []
         for entry in entries:
-            event_date = extract_task_due_date(entry.event_date)
+            try:
+                parsed = datetime.fromisoformat(entry.event_date)
+                event_date = (
+                    (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc))
+                    .astimezone(timezone.utc)
+                    .replace(tzinfo=None)
+                )
+            except (TypeError, ValueError):
+                event_date = None
             if event_date is None:
                 logger.debug(
                     f"Skipping event {entry.id} due to unparseable date {entry.event_date}"

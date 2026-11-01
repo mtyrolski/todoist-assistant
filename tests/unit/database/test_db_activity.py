@@ -431,3 +431,25 @@ def test_fetch_activity_incremental_falls_back_without_cached_boundary(db_activi
 
     assert result == [event]
     fetch_recent.assert_called_once_with(max_pages=2)
+
+
+def test_activity_timestamps_with_offsets_are_stored_as_naive_utc():
+    from todoist.core.types import EventEntry
+    from todoist.database.db_activity import DatabaseActivity
+    from datetime import datetime
+
+    entry = EventEntry(
+        id="offset",
+        object_type="item",
+        object_id="task",
+        event_type="completed",
+        event_date="2026-11-02T00:30:00+01:00",
+        parent_project_id="project",
+        parent_item_id=None,
+        initiator_id=None,
+        extra_data={},
+        extra_data_id=None,
+    )
+    events = DatabaseActivity._events_from_entries([entry])
+    assert events[0].date == datetime(2026, 11, 1, 23, 30)
+    assert events[0].date.tzinfo is None
