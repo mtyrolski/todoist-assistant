@@ -433,3 +433,70 @@ def test_dashboard_settings_create_directory_and_invalidate_home(
     assert reread["dangerOnFireLabel"] is False
     assert reread["warnOnPriority"] is False
     assert path.exists()
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"enabled": "false"},
+        {"warnOnPriority": 0},
+        {"fireLabels": "fire"},
+        {"warnPriorityThresholds": "43"},
+        {"warnPriorityThresholds": [0, 5]},
+        {"warnPriorityMinCount": 1.5},
+        {"warnDueWithinDays": -1},
+        {"warnDueMinCount": 0},
+        {"warnDeadlineWithinDays": True},
+        {"fireLabels": [None]},
+        {"plotEvents": [{"date": "2026-02-30", "label": "Invalid"}]},
+        {"plotEvents": [{"date": "2026-11-01", "label": "Launch", "color": "garbage"}]},
+    ],
+)
+def test_invalid_settings_do_not_modify_saved_rules(
+    monkeypatch, tmp_path, api_client, patch
+):
+    path = tmp_path / "dashboard.yaml"
+    path.write_text("urgency:\n  enabled: true\n  warn_priority_thresholds: [4]\n")
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", path)
+    before = path.read_bytes()
+    response = api_client.put("/api/admin/dashboard/settings", json=patch)
+    assert response.status_code == 400
+    assert path.read_bytes() == before
+    assert response.json()["detail"]
+
+
+def test_concurrent_partial_settings_updates_preserve_each_other(monkeypatch, tmp_path):
+    import asyncio
+    import httpx
+
+    path = tmp_path / "dashboard.yaml"
+    path.write_text("urgency:\n  enabled: true\n  warn_priority_thresholds: [4]\n")
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", path)
+
+    async def run():
+        lock = asyncio.Lock()
+        monkeypatch.setattr(web_api, "_ADMIN_LOCK", lock)
+        await lock.acquire()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=web_api.app), base_url="http://test"
+        ) as client:
+            first = asyncio.create_task(
+                client.put("/api/admin/dashboard/settings", json={"enabled": False})
+            )
+            second = asyncio.create_task(
+                client.put(
+                    "/api/admin/dashboard/settings",
+                    json={"warnPriorityThresholds": [2]},
+                )
+            )
+            await asyncio.sleep(0)
+            lock.release()
+            responses = await asyncio.gather(first, second)
+            assert all(response.status_code == 200 for response in responses)
+            settings = (await client.get("/api/admin/dashboard/settings")).json()[
+                "settings"
+            ]
+            assert settings["enabled"] is False
+            assert settings["warnPriorityThresholds"] == [2]
+
+    asyncio.run(run())

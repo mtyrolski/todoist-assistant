@@ -4,16 +4,11 @@
 # pylint: disable=protected-access,cyclic-import,undefined-variable,pointless-string-statement
 
 import asyncio
-from collections.abc import Mapping
 from typing import Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from todoist.web.api_components.settings import (
-    as_sequence as _as_sequence,
-    body_object as _body_object,
-    coerce_int as _coerce_int,
-)
+from todoist.web.dashboard_settings import apply_settings_patch, parse_settings_patch
 from todoist.web.routes.common import _sync_api_globals
 
 
@@ -54,39 +49,6 @@ def _dashboard_settings_response(config: Any, *, saved: bool = False) -> dict[st
         "editTargets": _dashboard_edit_targets(),
     }
     return {"saved": True, **payload} if saved else payload
-
-
-async def _save_config(path: Any, config: Any) -> None:
-    async with _ADMIN_LOCK:
-        _save_yaml_config(path, config)
-
-
-def _normalized_plot_events(items: Any) -> list[dict[str, str]]:
-    events: list[dict[str, str]] = []
-    for item in _as_sequence(items, "plotEvents"):
-        if not isinstance(item, Mapping):
-            raise HTTPException(
-                status_code=400, detail="plotEvents entries must be objects"
-            )
-        raw_date = str(item.get("date") or "").strip()
-        raw_label = str(item.get("label") or "").strip()
-        if not raw_date and not raw_label:
-            continue
-        if not raw_date or not raw_label:
-            raise HTTPException(
-                status_code=400, detail="plot event date and label are required"
-            )
-        parsed_date = _compute_plot_range(
-            _empty_activity_df(), weeks=1, beg=raw_date, end=raw_date
-        )[0]
-        events.append(
-            {
-                "date": parsed_date.strftime("%Y-%m-%d"),
-                "label": raw_label,
-                "color": str(item.get("color") or "#ff6b7a").strip(),
-            }
-        )
-    return events
 
 
 @router.get("/api/admin/project_adjustments", tags=["admin"])
@@ -297,85 +259,10 @@ async def admin_dashboard_labels() -> dict[str, Any]:
 async def admin_update_dashboard_settings(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    payload = _body_object(payload)
-
-    config = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
-    urgency = config.get("urgency") or {}
-    if not isinstance(urgency, Mapping):
-        urgency = {}
-    urgency = dict(urgency)
-
-    if "enabled" in payload:
-        urgency["enabled"] = bool(payload["enabled"])
-    if "fireLabel" in payload:
-        urgency["fire_label"] = str(payload["fireLabel"]).strip()
-    if "fireLabels" in payload:
-        urgency["fire_labels"] = [
-            str(value).strip()
-            for value in _as_sequence(payload["fireLabels"], "fireLabels")
-            if str(value).strip()
-        ]
-        if urgency["fire_labels"]:
-            urgency["fire_label"] = urgency["fire_labels"][0]
-    int_updates = (
-        ("warnDueWithinDays", "warn_due_within_days", False),
-        ("warnDeadlineWithinDays", "warn_deadline_within_days", False),
-        ("warnPriorityMinCount", "warn_priority_min_count", True),
-        ("warnDueMinCount", "warn_due_min_count", True),
-        ("warnDeadlineMinCount", "warn_deadline_min_count", True),
-    )
-    for src, dst, minimum_one in int_updates:
-        if src in payload:
-            value = _coerce_int(payload[src], src)
-            urgency[dst] = max(1, value) if minimum_one else value
-    for src, dst in (
-        ("dangerOnFireLabel", "danger_on_fire_label"),
-        ("warnOnPriority", "warn_on_priority"),
-        ("warnOnDue", "warn_on_due"),
-        ("warnOnDeadline", "warn_on_deadline"),
-    ):
-        if src in payload:
-            urgency[dst] = bool(payload[src])
-    for src, dst in (
-        ("warnSummaryLabel", "warn_summary_label"),
-        ("dangerSummaryLabel", "danger_summary_label"),
-    ):
-        if src in payload:
-            urgency[dst] = str(payload[src]).strip()
-    if "warnPriorityThresholds" in payload:
-        urgency["warn_priority_thresholds"] = [
-            _coerce_int(value, "warnPriorityThresholds")
-            for value in _as_sequence(
-                payload["warnPriorityThresholds"],
-                "warnPriorityThresholds",
-                allow_str=True,
-            )
-        ]
-    if "badgeLabels" in payload:
-        badge_labels = payload["badgeLabels"]
-        if not isinstance(badge_labels, Mapping):
-            raise HTTPException(status_code=400, detail="badgeLabels must be an object")
-        urgency["badge_labels"] = {
-            "good": str(
-                badge_labels.get("good")
-                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["good"]
-            ).strip(),
-            "warn": str(
-                badge_labels.get("warn")
-                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["warn"]
-            ).strip(),
-            "danger": str(
-                badge_labels.get("danger")
-                or DEFAULT_URGENCY_SETTINGS["badge_labels"]["danger"]
-            ).strip(),
-        }
-    normalized_events = []
-    if "plotEvents" in payload:
-        normalized_events = _normalized_plot_events(payload["plotEvents"])
-
-    config["urgency"] = urgency
-    if "plotEvents" in payload:
-        config["plot_events"] = normalized_events
-    await _save_config(_DASHBOARD_CONFIG_PATH, config)
-    _state.home_payload_cache.clear()
+    patch = parse_settings_patch(payload)
+    async with _ADMIN_LOCK:
+        config = _read_yaml_config(_DASHBOARD_CONFIG_PATH, required=False)
+        apply_settings_patch(config, patch)
+        _save_yaml_config(_DASHBOARD_CONFIG_PATH, config)
+        _state.home_payload_cache.clear()
     return _dashboard_settings_response(config, saved=True)

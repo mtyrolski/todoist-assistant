@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 from tempfile import NamedTemporaryFile
-from typing import cast
 
 from fastapi import HTTPException
 from omegaconf import DictConfig, OmegaConf
@@ -20,7 +19,13 @@ def read_yaml_config(path: Path, *, required: bool = True) -> DictConfig:
         raise HTTPException(
             status_code=500, detail=f"Failed to read {path.name}: {exc}"
         ) from exc
-    return OmegaConf.create({}) if loaded is None else cast(DictConfig, loaded)
+    if loaded is None:
+        return OmegaConf.create({})
+    if not isinstance(loaded, DictConfig):
+        raise HTTPException(
+            status_code=500, detail=f"{path.name} must contain a YAML object"
+        )
+    return loaded
 
 
 def save_yaml_config(path: Path, config: DictConfig) -> None:
