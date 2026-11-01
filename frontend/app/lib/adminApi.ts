@@ -42,7 +42,7 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback;
 }
 
-async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, fallbackError = "Request failed"): Promise<T> {
+export async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, fallbackError = "Request failed"): Promise<T> {
   const res = await fetch(input, init);
   const payload = await readJson<T>(res);
   if (!res.ok) {

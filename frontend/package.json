@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test tests/*.test.cjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "15.5.28",
@@ -16,6 +18,7 @@
     "react-plotly.js": "^2.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@types/node": "22.7.4",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",

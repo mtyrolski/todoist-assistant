@@ -3435,3 +3435,16 @@ textarea.textInput {
     width: 100%;
   }
 }
+
+.settingsFields { border: 0; margin: 0; min-width: 0; padding: 0; }
+.settingsFields legend { margin-bottom: 10px; }
+.settingsFields:disabled { opacity: .65; }
+.settingsToggle { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+.settingsToggle input { accent-color: var(--accent); width: 19px; height: 19px; flex-shrink: 0; }
+.settingsChoices { display: flex; flex-wrap: wrap; gap: 8px; }
+.settingsChoice { border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--muted); min-height: 44px; padding: 8px 14px; cursor: pointer; font: inherit; overflow-wrap: anywhere; }
+.settingsChoiceSelected { color: var(--text); border-color: var(--accent); background: rgba(118,232,181,.09); }
+.settingsChoice:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settingsAddLabel { display: flex; flex-wrap: wrap; gap: 10px; }
+.settingsAddLabel input { flex: 1 1 200px; min-width: 0; }
+.settingsError { padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(255,133,142,.5); color: #ffb0b6; overflow-wrap: anywhere; }

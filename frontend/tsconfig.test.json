@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "incremental": false,
+    "outDir": ".test-build",
+    "rootDir": "app/lib",
+    "isolatedModules": false
+  },
+  "include": ["app/lib/dashboardSettings.ts"],
+  "exclude": ["node_modules", ".test-build"]
+}

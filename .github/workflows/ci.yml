@@ -40,5 +40,16 @@ jobs:
         working-directory: frontend
       - run: npm run lint
         working-directory: frontend
+      - run: npm test
+        working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: frontend-browser-failures
+          path: frontend/test-results/

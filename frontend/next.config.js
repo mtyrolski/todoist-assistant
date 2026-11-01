@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 module.exports = {
   output: "standalone",
+  distDir: process.env.TODOIST_NEXT_DIST_DIR || ".next",
   // TypeScript checking runs through npm run lint; no ESLint toolchain is used.
   eslint: { ignoreDuringBuilds: true },
   async rewrites() {

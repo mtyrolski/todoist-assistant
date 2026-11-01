@@ -1,385 +1,174 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { InfoTip } from "./InfoTip";
+import { requestJson } from "../lib/adminApi";
+import { NUMBER_FIELDS, settingsDraft, settingsPayload } from "../lib/dashboardSettings";
+import type { DashboardSettings as Settings, SettingsDraft, PlotEventSetting } from "../lib/dashboardSettings";
 
-type DashboardSettingsResponse = {
-  settings: {
-    enabled: boolean;
-    dangerOnFireLabel: boolean;
-    warnOnPriority: boolean;
-    warnOnDue: boolean;
-    warnOnDeadline: boolean;
-    fireLabel: string;
-    fireLabels: string[];
-    warnPriorityThresholds: number[];
-    warnPriorityMinCount: number;
-    warnDueWithinDays: number;
-    warnDueMinCount: number;
-    warnDeadlineWithinDays: number;
-    warnDeadlineMinCount: number;
-    configPath?: string;
-    plotEvents?: PlotEventSetting[];
-  };
-};
-
-type PlotEventSetting = {
-  date: string;
-  label: string;
-  color: string;
-};
-
-type DashboardLabelsResponse = {
-  labels: {
-    name: string;
-    color?: string | null;
-  }[];
-};
-
-const DASHBOARD_SETTINGS_HELP = `**Dashboard Settings**
-Tune dashboard-specific rules that drive warning cards and local monitoring.
-
-- Changes are saved to local YAML files.
-- Urgency settings change the watch/warn behavior on the main dashboard.`;
-
-const PRIORITY_OPTIONS = [
-  { value: 4, label: "P1" },
-  { value: 3, label: "P2" },
-  { value: 2, label: "P3" },
-  { value: 1, label: "P4" }
-];
-
-async function readJson<T>(res: Response): Promise<T> {
-  const text = await res.text();
-  let payload;
-  try { payload = text ? JSON.parse(text) : {}; }
-  catch { throw new Error(`Server returned an invalid response (${res.status})`); }
-  if (!res.ok) throw new Error(payload.detail || `Request failed (${res.status})`);
-  return payload as T;
-}
+type SettingsResponse = { settings: Settings };
+type LabelsResponse = { labels: { name: string }[] };
+const RULES = [
+  ["dangerOnFireLabel", "Red alert for fire labels"],
+  ["warnOnPriority", "Attention for selected priorities"],
+  ["warnOnDue", "Attention for due dates"],
+  ["warnOnDeadline", "Attention for deadlines"]
+] as const;
 
 export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => void }) {
+  const [saved, setSaved] = useState<SettingsDraft | null>(null);
+  const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  const [labels, setLabels] = useState<string[]>([]);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [labelWarning, setLabelWarning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [configPath, setConfigPath] = useState<string>("");
-  const [enabled, setEnabled] = useState(true);
-  const [rules, setRules] = useState({ dangerOnFireLabel: true, warnOnPriority: true, warnOnDue: true, warnOnDeadline: true });
-  const [fireLabels, setFireLabels] = useState<string[]>(["fire"]);
-  const [labelOptions, setLabelOptions] = useState<string[]>([]);
-  const [warnPriorityThresholds, setWarnPriorityThresholds] = useState<number[]>([4, 3]);
-  const [warnPriorityMinCount, setWarnPriorityMinCount] = useState("1");
-  const [warnDueWithinDays, setWarnDueWithinDays] = useState("0");
-  const [warnDueMinCount, setWarnDueMinCount] = useState("1");
-  const [warnDeadlineWithinDays, setWarnDeadlineWithinDays] = useState("0");
-  const [warnDeadlineMinCount, setWarnDeadlineMinCount] = useState("1");
-  const [plotEvents, setPlotEvents] = useState<PlotEventSetting[]>([]);
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(saved);
+  const labelOptions = useMemo(() => [...new Set([...labels, ...(draft?.fireLabels ?? [])])].sort((a, b) => a.localeCompare(b)), [labels, draft?.fireLabels]);
 
-  const loadSettings = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true); setError(null); setNotice(null);
     try {
-      setLoading(true);
-      setError(null);
-      setNotice(null);
-      const res = await fetch("/api/admin/dashboard/settings");
-      const payload = await readJson<DashboardSettingsResponse>(res);
-      if (!res.ok) {
-        throw new Error("Failed to load dashboard settings");
-      }
-      setEnabled(payload.settings.enabled);
-      setRules({ dangerOnFireLabel: payload.settings.dangerOnFireLabel, warnOnPriority: payload.settings.warnOnPriority, warnOnDue: payload.settings.warnOnDue, warnOnDeadline: payload.settings.warnOnDeadline });
-      setFireLabels(
-        payload.settings.fireLabels
-      );
-      setWarnPriorityThresholds(payload.settings.warnPriorityThresholds);
-      setWarnPriorityMinCount(String(payload.settings.warnPriorityMinCount));
-      setWarnDueWithinDays(String(payload.settings.warnDueWithinDays));
-      setWarnDueMinCount(String(payload.settings.warnDueMinCount));
-      setWarnDeadlineWithinDays(String(payload.settings.warnDeadlineWithinDays));
-      setWarnDeadlineMinCount(String(payload.settings.warnDeadlineMinCount));
-      setPlotEvents(payload.settings.plotEvents ?? []);
-      setConfigPath(payload.settings.configPath ?? "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard settings");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadLabels = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/dashboard/labels");
-      const payload = await readJson<DashboardLabelsResponse>(res);
-      if (!res.ok) {
-        throw new Error("Failed to load labels");
-      }
-      const nextLabels = payload.labels
-        .map((item) => item.name.trim())
-        .filter((value) => value.length > 0);
-      setLabelOptions(nextLabels);
-    } catch {
-      setLabelOptions([]);
-    }
+      const response = await requestJson<SettingsResponse>("/api/admin/dashboard/settings", { signal }, "Could not load dashboard settings");
+      const next = settingsDraft(response.settings); setSaved(next); setDraft(next);
+    } catch (cause) {
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Could not load dashboard settings");
+    } finally { if (!signal?.aborted) setLoading(false); }
   }, []);
 
   useEffect(() => {
-    loadSettings();
-    loadLabels();
-  }, [loadLabels, loadSettings]);
+    const controller = new AbortController();
+    void load(controller.signal);
+    requestJson<LabelsResponse>("/api/admin/dashboard/labels", { signal: controller.signal })
+      .then((response) => setLabels(response.labels.map((label) => label.name.trim()).filter(Boolean)))
+      .catch(() => { if (!controller.signal.aborted) setLabelWarning(true); });
+    return () => controller.abort();
+  }, [load]);
+  useEffect(() => {
+    if (!dirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [dirty]);
 
-  const saveSettings = async () => {
+  const patch = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) => {
+    setDraft((current) => current ? { ...current, [key]: value } : current); setNotice(null);
+  };
+  const updateEvent = (index: number, value: Partial<PlotEventSetting>) => {
+    if (draft) patch("plotEvents", draft.plotEvents.map((item, position) => position === index ? { ...item, ...value } : item));
+  };
+  const save = async () => {
+    if (!draft || saving) return;
+    setError(null); setNotice(null);
+    let payload;
+    try { payload = settingsPayload(draft); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Check the form values."); return; }
+    setSaving(true);
+    let updated = false;
     try {
-      setSaving(true);
-      setError(null);
-      setNotice(null);
-      const res = await fetch("/api/admin/dashboard/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled,
-          ...rules,
-          fireLabels,
-          fireLabel: fireLabels[0] ?? "",
-          warnPriorityThresholds,
-          warnPriorityMinCount: Number(warnPriorityMinCount),
-          warnDueWithinDays: Number(warnDueWithinDays),
-          warnDueMinCount: Number(warnDueMinCount),
-          warnDeadlineWithinDays: Number(warnDeadlineWithinDays),
-          warnDeadlineMinCount: Number(warnDeadlineMinCount),
-          plotEvents: plotEvents
-            .map((item) => ({
-              date: item.date.trim(),
-              label: item.label.trim(),
-              color: item.color.trim() || "#ff6b7a"
-            }))
-            .filter((item) => item.date || item.label)
-        })
-      });
-      const payload = await readJson<DashboardSettingsResponse>(res);
-      if (!res.ok) {
-        throw new Error("Failed to save dashboard settings");
-      }
-      setEnabled(payload.settings.enabled);
-      setRules({ dangerOnFireLabel: payload.settings.dangerOnFireLabel, warnOnPriority: payload.settings.warnOnPriority, warnOnDue: payload.settings.warnOnDue, warnOnDeadline: payload.settings.warnOnDeadline });
-      setFireLabels(payload.settings.fireLabels);
-      setWarnPriorityThresholds(payload.settings.warnPriorityThresholds);
-      setWarnPriorityMinCount(String(payload.settings.warnPriorityMinCount));
-      setWarnDueWithinDays(String(payload.settings.warnDueWithinDays));
-      setWarnDueMinCount(String(payload.settings.warnDueMinCount));
-      setWarnDeadlineWithinDays(String(payload.settings.warnDeadlineWithinDays));
-      setWarnDeadlineMinCount(String(payload.settings.warnDeadlineMinCount));
-      setPlotEvents(payload.settings.plotEvents ?? []);
-      setConfigPath(payload.settings.configPath ?? "");
-      setNotice("Dashboard urgency settings updated.");
-      onAfterMutation();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save dashboard settings");
-    } finally {
-      setSaving(false);
+      const response = await requestJson<SettingsResponse>("/api/admin/dashboard/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      }, "Could not save dashboard settings");
+      const next = settingsDraft(response.settings); setSaved(next); setDraft(next); updated = true;
+      setNotice("Settings saved. Dashboard attention rules are updated.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save dashboard settings"); }
+    finally { setSaving(false); }
+    if (updated) {
+      try { onAfterMutation(); }
+      catch { setNotice("Settings saved. Refresh the dashboard to see the updated rules."); }
     }
-  };
-
-  const updatePlotEvent = (index: number, patch: Partial<PlotEventSetting>) => {
-    setPlotEvents((items) => items.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
-  };
-
-  const addPlotEvent = () => {
-    setPlotEvents((items) => [...items, { date: "", label: "", color: "#ff6b7a" }]);
-  };
-
-  const removePlotEvent = (index: number) => {
-    setPlotEvents((items) => items.filter((_, idx) => idx !== index));
   };
 
   return (
     <section id="dashboard-settings" className="card">
       <header className="cardHeader">
         <div className="cardTitleRow">
-          <h2>Dashboard Settings</h2>
-          <InfoTip label="About dashboard settings" content={DASHBOARD_SETTINGS_HELP} />
+          <h2>Dashboard settings</h2>
+          <InfoTip label="About dashboard settings" content="Choose which tasks need attention and when the dashboard shows a red alert. Rules are saved locally. Due windows include overdue tasks." />
         </div>
-        {configPath ? <span className="pill pill-neutral">{configPath}</span> : null}
+        {dirty ? <span className="pill pill-warn">Unsaved changes</span> : null}
       </header>
-      {loading ? (
-        <div className="skeleton" style={{ minHeight: 180 }} />
-      ) : (
+      {loading ? <div className="skeleton" style={{ minHeight: 180 }} /> : !draft ? (
         <div className="stack">
-          <label className="field">
-            <span className="fieldLabel">Urgency monitor enabled</span>
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-          </label>
-          {([
-            ["dangerOnFireLabel", "Red alert for fire labels"],
-            ["warnOnPriority", "Attention needed for selected priorities"],
-            ["warnOnDue", "Attention needed for due dates"],
-            ["warnOnDeadline", "Attention needed for deadlines"]
-          ] as const).map(([key, label]) => (
-            <label className="field" key={key}>
-              <span className="fieldLabel">{label}</span>
-              <input type="checkbox" checked={rules[key]} onChange={(event) => setRules((current) => ({ ...current, [key]: event.target.checked }))} />
-            </label>
-          ))}
-          <label className="field">
-            <span className="fieldLabel">Fire labels</span>
-            <select
-              className="textInput multiSelectInput"
-              multiple
-              value={fireLabels}
-              onChange={(event) =>
-                setFireLabels(Array.from(event.target.selectedOptions, (option) => option.value))
-              }
-            >
-              {fireLabels
-                .filter((labelName) => !labelOptions.includes(labelName))
-                .map((labelName) => (
-                  <option key={labelName} value={labelName}>
-                    {labelName}
-                  </option>
-                ))}
-              {labelOptions.map((labelName) => (
-                <option key={labelName} value={labelName}>
-                  {labelName}
-                </option>
-              ))}
-            </select>
-            <p className="muted tiny">Hold Ctrl/Cmd to pick multiple labels.</p>
-          </label>
-          <div className="grid2">
-            <label className="field">
-              <span className="fieldLabel">Warn priorities</span>
-              <select
-                className="textInput multiSelectInput"
-                multiple
-                value={warnPriorityThresholds.map(String)}
-                onChange={(event) =>
-                  setWarnPriorityThresholds(
-                    Array.from(event.target.selectedOptions, (option) => Number(option.value))
-                  )
-                }
-              >
-                {PRIORITY_OPTIONS.map((option) => (
-                  <option key={option.value} value={String(option.value)}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <p className="muted tiny">Explicit Todoist priorities: P1, P2, P3, P4.</p>
-            </label>
-            <label className="field">
-              <span className="fieldLabel">Minimum priority matches</span>
-              <input
-                className="textInput"
-                type="number"
-                min="1"
-                value={warnPriorityMinCount}
-                onChange={(event) => setWarnPriorityMinCount(event.target.value)}
-              />
-            </label>
-          </div>
-          <div className="grid2">
-            <label className="field">
-              <span className="fieldLabel">Due within days</span>
-              <input
-                className="textInput"
-                type="number"
-                min="0"
-                value={warnDueWithinDays}
-                onChange={(event) => setWarnDueWithinDays(event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span className="fieldLabel">Minimum due matches</span>
-              <input
-                className="textInput"
-                type="number"
-                min="1"
-                value={warnDueMinCount}
-                onChange={(event) => setWarnDueMinCount(event.target.value)}
-              />
-            </label>
-          </div>
-          <div className="grid2">
-            <label className="field">
-              <span className="fieldLabel">Deadline within days</span>
-              <input
-                className="textInput"
-                type="number"
-                min="0"
-                value={warnDeadlineWithinDays}
-                onChange={(event) => setWarnDeadlineWithinDays(event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span className="fieldLabel">Minimum deadline matches</span>
-              <input
-                className="textInput"
-                type="number"
-                min="1"
-                value={warnDeadlineMinCount}
-                onChange={(event) => setWarnDeadlineMinCount(event.target.value)}
-              />
-            </label>
-          </div>
-          <div className="plotEventEditor">
-            <div className="adminRow">
-              <div>
-                <p className="fieldLabel" style={{ margin: 0 }}>Plot event markers</p>
-                <p className="muted tiny" style={{ margin: "4px 0 0" }}>
-                  Completion plots show these as annotated vertical bars.
-                </p>
-              </div>
-              <button className="button buttonSmall buttonGhost" type="button" onClick={addPlotEvent}>
-                Add event
-              </button>
-            </div>
-            {plotEvents.length ? (
-              <div className="plotEventList">
-                {plotEvents.map((item, index) => (
-                  <div className="plotEventRow" key={index}>
-                    <label className="field">
-                      <span className="fieldLabel">Date</span>
-                      <input
-                        className="textInput"
-                        type="date"
-                        value={item.date}
-                        onChange={(event) => updatePlotEvent(index, { date: event.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="fieldLabel">Label</span>
-                      <input
-                        className="textInput"
-                        value={item.label}
-                        onChange={(event) => updatePlotEvent(index, { label: event.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="fieldLabel">Color</span>
-                      <input
-                        className="textInput colorInput"
-                        type="color"
-                        value={item.color || "#ff6b7a"}
-                        onChange={(event) => updatePlotEvent(index, { color: event.target.value })}
-                      />
-                    </label>
-                    <button className="button buttonSmall buttonGhost" type="button" onClick={() => removePlotEvent(index)}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="muted tiny" style={{ margin: 0 }}>No plot event markers configured.</p>
-            )}
-          </div>
-          <div className="adminRowRight">
-            <button className="button buttonSmall" type="button" onClick={saveSettings} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-          {notice ? <p className="pill pill-good">{notice}</p> : null}
-          {error ? <p className="pill pill-warn">{error}</p> : null}
+          <p role="alert" className="settingsError">{error ?? "Settings are unavailable."}</p>
+          <button type="button" className="button buttonSmall" onClick={() => void load()}>Try again</button>
         </div>
+      ) : (
+        <form className="stack" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          <fieldset className="settingsFields stack" disabled={saving}>
+            <label className="settingsToggle">
+              <input type="checkbox" checked={draft.enabled} onChange={(event) => patch("enabled", event.target.checked)} />
+              <span>Enable attention monitoring</span>
+            </label>
+            <p className="muted tiny">Red alerts are triggered by fire labels. Attention warnings follow the priority, due date and deadline rules you enable.</p>
+            {RULES.map(([key, label]) => (
+              <label className="settingsToggle" key={key}>
+                <input type="checkbox" checked={draft[key]} onChange={(event) => patch(key, event.target.checked)} />
+                <span>{label}</span>
+              </label>
+            ))}
+            <fieldset className="settingsFields stack">
+              <legend className="fieldLabel">Fire labels · exact names</legend>
+              <div className="settingsChoices">
+                {labelOptions.map((name) => (
+                  <button key={name} type="button" className={`settingsChoice${draft.fireLabels.includes(name) ? " settingsChoiceSelected" : ""}`}
+                    aria-pressed={draft.fireLabels.includes(name)} onClick={() => patch("fireLabels", draft.fireLabels.includes(name) ? draft.fireLabels.filter((value) => value !== name) : [...draft.fireLabels, name])}>{name}</button>
+                ))}
+              </div>
+              {labelWarning ? <p className="muted tiny">Could not fetch account labels. Saved selections are kept; you can add a label by name.</p> : null}
+              <div className="settingsAddLabel">
+                <input className="textInput" aria-label="Add a fire label by name" placeholder="Add a label by exact name" value={labelDraft} onChange={(event) => setLabelDraft(event.target.value)} />
+                <button className="button buttonSmall buttonGhost" type="button" disabled={!labelDraft.trim()} onClick={() => {
+                  const name = labelDraft.trim(); if (name && !draft.fireLabels.includes(name)) patch("fireLabels", [...draft.fireLabels, name]); setLabelDraft("");
+                }}>Add label</button>
+              </div>
+              <p className="muted tiny">{draft.fireLabels.length ? `${draft.fireLabels.length} selected` : "No labels selected — fire labels will not trigger an alert."}</p>
+            </fieldset>
+            <fieldset className="settingsFields stack">
+              <legend className="fieldLabel">Attention priorities</legend>
+              <div className="settingsChoices">
+                {[4, 3, 2, 1].map((value) => (
+                  <button key={value} type="button" aria-pressed={draft.warnPriorityThresholds.includes(value)}
+                    className={`settingsChoice${draft.warnPriorityThresholds.includes(value) ? " settingsChoiceSelected" : ""}`}
+                    onClick={() => patch("warnPriorityThresholds", draft.warnPriorityThresholds.includes(value) ? draft.warnPriorityThresholds.filter((item) => item !== value) : [...draft.warnPriorityThresholds, value].sort((a, b) => b - a))}>P{5 - value}</button>
+                ))}
+              </div>
+              <p className="muted tiny">Tap to toggle. No priorities selected means priority alone will not trigger a warning.</p>
+            </fieldset>
+            <div className="grid2">
+              {NUMBER_FIELDS.map(({ key, label, min }) => (
+                <label className="field" key={key}>
+                  <span className="fieldLabel">{label}</span>
+                  <input className="textInput" type="number" inputMode="numeric" min={min} max={100000} step={1} required value={draft[key]} onChange={(event) => patch(key, event.target.value)} />
+                </label>
+              ))}
+            </div>
+            <p className="muted tiny">A window of 0 includes today and all overdue dates. Larger windows also include upcoming dates. Minimum matches apply separately to each rule.</p>
+            <div className="plotEventEditor">
+              <div className="adminRow">
+                <span className="fieldLabel">Plot event markers</span>
+                <button className="button buttonSmall buttonGhost" type="button" onClick={() => patch("plotEvents", [...draft.plotEvents, { date: "", label: "", color: "#ff6b7a" }])}>Add event</button>
+              </div>
+              {draft.plotEvents.map((item, index) => (
+                <div className="plotEventRow" key={index}>
+                  <label className="field"><span className="fieldLabel">Date</span><input className="textInput" type="date" value={item.date} onChange={(event) => updateEvent(index, { date: event.target.value })} /></label>
+                  <label className="field"><span className="fieldLabel">Label</span><input className="textInput" maxLength={200} value={item.label} onChange={(event) => updateEvent(index, { label: event.target.value })} /></label>
+                  <label className="field"><span className="fieldLabel">Color</span><input className="textInput colorInput" type="color" value={item.color} onChange={(event) => updateEvent(index, { color: event.target.value })} /></label>
+                  <button className="button buttonSmall buttonGhost" type="button" aria-label={`Remove event ${item.label || index + 1}`} onClick={() => patch("plotEvents", draft.plotEvents.filter((_, position) => index !== position))}>Remove</button>
+                </div>
+              ))}
+              {!draft.plotEvents.length ? <p className="muted tiny">No plot event markers configured.</p> : null}
+            </div>
+            <div className="adminRowRight">
+              <button className="button buttonSmall buttonGhost" type="button" disabled={!dirty} onClick={() => { setDraft(saved); setError(null); setNotice(null); }}>Discard changes</button>
+              <button className="button buttonSmall" type="submit" disabled={!dirty}>{saving ? "Saving…" : "Save settings"}</button>
+            </div>
+          </fieldset>
+          {notice ? <p role="status" className="pill pill-good">{notice}</p> : null}
+          {error ? <p role="alert" className="settingsError">{error}</p> : null}
+        </form>
       )}
     </section>
   );

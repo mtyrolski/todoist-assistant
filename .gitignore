@@ -88,3 +88,10 @@ packaging/macos/TodoistAssistant.icns
 
 # Android build entrypoint
 !scripts/build_android.sh
+
+frontend/.test-build/
+
+frontend/test-results/
+frontend/playwright-report/
+
+frontend/.next-e2e/
