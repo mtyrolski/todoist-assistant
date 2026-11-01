@@ -1,11 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import type { PlotParams } from "react-plotly.js";
-import type { ComponentType, ReactNode } from "react";
+import { Plot } from "./Plot";
+import type { ReactNode } from "react";
 import { InfoTip } from "./InfoTip";
-
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
 export type PlotlyFigure = {
   data: unknown[];

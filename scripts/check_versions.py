@@ -121,6 +121,19 @@ def main() -> int:
             f"frontend/package-lock.json packages[''].version {lock_package_version} != pyproject {version}"
         )
 
+    if frontend_lock.exists():
+        from plotly.offline import get_plotlyjs_version
+
+        packages = json.loads(frontend_lock.read_text(encoding="utf-8")).get(
+            "packages", {}
+        )
+        renderer = packages.get("node_modules/plotly.js", {}).get("version", "")
+        backend_renderer = get_plotlyjs_version()
+        if renderer.split(".")[0] != backend_renderer.split(".")[0]:
+            mismatches.append(
+                f"frontend Plotly.js {renderer} is incompatible with the backend renderer {backend_renderer}; update the browser distribution"
+            )
+
     uv_lock = repo_root / "uv.lock"
     uv_lock_version = read_uv_lock_version(uv_lock)
     if uv_lock.exists() and uv_lock_version is None:

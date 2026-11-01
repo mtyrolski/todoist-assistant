@@ -6,7 +6,7 @@ Todoist Assistant is a local dashboard for Todoist activity and project history.
 
 ## Quick start
 
-Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js 20+, and a Todoist API token.
+Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js 20.9+, and a Todoist API token.
 
 ```bash
 git clone https://github.com/mtyrolski/todoist-assistant.git

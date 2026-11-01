@@ -1,10 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlotParams } from "react-plotly.js";
+import { Plot } from "./Plot";
 import { PlotCard } from "./PlotCard";
 import type { PlotlyFigure } from "./PlotCard";
 import { StatCard } from "./StatCard";
@@ -30,8 +29,6 @@ import {
   useDashboardStatus,
   useSyncLabel
 } from "../lib/dashboardHooks";
-
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
 type UrgencyChipKey = "fireTasks" | "p1Tasks" | "p2Tasks" | "p3Tasks" | "p4Tasks" | "dueTasks" | "deadlineTasks";
 

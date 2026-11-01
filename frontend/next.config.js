@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 module.exports = {
   output: "standalone",
+  // TypeScript checking runs through npm run lint; no ESLint toolchain is used.
+  eslint: { ignoreDuringBuilds: true },
   async rewrites() {
     return [
       {
