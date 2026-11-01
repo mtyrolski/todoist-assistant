@@ -150,6 +150,7 @@ final class TodoistClient {
       }
     for (int i = 0; i < archived.length(); i++) {
       JSONObject project = archived.getJSONObject(i);
+      project.put("is_archived", true);
       known.put(project.getString("id"), project);
     }
     for (int i = 0; i < current.length(); i++) {

@@ -119,7 +119,38 @@ public class DashboardModelTest {
     assertEquals(40, model.tasks.size());
     assertEquals(
         model.weeks[8],
-        model.projectCompletions.values().stream().mapToInt(Integer::intValue).sum());
+        model.weeklyProjects.get(8).values().stream().mapToInt(Integer::intValue).sum());
     assertTrue(model.forecast >= model.weeks[8]);
+    assertEquals(1, model.undone);
+    assertEquals(model.eventCount - 2, java.util.Arrays.stream(model.weeks).sum());
+  }
+
+  @Test
+  public void archivedRootsKeepActualCountsWithoutForecastingMoreWork() throws Exception {
+    Clock wednesday = Clock.fixed(Instant.parse("2026-10-28T12:00:00Z"), CLOCK.getZone());
+    JSONObject project = new JSONObject().put("id", "p").put("name", "Shipped");
+    JSONArray events = new JSONArray();
+    for (int i = 0; i < 15; i++) {
+      events.put(
+          new JSONObject()
+              .put("id", "e" + i)
+              .put("object_id", "t" + i)
+              .put("object_type", "item")
+              .put("event_type", "completed")
+              .put("parent_project_id", "p")
+              .put("event_date", i == 0 ? "2026-10-26T10:00:00Z" : "2026-10-20T10:00:00Z"));
+    }
+    JSONObject data =
+        empty()
+            .put("syncedAt", wednesday.instant().toString())
+            .put("activities", events)
+            .put("projects", new JSONArray().put(project));
+    assertTrue(new DashboardModel(data, wednesday).forecast > 1);
+    data.put("projects", new JSONArray())
+        .put("knownProjects", new JSONArray().put(project.put("is_archived", true)));
+    DashboardModel archived = new DashboardModel(data, wednesday);
+    assertEquals(1, archived.weeks[8]);
+    assertEquals(1, archived.forecast);
+    assertEquals(1, archived.weeklyProjects.get(8).get("Shipped").intValue());
   }
 }

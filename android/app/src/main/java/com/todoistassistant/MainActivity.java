@@ -60,6 +60,7 @@ public class MainActivity extends ComponentActivity {
     super.onCreate(saved);
     if (saved != null) {
       tab = saved.getInt("tab");
+      allContributions = saved.getBoolean("allContributions");
       priorityValue = saved.getInt("priority");
       selectedWeek = saved.getInt("week", 8);
       String[] stored = saved.getStringArray("queries");
@@ -254,12 +255,13 @@ public class MainActivity extends ComponentActivity {
     status.setVisibility(state.message.isEmpty() ? View.GONE : View.VISIBLE);
     progress.setVisibility(busy ? View.VISIBLE : View.GONE);
     cancel.setVisibility(state.syncing ? View.VISIBLE : View.GONE);
-    if (state.model == null) timestamp.setText("Private on your device · works offline");
+    if (state.model == null) timestamp.setText(R.string.offline_privacy);
     else
       timestamp.setText(
-          (state.demo ? "DEMO · " : "Saved · ")
-              + DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
-                  .format(state.model.syncedAt.atZone(ZoneId.systemDefault())));
+          getString(
+              state.demo ? R.string.demo_timestamp : R.string.saved_timestamp,
+              DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+                  .format(state.model.syncedAt.atZone(ZoneId.systemDefault()))));
     if (!search.getText().toString().equals(queries[tab])) {
       changingSearch = true;
       search.setText(queries[tab]);
@@ -419,7 +421,7 @@ public class MainActivity extends ComponentActivity {
             "Undo actions are recorded separately. Ordinary undone completions are removed from their original period; recurring occurrences stay counted.",
             Ui.MUTED,
             () -> {
-              queries[2] = "uncompleted";
+              queries[2] = "undone";
               selectTab(2);
             }));
     rows.add(heading("SAVED ON THIS DEVICE"));
@@ -491,7 +493,12 @@ public class MainActivity extends ComponentActivity {
     rows.add(heading("RECENT ACTIVITY · UP TO 200 EVENTS"));
     String query = queries[2].trim().toLowerCase(Locale.ROOT);
     for (var event : data.recent) {
-      if (!(event.kind + " " + event.content + " " + event.project)
+      if (!((event.kind.equals("uncompleted") ? "undone completion " : "")
+              + event.kind
+              + " "
+              + event.content
+              + " "
+              + event.project)
           .toLowerCase(Locale.ROOT)
           .contains(query)) continue;
       String when =
@@ -720,6 +727,7 @@ public class MainActivity extends ComponentActivity {
   @Override
   protected void onSaveInstanceState(Bundle out) {
     out.putInt("tab", tab);
+    out.putBoolean("allContributions", allContributions);
     out.putInt("priority", priorityValue);
     out.putInt("week", selectedWeek);
     out.putStringArray("queries", queries);

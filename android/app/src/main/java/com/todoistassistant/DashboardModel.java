@@ -45,12 +45,11 @@ final class DashboardModel {
   }
 
   static final class Project {
-    final String id, name, path;
+    final String id, path;
     final List<Task> tasks;
 
-    Project(String id, String name, String path, List<Task> tasks) {
+    Project(String id, String path, List<Task> tasks) {
       this.id = id;
-      this.name = name;
       this.path = path;
       this.tasks = Collections.unmodifiableList(tasks);
     }
@@ -76,7 +75,6 @@ final class DashboardModel {
   final Instant syncedAt;
   final LocalDate weekStart;
   final int[] weeks, priorities;
-  final Map<String, Integer> projectCompletions;
   final List<Map<String, Integer>> weeklyProjects;
   final int forecast, undone, eventCount;
   final boolean forecastAvailable, historyAvailable;
@@ -99,6 +97,12 @@ final class DashboardModel {
       known.put(all.getJSONObject(i).getString("id"), all.getJSONObject(i));
     for (int i = 0; i < active.length(); i++)
       known.put(active.getJSONObject(i).getString("id"), active.getJSONObject(i));
+    java.util.Set<String> archivedRoots = new java.util.HashSet<>();
+    for (var project : known.values())
+      if (project.optBoolean("is_archived"))
+        archivedRoots.add(rootName(project.optString("id"), known));
+    for (int i = 0; i < active.length(); i++)
+      archivedRoots.remove(rootName(active.getJSONObject(i).optString("id"), known));
     priorities = new int[4];
     List<Task> taskList = new ArrayList<>();
     Map<String, List<Task>> byProject = new HashMap<>();
@@ -124,17 +128,13 @@ final class DashboardModel {
       List<Task> children = byProject.remove(id);
       if (children == null) children = new ArrayList<>();
       children.sort(order);
-      projectList.add(new Project(id, item.optString("name"), projectPath(id, known), children));
+      projectList.add(new Project(id, projectPath(id, known), children));
     }
     // A project can disappear between the project and task requests. Keep its tasks visible.
     for (var entry : byProject.entrySet()) {
       entry.getValue().sort(order);
       projectList.add(
-          new Project(
-              entry.getKey(),
-              projectPath(entry.getKey(), known),
-              projectPath(entry.getKey(), known),
-              entry.getValue()));
+          new Project(entry.getKey(), projectPath(entry.getKey(), known), entry.getValue()));
     }
     projectList.sort(Comparator.comparing(project -> project.path, String.CASE_INSENSITIVE_ORDER));
     projects = Collections.unmodifiableList(projectList);
@@ -194,7 +194,6 @@ final class DashboardModel {
         Duration.between(begin, historyAsOf).toMillis()
             / (double) Duration.between(begin, end).toMillis();
     int estimate = 0;
-    Map<String, Integer> counts = new HashMap<>();
     for (var entry : projectWeeks.entrySet()) {
       int[] values = entry.getValue();
       int first = 0;
@@ -205,20 +204,11 @@ final class DashboardModel {
       boolean recentlyActive =
           values[8] > 0 || values[7] > 0 || values[6] > 0 || values[5] > 0 || values[4] > 0;
       estimate +=
-          forecastAvailable && recentlyActive
+          forecastAvailable && recentlyActive && !archivedRoots.contains(entry.getKey())
               ? Forecast.total(values[8], history, fraction)
               : values[8];
-      if (values[8] > 0) counts.put(entry.getKey(), values[8]);
     }
     forecast = estimate;
-    List<Map.Entry<String, Integer>> sorted = new ArrayList<>(counts.entrySet());
-    sorted.sort(
-        Map.Entry.<String, Integer>comparingByValue()
-            .reversed()
-            .thenComparing(Map.Entry.comparingByKey()));
-    Map<String, Integer> ordered = new LinkedHashMap<>();
-    for (var entry : sorted) ordered.put(entry.getKey(), entry.getValue());
-    projectCompletions = Collections.unmodifiableMap(ordered);
     List<Map<String, Integer>> breakdowns = new ArrayList<>();
     for (int week = 0; week < 9; week++) {
       Map<String, Integer> breakdown = new HashMap<>();

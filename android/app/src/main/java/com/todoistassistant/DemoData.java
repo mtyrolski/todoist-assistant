@@ -3,7 +3,6 @@ package com.todoistassistant;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -53,12 +52,21 @@ final class DemoData {
                 .put("object_type", "item")
                 .put("event_type", "completed")
                 .put("parent_project_id", j % 3 == 0 ? "life" : "product")
-                .put("event_date", date.atStartOfDay(ZoneOffset.UTC).toInstant().toString())
+                .put("event_date", date.atStartOfDay(clock.getZone()).toInstant().toString())
                 .put(
                     "extra_data",
                     new JSONObject().put("content", "Completed milestone " + (day + j))));
       }
     }
+    events.put(
+        new JSONObject()
+            .put("id", "demo-undo")
+            .put("object_id", "completion-2-1")
+            .put("object_type", "item")
+            .put("event_type", "uncompleted")
+            .put("parent_project_id", "product")
+            .put("event_date", today.atStartOfDay(clock.getZone()).toInstant().toString())
+            .put("extra_data", new JSONObject().put("content", "Reopened a milestone")));
     return new JSONObject()
         .put("schemaVersion", 2)
         .put("userId", "demo")
