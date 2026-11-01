@@ -42,7 +42,7 @@ npm --prefix frontend run test:e2e
 
 The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The Android app is a standalone native client with its own local event cache. Build an installable APK with `make build_android`, or download the artifact from the Android APK workflow. See [Android build and usage](docs/ANDROID.md).
 
-Completion charts reconcile ordinary undo actions from the same event cache and keep recurring occurrences. Undo actions remain in activity history. See [completion and forecast rules](docs/COMPLETIONS.md).
+Completion charts use cached events. Undoing an ordinary completion removes it from its original period; recurring occurrences remain counted. Raw actions stay in activity history. Forecasts combine up to eight prior periods, including empty periods, with the current pace; totals sum project forecasts.
 
 The dashboard refreshes saved data in the background every minute. Failed syncs keep the last view and show a warning.
 
