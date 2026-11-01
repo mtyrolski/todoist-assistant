@@ -447,7 +447,6 @@ def extract_metrics_dict(
         ("Events", None, False),
         ("Completed Tasks", "completed", False),
         ("Added Tasks", "added", False),
-        ("Undone Completions", "uncompleted", False),
         ("Rescheduled Tasks", "rescheduled", True),
     )
     metrics: list[dict[str, Any]] = []

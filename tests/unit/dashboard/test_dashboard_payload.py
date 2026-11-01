@@ -58,7 +58,6 @@ def test_extract_metrics_dict_keeps_period_metrics_only() -> None:
         "Events",
         "Completed Tasks",
         "Added Tasks",
-        "Undone Completions",
         "Rescheduled Tasks",
     ]
 
@@ -371,4 +370,4 @@ def test_undone_completions_remain_actions_without_inflating_effective_counts():
     values = {metric["name"]: metric["value"] for metric in metrics}
     assert values["Events"] == 3
     assert values["Completed Tasks"] == 1
-    assert values["Undone Completions"] == 1
+    assert "Undone Completions" not in values

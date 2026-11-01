@@ -8,7 +8,7 @@ The cache keeps original events, including `completed` and `uncompleted`, and me
 - For an ordinary task, each `completed` event enters that task's outstanding completion stack. An `uncompleted` event cancels the latest outstanding completion. An unmatched undo never creates a negative count.
 - A cancelled completion stops contributing to its original day/week/month. Its action row remains available in activity history. If the task is completed again, the later completion counts on its own date.
 - Recurring tasks retain each occurrence. A subsequent reset/undo does not remove prior occurrences. Recurrence is recognized chronologically from cached `is_recurring`, `due.is_recurring`, or `sub_tasks_reset` metadata. A future change to recurrence never rewrites earlier ordinary completions; explicitly turning recurrence off affects subsequent completions.
-- Undo events remain in the derived activity data and have their own metric and activity trace, including undo events for recurring tasks.
+- Undo events remain in the derived activity data and activity trace, including undo events for recurring tasks. They do not have a separate dashboard metric card.
 - The task identity is the event's `object_id`, never its parent task ID. Tasks in missing/deleted projects remain under `(unknown)` instead of disappearing from totals.
 
 The original cache is not rewritten by this projection. Re-running it with the same events produces the same result. A newer undo can revise an older period; that is expected. Counts depend on available history and recurrence metadata. Missing API history cannot be reconstructed from aggregate counters.

@@ -7,7 +7,6 @@ All recorded task actions in the selected period, including completion and undo 
 Effective completions in the selected period. Ordinary completions later undone are removed; recurring occurrences remain counted.
 
 - Delta compares against the previous period of equal length.`,
-  "Undone Completions": `Undone completions\nNumber of undo actions recorded in the cache during the selected period. Each undo cancels the most recent outstanding ordinary completion at its original date. Recurring completions remain counted.`,
   "Added Tasks": `Added tasks
 Total tasks added in the selected period.
 
