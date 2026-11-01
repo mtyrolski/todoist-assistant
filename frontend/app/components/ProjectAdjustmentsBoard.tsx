@@ -1,5 +1,6 @@
 "use client";
 
+import { readJson } from "../lib/adminApi";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { InfoTip } from "./InfoTip";
@@ -49,18 +50,6 @@ Todoist parent links map archived projects automatically. Saved mappings overrid
 
 const RETRY_LIMIT = 6;
 const RETRY_DELAY_MS = 2000;
-
-async function readJson<T>(res: Response): Promise<T> {
-  const text = await res.text();
-  if (!text) return {} as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    const snippet = text.trim();
-    const summary = snippet.length > 200 ? `${snippet.slice(0, 200)}...` : snippet;
-    throw new Error(summary ? `Invalid JSON response: ${summary}` : "Invalid JSON response");
-  }
-}
 
 function isRetryableFetchError(message: string): boolean {
   return /invalid json response|failed to fetch|networkerror|econnrefused|socket hang up|econnreset/i.test(message);

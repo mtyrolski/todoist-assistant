@@ -1,5 +1,6 @@
 "use client";
 
+import { readJson } from "../lib/adminApi";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -12,16 +13,6 @@ type TokenStatus = {
 };
 
 type TokenGateState = { setupActive: boolean; tokenReady: boolean };
-
-async function readJson<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  if (!text) return {} as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error("Invalid API response");
-  }
-}
 
 export function TokenGate({ children }: { children: ReactNode | ((state: TokenGateState) => ReactNode) }) {
   const [status, setStatus] = useState<TokenStatus | null>(null);

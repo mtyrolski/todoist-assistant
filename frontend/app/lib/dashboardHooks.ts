@@ -1,5 +1,6 @@
 "use client";
 
+import { readJson } from "./adminApi";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardHome, DashboardStatus, Granularity, Health } from "./dashboardData";
 import type { DashboardProgress } from "../components/ProgressSteps";
@@ -7,18 +8,6 @@ import type { ProjectTimelineData } from "./projectTimeline";
 
 const DASHBOARD_RETRY_LIMIT = 300;
 const DASHBOARD_RETRY_DELAY_MS = 2500;
-
-async function readJson<T>(res: Response): Promise<T> {
-  const text = await res.text();
-  if (!text) return {} as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    const snippet = text.trim();
-    const summary = snippet.length > 200 ? `${snippet.slice(0, 200)}...` : snippet;
-    throw new Error(summary ? `Invalid JSON response: ${summary}` : "Invalid JSON response");
-  }
-}
 
 function isRetryableFetchError(message: string): boolean {
   return /invalid json response|failed to fetch|networkerror|socket hang up|econnrefused|econnreset|timed out|timeout/i.test(

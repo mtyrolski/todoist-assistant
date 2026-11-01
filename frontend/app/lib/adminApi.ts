@@ -20,7 +20,7 @@ export type AdminTimezoneStatus = {
   invalidOverride?: string;
 };
 
-async function readJson<T>(res: Response): Promise<T> {
+export async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) return {} as T;
   try {
