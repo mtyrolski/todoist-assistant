@@ -26,11 +26,6 @@ class TodoistEndpoints:
 
     # Tasks
     CREATE_TASK = Endpoint("create_task", "POST", f"{API_BASE}/tasks")
-    GET_TASK = Endpoint("get_task", "GET", f"{API_BASE}/tasks/{{task_id}}")
-    UPDATE_TASK = Endpoint("update_task", "POST", f"{API_BASE}/tasks/{{task_id}}")
-    DELETE_TASK = Endpoint("delete_task", "DELETE", f"{API_BASE}/tasks/{{task_id}}")
-    CREATE_COMMENT = Endpoint("create_comment", "POST", f"{API_BASE}/comments")
-    LIST_COMMENTS = Endpoint("list_comments", "GET", f"{API_BASE}/comments")
 
     # Labels
     LIST_LABELS = Endpoint("list_labels", "GET", f"{API_BASE}/labels")

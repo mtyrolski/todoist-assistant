@@ -453,3 +453,8 @@ def test_activity_timestamps_with_offsets_are_stored_as_naive_utc():
     events = DatabaseActivity._events_from_entries([entry])
     assert events[0].date == datetime(2026, 11, 1, 23, 30)
     assert events[0].date.tzinfo is None
+
+
+def test_fetch_activity_short_circuits_for_zero_pages(db_activity):
+    result = db_activity.fetch_activity(max_pages=0)
+    assert result == []

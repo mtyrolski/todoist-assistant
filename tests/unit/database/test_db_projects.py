@@ -226,3 +226,12 @@ def test_fetch_projects_incrementally_reuses_unchanged_and_refreshes_changed(
     assert [task.id for task in by_id["b"].tasks] == ["new-b"]
     assert [task.id for task in by_id["c"].tasks] == ["new-c"]
     assert {call.args[0] for call in fetch_tasks.call_args_list} == {"b", "c"}
+
+
+def test_fetch_projects_short_circuits_for_empty_project_list(monkeypatch):
+    db_projects = DatabaseProjects()
+    monkeypatch.setattr(db_projects, "_fetch_projects_data", lambda: [])
+
+    result = db_projects.fetch_projects(include_tasks=True)
+    assert result == []
+    assert db_projects.projects_cache == []
