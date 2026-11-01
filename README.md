@@ -37,7 +37,9 @@ npm --prefix frontend run lint
 npm --prefix frontend run build
 ```
 
-The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The planned Android app is a standalone native client with its own local data store; the current Python and Next.js desktop dashboard is not an Android APK. See [Android direction](docs/ANDROID.md).
+The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The Android app is a standalone native client with its own local event cache. Build an installable APK with `make build_android`, or download the artifact from the Android APK workflow. See [Android build and usage](docs/ANDROID.md).
+
+Completion charts reconcile ordinary undo actions from the same event cache and keep recurring occurrences. Undo actions have a separate metric and activity trace. See [completion and forecast rules](docs/COMPLETIONS.md).
 
 ## Packaging
 

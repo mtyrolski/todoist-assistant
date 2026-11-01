@@ -85,3 +85,6 @@ packaging/macos/TodoistAssistant.icns
 
 # TypeScript incremental builds
 *.tsbuildinfo
+
+# Android build entrypoint
+!scripts/build_android.sh

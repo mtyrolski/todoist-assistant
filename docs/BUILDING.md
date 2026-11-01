@@ -3,6 +3,7 @@
 This doc captures the current build structure and the GitHub Actions workflows.
 
 ## Build outputs
+- Android: `dist/android/todoist-assistant-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
 - Windows: `dist/windows/`
   - `TodoistAssistantSetup.exe` (Burn bootstrapper used by end users)
   - `todoist-assistant-<version>.msi` (raw MSI for deployment and automation)
