@@ -1,19 +1,25 @@
-"""Tests for Todoist dashboard plotting helpers."""
+"""Tests for the active project hierarchy sunburst plot."""
 
 from datetime import datetime
 from collections.abc import Sequence
 from typing import Any, cast
 
 import pandas as pd
+import plotly.graph_objects as go
+import pytest
 
 from tests.factories import make_project, make_project_entry
-from todoist.dashboard._plot_project_hierarchy import plot_active_project_hierarchy
+from todoist.dashboard._plot_project_hierarchy import (
+    plot_active_project_hierarchy_sunburst,
+)
 
 ProjectSpec = tuple[str, str, str | None]
 TaskSpec = tuple[str, str, int, str, str]
 
 
-def _tasks(specs: Sequence[TaskSpec], *, completed: bool = True, indexed: bool = True) -> pd.DataFrame:
+def _tasks(
+    specs: Sequence[TaskSpec], *, completed: bool = True, indexed: bool = True
+) -> pd.DataFrame:
     rows = [
         {
             "date": f"2025-01-{day % 28 + 1:02d}",
@@ -39,14 +45,16 @@ def _projects(specs: Sequence[ProjectSpec]) -> list[Any]:
     return [
         make_project(
             project_id=project_id,
-            project_entry=make_project_entry(project_id=project_id, name=name, parent_id=parent_id),
+            project_entry=make_project_entry(
+                project_id=project_id, name=name, parent_id=parent_id
+            ),
         )
         for project_id, name, parent_id in specs
     ]
 
 
-def _plot(df: pd.DataFrame, projects: list[Any]) -> Any:
-    return plot_active_project_hierarchy(
+def _plot(df: pd.DataFrame, projects: list[Any]) -> go.Figure:
+    return plot_active_project_hierarchy_sunburst(
         df,
         datetime(2025, 1, 1),
         datetime(2025, 1, 31),
@@ -55,30 +63,23 @@ def _plot(df: pd.DataFrame, projects: list[Any]) -> Any:
     )
 
 
-def _bubble_map(fig: Any) -> dict[str, dict[str, Any]]:
-    nodes: dict[str, dict[str, Any]] = {}
-    for trace in cast(tuple[Any, ...], fig.data):
-        trace = cast(Any, trace)
-        if str(getattr(trace, "hoverinfo", "")) == "skip":
-            continue
-        customdata = list(getattr(trace, "customdata", []) or [])
-        if not customdata:
-            continue
-        sizes = list(getattr(getattr(trace, "marker", None), "size", []))
-        for idx, point in enumerate(customdata):
-            nodes[str(point[0])] = {
-                "label": str(point[1]),
-                "total": int(point[2]),
-                "direct": int(point[3]),
-                "root_name": str(point[4]),
-                "depth": int(point[5]),
-                "hidden_projects": int(point[6]),
-                "kind": str(point[7]),
-                "size": float(sizes[idx]),
-                "x": float(trace.x[idx]),
-                "y": float(trace.y[idx]),
-            }
-    return nodes
+def _sunburst_node_map(fig: go.Figure) -> dict[str, dict[str, Any]]:
+    traces = cast(tuple[Any, ...], fig.data)
+    assert len(traces) == 1
+    trace = cast(Any, traces[0])
+    assert trace.type == "sunburst"
+    assert trace.branchvalues == "total"
+    return {
+        str(node_id): {
+            "parent": str(trace.parents[idx]),
+            "label": str(trace.labels[idx]),
+            "text": str(trace.text[idx]),
+            "value": int(trace.values[idx]),
+            "color": str(trace.marker.colors[idx]),
+            "customdata": trace.customdata[idx],
+        }
+        for idx, node_id in enumerate(trace.ids)
+    }
 
 
 BASE_PROJECTS: list[ProjectSpec] = [
@@ -89,57 +90,84 @@ BASE_PROJECTS: list[ProjectSpec] = [
 ]
 
 
-def test_plot_active_project_hierarchy_rolls_up_active_subprojects():
-    fig = _plot(
-        _tasks(
-            [
-                ("root-a", "Root A", 1, "root-a", "Root A"),
-                ("child-a1", "Child A1", 2, "root-a", "Root A"),
-                ("grand-a", "Grand A", 1, "root-a", "Root A"),
-                ("root-b", "Root B", 1, "root-b", "Root B"),
-                ("inactive-project", "Inactive", 1, "inactive-project", "Inactive"),
-            ]
-        ),
-        _projects(BASE_PROJECTS),
+def test_plot_active_project_hierarchy_sunburst_rolls_up_active_subprojects():
+    nodes = _sunburst_node_map(
+        _plot(
+            _tasks(
+                [
+                    ("root-a", "Root A", 1, "root-a", "Root A"),
+                    ("child-a1", "Child A1", 2, "root-a", "Root A"),
+                    ("grand-a", "Grand A", 1, "root-a", "Root A"),
+                    ("root-b", "Root B", 1, "root-b", "Root B"),
+                    ("inactive-project", "Inactive", 1, "inactive-project", "Inactive"),
+                ]
+            ),
+            _projects(BASE_PROJECTS),
+        )
     )
 
-    assert [cast(Any, trace).type for trace in fig.data if getattr(trace, "hoverinfo", "") != "skip"] == [
-        "scatter",
-        "scatter",
-    ]
-    nodes = _bubble_map(fig)
     assert "inactive-project" not in nodes
+    assert nodes["active-projects"]["parent"] == ""
+    assert nodes["active-projects"]["value"] == 5
+    assert nodes["root-a"]["parent"] == "active-projects"
     assert nodes["root-a"]["label"] == "Root A"
-    assert nodes["root-a"]["direct"] == 1
-    assert nodes["root-a"]["total"] == 4
-    assert nodes["root-a"]["kind"] == "root"
-    assert nodes["child-a1"]["total"] == 3
-    assert nodes["child-a1"]["root_name"] == "Root A"
-    assert nodes["grand-a"]["total"] == nodes["root-b"]["total"] == 1
-    for child_id in ("child-a1", "grand-a"):
-        child = nodes[child_id]
-        assert abs(child["x"] - nodes["root-a"]["x"]) < abs(child["x"] - nodes["root-b"]["x"])
-        assert child["y"] < nodes["root-a"]["y"]
+    assert nodes["root-a"]["text"] == "Root A<br><b>80.0%</b>"
+    assert nodes["root-a"]["value"] == 4
+    assert nodes["root-a"]["color"] == "#123456"
+    assert nodes["root-b"]["text"] == "Root B<br><b>20.0%</b>"
+    assert nodes["active-projects"]["text"] == "Projects<br>5"
+    assert nodes["child-a1"]["parent"] == "root-a"
+    assert nodes["child-a1"]["value"] == 3
+    assert nodes["grand-a"]["parent"] == "child-a1"
+    assert nodes["grand-a"]["value"] == nodes["root-b"]["value"] == 1
 
 
-def test_plot_active_project_hierarchy_folds_small_long_tail_into_other_bubble():
-    child_totals = [6, 4, 3, 1, 1]
-    fig = _plot(
-        _tasks(
-            [("root-a", "Root A", 5, "root-a", "Root A")]
-            + [(f"child-a{i}", f"Child A{i}", total, "root-a", "Root A") for i, total in enumerate(child_totals, 1)]
+@pytest.mark.parametrize(
+    ("task_specs", "project_specs", "node_id", "parent", "value", "hidden"),
+    [
+        (
+            [("root-a", "Root A", 2, "root-a", "Root A")]
+            + [
+                (f"child-a{i}", f"Child A{i}", total, "root-a", "Root A")
+                for i, total in enumerate([20, 10, 4, 3, 1, 1], 1)
+            ],
+            [("root-a", "Root A", None)]
+            + [(f"child-a{i}", f"Child A{i}", "root-a") for i in range(1, 7)],
+            "other:root-a",
+            "root-a",
+            2,
+            2,
         ),
-        _projects([("root-a", "Root A", None)] + [(f"child-a{i}", f"Child A{i}", "root-a") for i in range(1, 6)]),
-    )
+        (
+            [
+                (f"root-{i}", f"Root {i}", total, f"root-{i}", f"Root {i}")
+                for i, total in enumerate([100, 50, 25, 10, 1, 1, 1], 1)
+            ],
+            [(f"root-{i}", f"Root {i}", None) for i in range(1, 8)],
+            "other-roots",
+            "active-projects",
+            3,
+            3,
+        ),
+    ],
+)
+def test_plot_active_project_hierarchy_sunburst_folds_small_nodes(
+    task_specs: list[TaskSpec],
+    project_specs: list[ProjectSpec],
+    node_id: str,
+    parent: str,
+    value: int,
+    hidden: int,
+):
+    nodes = _sunburst_node_map(_plot(_tasks(task_specs), _projects(project_specs)))
 
-    nodes = _bubble_map(fig)
-    assert nodes["other:root-a"]["kind"] == "aggregate"
-    assert nodes["other:root-a"]["total"] == 2
-    assert nodes["other:root-a"]["hidden_projects"] == 2
-    assert nodes["other:root-a"]["size"] < nodes["child-a3"]["size"]
+    assert nodes[node_id]["parent"] == parent
+    assert nodes[node_id]["value"] == value
+    assert nodes[node_id]["customdata"][6] == hidden
+    assert nodes[node_id]["customdata"][7] == "aggregate"
 
 
-def test_plot_active_project_hierarchy_returns_empty_figure_without_completed_tasks():
+def test_plot_active_project_hierarchy_sunburst_returns_empty_figure_without_completed_tasks():
     fig = _plot(
         _tasks([("root-a", "Root A", 1, "root-a", "Root A")], completed=False),
         _projects([("root-a", "Root A", None)]),
@@ -149,10 +177,128 @@ def test_plot_active_project_hierarchy_returns_empty_figure_without_completed_ta
     assert "No completed tasks" in str(fig.layout.annotations[0].text)
 
 
-def test_plot_active_project_hierarchy_normalizes_date_column_input():
-    fig = _plot(
-        _tasks([("root-a", "Root A", 1, "root-a", "Root A")], indexed=False),
-        _projects([("root-a", "Root A", None)]),
+def test_plot_active_project_hierarchy_sunburst_normalizes_date_column_input():
+    nodes = _sunburst_node_map(
+        _plot(
+            _tasks([("root-a", "Root A", 1, "root-a", "Root A")], indexed=False),
+            _projects([("root-a", "Root A", None)]),
+        )
     )
 
-    assert _bubble_map(fig)["root-a"]["total"] == 1
+    assert nodes["root-a"]["value"] == 1
+    assert nodes["root-a"]["customdata"][2] == 1
+
+
+def test_plot_project_hierarchy_sunburst_resolves_root_colors_case_insensitively():
+    fig = plot_active_project_hierarchy_sunburst(
+        _tasks(
+            [
+                ("root-a", "Root A", 1, "root-a", "Root A"),
+                ("root-b", "Root B", 1, "root-b", "Root B"),
+            ]
+        ),
+        datetime(2025, 1, 1),
+        datetime(2025, 1, 31),
+        _projects([("root-a", "Root A", None), ("root-b", "Root B", None)]),
+        {"root a": "#abcdef"},
+    )
+
+    nodes = _sunburst_node_map(fig)
+    assert nodes["root-a"]["color"] == "#abcdef"
+    assert nodes["root-b"]["color"] == "#808080"
+
+
+def test_plot_project_hierarchy_sunburst_includes_archived_projects_and_rolls_up_counts():
+    root = make_project(
+        project_id="root-a",
+        project_entry=make_project_entry(
+            project_id="root-a", name="Root A", parent_id=None
+        ),
+    )
+    archived_parent = make_project(
+        project_id="archived-parent",
+        project_entry=make_project_entry(
+            project_id="archived-parent",
+            name="Archived Parent",
+            parent_id="root-a",
+        ),
+        is_archived=True,
+    )
+    archived_child = make_project(
+        project_id="archived-child",
+        project_entry=make_project_entry(
+            project_id="archived-child",
+            name="Archived Child",
+            parent_id="archived-parent",
+        ),
+        is_archived=True,
+    )
+
+    nodes = _sunburst_node_map(
+        _plot(
+            _tasks(
+                [
+                    ("root-a", "Root A", 1, "root-a", "Root A"),
+                    (
+                        "archived-parent",
+                        "Archived Parent",
+                        2,
+                        "root-a",
+                        "Root A",
+                    ),
+                    (
+                        "archived-child",
+                        "Archived Child",
+                        3,
+                        "root-a",
+                        "Root A",
+                    ),
+                ]
+            ),
+            [root, archived_parent, archived_child],
+        )
+    )
+
+    assert nodes["active-projects"]["value"] == 6
+    assert nodes["root-a"]["value"] == 6
+    assert nodes["archived-parent"]["parent"] == "root-a"
+    assert nodes["archived-parent"]["value"] == 5
+    assert nodes["archived-child"]["parent"] == "archived-parent"
+    assert nodes["archived-child"]["value"] == 3
+    assert nodes["archived-child"]["customdata"][8] == "Archived"
+    assert nodes["archived-child"]["customdata"][9] == "Automatic (Todoist hierarchy)"
+
+
+def test_plot_project_hierarchy_sunburst_manual_mapping_overrides_archived_root():
+    root = make_project(
+        project_id="root-a",
+        project_entry=make_project_entry(
+            project_id="root-a", name="Root A", parent_id=None
+        ),
+    )
+    archived_root = make_project(
+        project_id="old-root",
+        project_entry=make_project_entry(
+            project_id="old-root", name="Old Root", parent_id=None
+        ),
+        is_archived=True,
+    )
+    fig = plot_active_project_hierarchy_sunburst(
+        _tasks(
+            [
+                ("root-a", "Root A", 1, "root-a", "Root A"),
+                ("old-root", "Old Root", 2, "root-a", "Root A"),
+            ]
+        ),
+        datetime(2025, 1, 1),
+        datetime(2025, 1, 31),
+        [root, archived_root],
+        {"Root A": "#123456"},
+        project_mappings={"Old Root": "Root A"},
+    )
+
+    nodes = _sunburst_node_map(fig)
+    assert nodes["root-a"]["value"] == 3
+    assert nodes["old-root"]["parent"] == "root-a"
+    assert nodes["old-root"]["customdata"][8] == "Archived"
+    assert nodes["old-root"]["customdata"][9] == "Manual mapping"

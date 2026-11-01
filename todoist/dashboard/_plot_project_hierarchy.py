@@ -2,21 +2,19 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-import math
 from typing import Callable, cast
 
 import pandas as pd
-
-from todoist.core.completions import effective_completion_mask
 import plotly.graph_objects as go
 
+from todoist.core.completions import effective_completion_mask
 from todoist.core.types import Project
+from todoist.dashboard._project_colors import resolve_project_color
 
 _BACKGROUND_COLOR = "#111318"
-_BORDER_COLOR = "rgba(17,19,24,0.92)"
-_EMPTY_COLOR = "#7f8b99"
 _TEXT_COLOR = "#e7edf5"
 _MUTED_TEXT_COLOR = "#9fb0c2"
+_COLOR_FALLBACK = "#7f8b99"
 
 
 @dataclass(frozen=True)
@@ -33,14 +31,6 @@ class _HierarchyNode:
     parent_id: str = ""
     is_archived: bool = False
     parent_assignment: str = "Root project"
-
-
-@dataclass(frozen=True)
-class _BubblePoint:
-    node: _HierarchyNode
-    x: float
-    y: float
-    size: float
 
 
 def _empty_project_hierarchy_figure(
@@ -240,7 +230,7 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
                 )
             except ValueError:
                 pass
-    fallback = _EMPTY_COLOR
+    fallback = _COLOR_FALLBACK
     return (
         int(fallback[1:3], 16),
         int(fallback[3:5], 16),
@@ -289,19 +279,6 @@ def _wrap_label(label: str, max_line_length: int = 15) -> str:
     if consumed_words < len(words) or len(label.replace(" ", "")) > max_line_length * 2:
         return f"{wrapped}..."
     return wrapped
-
-
-def _bubble_size(
-    value: int,
-    *,
-    max_value: int,
-    min_diameter: float,
-    max_diameter: float,
-) -> float:
-    if max_value <= 0:
-        return min_diameter
-    scale = math.sqrt(max(value, 0)) / math.sqrt(max_value)
-    return min_diameter + scale * (max_diameter - min_diameter)
 
 
 def _select_visible_nodes(
@@ -393,214 +370,118 @@ def _active_project_tree(
     )
 
 
-def _cluster_x_positions(count: int) -> list[float]:
-    if count <= 0:
-        return []
-    if count == 1:
-        return [50.0]
-    start = 18.0 if count > 2 else 30.0
-    end = 82.0 if count > 2 else 70.0
-    step = (end - start) / (count - 1)
-    return [start + step * idx for idx in range(count)]
+_EMPTY_COLOR = "#8ea3ff"
+_CENTER_COLOR = "#151a2b"
+_PANEL_GLOW = "#71dfff"
 
 
-def _cluster_centers(cluster_count: int) -> list[tuple[float, float]]:
-    if cluster_count <= 0:
-        return []
-    if cluster_count <= 3:
-        xs = _cluster_x_positions(cluster_count)
-        return [
-            (
-                x_value,
-                70.0 + 3.0 * math.sin((idx - (cluster_count - 1) / 2.0) * 0.7),
-            )
-            for idx, x_value in enumerate(xs)
-        ]
-
-    first_row = math.ceil(cluster_count / 2)
-    second_row = cluster_count - first_row
-    centers: list[tuple[float, float]] = []
-    for idx, x_value in enumerate(_cluster_x_positions(first_row)):
-        centers.append(
-            (
-                x_value,
-                76.0 + 2.0 * math.sin((idx - (first_row - 1) / 2.0) * 0.7),
-            )
-        )
-    for idx, x_value in enumerate(_cluster_x_positions(second_row)):
-        centers.append(
-            (
-                x_value,
-                34.0 + 1.5 * math.sin((idx - (second_row - 1) / 2.0) * 0.5),
-            )
-        )
-    return centers
+def _empty_sunburst_figure(message: str) -> go.Figure:
+    return _empty_project_hierarchy_figure(message, height=560, font_color=_TEXT_COLOR)
 
 
-def _child_anchor_offsets(count: int) -> list[tuple[float, float]]:
-    anchor_map: dict[int, list[tuple[float, float]]] = {
-        1: [(0.0, -1.0)],
-        2: [(-0.78, -0.84), (0.78, -0.84)],
-        3: [(0.0, -1.02), (-0.96, -0.58), (0.96, -0.58)],
-        4: [(-0.68, -1.1), (0.68, -1.1), (-1.04, -0.45), (1.04, -0.45)],
-        5: [
-            (0.0, -1.12),
-            (-0.78, -1.0),
-            (0.78, -1.0),
-            (-1.06, -0.42),
-            (1.06, -0.42),
-        ],
-        6: [
-            (0.0, -1.22),
-            (-0.76, -1.08),
-            (0.76, -1.08),
-            (-1.06, -0.52),
-            (1.06, -0.52),
-            (0.0, -0.46),
-        ],
-    }
-    return anchor_map.get(count, anchor_map[6])
-
-
-def _nearest_center_distance(
-    centers: list[tuple[float, float]], current_idx: int
-) -> float:
-    if len(centers) <= 1:
-        return 36.0
-    current_x, current_y = centers[current_idx]
-    return min(
-        math.dist((current_x, current_y), other_center)
-        for idx, other_center in enumerate(centers)
-        if idx != current_idx
-    )
-
-
-def _bubble_text(node: _HierarchyNode, size: float) -> str:
-    wrapped_label = _wrap_label(node.label if node.kind != "aggregate" else "Other")
-    if node.kind == "root":
-        return f"{wrapped_label}<br>{node.total_completed}"
-    if size >= 32.0 or node.kind == "aggregate":
-        return f"{wrapped_label}<br>{node.total_completed}"
-    if size >= 26.0:
-        return str(node.total_completed)
-    return ""
-
-
-def _build_trace(
-    points: list[_BubblePoint],
+def _build_nodes_for_parent(
     *,
-    name: str,
-    line_width: float,
-    border_mix: float,
-    glow_scale: float,
-    text_size: int,
-    hovertemplate: str,
-) -> tuple[go.Scatter, go.Scatter]:
-    if not points:
-        empty_trace = go.Scatter(x=[], y=[])
-        return empty_trace, empty_trace
-
-    x_values = [point.x for point in points]
-    y_values = [point.y for point in points]
-    sizes = [point.size for point in points]
-    colors = [point.node.color for point in points]
-    text_values = [_bubble_text(point.node, point.size) for point in points]
-    line_colors = [
-        _mix_color(point.node.color, "#ffffff", border_mix) for point in points
-    ]
-    customdata = [
-        [
-            point.node.node_id,
-            point.node.label,
-            point.node.total_completed,
-            point.node.direct_completed,
-            point.node.root_name,
-            point.node.depth,
-            point.node.hidden_projects,
-            point.node.kind,
-            "Archived" if point.node.is_archived else "Active",
-            point.node.parent_assignment,
-        ]
-        for point in points
-    ]
-
-    glow_trace = go.Scatter(
-        x=x_values,
-        y=y_values,
-        mode="markers",
-        showlegend=False,
-        hoverinfo="skip",
-        marker=dict(
-            size=[size * glow_scale for size in sizes],
-            color=[_rgba(color, 0.18) for color in colors],
-            line=dict(width=0),
-        ),
-    )
-    bubble_trace = go.Scatter(
-        x=x_values,
-        y=y_values,
-        mode="markers+text",
-        name=name,
-        text=text_values,
-        textposition="middle center",
-        textfont=dict(size=text_size, color=_TEXT_COLOR),
-        cliponaxis=False,
-        customdata=customdata,
-        hovertemplate=hovertemplate,
-        marker=dict(
-            size=sizes,
-            color=colors,
-            line=dict(color=line_colors, width=line_width),
-            opacity=0.97,
-        ),
-    )
-    return glow_trace, bubble_trace
-
-
-def _collect_active_descendants(
-    *,
-    root_id: str,
-    root_label: str,
+    parent_id: str,
+    root_name: str,
     root_color: str,
+    depth: int,
     projects_by_id: dict[str, Project],
     children_by_parent: dict[str, list[str]],
     subtree_total: Callable[[str], int],
     direct_counts: dict[str, int],
     assignment_by_id: dict[str, str],
 ) -> list[_HierarchyNode]:
-    descendants: list[_HierarchyNode] = []
+    candidates: list[_HierarchyNode] = []
+    for child_id in children_by_parent.get(parent_id, []):
+        total_completed = subtree_total(child_id)
+        if total_completed <= 0:
+            continue
 
-    def collect(project_id: str, *, depth: int) -> None:
-        for child_id in children_by_parent.get(project_id, []):
-            total_completed = subtree_total(child_id)
-            if total_completed <= 0:
-                continue
-            child_project = projects_by_id[child_id]
-            child_name = str(child_project.project_entry.name)
-            descendants.append(
-                _HierarchyNode(
-                    node_id=child_id,
-                    label=child_name,
-                    total_completed=total_completed,
-                    direct_completed=int(direct_counts.get(child_id, 0)),
-                    root_name=root_label,
-                    depth=depth,
-                    kind="project",
-                    color=_mix_color(root_color, "#ffffff", 0.22 + depth * 0.09),
-                    is_archived=child_project.is_archived,
-                    parent_assignment=assignment_by_id[child_id],
+        child_project = projects_by_id[child_id]
+        child_name = str(child_project.project_entry.name)
+        candidates.append(
+            _HierarchyNode(
+                node_id=child_id,
+                parent_id=parent_id,
+                label=child_name,
+                total_completed=total_completed,
+                direct_completed=int(direct_counts.get(child_id, 0)),
+                root_name=root_name,
+                depth=depth,
+                kind="project",
+                color=_rgba(
+                    _mix_color(root_color, "#ffffff", min(0.34, 0.1 + depth * 0.11)),
+                    max(0.84, 1.0 - depth * 0.06),
+                ),
+                is_archived=child_project.is_archived,
+                parent_assignment=assignment_by_id[child_id],
+            )
+        )
+
+    candidates.sort(key=lambda node: (-node.total_completed, node.label.lower()))
+    preferred_visible = 4 if depth <= 1 else 3
+    max_visible = 6 if depth <= 1 else 5
+    visible_children, hidden_children = _select_visible_nodes(
+        candidates,
+        preferred_visible=preferred_visible,
+        max_visible=max_visible,
+    )
+    if hidden_children:
+        visible_children.append(
+            _HierarchyNode(
+                node_id=f"other:{parent_id}",
+                parent_id=parent_id,
+                label="Other",
+                total_completed=sum(node.total_completed for node in hidden_children),
+                direct_completed=sum(node.direct_completed for node in hidden_children),
+                root_name=root_name,
+                depth=depth,
+                kind="aggregate",
+                color=_rgba(
+                    _mix_color(root_color, "#fff3dc", 0.18 + min(depth, 4) * 0.05),
+                    0.82,
+                ),
+                hidden_projects=len(hidden_children),
+            )
+        )
+
+    nodes: list[_HierarchyNode] = []
+    for child_node in visible_children:
+        nodes.append(child_node)
+        if child_node.kind == "project":
+            nodes.extend(
+                _build_nodes_for_parent(
+                    parent_id=child_node.node_id,
+                    root_name=root_name,
+                    root_color=root_color,
+                    depth=depth + 1,
+                    projects_by_id=projects_by_id,
+                    children_by_parent=children_by_parent,
+                    subtree_total=subtree_total,
+                    direct_counts=direct_counts,
+                    assignment_by_id=assignment_by_id,
                 )
             )
-            collect(child_id, depth=depth + 1)
-
-    collect(root_id, depth=1)
-    descendants.sort(
-        key=lambda node: (-node.total_completed, node.depth, node.label.lower())
-    )
-    return descendants
+    return nodes
 
 
-def plot_active_project_hierarchy(
+def _sunburst_display_label(node: _HierarchyNode) -> str:
+    if node.kind == "aggregate":
+        return "Other" if node.label == "Other" else _wrap_label(node.label)
+    return _wrap_label(node.label)
+
+
+def _sunburst_display_text(node: _HierarchyNode, project_total: int) -> str:
+    label = _sunburst_display_label(node)
+    if node.kind == "center":
+        return f"{label}<br>{node.total_completed}"
+    if node.depth == 1:
+        percentage = 100.0 * node.total_completed / max(project_total, 1)
+        return f"{label}<br><b>{percentage:.1f}%</b>"
+    return f"{label}<br>{node.total_completed}"
+
+
+def plot_active_project_hierarchy_sunburst(
     df: pd.DataFrame,
     beg_date: datetime,
     end_date: datetime,
@@ -618,15 +499,13 @@ def plot_active_project_hierarchy(
     elif "type" not in df.columns:
         empty_message = "Activity data is missing project event types"
     if empty_message is not None:
-        return _empty_project_hierarchy_figure(empty_message)
+        return _empty_sunburst_figure(empty_message)
 
     df = _normalize_activity_frame(df)
     df_period = cast(pd.DataFrame, df[(df.index >= beg_date) & (df.index < end_date)])
     df_completed = cast(pd.DataFrame, df_period[effective_completion_mask(df_period)])
     if df_completed.empty:
-        return _empty_project_hierarchy_figure(
-            "No completed tasks in the selected range"
-        )
+        return _empty_sunburst_figure("No completed tasks in the selected range")
 
     (
         projects_by_id,
@@ -646,25 +525,21 @@ def plot_active_project_hierarchy(
         project_id for project_id in root_ids if subtree_total(project_id) > 0
     ]
     if not active_root_ids:
-        return _empty_project_hierarchy_figure(
-            "No project completions in the selected range"
-        )
+        return _empty_sunburst_figure("No project completions in the selected range")
 
     root_nodes = [
         _HierarchyNode(
             node_id=project_id,
+            parent_id="active-projects",
             label=str(projects_by_id[project_id].project_entry.name),
             total_completed=subtree_total(project_id),
             direct_completed=int(direct_counts.get(project_id, 0)),
             root_name=str(projects_by_id[project_id].project_entry.name),
-            depth=0,
+            depth=1,
             kind="root",
-            color=_mix_color(
-                project_colors.get(
-                    str(projects_by_id[project_id].project_entry.name), _EMPTY_COLOR
-                ),
-                "#ffffff",
-                0.1,
+            color=resolve_project_color(
+                projects_by_id[project_id].project_entry.name,
+                project_colors,
             ),
             is_archived=projects_by_id[project_id].is_archived,
             parent_assignment=assignment_by_id[project_id],
@@ -678,198 +553,160 @@ def plot_active_project_hierarchy(
         )
     ]
     visible_roots, hidden_roots = _select_visible_nodes(
-        root_nodes, preferred_visible=4, max_visible=7
+        root_nodes, preferred_visible=4, max_visible=6
     )
-
-    descendant_points_by_root: dict[str, list[_HierarchyNode]] = {}
     if hidden_roots:
-        hidden_total = sum(node.total_completed for node in hidden_roots)
         visible_roots.append(
             _HierarchyNode(
                 node_id="other-roots",
+                parent_id="active-projects",
                 label="Other Roots",
-                total_completed=hidden_total,
+                total_completed=sum(node.total_completed for node in hidden_roots),
                 direct_completed=sum(node.direct_completed for node in hidden_roots),
-                root_name="Other roots",
-                depth=0,
+                root_name="Projects",
+                depth=1,
                 kind="aggregate",
-                color=_mix_color(_EMPTY_COLOR, "#dbe7f5", 0.18),
+                color=_rgba(_mix_color(_EMPTY_COLOR, "#efe1ff", 0.34), 0.88),
                 hidden_projects=len(hidden_roots),
             )
         )
 
-    for root_node in visible_roots:
-        if root_node.node_id == "other-roots":
-            descendant_points_by_root[root_node.node_id] = []
-            continue
-
-        descendants = _collect_active_descendants(
-            root_id=root_node.node_id,
-            root_label=root_node.label,
-            root_color=root_node.color,
-            projects_by_id=projects_by_id,
-            children_by_parent=children_by_parent,
-            subtree_total=subtree_total,
-            direct_counts=direct_counts,
-            assignment_by_id=assignment_by_id,
+    all_nodes: list[_HierarchyNode] = [
+        _HierarchyNode(
+            node_id="active-projects",
+            parent_id="",
+            label="Projects",
+            total_completed=sum(node.total_completed for node in visible_roots),
+            direct_completed=sum(node.direct_completed for node in visible_roots),
+            root_name="Projects",
+            depth=0,
+            kind="center",
+            color=_rgba(_CENTER_COLOR, 0.98),
         )
-        visible_descendants, hidden_descendants = _select_visible_nodes(
-            descendants, preferred_visible=3, max_visible=6
-        )
-        if hidden_descendants:
-            visible_descendants.append(
-                _HierarchyNode(
-                    node_id=f"other:{root_node.node_id}",
-                    label="Other",
-                    total_completed=sum(
-                        node.total_completed for node in hidden_descendants
-                    ),
-                    direct_completed=sum(
-                        node.direct_completed for node in hidden_descendants
-                    ),
-                    root_name=root_node.label,
-                    depth=1,
-                    kind="aggregate",
-                    color=_mix_color(root_node.color, "#dbe7f5", 0.34),
-                    hidden_projects=len(hidden_descendants),
-                )
-            )
-        descendant_points_by_root[root_node.node_id] = visible_descendants
-
-    all_nodes = visible_roots + [
-        node
-        for _, descendants in descendant_points_by_root.items()
-        for node in descendants
     ]
-    max_value = max(node.total_completed for node in all_nodes)
-
-    root_points: list[_BubblePoint] = []
-    child_points: list[_BubblePoint] = []
-    cluster_centers = _cluster_centers(len(visible_roots))
-    for idx, root_node in enumerate(visible_roots):
-        center_x, center_y = cluster_centers[idx]
-        root_size = _bubble_size(
-            root_node.total_completed,
-            max_value=max_value,
-            min_diameter=44.0,
-            max_diameter=74.0,
-        )
-        root_points.append(
-            _BubblePoint(node=root_node, x=center_x, y=center_y, size=root_size)
-        )
-
-        descendants = descendant_points_by_root[root_node.node_id]
-        if not descendants:
-            continue
-        child_sizes = [
-            _bubble_size(
-                descendant.total_completed,
-                max_value=max_value,
-                min_diameter=20.0,
-                max_diameter=46.0,
-            )
-            for descendant in descendants
-        ]
-        nearest_gap = _nearest_center_distance(cluster_centers, idx)
-        horizontal_span = min(11.5, max(7.4, nearest_gap * 0.24))
-        vertical_span = min(13.0, max(8.8, nearest_gap * 0.21))
-        radial_padding = max(4.4, root_size * 0.12)
-        anchors = _child_anchor_offsets(len(descendants))
-        for descendant, child_size, anchor in zip(
-            descendants, child_sizes, anchors, strict=False
-        ):
-            anchor_x, anchor_y = anchor
-            horizontal_offset = anchor_x * (
-                horizontal_span + child_size * 0.09 + radial_padding * 0.12
-            )
-            vertical_offset = anchor_y * (
-                vertical_span + child_size * 0.07 + radial_padding * 0.18
-            )
-            child_points.append(
-                _BubblePoint(
-                    node=descendant,
-                    x=center_x + horizontal_offset,
-                    y=center_y + vertical_offset,
-                    size=child_size,
+    for root_node in visible_roots:
+        all_nodes.append(root_node)
+        if root_node.kind != "aggregate":
+            all_nodes.extend(
+                _build_nodes_for_parent(
+                    parent_id=root_node.node_id,
+                    root_name=root_node.label,
+                    root_color=root_node.color,
+                    depth=2,
+                    projects_by_id=projects_by_id,
+                    children_by_parent=children_by_parent,
+                    subtree_total=subtree_total,
+                    direct_counts=direct_counts,
+                    assignment_by_id=assignment_by_id,
                 )
             )
 
-    child_glow, child_trace = _build_trace(
-        child_points,
-        name="Subprojects",
-        line_width=1.6,
-        border_mix=0.42,
-        glow_scale=1.55,
-        text_size=12,
-        hovertemplate=(
-            "<b>%{customdata[1]}</b>"
-            "<br>Root project: %{customdata[4]}"
-            "<br>Total completed in range: %{customdata[2]}"
-            "<br>Completed directly in project: %{customdata[3]}"
-            "<br>Hierarchy depth: %{customdata[5]}"
-            "<br>Hidden projects folded in: %{customdata[6]}"
-            "<br>Project status: %{customdata[8]}"
-            "<br>Parent assignment: %{customdata[9]}"
-            "<extra></extra>"
-        ),
-    )
-    root_glow, root_trace = _build_trace(
-        root_points,
-        name="Root projects",
-        line_width=2.2,
-        border_mix=0.28,
-        glow_scale=1.65,
-        text_size=13,
-        hovertemplate=(
-            "<b>%{customdata[1]}</b>"
-            "<br>Total completed in range: %{customdata[2]}"
-            "<br>Completed directly in root: %{customdata[3]}"
-            "<br>Hidden roots folded in: %{customdata[6]}"
-            "<br>Project status: %{customdata[8]}"
-            "<br>Parent assignment: %{customdata[9]}"
-            "<extra></extra>"
-        ),
-    )
+    ids = [node.node_id for node in all_nodes]
+    parents = [node.parent_id for node in all_nodes]
+    labels = [_sunburst_display_label(node) for node in all_nodes]
+    project_total = all_nodes[0].total_completed
+    texts = [_sunburst_display_text(node, project_total) for node in all_nodes]
+    values = [node.total_completed for node in all_nodes]
+    colors = [node.color for node in all_nodes]
+    customdata = [
+        [
+            node.node_id,
+            node.label,
+            node.total_completed,
+            node.direct_completed,
+            node.root_name,
+            node.depth,
+            node.hidden_projects,
+            node.kind,
+            "Archived" if node.is_archived else "Active",
+            node.parent_assignment,
+        ]
+        for node in all_nodes
+    ]
 
-    fig = go.Figure(data=[child_glow, root_glow, child_trace, root_trace])
+    fig = go.Figure(
+        data=[
+            go.Sunburst(
+                ids=ids,
+                labels=labels,
+                text=texts,
+                parents=parents,
+                values=values,
+                branchvalues="total",
+                sort=False,
+                marker=dict(
+                    colors=colors,
+                    line=dict(color="rgba(241,246,255,0.42)", width=3.2),
+                ),
+                leaf=dict(opacity=0.98),
+                customdata=customdata,
+                textinfo="text",
+                insidetextorientation="auto",
+                insidetextfont=dict(
+                    family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                    size=18,
+                    color="#f8fbff",
+                ),
+                outsidetextfont=dict(
+                    family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                    size=16,
+                    color="#f8fbff",
+                ),
+                hoverlabel=dict(
+                    bgcolor="rgba(12,16,28,0.96)",
+                    bordercolor=_rgba(_PANEL_GLOW, 0.28),
+                    font=dict(
+                        color=_TEXT_COLOR,
+                        size=14,
+                        family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                    ),
+                ),
+                hovertemplate=(
+                    "<b>%{customdata[1]}</b>"
+                    "<br>Total completed in range: %{customdata[2]}"
+                    "<br>Completed directly in project: %{customdata[3]}"
+                    "<br>Root project: %{customdata[4]}"
+                    "<br>Hierarchy depth: %{customdata[5]}"
+                    "<br>Hidden projects folded in: %{customdata[6]}"
+                    "<br>Project status: %{customdata[8]}"
+                    "<br>Parent assignment: %{customdata[9]}"
+                    "<extra></extra>"
+                ),
+            )
+        ]
+    )
     fig.update_layout(
         template="plotly_dark",
         title=None,
         height=620,
-        margin=dict(l=24, r=24, t=30, b=72),
+        margin=dict(l=24, r=24, t=30, b=76),
         paper_bgcolor=_BACKGROUND_COLOR,
         plot_bgcolor=_BACKGROUND_COLOR,
         showlegend=False,
-        xaxis=dict(
-            visible=False,
-            range=[0, 100],
-            fixedrange=False,
+        uniformtext=dict(minsize=13, mode="hide"),
+        font=dict(
+            color=_TEXT_COLOR,
+            family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
         ),
-        yaxis=dict(
-            visible=False,
-            range=[0, 100],
-            fixedrange=False,
-            scaleanchor="x",
-            scaleratio=1,
-        ),
-        dragmode="pan",
-        uirevision="active-project-hierarchy",
+        uirevision="active-project-hierarchy-sunburst",
         annotations=[
             dict(
-                x=0.99,
-                y=0.0,
+                x=0.5,
+                y=-0.065,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
-                xanchor="right",
+                xanchor="center",
                 yanchor="bottom",
-                align="right",
+                align="center",
                 text=(
-                    "Bubble area tracks completed tasks. "
-                    "Long tails are folded into Other only when they stay smaller "
-                    "than the smallest visible bubble."
+                    "Ring area tracks completed tasks. Long tails fold into Other only when they stay smaller than the smallest visible sibling."
                 ),
-                font=dict(size=9, color=_MUTED_TEXT_COLOR),
+                font=dict(
+                    size=10,
+                    color=_MUTED_TEXT_COLOR,
+                    family="Space Grotesk, Segoe UI, Inter, ui-sans-serif, system-ui, sans-serif",
+                ),
             )
         ],
     )

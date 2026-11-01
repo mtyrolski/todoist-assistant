@@ -13,7 +13,7 @@ from todoist.dashboard._plot_project_lifecycle import (
     build_project_lifecycle_data,
     plot_project_lifecycle_timeline,
 )
-from todoist.dashboard._plot_project_hierarchy_sunburst import (
+from todoist.dashboard._plot_project_hierarchy import (
     plot_active_project_hierarchy_sunburst,
 )
 from todoist.dashboard._plot_weekly_trend import plot_weekly_completion_trend
