@@ -7,10 +7,6 @@ from loguru import logger
 from todoist.core.types import Project
 
 
-def all_tasks(project: Project) -> int:
-    return len(project.tasks)
-
-
 def priority_tasks(project: Project, prio: int) -> int:
     """
     Returns the number of tasks with a given priority in a project.
@@ -25,10 +21,6 @@ p1_tasks = partial(priority_tasks, prio=4)
 p2_tasks = partial(priority_tasks, prio=3)
 p3_tasks = partial(priority_tasks, prio=2)
 p4_tasks = partial(priority_tasks, prio=1)
-
-
-def any_labels(project: Project) -> int:
-    return sum(bool(task.task_entry.labels) for task in project.tasks)
 
 
 def try_parse_date(date: str) -> datetime | None:

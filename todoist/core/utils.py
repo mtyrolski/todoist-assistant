@@ -163,11 +163,6 @@ def resolve_cache_dir(path: str | None = None) -> str:
     return str((Path.cwd() / DEFAULT_CACHE_SUBDIR).resolve())
 
 
-def runtime_file_path(filename: str, cache_dir: str | None = None) -> str:
-    cache_root = Path(resolve_cache_dir(cache_dir))
-    return str(cache_root / filename)
-
-
 def get_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
     raw = getenv(str(EnvVar.LOG_LEVEL), default)
     normalized = str(raw).strip().upper() if raw is not None else default
@@ -557,11 +552,6 @@ class Anonymizable(ABC):
             logger.debug("Already anonymized. Skipping.")
 
 
-def last_n_years_in_weeks(n_years: int) -> int:
-    count_f: float = 365.25 * n_years / 7
-    return int(count_f)
-
-
 def get_api_key() -> str:
     """Return a normalized Todoist API token or an empty string when unset."""
 
@@ -621,33 +611,6 @@ def get_max_requests_per_minute() -> int:
         except ValueError:
             logger.warning(f"Invalid {EnvVar.MAX_REQUESTS_PER_MINUTE} value: {raw}")
     return DEFAULT_MAX_REQUESTS_PER_MINUTE
-
-
-def _get_positive_float_env(var_name: EnvVar, *, default: float) -> float:
-    raw = getenv(str(var_name))
-    if raw:
-        try:
-            value = float(raw)
-            if value >= 0:
-                return value
-        except ValueError:
-            logger.warning(f"Invalid {var_name} value: {raw}")
-    return default
-
-
-def get_rate_pacing_base_delay_seconds() -> float:
-    """Additional minimum delay applied between rate-limited requests."""
-    return _get_positive_float_env(EnvVar.RATE_PACING_BASE_DELAY_SECONDS, default=0.0)
-
-
-def get_rate_pacing_jitter_min_seconds() -> float:
-    """Lower bound for random jitter added to pacing delay."""
-    return _get_positive_float_env(EnvVar.RATE_PACING_JITTER_MIN_SECONDS, default=0.0)
-
-
-def get_rate_pacing_jitter_max_seconds() -> float:
-    """Upper bound for random jitter added to pacing delay."""
-    return _get_positive_float_env(EnvVar.RATE_PACING_JITTER_MAX_SECONDS, default=0.0)
 
 
 def _resolve_retry_wait_seconds(

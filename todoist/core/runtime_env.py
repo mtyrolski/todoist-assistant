@@ -4,7 +4,6 @@ from collections.abc import Mapping
 import os
 from pathlib import Path
 
-from dotenv import dotenv_values, load_dotenv
 
 from todoist.core.env import EnvVar
 
@@ -39,32 +38,3 @@ def resolve_runtime_env_path(
     if repo_root is not None:
         return repo_root.resolve() / ".env"
     return current_dir / ".env"
-
-
-def load_runtime_env_values(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-
-    return {
-        key: value
-        for key, value in dotenv_values(path).items()
-        if isinstance(key, str) and isinstance(value, str)
-    }
-
-
-def load_local_dotenv(
-    *,
-    path: Path | None = None,
-    repo_root: Path | None = None,
-    cwd: Path | None = None,
-    override: bool = True,
-    environ: Mapping[str, str] | None = None,
-) -> Path:
-    env_path = path or resolve_runtime_env_path(
-        repo_root=repo_root,
-        cwd=cwd,
-        environ=environ,
-    )
-    if env_path.exists():
-        load_dotenv(env_path, override=override)
-    return env_path

@@ -1,4 +1,3 @@
-from typing import Any, cast
 
 from tests.unit.database.helpers import make_event
 from todoist.core.types import Project, Task
@@ -36,15 +35,3 @@ def test_event_equality_and_hashing():
     assert event1a == event1b
     assert event1a != event2
     assert len({event1a, event1b, event2}) == 2
-
-
-def test_task_entry_duration_edge_cases(sample_task_entry):
-    task_entry = sample_task_entry
-    task_entry.duration = None
-    assert task_entry.duration_kwargs is None
-
-    task_entry.duration = {"invalid": "structure"}
-    assert task_entry.duration_kwargs is None
-
-    task_entry.duration = cast(Any, "not_a_dict")
-    assert task_entry.duration_kwargs is None

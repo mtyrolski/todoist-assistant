@@ -9,7 +9,6 @@ from todoist.web.dashboard_payload import (
     apply_date_axis_viewport,
     compute_plot_history_beg,
     FIRE_TASK_LABEL,
-    count_labeled_tasks,
     evaluate_urgency_status,
     extract_metrics_dict,
     normalize_plot_events,
@@ -20,21 +19,6 @@ def _assert_counts_include(status: dict[str, object], **expected: int) -> None:
     counts = status["counts"]
     assert isinstance(counts, dict)
     assert {key: counts[key] for key in expected} == expected
-
-
-def test_count_labeled_tasks_matches_fire_label_case_insensitively() -> None:
-    projects = [
-        make_project(
-            tasks=[
-                make_task("a", labels=[FIRE_TASK_LABEL]),
-                make_task("b", labels=["Fire \U0001f9ef\U0001f692"]),
-                make_task("c", labels=["other"]),
-            ]
-        ),
-        make_project(tasks=[make_task("d", labels=[FIRE_TASK_LABEL, "extra"])]),
-    ]
-
-    assert count_labeled_tasks(projects, label_name=FIRE_TASK_LABEL) == 3
 
 
 def test_extract_metrics_dict_keeps_period_metrics_only() -> None:

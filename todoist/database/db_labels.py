@@ -52,39 +52,6 @@ class DatabaseLabels:
 
         return [cast(LabelRecord, dict(label)) for label in self._labels]
 
-    def delete_label_by_name(self, label_name: str) -> bool:
-        """Delete a personal Todoist label by name when it exists locally."""
-
-        label = next(
-            (item for item in self._labels if item["name"] == label_name), None
-        )
-        if label is None:
-            logger.debug(f"Label {label_name!r} not found; skipping delete.")
-            return False
-        label_id = label.get("id")
-        if not label_id:
-            logger.warning(f"Label {label_name!r} has no id; cannot delete it.")
-            return False
-
-        spec = RequestSpec(
-            endpoint=TodoistEndpoints.DELETE_LABEL.format(label_id=label_id),
-            headers={"Content-Type": "application/json"},
-            rate_limited=True,
-        )
-        result = self._api_client.request(
-            spec, operation_name=f"delete label {label_name}"
-        )
-        if result.status_code not in (200, 204):
-            logger.error(
-                "Unexpected status when deleting label", status=result.status_code
-            )
-            return False
-
-        self._labels = [item for item in self._labels if item.get("id") != label_id]
-        self._mapping_label_name_to_color.pop(label_name, None)
-        logger.warning(f"Deleted Todoist label {label_name!r} (id={label_id}).")
-        return True
-
     def _fetch_label_data(self) -> None:
         """
         Fetches label data from the Todoist API and populates local attributes.

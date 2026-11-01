@@ -188,16 +188,6 @@ def fetch_activity(
     return all_events, new_events, False
 
 
-def remove_last_n_events_from_activity(
-    activity_db: EventCollection, n: int
-) -> EventCollection:
-    events_to_remove = get_last_n_events(activity_db, n)
-    for event in events_to_remove:
-        activity_db.remove(event)
-    Cache().activity.save(activity_db)
-    return activity_db
-
-
 def main(nweeks: int = 3):
     dbio = Database(".env")
     activity_db, new_items, is_corrupted = fetch_activity(dbio, nweeks)

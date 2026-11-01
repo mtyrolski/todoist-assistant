@@ -6,8 +6,6 @@ from functools import partial
 import pytest
 
 from todoist.features.stats import (
-    all_tasks,
-    any_labels,
     extract_task_due_date,
     p1_tasks,
     p2_tasks,
@@ -31,13 +29,6 @@ def project_with_tasks(project_factory, task_factory):
         task_factory("task5", priority=1, labels=["someday"]),
     ]
     return project_factory(tasks=tasks)
-
-
-@pytest.mark.parametrize("task_count", [0, 1, 5])
-def test_all_tasks_counts(project_factory, task_factory, task_count: int):
-    tasks = [task_factory(f"task{i}") for i in range(task_count)]
-    project = project_factory(project_id=f"project_{task_count}", tasks=tasks)
-    assert all_tasks(project) == task_count
 
 
 @pytest.mark.parametrize(
@@ -75,26 +66,6 @@ def test_priority_partials_on_empty_project(project_factory):
     assert p2_tasks(empty) == 0
     assert p3_tasks(empty) == 0
     assert p4_tasks(empty) == 0
-
-
-@pytest.mark.parametrize(
-    ("task_labels", "expected_count"),
-    [
-        ([["a"], ["b", "c"], []], 2),
-        ([[], [], []], 0),
-        ([["x"], ["y"], ["z"]], 3),
-        ([["a", "b", "c"], [], ["d"]], 2),
-    ],
-)
-def test_any_labels_counts(
-    project_factory, task_factory, task_labels: list[list[str]], expected_count: int
-):
-    tasks = [
-        task_factory(f"task{i}", labels=labels)
-        for i, labels in enumerate(task_labels, start=1)
-    ]
-    project = project_factory(project_id="labels", tasks=tasks)
-    assert any_labels(project) == expected_count
 
 
 @pytest.mark.parametrize(

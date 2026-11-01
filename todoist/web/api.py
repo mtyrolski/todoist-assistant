@@ -61,8 +61,6 @@ from todoist.web.api_components.logs import (
     display_log_path as _component_display_log_path,
     read_log_file as _read_log_file,
     resolve_runtime_log_request as _component_resolve_runtime_log_request,
-    resolve_runtime_log_source as _component_resolve_runtime_log_source,
-    runtime_log_path as _component_runtime_log_path,
     runtime_log_sources as _component_runtime_log_sources,
 )
 from todoist.web.api_components.runtime import (
@@ -313,18 +311,10 @@ def _display_log_path(path: Path) -> str:
     )
 
 
-def _runtime_log_path(spec: _RuntimeLogSpec) -> Path:
-    return _component_runtime_log_path(spec, cache_dir=Path(Cache().path))
-
-
 def _runtime_log_sources() -> list[dict[str, Any]]:
     return _component_runtime_log_sources(
         data_dir=_DATA_DIR, cache_dir=Path(Cache().path)
     )
-
-
-def _resolve_runtime_log_source(source: str) -> tuple[_RuntimeLogSpec, Path]:
-    return _component_resolve_runtime_log_source(source, cache_dir=Path(Cache().path))
 
 
 def _resolve_runtime_log_request(
@@ -336,22 +326,6 @@ def _resolve_runtime_log_request(
         source=source,
         path=path,
     )
-
-
-def _safe_data_path(rel_path: str, *, suffix: str | None = None) -> Path:
-    raw = Path(rel_path).expanduser()
-    candidate = raw.resolve() if raw.is_absolute() else (_DATA_DIR / raw).resolve()
-
-    allowed_roots = {_DATA_DIR.resolve(), Path(Cache().path).resolve()}
-    if not any(
-        candidate == root or root in candidate.parents for root in allowed_roots
-    ):
-        raise HTTPException(
-            status_code=400, detail="Path must be within data or cache directory"
-        )
-    if suffix and candidate.suffix != suffix:
-        raise HTTPException(status_code=400, detail=f"Path must end with {suffix}")
-    return candidate
 
 
 def _available_mapping_files() -> list[str]:

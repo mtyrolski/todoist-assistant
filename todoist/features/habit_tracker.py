@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from hashlib import sha1
 from typing import Any, Sequence, cast
 
 import pandas as pd
@@ -190,34 +189,3 @@ def summarize_tracked_habits(
         "items": items,
         "history": history,
     }
-
-
-def render_habit_comment(task_summary: dict[str, Any], *, period_label: str) -> str:
-    reliability = task_summary.get("reliability")
-    reliability_line = (
-        f"- Reliability: {float(reliability):.2f}%"
-        if reliability is not None
-        else "- Reliability: N/A"
-    )
-    return "\n".join(
-        [
-            f"Habit tracker update for {period_label}",
-            "",
-            f"- Completed this week: {int(task_summary.get('weeklyCompleted', 0))}",
-            f"- Rescheduled this week: {int(task_summary.get('weeklyRescheduled', 0))}",
-            f"- All-time completions: {int(task_summary.get('allTimeCompleted', 0))}",
-            f"- All-time reschedules: {int(task_summary.get('allTimeRescheduled', 0))}",
-            reliability_line,
-        ]
-    )
-
-
-def habit_comment_fingerprint(
-    task_summary: dict[str, Any], *, period_label: str
-) -> str:
-    payload = (
-        f"{period_label}|{task_summary.get('taskId')}|"
-        f"{task_summary.get('weeklyCompleted')}|{task_summary.get('weeklyRescheduled')}|"
-        f"{task_summary.get('allTimeCompleted')}|{task_summary.get('allTimeRescheduled')}"
-    )
-    return sha1(payload.encode("utf-8")).hexdigest()

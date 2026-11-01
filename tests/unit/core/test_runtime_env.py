@@ -1,8 +1,6 @@
-import os
 from pathlib import Path
 
 from todoist.core.runtime_env import (
-    load_local_dotenv,
     resolve_runtime_env_path,
 )
 
@@ -46,11 +44,3 @@ def test_resolve_runtime_env_path_prefers_data_dir_over_cache_dir(
     )
 
     assert env_path == data_dir / ".env"
-def test_load_local_dotenv_loads_resolved_env_file(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("API_KEY", raising=False)
-    (tmp_path / ".env").write_text("API_KEY='test-token'", encoding="utf-8")
-
-    env_path = load_local_dotenv(repo_root=tmp_path, cwd=tmp_path)
-
-    assert env_path == tmp_path / ".env"
-    assert os.getenv("API_KEY") == "test-token"

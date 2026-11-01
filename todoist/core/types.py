@@ -163,33 +163,6 @@ class _Task_V1:
         return f"Task {self.content}"
 
     @property
-    def kwargs(self) -> dict[str, Any]:
-        basic_kwargs = self.__dict__.copy()
-        basic_kwargs["duration_unit"] = (
-            None if self.duration is None else self.duration.get("unit")
-        )
-        basic_kwargs["duration"] = (
-            None if self.duration is None else self.duration.get("amount")
-        )
-        return basic_kwargs
-
-    @property
-    def duration_kwargs(self) -> dict[str, str | int] | None:
-        if self.duration is None:
-            return None
-
-        if any(
-            [
-                not isinstance(self.duration, dict),
-                "duration" not in self.duration,
-                "unit" not in self.duration,
-            ]
-        ):
-            return None
-
-        return {"duration": self.duration["duration"], "unit": self.duration["unit"]}
-
-    @property
     def due_datetime(self) -> dt.datetime | None:
         if self.due is None:
             return None

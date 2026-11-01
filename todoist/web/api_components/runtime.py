@@ -136,42 +136,6 @@ def safe_display_path(path: Path, *, root: Path | None = None) -> str:
     return name or str(path)
 
 
-def resolve_timezone_status() -> dict[str, Any]:
-    env_path = resolve_env_path()
-    timezone_key = str(EnvVar.TIMEZONE)
-    system_timezone = detect_system_timezone()
-
-    override = normalize_timezone(os.getenv(timezone_key))
-    if not override and env_path.exists():
-        data = dotenv_values(env_path)
-        override = normalize_timezone(data.get(timezone_key))
-        if override:
-            os.environ[timezone_key] = override
-
-    payload: dict[str, Any] = {
-        "configured": False,
-        "timezone": system_timezone,
-        "source": "system",
-        "override": None,
-        "overrideValid": True,
-        "system": system_timezone,
-        "envPath": safe_display_path(env_path, root=REPO_ROOT),
-    }
-    if not override:
-        return payload
-
-    payload["override"] = override
-    if is_valid_timezone_name(override):
-        payload["configured"] = True
-        payload["timezone"] = override
-        payload["source"] = "env"
-        return payload
-
-    payload["overrideValid"] = False
-    payload["invalidOverride"] = override
-    return payload
-
-
 def mask_api_key(value: str) -> str:
     if not value:
         return ""

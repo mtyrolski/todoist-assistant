@@ -64,25 +64,6 @@ def _normalize_label_name(value: str) -> str:
     return value.strip().casefold()
 
 
-def count_labeled_tasks(
-    active_projects: Sequence[Project] | None, *, label_name: str
-) -> int:
-    if not active_projects:
-        return 0
-
-    normalized_target = _normalize_label_name(label_name)
-    total = 0
-    for project in active_projects:
-        for task in project.tasks or []:
-            task_labels = {
-                _normalize_label_name(str(label))
-                for label in (task.task_entry.labels or [])
-            }
-            if normalized_target in task_labels:
-                total += 1
-    return total
-
-
 def _task_matches_any_label(task: Any, label_names: Sequence[str]) -> bool:
     normalized_labels = {
         _normalize_label_name(str(label)) for label in label_names if str(label).strip()
