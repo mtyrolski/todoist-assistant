@@ -42,6 +42,8 @@ export type HabitTrackerItem = {
 };
 
 export type DashboardHome = {
+  refreshing?: boolean;
+  refreshWarning?: string | null;
   noData?: boolean;
   range: { beg: string; end: string; granularity: Granularity; weeks: number };
   metrics: {

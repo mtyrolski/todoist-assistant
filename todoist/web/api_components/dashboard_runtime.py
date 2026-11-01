@@ -59,8 +59,9 @@ def _env_demo_mode() -> bool:
 
 def _run_async_in_main_loop(coro: Any) -> Any:
     """Run an async coroutine in the main event loop from a worker thread."""
-    if _main_loop is not None:
-        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+    loop = _state.main_loop or _main_loop
+    if loop is not None and loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result()
     else:
         # Fallback to creating a new event loop if main loop is not set
@@ -514,6 +515,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         "active_projects": active_projects,
         "archived_projects": archived_projects,
         "project_colors": project_colors,
+        "last_refresh_error": _state.last_refresh_error,
     }
     try:
         Cache().dashboard_state.save(payload)
@@ -561,6 +563,8 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     ):
         return False
 
+    warning = payload.get("last_refresh_error")
+    _state.last_refresh_error = warning if isinstance(warning, str) else None
     _state.db = None
     _state.df_activity = _normalize_activity_df(df_activity)
     _state.active_projects = active_projects
@@ -651,7 +655,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             step=1,
             detail="Checking activity changes before reconciling projects",
         )
-        dbio = Database(".env")
+        dbio = Database(str(_resolve_env_path()))
         previous_projects, previous_refresh_s = _project_refresh_baseline(
             demo_mode=demo_mode
         )
@@ -819,6 +823,11 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.archived_projects = archived_projects
         _state.project_colors = project_colors
         _state.last_refresh_s = time.time()
+        _state.last_refresh_error = (
+            "Activity sync failed. Task metadata was updated, but completion history is from saved data."
+            if _resolve_api_key() and not demo_mode and not activity_sync_succeeded
+            else None
+        )
         _state.home_payload_cache = {}
         _state.demo_mode = demo_mode
         _state.activity_cache_signature = _activity_cache_signature()
@@ -831,27 +840,76 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _run_async_in_main_loop(_finish_progress(error))
 
 
+def _schedule_stale_state_refresh(*, demo_mode: bool) -> None:
+    now = time.time()
+    age = now - _state.last_refresh_s
+    if 0 <= age < _STATE_TTL_S or (
+        _state.refresh_task is not None and not _state.refresh_task.done()
+    ):
+        return
+    if 0 <= now - _state.last_refresh_attempt_s < _STATE_TTL_S:
+        return
+    _state.last_refresh_attempt_s = now
+    _state.refresh_task = asyncio.create_task(
+        _refresh_cached_state(demo_mode=demo_mode)
+    )
+
+
+async def _refresh_cached_state(*, demo_mode: bool) -> None:
+    async with _STATE_LOCK:
+        try:
+            _state.last_refresh_error = None
+            await asyncio.to_thread(_refresh_state_sync, demo_mode=demo_mode)
+        except Exception as exc:
+            logger.warning("Dashboard refresh failed; retaining saved data: {}", exc)
+            _state.last_refresh_error = (
+                "Could not refresh Todoist. Showing saved data; use Refresh to retry."
+            )
+            _state.home_payload_cache.clear()
+
+
 async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
     global _main_loop
+    _main_loop = asyncio.get_running_loop()
+    _state.main_loop = _main_loop
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
+    if refresh and _state.refresh_task is not None and not _state.refresh_task.done():
+        await asyncio.shield(_state.refresh_task)
+        if _state.demo_mode == desired_demo:
+            return
     if not refresh and _state.is_ready_for(
         demo_mode=desired_demo,
         activity_cache_signature=_activity_cache_signature(),
     ):
+        _schedule_stale_state_refresh(demo_mode=desired_demo)
         return
 
     async with _STATE_LOCK:
         desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-        if not refresh and _state.is_ready_for(
-            demo_mode=desired_demo,
-            activity_cache_signature=_activity_cache_signature(),
+        if not refresh and (
+            _state.is_ready_for(
+                demo_mode=desired_demo,
+                activity_cache_signature=_activity_cache_signature(),
+            )
+            or _load_state_from_disk_cache(demo_mode=desired_demo)
         ):
+            _schedule_stale_state_refresh(demo_mode=desired_demo)
             return
-        if not refresh and _load_state_from_disk_cache(demo_mode=desired_demo):
-            return
-        # Store the main event loop for worker threads to use
-        _main_loop = asyncio.get_running_loop()
-        await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
+        _state.last_refresh_attempt_s = time.time()
+        try:
+            _state.last_refresh_error = None
+            await asyncio.to_thread(_refresh_state_sync, demo_mode=desired_demo)
+        except Exception:
+            if (
+                _state.df_activity is None
+                or _state.active_projects is None
+                or _state.demo_mode != desired_demo
+            ):
+                raise
+            _state.last_refresh_error = (
+                "Could not refresh Todoist. Showing saved data; use Refresh to retry."
+            )
+            _state.home_payload_cache.clear()
 
 
 def _cache_runtime_path(filename: str) -> Path:

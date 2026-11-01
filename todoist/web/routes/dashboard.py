@@ -64,9 +64,7 @@ async def hierarchy_playback(
         return {"error": "Dashboard data unavailable.", "frames": []}
 
     activity = _normalize_activity_df(activity)
-    range_beg, range_end = _compute_plot_range(
-        activity, weeks=weeks, beg=beg, end=end
-    )
+    range_beg, range_end = _compute_plot_range(activity, weeks=weeks, beg=beg, end=end)
     mappings = get_adjusting_mapping()
     archived_parents = get_adjusting_archived_parent_projects()
     cache_key = (
@@ -95,10 +93,12 @@ async def hierarchy_playback(
             project_mappings=mappings,
             archived_parent_projects=archived_parents,
         )
-        frames.append({
-            "date": (frame_end - timedelta(microseconds=1)).date().isoformat(),
-            "figure": _fig_to_dict(figure),
-        })
+        frames.append(
+            {
+                "date": (frame_end - timedelta(microseconds=1)).date().isoformat(),
+                "figure": _fig_to_dict(figure),
+            }
+        )
     payload = {"frames": frames}
     _state.home_payload_cache[cache_key] = payload
     return payload
@@ -229,6 +229,9 @@ async def dashboard_home(
     plot_events = _normalize_plot_events(dashboard_settings_cfg)
     always_visible_projects = get_adjusting_archived_parent_projects()
     project_mappings = get_adjusting_mapping()
+    archived_plot_projects = {
+        project.project_entry.name for project in archived_projects
+    } - {project.project_entry.name for project in active_projects}
 
     p1 = sum(map(p1_tasks, active_projects))
     p2 = sum(map(p2_tasks, active_projects))
@@ -247,7 +250,12 @@ async def dashboard_home(
     )
     cached = _state.home_payload_cache.get(cache_key)
     if cached and not refresh:
-        return cached
+        return {
+            **cached,
+            "refreshWarning": _state.last_refresh_error,
+            "refreshing": _state.refresh_task is not None
+            and not _state.refresh_task.done(),
+        }
 
     anchor_dt = _safe_activity_anchor(df_activity)
     last_week_beg, last_week_end, last_week_label = _last_completed_week_bounds(
@@ -293,6 +301,7 @@ async def dashboard_home(
                     visibility_end_date=end_range,
                     always_visible_projects=always_visible_projects,
                     bounds_are_utc=beg is None,
+                    archived_project_names=archived_plot_projects,
                 ),
                 plot_events,
                 beg=history_beg_range,
@@ -313,6 +322,7 @@ async def dashboard_home(
                     visibility_end_date=end_range,
                     always_visible_projects=always_visible_projects,
                     bounds_are_utc=beg is None,
+                    archived_project_names=archived_plot_projects,
                 ),
                 plot_events,
                 beg=history_beg_range,
@@ -393,6 +403,9 @@ async def dashboard_home(
             "previousPeriod": periods["previousLabel"],
         },
         "urgencyStatus": urgency_status,
+        "refreshWarning": _state.last_refresh_error,
+        "refreshing": _state.refresh_task is not None
+        and not _state.refresh_task.done(),
         "configurableItems": [
             {
                 "key": "urgency",

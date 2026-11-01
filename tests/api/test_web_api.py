@@ -112,18 +112,20 @@ def test_project_timeline_endpoint_returns_structured_archived_history(
 def test_hierarchy_playback_builds_cumulative_frames_on_demand(
     monkeypatch, api_client
 ) -> None:
-    activity = _event_df([
-        {
-            "date": "2026-08-02",
-            "id": "e1",
-            "title": "done",
-            "type": "completed",
-            "parent_project_id": "root",
-            "parent_project_name": "Product",
-            "root_project_name": "Product",
-            "task_id": "1",
-        }
-    ])
+    activity = _event_df(
+        [
+            {
+                "date": "2026-08-02",
+                "id": "e1",
+                "title": "done",
+                "type": "completed",
+                "parent_project_id": "root",
+                "parent_project_name": "Product",
+                "root_project_name": "Product",
+                "task_id": "1",
+            }
+        ]
+    )
     _set_dashboard_df(monkeypatch, activity)
     web_api._state.active_projects = [make_project(project_id="root")]
     web_api._state.archived_projects = []
@@ -332,9 +334,12 @@ def test_dashboard_home_bootstraps_from_disk_cache_without_refresh(
     _clear_dashboard_state()
 
     def _fake_load_state_from_disk_cache(*, demo_mode: bool) -> bool:
+        import time
+
         _ = demo_mode
         _set_state_with_df(_single_event_df())
         web_api._state.demo_mode = False
+        web_api._state.last_refresh_s = time.time()
         return True
 
     def _unexpected_refresh(*, demo_mode: bool) -> None:
@@ -704,3 +709,160 @@ def test_dashboard_home_passes_active_and_archived_projects_to_hierarchy(
     ]
     assert captured["mappings"] == {"Archived": "Active"}
     assert captured["archived_parents"] == {"Archived"}
+
+
+def test_stale_ready_state_refreshes_in_background_without_blocking_cached_reads(
+    monkeypatch,
+):
+    import asyncio
+    import time
+    import todoist.web.api_components.dashboard_runtime as runtime
+
+    state = web_api._DashboardState()
+    state.df_activity = _single_event_df()
+    state.active_projects = []
+    state.project_colors = {}
+    state.last_refresh_s = time.time() - 3600
+    monkeypatch.setattr(web_api, "_state", state)
+    monkeypatch.setattr(web_api, "_activity_cache_signature", lambda: None)
+    refreshed = []
+
+    def refresh(*, demo_mode):
+        refreshed.append(True)
+        state.last_refresh_s = time.time()
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", refresh)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        assert state.refresh_task is not None
+        assert state.df_activity is not None
+        await state.refresh_task
+        assert refreshed == [True]
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        assert refreshed == [True]
+
+    asyncio.run(run())
+
+
+def test_failed_background_refresh_keeps_cached_data_and_throttles_retries(monkeypatch):
+    import asyncio
+    import time
+    import todoist.web.api_components.dashboard_runtime as runtime
+
+    state = web_api._DashboardState()
+    state.df_activity = _single_event_df()
+    state.active_projects = []
+    state.project_colors = {}
+    state.last_refresh_s = time.time() - 3600
+    monkeypatch.setattr(web_api, "_state", state)
+    monkeypatch.setattr(web_api, "_activity_cache_signature", lambda: None)
+
+    def offline(*, demo_mode):
+        raise ConnectionError("offline")
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", offline)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        task = state.refresh_task
+        await task
+        assert len(state.df_activity) == 1
+        assert "saved data" in state.last_refresh_error
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        assert state.refresh_task is task
+
+    asyncio.run(run())
+
+
+def test_explicit_refresh_joins_an_existing_background_sync(monkeypatch):
+    import asyncio
+    import todoist.web.api_components.dashboard_runtime as runtime
+
+    state = web_api._DashboardState()
+    monkeypatch.setattr(web_api, "_state", state)
+
+    async def run():
+        gate = asyncio.Event()
+        state.refresh_task = asyncio.create_task(gate.wait())
+        runtime._sync_api_globals()
+        request = asyncio.create_task(
+            runtime._ensure_state(refresh=True, demo_mode=False)
+        )
+        await asyncio.sleep(0)
+        assert not request.done()
+        gate.set()
+        await request
+
+    asyncio.run(run())
+
+
+def test_state_refresh_uses_the_runtime_credential_file(monkeypatch, tmp_path):
+    import pytest
+
+    env = tmp_path / "runtime" / ".env"
+    received = []
+
+    class StopAtDatabase:
+        def __init__(self, path):
+            received.append(path)
+            raise RuntimeError("stop before network access")
+
+    monkeypatch.setattr(web_api, "Database", StopAtDatabase)
+    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env)
+    monkeypatch.setattr(
+        web_api, "_run_async_in_main_loop", lambda coroutine: coroutine.close()
+    )
+    with pytest.raises(RuntimeError, match="stop before network"):
+        web_api._call_dashboard_runtime("_refresh_state_sync", demo_mode=False)
+    assert received == [str(env)]
+
+
+def test_background_refresh_preserves_partial_sync_warnings(monkeypatch):
+    import asyncio
+    import todoist.web.api_components.dashboard_runtime as runtime
+
+    state = web_api._DashboardState()
+    monkeypatch.setattr(web_api, "_state", state)
+
+    def partial_refresh(*, demo_mode):
+        state.last_refresh_error = "Activity history could not be refreshed."
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", partial_refresh)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        await runtime._refresh_cached_state(demo_mode=False)
+        assert state.last_refresh_error == "Activity history could not be refreshed."
+
+    asyncio.run(run())
+
+
+def test_failed_mode_change_does_not_return_data_from_the_previous_mode(monkeypatch):
+    import asyncio
+    import pytest
+    import todoist.web.api_components.dashboard_runtime as runtime
+
+    state = web_api._DashboardState()
+    state.df_activity = _single_event_df()
+    state.active_projects = []
+    state.demo_mode = True
+    monkeypatch.setattr(web_api, "_state", state)
+
+    def offline(*, demo_mode):
+        raise ConnectionError("offline")
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", offline)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        with pytest.raises(ConnectionError, match="offline"):
+            await runtime._ensure_state(refresh=True, demo_mode=False)
+
+    asyncio.run(run())

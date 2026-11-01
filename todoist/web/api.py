@@ -133,6 +133,10 @@ ProgressLaneStatus = Literal["queued", "active", "done"]
 class _DashboardState:
     def __init__(self) -> None:
         self.last_refresh_s: float = 0.0
+        self.last_refresh_attempt_s: float = 0.0
+        self.last_refresh_error: str | None = None
+        self.refresh_task: asyncio.Task[None] | None = None
+        self.main_loop: asyncio.AbstractEventLoop | None = None
         self.db: Database | None = None
         self.df_activity: pd.DataFrame | None = None
         self.active_projects: list[Project] | None = None
@@ -192,7 +196,7 @@ _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
-_DASHBOARD_STATE_SCHEMA_VERSION = 4
+_DASHBOARD_STATE_SCHEMA_VERSION = 5
 _DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {

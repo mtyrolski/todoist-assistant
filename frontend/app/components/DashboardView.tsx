@@ -479,6 +479,8 @@ export function DashboardView({
               { label: syncLabel, tone: "neutral", title: syncTitle },
               { label: periodLabel ?? "" },
               { label: dashboardError ?? "", tone: "warn" },
+              { label: dashboard?.refreshWarning ?? "", tone: "warn" },
+              { label: dashboard?.refreshing ? "Syncing in the background…" : "", tone: "neutral" },
               { label: error ?? "", tone: "warn" }
             ]}
           />
