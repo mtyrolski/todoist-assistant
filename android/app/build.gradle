@@ -1,0 +1,21 @@
+plugins { id 'com.android.application' }
+
+def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../frontend/package.json')).version
+
+android {
+    namespace 'com.todoistassistant'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.todoistassistant'
+        minSdk 26
+        targetSdk 35
+        versionCode 401
+        versionName appVersion
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes { release { minifyEnabled false } }
+}
+dependencies { testImplementation 'junit:junit:4.13.2' }
