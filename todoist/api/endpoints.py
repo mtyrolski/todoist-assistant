@@ -38,9 +38,6 @@ class TodoistEndpoints:
 
     # Activity
     LIST_ACTIVITY = Endpoint("list_activity", "GET", f"{API_BASE}/activities")
-    PRODUCTIVITY_STATS = Endpoint(
-        "productivity_stats", "GET", f"{API_BASE}/tasks/completed/stats"
-    )
 
     # Projects
     LIST_PROJECTS = Endpoint("list_projects", "GET", f"{API_BASE}/projects")

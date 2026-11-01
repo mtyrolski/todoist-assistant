@@ -36,5 +36,6 @@ class EventType(StrEnum):
     ADDED = "added"
     UPDATED = "updated"
     COMPLETED = "completed"
+    UNCOMPLETED = "uncompleted"
     DELETED = "deleted"
     RESCHEDULED = "rescheduled"

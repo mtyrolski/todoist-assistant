@@ -7,6 +7,7 @@ Total task activity (added, completed, rescheduled) in the selected period.
 Total completed tasks in the selected period.
 
 - Delta compares against the previous period of equal length.`,
+  "Undone Completions": `Undone completions\nNumber of undo actions recorded in the cache during the selected period. Each undo cancels the most recent outstanding ordinary completion at its original date. Recurring completions remain counted.`,
   "Added Tasks": `Added tasks
 Total tasks added in the selected period.
 
@@ -59,9 +60,9 @@ Normalized cumulative completion pace by weekday.
   taskLifespans: `Task Lifespans
 Time between task creation and completion. Each completed task counts equally. Use Selected period to include tasks completed in the dashboard date range; All time includes the full recorded history.`,
   completedTasksPeriodically: `Periodically Completed Tasks
-Completed tasks per project for each calendar period. Recent weekly points use Todoist Productivity counters (last four weeks); older weeks and monthly views count cached completion events and may differ from Productivity.\n\nOpen circles show actual counts; filled circles and dashed lines show estimates. Forecasts blend the last eight periods (including empty periods) with current pace and never fall below actuals. All projects forecast is the sum of project forecasts.`,
+Completed tasks per project for each calendar period. All periods use the same cached completion history: undoing a non-recurring completion removes it from its original period; recurring completions remain separate occurrences.\n\nOpen circles show actual counts; filled circles and dashed lines show estimates. Forecasts blend the last eight periods (including empty periods) with current pace and never fall below actuals. All projects forecast is the sum of project forecasts.`,
   cumsumCompletedTasksPeriodically: `Cumulative Completed Tasks
-Running total of completions per project across the available chart history. Recent weeks use Todoist Productivity counters; older history uses cached completion events. This is not the account lifetime total.`,
+Running total of completions per project across the available chart history. All periods use the same reconciled cached completion history. This is not the account lifetime total.`,
   activeProjectHierarchy: `Project Hierarchy
 Sunburst view of the busiest active and archived projects and their subprojects.
 

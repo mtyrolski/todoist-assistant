@@ -206,8 +206,8 @@ def test_events_to_dataframe_missing_project_mapping(event1, project1):
             {event1, missing_project_event}, {"project1": "Project One"}, {"project1": project1}
         )
 
-        assert len(df) == 1
-        assert df.iloc[0]["id"] == "event1"
+        assert len(df) == 2
+        assert df.iloc[1]["root_project_name"] == "(unknown)"
         mock_logger.warning.assert_called()
 
 

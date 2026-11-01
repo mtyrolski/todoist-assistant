@@ -58,6 +58,7 @@ def test_extract_metrics_dict_keeps_period_metrics_only() -> None:
         "Events",
         "Completed Tasks",
         "Added Tasks",
+        "Undone Completions",
         "Rescheduled Tasks",
     ]
 
@@ -301,3 +302,11 @@ def test_urgency_honors_loaded_yaml_rules_and_empty_selections():
     settings.warn_priority_thresholds = [4]
     settings.warn_priority_min_count = 2
     assert evaluate_urgency_status(projects, settings=settings)["state"] == "good"
+
+
+def test_automatic_plot_range_includes_newest_cached_completion():
+    from todoist.web.dashboard_payload import compute_plot_range
+
+    df = pd.DataFrame({'type': ['completed']}, index=pd.to_datetime(['2026-10-31T20:00:00']))
+    _, end = compute_plot_range(df, weeks=12, beg=None, end=None)
+    assert df.index[0] < end

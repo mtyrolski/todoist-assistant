@@ -39,17 +39,6 @@ class DatabaseActivity:
     def reset(self):
         pass
 
-    def fetch_productivity_stats(self) -> dict:
-        result = self._api_client.request(
-            RequestSpec(
-                endpoint=TodoistEndpoints.PRODUCTIVITY_STATS, rate_limited=True
-            ),
-            expect_json=True,
-        )
-        if not isinstance(result.json, dict):
-            raise ValueError("Todoist productivity stats must be an object")
-        return result.json
-
     @property
     def last_call_details(self) -> EndpointCallResult | None:
         """Expose metadata about the most recent API call."""

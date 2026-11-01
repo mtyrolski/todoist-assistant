@@ -24,6 +24,7 @@ _DAY_NAMES = [
 _ACTIVITY_COLORS = {
     "added": "#2E8B57",
     "completed": "#4169E1",
+    "uncompleted": "#E5A04B",
     "updated": "#FF8C00",
     "deleted": "#DC143C",
     "rescheduled": "#9370DB",

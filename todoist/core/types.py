@@ -6,6 +6,7 @@ from loguru import logger
 from pandas import DataFrame
 
 from todoist.core.constants import EventExtraField, EventType
+from todoist.core.completions import reconcile_completions
 
 
 def _normalize_access(value: Any) -> dict[str, Any] | None:
@@ -324,6 +325,7 @@ SUPPORTED_EVENT_TYPES = [
     EventType.ADDED.value,
     EventType.UPDATED.value,
     EventType.COMPLETED.value,
+    EventType.UNCOMPLETED.value,
     EventType.DELETED.value,
 ]
 
@@ -343,7 +345,7 @@ def events_to_dataframe(
     """
 
     # Sorting events by date
-    events = sorted(activity, key=lambda event: event.date)
+    events = reconcile_completions(activity)
 
     # Creating dataframes
     mapping_data: dict[str, list] = {
@@ -377,7 +379,6 @@ def events_to_dataframe(
             and parent_project_id not in project_id_to_name
         ):
             not_found_in_project_id_to_root.add(parent_project_id)
-            continue
 
         root_project = (
             project_id_to_root.get(parent_project_id) if parent_project_id else None
@@ -403,7 +404,7 @@ def events_to_dataframe(
         )
         mapping_data["parent_item_id"].append(event.event_entry.parent_item_id)
         ee = event.event_entry
-        task_id = ee.parent_item_id or ee.object_id
+        task_id = ee.object_id
         mapping_data["task_id"].append(task_id)
 
     logger.info(f"Processed {len(mapping_data['id'])} events")

@@ -466,6 +466,11 @@ def extract_metrics_dict(
         ),
         ("Added Tasks", lambda b, e: _get_total_tasks_by_type(b, e, "added"), False),
         (
+            "Undone Completions",
+            lambda b, e: _get_total_tasks_by_type(b, e, "uncompleted"),
+            False,
+        ),
+        (
             "Rescheduled Tasks",
             lambda b, e: _get_total_tasks_by_type(b, e, "rescheduled"),
             True,
@@ -712,7 +717,8 @@ def compute_plot_range(
     if weeks < 1 or weeks > 260:
         raise HTTPException(status_code=400, detail="weeks must be between 1 and 260")
 
-    end_range = safe_activity_anchor(df_activity)
+    # Plot filters use an exclusive upper bound; include the newest cached event.
+    end_range = safe_activity_anchor(df_activity) + timedelta(microseconds=1)
     beg_range = end_range - timedelta(weeks=weeks)
     return beg_range, end_range
 
