@@ -768,3 +768,67 @@ def test_project_forecast_history_includes_recent_idle_weeks():
     assert _history_totals_for_project(
         values=values, series=values.iloc[:1], context=context, config=_PERIODIC_CONFIG
     ) == [8, 0, 0]
+
+
+@pytest.mark.parametrize(("plot_func", "total_name"), PLOT_FUNCTIONS)
+def test_total_history_keeps_projects_hidden_by_the_initial_viewport(
+    monkeypatch, plot_func, total_name
+):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 6, 5, 12))
+    df = _completed_df(
+        [
+            ("2024-05-24", "Old project", "a", "Old task"),
+            ("2024-06-03", "Active project", "b", "Current task"),
+        ]
+    )
+    fig = plot_func(
+        df,
+        datetime(2024, 5, 1),
+        datetime(2024, 6, 5),
+        granularity="W",
+        project_colors={},
+        visibility_beg_date=datetime(2024, 6, 1),
+        visibility_end_date=datetime(2024, 6, 5),
+    )
+    assert not any(name.startswith("Old project") for name in _trace_names(fig))
+    total = _trace_by_lower_name(fig, total_name)
+    points = dict(zip(pd.to_datetime(total.x), total.y))
+    assert points[pd.Timestamp("2024-05-26")] == 1
+    expected = 2 if plot_func is cumsum_completed_tasks_periodically else 1
+    assert list(_trace_by_name(fig, "All Projects (so far)").y) == [expected]
+
+
+def test_future_dated_cache_events_do_not_inflate_so_far(monkeypatch):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 6, 5, 12))
+    df = _completed_df(
+        [
+            ("2024-06-03", "A", "a", "Real completion"),
+            ("2024-06-06", "A", "b", "Future event"),
+        ]
+    )
+    fig = plot_completed_tasks_periodically(
+        df, datetime(2024, 5, 1), datetime(2024, 6, 20), "W", {}
+    )
+    assert list(_trace_by_name(fig, "All Projects (so far)").y) == [1]
+
+
+def test_archive_status_is_separate_from_always_visible_projects(monkeypatch):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 6, 5, 12))
+    df = _completed_df(
+        [
+            ("2024-06-03", "Archived", "a", "Archived task"),
+            ("2024-06-03", "Active", "b", "Active task"),
+        ]
+    )
+    fig = plot_completed_tasks_periodically(
+        df,
+        datetime(2024, 5, 1),
+        datetime(2024, 6, 5),
+        "W",
+        {},
+        always_visible_projects={"Active"},
+        archived_project_names={"Archived"},
+    )
+    names = _trace_names(fig)
+    assert "Active (forecast)" in names
+    assert not any(name.startswith("Archived (forecast") for name in names)

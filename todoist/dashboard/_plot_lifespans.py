@@ -3,6 +3,8 @@ from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+
+from todoist.core.completions import effective_completion_mask
 import plotly.graph_objects as go
 from loguru import logger
 
@@ -251,7 +253,7 @@ def plot_task_lifespans(
         )
         return _empty_figure("Invalid data structure")
 
-    event_mask = cast(pd.Series, df["type"].isin(["added", "completed"]))
+    event_mask = cast(pd.Series, df["type"].eq("added") | effective_completion_mask(df))
     if not event_mask.any():
         logger.info("No added/completed events available for lifespan plot")
         return _empty_figure("No Task Events")

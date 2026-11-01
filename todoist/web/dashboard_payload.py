@@ -6,6 +6,8 @@ from typing import Any, cast
 from fastapi import HTTPException
 from loguru import logger
 import pandas as pd
+
+from todoist.core.completions import effective_completion_mask
 import plotly.graph_objects as go
 import plotly.io as pio
 
@@ -404,7 +406,7 @@ def period_bounds(df_activity, granularity: str) -> dict[str, Any]:
     }
     timespan = granularity_to_timedelta[granularity]
 
-    end_range = safe_activity_anchor(df_activity)
+    end_range = safe_activity_anchor(df_activity) + timedelta(microseconds=1)
     beg_range = end_range - timespan
     previous_beg_range = beg_range - timespan
     previous_end_range = end_range - timespan
@@ -433,56 +435,35 @@ def extract_metrics_dict(
 ) -> list[dict[str, Any]]:
     df_activity = normalize_activity_df(df_activity)
 
-    def _get_total_events(beg_, end_) -> int:
-        filtered_df = df_activity[
-            (df_activity.index >= beg_) & (df_activity.index <= end_)
-        ]
-        return len(filtered_df)
+    def counts_in_window(beg: datetime, end: datetime) -> tuple[int, dict[str, int]]:
+        frame = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
+        counts = frame["type"].value_counts().to_dict()
+        counts["completed"] = int(effective_completion_mask(frame).sum())
+        return len(frame), counts
 
-    def _get_total_tasks_by_type(beg_, end_, task_type: str) -> int:
-        filtered_df = df_activity[
-            (df_activity.index >= beg_) & (df_activity.index <= end_)
-        ]
-        return int((filtered_df["type"] == task_type).sum())
-
-    metric_specs: list[tuple[str, Any, bool]] = [
-        ("Events", _get_total_events, False),
-        (
-            "Completed Tasks",
-            lambda b, e: _get_total_tasks_by_type(b, e, "completed"),
-            False,
-        ),
-        ("Added Tasks", lambda b, e: _get_total_tasks_by_type(b, e, "added"), False),
-        (
-            "Undone Completions",
-            lambda b, e: _get_total_tasks_by_type(b, e, "uncompleted"),
-            False,
-        ),
-        (
-            "Rescheduled Tasks",
-            lambda b, e: _get_total_tasks_by_type(b, e, "rescheduled"),
-            True,
-        ),
-    ]
-
+    current_events, current = counts_in_window(periods["beg"], periods["end"])
+    previous_events, previous = counts_in_window(periods["prevBeg"], periods["prevEnd"])
+    specs = (
+        ("Events", None, False),
+        ("Completed Tasks", "completed", False),
+        ("Added Tasks", "added", False),
+        ("Undone Completions", "uncompleted", False),
+        ("Rescheduled Tasks", "rescheduled", True),
+    )
     metrics: list[dict[str, Any]] = []
-    for metric_name, metric_func, inverse in metric_specs:
-        current_value = int(metric_func(periods["beg"], periods["end"]))
-        previous_value = int(metric_func(periods["prevBeg"], periods["prevEnd"]))
-        delta_percent = (
-            round((current_value - previous_value) / previous_value * 100, 2)
-            if previous_value
-            else None
-        )
+    for name, kind, inverse in specs:
+        value = current_events if kind is None else int(current.get(kind, 0))
+        old_value = previous_events if kind is None else int(previous.get(kind, 0))
         metrics.append(
             {
-                "name": metric_name,
-                "value": current_value,
-                "deltaPercent": delta_percent,
+                "name": name,
+                "value": value,
+                "deltaPercent": round((value - old_value) / old_value * 100, 2)
+                if old_value
+                else None,
                 "inverseDelta": inverse,
             }
         )
-
     return metrics
 
 
@@ -738,7 +719,7 @@ def completed_share_leaderboard(
         pd.DataFrame,
         df_activity[(df_activity.index >= beg) & (df_activity.index < end)],
     )
-    df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
+    df_completed = cast(pd.DataFrame, df_period[effective_completion_mask(df_period)])
     total_completed = int(len(df_completed))
 
     items = [
@@ -863,7 +844,14 @@ def compute_insights(
         ("completed", "Most active project", "completed tasks"),
         ("rescheduled", "Most rescheduled project", "reschedules"),
     ):
-        df_type = cast(pd.DataFrame, df_period[df_period["type"] == task_type])
+        df_type = cast(
+            pd.DataFrame,
+            df_period[
+                effective_completion_mask(df_period)
+                if task_type == "completed"
+                else df_period["type"].eq(task_type)
+            ],
+        )
         if df_type.empty or project_col not in df_type.columns:
             continue
         top_project = _first_count(
@@ -901,7 +889,7 @@ def compute_insights(
 
     try:
         added_i = int((df_period["type"] == "added").sum())
-        completed_i = int((df_period["type"] == "completed").sum())
+        completed_i = int(effective_completion_mask(df_period).sum())
         ratio = round((completed_i / added_i), 2) if added_i else None
         insights.append(
             {

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from todoist.core.completions import reconcile_completions
+from todoist.core.completions import reconcile_completions, effective_completion_mask
 from todoist.core.types import Event, EventEntry, events_to_dataframe
 
 
@@ -28,10 +28,11 @@ def test_undo_removes_original_completion_across_week_and_month_boundaries():
     undo = event("2", "uncompleted", "2026-10-05T12:00:00")
     recompleted = event("3", "completed", "2026-10-06T12:00:00")
     frame = events_to_dataframe({original, undo, recompleted}, {}, {})
-    assert frame[frame["type"] == "completed"]["id"].tolist() == ["3"]
+    assert frame[effective_completion_mask(frame)]["id"].tolist() == ["3"]
     assert frame[frame["type"] == "uncompleted"]["id"].tolist() == ["2"]
-    assert frame["task_id"].tolist() == ["task", "task"]
-    assert frame["root_project_name"].tolist() == ["(unknown)", "(unknown)"]
+    assert frame["task_id"].tolist() == ["task", "task", "task"]
+    assert frame["root_project_name"].tolist() == ["(unknown)"] * 3
+    assert frame["id"].tolist() == ["1", "2", "3"]
 
 
 def test_repeated_undos_do_not_create_negative_counts_or_cancel_other_tasks():
@@ -53,7 +54,7 @@ def test_recurring_occurrences_survive_resets_and_undo_events():
         event("3", "completed", "2026-10-03"),
     ]
     frame = events_to_dataframe(set(events), {}, {})
-    assert frame[frame["type"] == "completed"]["id"].tolist() == ["1", "3"]
+    assert frame[effective_completion_mask(frame)]["id"].tolist() == ["1", "3"]
     assert frame[frame["type"] == "uncompleted"]["id"].tolist() == ["2"]
 
 
@@ -70,3 +71,32 @@ def test_projection_does_not_modify_cache_objects():
     }
     reconcile_completions(events)
     assert {e.event_type for e in events} == {"completed", "uncompleted"}
+
+
+def test_shared_android_completion_scenarios():
+    import json
+    from pathlib import Path
+
+    scenarios = json.loads(
+        (Path(__file__).parents[2] / "fixtures/completion_scenarios.json").read_text()
+    )
+    for scenario in scenarios:
+        events = []
+        for item in scenario["events"]:
+            extra = {}
+            if "recurring" in item:
+                extra["is_recurring"] = item["recurring"]
+            if item.get("reset"):
+                extra["sub_tasks_reset"] = True
+            events.append(
+                event(
+                    item["id"], item["type"], item["date"], task=item["task"], **extra
+                )
+            )
+        effective = reconcile_completions(events)
+        assert [e.id for e in effective if e.event_type == "completed"] == scenario[
+            "completed"
+        ], scenario["name"]
+        assert [e.id for e in effective if e.event_type == "uncompleted"] == scenario[
+            "undone"
+        ], scenario["name"]

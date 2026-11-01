@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import cast
 
 import pandas as pd
+
+from todoist.core.completions import effective_completion_mask
 import plotly.graph_objects as go
 
 from todoist.dashboard._plot_common import apply_dashboard_axes
@@ -67,7 +69,7 @@ def _weekly_trend_prepare_weekly_counts(
     if "type" not in df.columns:
         return None
 
-    df_completed = df[df["type"] == "completed"].loc[:end_date]
+    df_completed = df[effective_completion_mask(df)].loc[:end_date]
     if df_completed.empty:
         return None
 

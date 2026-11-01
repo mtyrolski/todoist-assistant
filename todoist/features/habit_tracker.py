@@ -5,6 +5,8 @@ from typing import Any, Sequence, cast
 
 import pandas as pd
 
+from todoist.core.completions import effective_completion_mask
+
 from todoist.core.types import Project
 
 TRACK_HABIT_LABEL = "track_habit"
@@ -121,7 +123,7 @@ def summarize_tracked_habits(
                     f"{beg.strftime('%Y-%m-%d')} "
                     f"to {(end - timedelta(days=1)).strftime('%Y-%m-%d')}"
                 ),
-                "completed": int((in_window["type"] == "completed").sum()),
+                "completed": int(effective_completion_mask(in_window).sum()),
                 "rescheduled": int((in_window["type"] == "rescheduled").sum()),
             }
         )
@@ -135,9 +137,9 @@ def summarize_tracked_habits(
             pd.DataFrame,
             task_df[(task_df.index >= week_beg) & (task_df.index < week_end)],
         )
-        weekly_completed = int((weekly_df["type"] == "completed").sum())
+        weekly_completed = int(effective_completion_mask(weekly_df).sum())
         weekly_rescheduled = int((weekly_df["type"] == "rescheduled").sum())
-        all_time_completed = int((task_df["type"] == "completed").sum())
+        all_time_completed = int(effective_completion_mask(task_df).sum())
         all_time_rescheduled = int((task_df["type"] == "rescheduled").sum())
         reliability_base = all_time_completed + all_time_rescheduled
         reliability = (

@@ -328,3 +328,47 @@ def test_upcoming_due_window_never_hides_overdue_tasks():
     )
     assert status["counts"]["dueTasks"] == 1
     assert status["state"] == "warn"
+
+
+def test_adjacent_metric_windows_do_not_count_the_shared_boundary_twice():
+    df = pd.DataFrame(
+        {"type": ["completed", "completed"]},
+        index=pd.to_datetime(["2026-10-25", "2026-10-26"]),
+    )
+    metrics = extract_metrics_dict(
+        df,
+        {
+            "beg": datetime(2026, 10, 26),
+            "end": datetime(2026, 11, 2),
+            "prevBeg": datetime(2026, 10, 19),
+            "prevEnd": datetime(2026, 10, 26),
+        },
+    )
+    completed = next(
+        metric for metric in metrics if metric["name"] == "Completed Tasks"
+    )
+    assert completed["value"] == 1
+    assert completed["deltaPercent"] == 0
+
+
+def test_undone_completions_remain_actions_without_inflating_effective_counts():
+    df = pd.DataFrame(
+        {
+            "type": ["completed", "uncompleted", "completed"],
+            "completion_effective": [False, False, True],
+        },
+        index=pd.to_datetime(["2026-10-26", "2026-10-27", "2026-10-28"]),
+    )
+    metrics = extract_metrics_dict(
+        df,
+        {
+            "beg": datetime(2026, 10, 26),
+            "end": datetime(2026, 11, 2),
+            "prevBeg": datetime(2026, 10, 19),
+            "prevEnd": datetime(2026, 10, 26),
+        },
+    )
+    values = {metric["name"]: metric["value"] for metric in metrics}
+    assert values["Events"] == 3
+    assert values["Completed Tasks"] == 1
+    assert values["Undone Completions"] == 1

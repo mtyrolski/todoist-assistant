@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Callable, cast
 
 import pandas as pd
+
+from todoist.core.completions import effective_completion_mask
 import plotly.graph_objects as go
 
 from todoist.core.types import Project
@@ -153,7 +155,7 @@ def plot_active_project_hierarchy_sunburst(
 
     df = _normalize_activity_frame(df)
     df_period = cast(pd.DataFrame, df[(df.index >= beg_date) & (df.index < end_date)])
-    df_completed = cast(pd.DataFrame, df_period[df_period["type"] == "completed"])
+    df_completed = cast(pd.DataFrame, df_period[effective_completion_mask(df_period)])
     if df_completed.empty:
         return _empty_sunburst_figure("No completed tasks in the selected range")
 

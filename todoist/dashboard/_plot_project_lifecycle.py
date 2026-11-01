@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from typing import Literal, NotRequired, TypedDict, cast
 
 import pandas as pd
+
+from todoist.core.completions import effective_completion_mask
 import plotly.graph_objects as go
 
 from todoist.core.types import Project
@@ -289,7 +291,7 @@ def _spans(
             None if project_frame.empty else _timestamp(str(project_frame.index.max()))
         )
         completions = (
-            int(recent[event_column].eq("completed").sum())
+            int(effective_completion_mask(recent, event_column).sum())
             if event_column in recent
             else 0
         )
@@ -297,7 +299,9 @@ def _spans(
         if event_column in recent and completions:
             completed_dates = (
                 _timestamp(str(value))
-                for value in recent.index[recent[event_column].eq("completed")]
+                for value in recent.index[
+                    effective_completion_mask(recent, event_column)
+                ]
             )
             completion_weeks = tuple(
                 sorted(

@@ -1,10 +1,10 @@
 export const METRIC_HELP: Record<string, string> = {
   Events: `Events
-Total task activity (added, completed, rescheduled) in the selected period.
+All recorded task actions in the selected period, including completion and undo actions.
 
 - Delta compares against the previous period of equal length.`,
   "Completed Tasks": `Completed tasks
-Total completed tasks in the selected period.
+Effective completions in the selected period. Ordinary completions later undone are removed; recurring occurrences remain counted.
 
 - Delta compares against the previous period of equal length.`,
   "Undone Completions": `Undone completions\nNumber of undo actions recorded in the cache during the selected period. Each undo cancels the most recent outstanding ordinary completion at its original date. Recurring completions remain counted.`,
@@ -73,7 +73,7 @@ Sunburst view of the busiest active and archived projects and their subprojects.
   heatmapEventsByDayHour: `Event Heatmap
 Activity intensity by day of week and hour. Darker means more events.`,
   eventsOverTime: `Events Over Time
-Timeline of activity events across the selected range.`,
+Timeline of raw activity actions across the selected range. Completion actions remain visible even if later undone; effective completed-task charts remove ordinary undone completions.`,
 };
 
 export const BADGES_HELP = `Priority badges

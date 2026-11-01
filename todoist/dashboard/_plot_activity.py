@@ -30,6 +30,10 @@ _ACTIVITY_COLORS = {
     "rescheduled": "#9370DB",
 }
 _ACTIVITY_TYPES = list(_ACTIVITY_COLORS)
+_ACTIVITY_LABELS = {
+    "completed": "Completion actions",
+    "uncompleted": "Undone completions",
+}
 
 
 def _title(text: str) -> dict[str, object]:
@@ -82,12 +86,13 @@ def plot_events_over_time(
     for index, activity_type in enumerate(_ACTIVITY_TYPES):
         if activity_type not in rolling_averages.columns:
             continue
+        label = _ACTIVITY_LABELS.get(activity_type, activity_type.capitalize())
         fig.add_trace(
             go.Scatter(
                 x=rolling_averages.index,
                 y=rolling_averages[activity_type],
                 mode="lines",
-                name=activity_type.capitalize(),
+                name=label,
                 fill="tonexty" if index > 0 else "tozeroy",
                 line=dict(
                     color=_ACTIVITY_COLORS.get(activity_type, "#808080"),
@@ -97,7 +102,7 @@ def plot_events_over_time(
                     _ACTIVITY_COLORS.get(activity_type, "#9e9e9e"), 0.28
                 ),
                 hovertemplate=(
-                    f"<b>{activity_type.capitalize()}</b><br>"
+                    f"<b>{label}</b><br>"
                     + "Date: %{x}<br>"
                     + "Average: %{y:.1f} events/day<br>"
                     + "<extra></extra>"

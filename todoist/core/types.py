@@ -6,7 +6,7 @@ from loguru import logger
 from pandas import DataFrame
 
 from todoist.core.constants import EventExtraField, EventType
-from todoist.core.completions import reconcile_completions
+from todoist.core.completions import completion_projection
 
 
 def _normalize_access(value: Any) -> dict[str, Any] | None:
@@ -345,7 +345,7 @@ def events_to_dataframe(
     """
 
     # Sorting events by date
-    events = reconcile_completions(activity)
+    events, cancelled_completions = completion_projection(activity)
 
     # Creating dataframes
     mapping_data: dict[str, list] = {
@@ -359,6 +359,7 @@ def events_to_dataframe(
         "root_project_name": [],
         "parent_item_id": [],
         "task_id": [],
+        "completion_effective": [],
     }
     old_count = len(events)
     event = list(
@@ -398,6 +399,9 @@ def events_to_dataframe(
         mapping_data["title"].append(event.name)
         mapping_data["date"].append(event.date)
         mapping_data["type"].append(event.event_type)
+        mapping_data["completion_effective"].append(
+            event.event_type == "completed" and event.id not in cancelled_completions
+        )
         mapping_data["parent_project_id"].append(parent_project_id)
         mapping_data["parent_project_name"].append(
             project_id_to_name.get(parent_project_id, "")
