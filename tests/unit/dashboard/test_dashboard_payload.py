@@ -307,6 +307,24 @@ def test_urgency_honors_loaded_yaml_rules_and_empty_selections():
 def test_automatic_plot_range_includes_newest_cached_completion():
     from todoist.web.dashboard_payload import compute_plot_range
 
-    df = pd.DataFrame({'type': ['completed']}, index=pd.to_datetime(['2026-10-31T20:00:00']))
+    df = pd.DataFrame(
+        {"type": ["completed"]}, index=pd.to_datetime(["2026-10-31T20:00:00"])
+    )
     _, end = compute_plot_range(df, weeks=12, beg=None, end=None)
     assert df.index[0] < end
+
+
+def test_upcoming_due_window_never_hides_overdue_tasks():
+    projects = [
+        make_project(tasks=[make_task("late", priority=1, due={"date": "2026-10-01"})])
+    ]
+    status = evaluate_urgency_status(
+        projects,
+        today=date(2026, 11, 1),
+        settings={
+            "warn_on_priority": False,
+            "warn_due_within_days": 3,
+        },
+    )
+    assert status["counts"]["dueTasks"] == 1
+    assert status["state"] == "warn"

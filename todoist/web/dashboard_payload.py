@@ -104,7 +104,7 @@ def _task_due_within_days(
     if within_days <= 0:
         return task_date.date() <= reference_day
     upper_bound = reference_day + timedelta(days=within_days)
-    return reference_day <= task_date.date() <= upper_bound
+    return task_date.date() <= upper_bound
 
 
 def _normalize_urgency_settings(
