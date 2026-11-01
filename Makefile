@@ -4,8 +4,6 @@ FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
-BACKEND ?= raw
-BACKEND_AI ?=
 
 setup: sync_history ## First-time source setup: fetch Todoist activity history
 
@@ -141,3 +139,7 @@ docker_pull: ## Pull published Docker images
 
 docker_watch: ## Live-reload with Docker Compose watch (Compose 2.22+)
 	docker compose watch
+
+.PHONY: build_android
+build_android: ## Build an installable Android APK and run Android tests/lint
+	bash scripts/build_android.sh
