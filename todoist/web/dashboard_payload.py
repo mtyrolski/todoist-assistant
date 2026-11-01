@@ -81,13 +81,6 @@ def count_labeled_tasks(
     return total
 
 
-def _task_matches_label(task: Any, label_name: str) -> bool:
-    task_labels = {
-        _normalize_label_name(str(label)) for label in (task.task_entry.labels or [])
-    }
-    return _normalize_label_name(label_name) in task_labels
-
-
 def _task_matches_any_label(task: Any, label_names: Sequence[str]) -> bool:
     normalized_labels = {
         _normalize_label_name(str(label)) for label in label_names if str(label).strip()
@@ -98,11 +91,6 @@ def _task_matches_any_label(task: Any, label_names: Sequence[str]) -> bool:
         _normalize_label_name(str(label)) for label in (task.task_entry.labels or [])
     }
     return bool(task_labels & normalized_labels)
-
-
-def _task_date_is_due(task_value: Any, reference_day: date) -> bool:
-    task_date = extract_task_due_date(task_value)
-    return task_date is not None and task_date.date() <= reference_day
 
 
 def _task_due_within_days(

@@ -28,11 +28,3 @@ def load_dashboard_config(path: Path | None = None) -> DictConfig:
     return cast(
         DictConfig, OmegaConf.create(loaded if isinstance(loaded, Mapping) else {})
     )
-
-
-def _config_path_label(path: Path) -> str:
-    repo_root = Path(__file__).resolve().parents[1]
-    try:
-        return str(path.relative_to(repo_root))
-    except ValueError:
-        return str(path)

@@ -8,7 +8,6 @@ license = "MIT"
 dependencies = [
     "joblib>=1.5.0",
     "loguru>=0.7.3",
-    "numpy>=2.2.5",
     "omegaconf>=2.3.0",
     "pandas>=2.2.3",
     "python-dotenv>=1.1.0",
@@ -26,11 +25,8 @@ package-dir = { "" = ".." }
 
 [tool.setuptools.packages.find]
 where = [".."]
-include = ["todoist", "todoist.*", "todoist_assistant", "todoist_assistant.*"]
+include = ["todoist", "todoist.*"]
 exclude = [
     "todoist.web*",
     "todoist.dashboard*",
-    "todoist_assistant.web*",
-    "todoist_assistant.dashboard*",
-    "todoist_assistant.ai*",
 ]
