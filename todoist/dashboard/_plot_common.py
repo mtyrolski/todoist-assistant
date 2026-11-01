@@ -61,7 +61,7 @@ def forecast_period_total(
 ) -> int:
     """Forecast the period total using a decayed history blended with current pace."""
 
-    if period_end <= period_start:
+    if period_end <= period_start or as_of >= period_end:
         return int(actual_so_far)
 
     elapsed_s = max(0.0, (as_of - period_start).total_seconds())
@@ -74,6 +74,8 @@ def forecast_period_total(
 
     effective_fraction = max(0.25, fraction)
     pace_projection = float(actual_so_far) / effective_fraction
+    if not history_totals:
+        return max(int(actual_so_far), int(round(pace_projection)))
     weight = min(0.85, max(0.15, fraction))
     forecast = (1.0 - weight) * baseline + weight * pace_projection
     return max(int(actual_so_far), int(round(forecast)))

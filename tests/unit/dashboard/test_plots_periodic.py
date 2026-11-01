@@ -685,3 +685,62 @@ def test_plot_weekly_completion_trend_skips_unavailable_long_window():
     assert any("6w baseline" in label for label in legend_labels)
     assert any("12w baseline" in label for label in legend_labels)
     assert not any("24w baseline" in label for label in legend_labels)
+
+
+@pytest.mark.parametrize(("plot_func", "_total_name"), PLOT_FUNCTIONS)
+def test_sunday_so_far_uses_account_counters_and_matching_colors(
+    monkeypatch, plot_func, _total_name
+):
+    _freeze_periodic_now(monkeypatch, datetime(2026, 11, 1, 12))
+    df = _completed_df(
+        [
+            ("2026-10-24", "Project A", "old", "Old task"),
+            ("2026-10-31", "Project A", "repeat", "Repeated completion"),
+            ("2026-10-31", "Project A", "repeat", "Repeated completion"),
+        ]
+    )
+    fig = plot_func(
+        df,
+        datetime(2026, 10, 1),
+        datetime(2026, 11, 1, 12),
+        granularity="W",
+        project_colors={"Project A": "#123456"},
+        weekly_completion_counts={"2026-11-01": {"Project A": 349}},
+    )
+    actual = _trace_by_name(fig, "Project A (so far)")
+    forecast = _trace_by_name(fig, "Project A (forecast)")
+    expected = 350 if plot_func is cumsum_completed_tasks_periodically else 349
+    assert list(actual.y) == [expected]
+    assert _trace_marker_color(actual) == _trace_marker_color(forecast) == "#123456"
+    assert list(_trace_by_name(fig, "All Projects (so far)").y) == [expected]
+
+
+def test_periodic_baseline_includes_wholly_empty_weeks():
+    _, counts = _prepare_completed_periodic_frame(
+        _completed_df(
+            [
+                ("2024-05-06", "Project A", "a", "A"),
+                ("2024-05-27", "Project A", "b", "B"),
+            ]
+        ),
+        beg_date=datetime(2024, 5, 1),
+        end_date=datetime(2024, 6, 1),
+        granularity="W",
+    )
+    assert counts["Project A"].tolist() == [1, 0, 0, 1]
+
+
+def test_historical_cutoff_does_not_use_future_account_counters(monkeypatch):
+    _freeze_periodic_now(monkeypatch, datetime(2026, 11, 1, 12))
+    _, counts = _prepare_completed_periodic_frame(
+        _completed_df(
+            [
+                ("2026-10-26", "Project A", "a", "A"),
+            ]
+        ),
+        beg_date=datetime(2026, 10, 1),
+        end_date=datetime(2026, 10, 27),
+        granularity="W",
+        weekly_completion_counts={"2026-11-01": {"Project A": 349}},
+    )
+    assert counts["Project A"].sum() == 1

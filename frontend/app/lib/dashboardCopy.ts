@@ -59,9 +59,9 @@ Normalized cumulative completion pace by weekday.
   taskLifespans: `Task Lifespans
 Time between task creation and completion. Each completed task counts equally. Use Selected period to include tasks completed in the dashboard date range; All time includes the full recorded history.`,
   completedTasksPeriodically: `Periodically Completed Tasks
-Completed tasks per project for each period in the selected range.`,
+Completed tasks per project for each calendar period. Recent weekly points use Todoist Productivity counters (last four weeks); older weeks and monthly views count cached completion events and may differ from Productivity.\n\nOpen circles show actual counts; filled circles and dashed lines show estimates. Forecasts blend the last eight periods (including empty periods) with current pace and never fall below actuals. All projects forecast is the sum of project forecasts.`,
   cumsumCompletedTasksPeriodically: `Cumulative Completed Tasks
-Running total of completions per project across the range.`,
+Running total of completions per project across the available chart history. Recent weeks use Todoist Productivity counters; older history uses cached completion events. This is not the account lifetime total.`,
   activeProjectHierarchy: `Project Hierarchy
 Sunburst view of the busiest active and archived projects and their subprojects.
 

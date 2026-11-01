@@ -514,6 +514,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         "active_projects": active_projects,
         "archived_projects": archived_projects,
         "project_colors": project_colors,
+        "weekly_completion_counts": _state.weekly_completion_counts,
     }
     try:
         Cache().dashboard_state.save(payload)
@@ -567,6 +568,7 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     _state.archived_projects = archived_projects
     _state.project_colors = {str(k): str(v) for k, v in project_colors.items()}
     _state.last_refresh_s = float(payload.get("last_refresh_s") or time.time())
+    _state.weekly_completion_counts = payload.get("weekly_completion_counts", {})
     _state.home_payload_cache = {}
     _state.demo_mode = demo_mode
     _state.activity_cache_signature = payload.get("activity_cache_signature")
@@ -813,6 +815,20 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             if target_name not in project_colors and source_name in project_colors:
                 project_colors[target_name] = project_colors[source_name]
 
+        from todoist.features.productivity import weekly_completion_counts
+
+        counters = {} if demo_mode else _state.weekly_completion_counts
+        if not demo_mode and _resolve_api_key():
+            try:
+                counters = weekly_completion_counts(
+                    dbio.fetch_productivity_stats(),
+                    dbio.fetch_mapping_project_id_to_root(),
+                    dbio.fetch_mapping_project_id_to_name(),
+                    get_adjusting_mapping(),
+                )
+            except Exception as exc:
+                logger.warning("Productivity counters unavailable; retaining cached counters: {}", type(exc).__name__)
+        _state.weekly_completion_counts = counters
         _state.db = dbio
         _state.df_activity = df_activity
         _state.active_projects = active_projects

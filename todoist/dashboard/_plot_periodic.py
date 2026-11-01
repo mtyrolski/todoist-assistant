@@ -203,6 +203,7 @@ def _prepare_completed_periodic_frame(
     visibility_beg_date: datetime | None = None,
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
+    weekly_completion_counts: dict[str, dict[str, int]] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     df_completed = cast(pd.DataFrame, df[df["type"] == "completed"].copy())
     df_completed.index = _local_periodic_index(df_completed.index)
@@ -222,6 +223,37 @@ def _prepare_completed_periodic_frame(
         .unstack("root_project_name")
         .sort_index(),
     )
+    if weekly_completion_counts and granularity in {"W", "W-SUN"}:
+        now_local = datetime.now(_periodic_timezone()).replace(tzinfo=None)
+        for label, counts in weekly_completion_counts.items():
+            label_ts = pd.Timestamp(label)
+            week_start = label_ts - pd.Timedelta(days=6)
+            # Whole historical weeks or the current live week can use account stats.
+            if week_start >= end_date or (
+                label_ts + pd.Timedelta(days=1) > end_date
+                and end_date.date() < now_local.date()
+            ):
+                continue
+            for column in counts:
+                if column not in df_periodic:
+                    df_periodic[column] = 0.0
+                if (
+                    week_start < visibility_end and label_ts >= visibility_beg
+                ) or column in (always_visible_projects or set()):
+                    if column not in active_columns:
+                        active_columns.append(column)
+            df_periodic.loc[label_ts] = pd.Series(counts).reindex(
+                df_periodic.columns, fill_value=0
+            )
+        df_periodic = df_periodic.sort_index()
+    if not df_periodic.empty:
+        # Groupby/unstack omits wholly empty periods. They still belong in the baseline.
+        df_periodic = df_periodic.reindex(
+            pd.date_range(
+                df_periodic.index.min(), df_periodic.index.max(), freq=granularity
+            ),
+            fill_value=0,
+        ).fillna(0)
     df_periodic = cast(pd.DataFrame, df_periodic[df_periodic.index >= beg_date])
     df_periodic = cast(
         pd.DataFrame,
@@ -258,7 +290,7 @@ def _build_periodic_forecast_context(
     period_index: pd.Index,
 ) -> _PeriodicForecastContext:
     normalized_index = cast(pd.DatetimeIndex, pd.DatetimeIndex(period_index))
-    as_of = min(end_date, datetime.now())
+    as_of = min(end_date, datetime.now(_periodic_timezone()).replace(tzinfo=None))
     current_label = _current_period_label(as_of, granularity, normalized_index)
     current_start: datetime | None = None
     current_end: datetime | None = None
@@ -274,7 +306,7 @@ def _build_periodic_forecast_context(
         current_label
         and current_start
         and current_end
-        and current_label > as_of
+        and current_end > as_of
         and has_current_period_activity
     )
     return _PeriodicForecastContext(
@@ -379,7 +411,12 @@ def _forecast_marker_trace(
                 opacity=marker_opacity or 0.92,
             )
             if forecast
-            else dict(symbol="circle-open", size=10, line=dict(width=2, color=color))
+            else dict(
+                symbol="circle-open",
+                size=10,
+                color=color,
+                line=dict(width=2, color=color),
+            )
         ),
         name=name,
         legendgroup=legendgroup,
@@ -395,6 +432,7 @@ def _add_total_overlay_traces(
     context: _PeriodicForecastContext,
     total_actual_so_far: int,
     config: _PeriodicPlotConfig,
+    forecast_total_override: int | None = None,
 ) -> None:
     if total_series.empty:
         return
@@ -458,6 +496,8 @@ def _add_total_overlay_traces(
         period_end=context.current_end,
         as_of=context.as_of,
     )
+    if forecast_total_override is not None:
+        forecast_total = forecast_total_override
     base_total = (
         float(historical.iloc[-1])
         if config.cumulative and not historical.empty
@@ -569,14 +609,14 @@ def _add_project_forecast_traces(
     actual_so_far: int,
     context: _PeriodicForecastContext,
     config: _PeriodicPlotConfig,
-) -> None:
+) -> int:
     if (
         not context.show_forecast
         or context.current_label is None
         or not context.current_start
         or not context.current_end
     ):
-        return
+        return actual_so_far
 
     history_totals = _history_totals_for_project(
         values=values,
@@ -585,7 +625,7 @@ def _add_project_forecast_traces(
         config=config,
     )
     if actual_so_far <= 0 and not any(v > 0 for v in history_totals[-4:]):
-        return
+        return actual_so_far
 
     forecast_total = forecast_period_total(
         actual_so_far=actual_so_far,
@@ -640,6 +680,7 @@ def _add_project_forecast_traces(
                 forecast=forecast,
             )
         )
+    return forecast_total
 
 
 # Plot configuration and range/visibility controls are intentionally explicit.
@@ -656,6 +697,7 @@ def _completed_tasks_periodically_figure(
     always_visible_projects: set[str] | None = None,
     bounds_are_utc: bool = False,
     config: _PeriodicPlotConfig = _PERIODIC_CONFIG,
+    weekly_completion_counts: dict[str, dict[str, int]] | None = None,
 ) -> go.Figure:
     if bounds_are_utc:
         beg_date = _local_periodic_datetime(beg_date)
@@ -678,6 +720,7 @@ def _completed_tasks_periodically_figure(
         visibility_beg_date=visibility_beg_date,
         visibility_end_date=visibility_end_date,
         always_visible_projects=always_visible_projects,
+        weekly_completion_counts=weekly_completion_counts,
     )
     df_periodic_counts = cast(pd.DataFrame, df_weekly_per_project.copy())
     df_values = df_weekly_per_project
@@ -698,9 +741,17 @@ def _completed_tasks_periodically_figure(
     current_counts = _current_period_project_counts(
         df_completed, context=forecast_context
     )
+    if forecast_context.current_label in df_periodic_counts.index:
+        current_counts = (
+            df_periodic_counts.loc[forecast_context.current_label]
+            .fillna(0)
+            .astype(int)
+            .to_dict()
+        )
     fig = go.Figure()
     archived_project_names = always_visible_projects or set()
 
+    total_project_forecast = 0
     for root_project in df_values.columns:
         root_project_name = str(root_project)
         project_counts = cast(pd.Series, df_periodic_counts[root_project])
@@ -736,7 +787,7 @@ def _completed_tasks_periodically_figure(
             )
 
         if not is_archived_project:
-            _add_project_forecast_traces(
+            total_project_forecast += _add_project_forecast_traces(
                 fig,
                 project_name=root_project_name,
                 color=color,
@@ -748,6 +799,9 @@ def _completed_tasks_periodically_figure(
                 config=config,
             )
 
+        else:
+            total_project_forecast += int(current_counts.get(root_project_name, 0))
+
     if include_total_overlay:
         _add_total_overlay_traces(
             fig,
@@ -755,6 +809,7 @@ def _completed_tasks_periodically_figure(
             context=forecast_context,
             total_actual_so_far=sum(current_counts.values()),
             config=config,
+            forecast_total_override=total_project_forecast,
         )
 
     fig.update_xaxes(
@@ -798,6 +853,7 @@ def plot_completed_tasks_periodically(
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
     bounds_are_utc: bool = False,
+    weekly_completion_counts: dict[str, dict[str, int]] | None = None,
 ) -> go.Figure:
     return _completed_tasks_periodically_figure(
         df,
@@ -811,6 +867,7 @@ def plot_completed_tasks_periodically(
         always_visible_projects,
         bounds_are_utc,
         config=_PERIODIC_CONFIG,
+        weekly_completion_counts=weekly_completion_counts,
     )
 
 
@@ -825,6 +882,7 @@ def cumsum_completed_tasks_periodically(
     visibility_end_date: datetime | None = None,
     always_visible_projects: set[str] | None = None,
     bounds_are_utc: bool = False,
+    weekly_completion_counts: dict[str, dict[str, int]] | None = None,
 ) -> go.Figure:
     return _completed_tasks_periodically_figure(
         df,
@@ -838,4 +896,5 @@ def cumsum_completed_tasks_periodically(
         always_visible_projects,
         bounds_are_utc,
         config=_CUMULATIVE_CONFIG,
+        weekly_completion_counts=weekly_completion_counts,
     )

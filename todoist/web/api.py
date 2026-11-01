@@ -139,6 +139,7 @@ class _DashboardState:
         self.archived_projects: list[Project] | None = None
         self.project_colors: dict[str, str] | None = None
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
+        self.weekly_completion_counts: dict[str, dict[str, int]] = {}
         self.demo_mode: bool = False
         self.activity_cache_signature: dict[str, int] | None = None
 
@@ -192,7 +193,7 @@ _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()
 _PROGRESS_LOCK = asyncio.Lock()
 _PROGRESS_TOTAL_STEPS = 3
-_DASHBOARD_STATE_SCHEMA_VERSION = 3
+_DASHBOARD_STATE_SCHEMA_VERSION = 4
 _DEMO_DASHBOARD_STATE_SCHEMA_VERSION = 2
 _main_loop: asyncio.AbstractEventLoop | None = None
 _TQDM_STEP_MAP = {

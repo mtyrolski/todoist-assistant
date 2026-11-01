@@ -652,7 +652,6 @@ def test_dashboard_home_includes_urgency_status(monkeypatch, api_client) -> None
     assert urgency_status["visibleChips"] == [
         "fireTasks",
         "p1Tasks",
-        "p2Tasks",
         "dueTasks",
         "deadlineTasks",
     ]
