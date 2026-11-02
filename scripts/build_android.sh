@@ -16,7 +16,7 @@ if [ -z "$android_sdk" ] && [ ! -f "$repo_root/android/local.properties" ]; then
     exit 1
 fi
 if [ "$mode" = preview ]; then
-    signing_dir="${ANDROID_PREVIEW_SIGNING_DIR:-$repo_root/.cache/android-signing/preview}"
+    signing_dir="${ANDROID_PREVIEW_SIGNING_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/todoist-assistant/signing/preview}"
     mkdir -p "$signing_dir"
     chmod 700 "$signing_dir"
     if [ ! -f "$signing_dir/preview.keystore" ]; then
