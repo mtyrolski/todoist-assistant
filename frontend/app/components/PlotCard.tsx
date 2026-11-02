@@ -98,8 +98,8 @@ export function PlotCard({
                   t: Math.max(compact ? (legendContent ? 12 : 48) : 76, toNumber(margin.t, compact ? (legendContent ? 12 : 48) : 76)),
                   b: Math.max(compact ? 36 : 58, toNumber(margin.b, compact ? 36 : 58))
                 },
-                xaxis: withTitleStandoff(xaxis, 18),
-                yaxis: withTitleStandoff(yaxis, 16),
+                xaxis: withTitleStandoff(compact ? { showgrid: false, ...xaxis } : xaxis, 18),
+                yaxis: withTitleStandoff(compact ? { showgrid: false, ...yaxis } : yaxis, 16),
                 legend: {
                   ...legend,
                   tracegroupgap: Math.max(12, toNumber(legend.tracegroupgap, 12))
