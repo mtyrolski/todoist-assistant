@@ -170,6 +170,20 @@ def test_fetch_mapping_project_id_to_root_uses_cache_after_first_call(db_project
     mock_fetch_archived.assert_called_once()
 
 
+def test_fetch_mapping_project_id_to_root_uses_v2_parent_when_parent_is_missing(db_projects):
+    root = _project("root")
+    child = make_project(
+        project_id="child",
+        project_entry=make_project_entry(project_id="child", v2_parent_id="root"),
+        is_archived=True,
+    )
+    with (
+        patch.object(db_projects, "fetch_projects", return_value=[root]),
+        patch.object(db_projects, "fetch_archived_projects", return_value=[child]),
+    ):
+        assert db_projects.fetch_mapping_project_id_to_root()["child"].id == "root"
+
+
 def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(
     db_projects,
 ):

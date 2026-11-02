@@ -217,12 +217,12 @@ def _resolve_root_project_name_to_id(
     active_roots = [
         project
         for project in _dbio.fetch_projects(include_tasks=False)
-        if project.project_entry.parent_id is None
+        if not (project.project_entry.parent_id or project.project_entry.v2_parent_id)
     ]
     archived_roots = [
         project
         for project in _dbio.fetch_archived_projects()
-        if project.project_entry.parent_id is None
+        if not (project.project_entry.parent_id or project.project_entry.v2_parent_id)
     ]
 
     active_by_name: dict[str, list[str]] = defaultdict(list)
@@ -290,7 +290,11 @@ def _project_ancestor_names(
         if name and name not in seen_names:
             names.append((name, bool(project.is_archived) if project else False))
             seen_names.add(name)
-        current_id = project.project_entry.parent_id if project else ""
+        current_id = (
+            project.project_entry.parent_id or project.project_entry.v2_parent_id or ""
+            if project
+            else ""
+        )
 
     root_project = project_id_to_root.get(project_id)
     if root_project and root_project.project_entry.name not in seen_names:

@@ -446,7 +446,7 @@ class DatabaseProjects:
         if project is None:
             logger.error(f"Could not fetch project {project_id} after retries")
             return None
-        parent_id = project.project_entry.parent_id
+        parent_id = project.project_entry.parent_id or project.project_entry.v2_parent_id
         if parent_id is None:
             return project
         # Recurse up
@@ -499,7 +499,10 @@ class DatabaseProjects:
                 )
                 break
 
-            parent_id = current_project.project_entry.parent_id
+            parent_id = (
+                current_project.project_entry.parent_id
+                or current_project.project_entry.v2_parent_id
+            )
             if parent_id is None:
                 resolved_root_id = current_id
                 break

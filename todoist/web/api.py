@@ -387,14 +387,14 @@ def _load_projects_for_adjustments_sync(
         {
             p.project_entry.name
             for p in active_projects
-            if p.project_entry.parent_id is None
+            if not (p.project_entry.parent_id or p.project_entry.v2_parent_id)
         }
     )
     archived_root = sorted(
         {
             p.project_entry.name
             for p in archived_projects
-            if p.project_entry.parent_id is None
+            if not (p.project_entry.parent_id or p.project_entry.v2_parent_id)
         }
     )
     archived_names = sorted({p.project_entry.name for p in archived_projects})
