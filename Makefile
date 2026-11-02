@@ -140,6 +140,12 @@ docker_pull: ## Pull published Docker images
 docker_watch: ## Live-reload with Docker Compose watch (Compose 2.22+)
 	docker compose watch
 
-.PHONY: build_android
+.PHONY: build_android build_android_preview build_android_bundle
 build_android: ## Build an installable Android APK and run Android tests/lint
 	bash scripts/build_android.sh
+
+build_android_preview: ## Build a signed, optimized APK alongside the debug app
+	bash scripts/build_android.sh preview
+
+build_android_bundle: ## Build an optimized Android App Bundle for Google Play
+	bash scripts/build_android.sh bundle
