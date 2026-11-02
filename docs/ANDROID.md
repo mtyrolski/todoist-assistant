@@ -21,6 +21,8 @@ The app targets API 36. Public Play publication still needs a confirmed permanen
 
 Connect a Todoist token in Control Panel, or choose Explore a demo. The app reads projects/tasks and twelve weeks of activity initially, follows cursor pages, then merges incremental updates by event ID. Account changes keep histories separate. Failed or cancelled syncs preserve saved data. Demo never overwrites account data. Tokens stay in Android Keystore-backed encrypted storage.
 
+For existing desktop project adjustments, save and export them from Project Adjustments, transfer the JSON to the phone, then choose **Import project adjustments** in Control Panel. The file contains project names. Imported mappings stay with that account and survive refreshes; export and import again after changing them on the computer. Todoist may omit archived projects' parent links, so the app also retains links it observed before archiving.
+
 Overview shows weekly actuals/forecasts, project contributions and cumulative completions. Projects supports search and priority filters; Activity shows recent actions. Control Panel reuses desktop alert settings. Full desktop lifespan analysis, hierarchy editing and project timelines are not included. Alert preferences and history remain local to each client.
 
 To run interaction tests on a dedicated emulator:

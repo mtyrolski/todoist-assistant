@@ -2,7 +2,7 @@
 
 A local dashboard for Todoist activity, completion history and projects. Available in a browser and as a standalone Android app.
 
-![Desktop dashboard with sample data](img/dashboard.webp)
+![Weekly completion and task lifespan charts](img/dashboard.webp)
 
 The dashboard includes completion charts and forecasts, a project hierarchy, project timelines, priority counts and configurable attention alerts. Data stays in a local cache and remains available between syncs.
 
@@ -33,6 +33,7 @@ Open <http://127.0.0.1:3000> and enter your Todoist API token. You can also copy
 make stop_dashboard  # stop the local servers
 make sync            # fetch recent activity
 make sync_history    # also fetch older history
+make run_demo        # show anonymized local data
 ```
 
 ## Android
@@ -41,7 +42,7 @@ The Android app uses the web dashboard's styles, fonts and charts. It syncs dire
 
 <img src="img/android.webp" width="340" alt="Android dashboard running the built-in demo">
 
-Screenshots show sample data.
+Screenshots use anonymized demo data or the Android sample.
 
 Download the Preview APK from [Android APK workflow artifacts](https://github.com/mtyrolski/todoist-summary-plugin/actions/workflows/android.yml), or build it with JDK 17 and Android SDK 36:
 
@@ -51,6 +52,8 @@ adb install -r dist/android/todoist-assistant-preview.apk
 ```
 
 Android includes weekly charts, project contributions, task search, recent activity and alert settings. See [Android build instructions](docs/ANDROID.md) for requirements and device tests.
+
+To reuse desktop project adjustments, export the saved mappings from Project Adjustments, copy the JSON file to the phone, and import it in the Android Control Panel.
 
 ## Development
 
