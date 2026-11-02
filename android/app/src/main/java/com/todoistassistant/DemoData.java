@@ -105,6 +105,7 @@ final class DemoData {
         .put("tasks", tasks)
         .put("activities", events)
         .put("syncedAt", clock.instant().toString())
+        .put("historyComplete", true)
         .put(
             "historyStart",
             monday.minusWeeks(9).atStartOfDay(clock.getZone()).toInstant().toString());

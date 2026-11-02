@@ -90,6 +90,7 @@ public class PlotDataTest {
   public void demoProvidesDurationsAndMoreThanOneActivityHour() throws Exception {
     DashboardModel model = new DashboardModel(DemoData.create(CLOCK), CLOCK);
     JSONObject data = MobilePayload.model(model).getJSONObject("plotData");
+    assertTrue(data.getBoolean("historyComplete"));
     assertTrue(data.getJSONArray("lifespans").length() > 1);
     java.util.Set<Integer> occupied = new java.util.HashSet<>();
     JSONArray days = data.getJSONArray("dailyActivity");
