@@ -155,7 +155,8 @@ public class MainActivity extends ComponentActivity {
           "window.dispatchEvent(new CustomEvent('todoist-state',{detail:" + payload + "}))", null);
     } catch (Exception exception) {
       web.evaluateJavascript(
-          "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not open dashboard data. Retry sync.'}))",
+          "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not open dashboard"
+              + " data. Retry sync.'}))",
           null);
     }
   }
@@ -231,7 +232,11 @@ public class MainActivity extends ComponentActivity {
                 model.disconnect();
                 break;
               case "import-adjustments":
-                adjustmentsPicker.launch(new String[] {"application/json", "text/plain"});
+                adjustmentsPicker.launch(
+                    new String[] {"application/json", "text/plain", "application/octet-stream"});
+                break;
+              case "save-adjustments":
+                model.saveAdjustments(argument);
                 break;
               case "close":
                 finish();

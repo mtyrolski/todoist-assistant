@@ -174,6 +174,106 @@ public class SyncLifecycleTest {
             .getJSONObject("mappings")
             .getString("Old"));
     assertTrue(file.delete());
+    CountDownLatch edited = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              observer =
+                  value -> {
+                    state.set(value);
+                    if (value.message.equals("Project adjustments saved.")) edited.countDown();
+                  };
+              model.state().observeForever(observer);
+              model.saveAdjustments(
+                  "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Old\":\"Work\",\"Missing\":\"Unknown"
+                      + " root\"},\"archivedParents\":[\"Another archive\"]}");
+            });
+    assertTrue(edited.await(10, TimeUnit.SECONDS));
+    JSONObject persisted =
+        new SnapshotStore(context).load("fake-test-token").getJSONObject("adjustments");
+    assertEquals("Work", persisted.getJSONObject("mappings").getString("Old"));
+    assertEquals("Unknown root", persisted.getJSONObject("mappings").getString("Missing"));
+    assertEquals("Another archive", persisted.getJSONArray("archivedParents").getString(0));
+    assertEquals(
+        "Unknown root",
+        MobilePayload.model(state.get().model)
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Missing"));
+    try (var output = new java.io.FileOutputStream(file)) {
+      output.write(
+          "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Old\":\"New root\",\"Another archive\":\"Work\"},\"archivedParents\":[\"Imported parent\"]}"
+              .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    CountDownLatch merged = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              observer =
+                  value -> {
+                    state.set(value);
+                    if (value.message.equals("Project adjustments imported.")) merged.countDown();
+                  };
+              model.state().observeForever(observer);
+              model.importAdjustments(Uri.fromFile(file));
+            });
+    assertTrue(merged.await(10, TimeUnit.SECONDS));
+    JSONObject afterImport =
+        new SnapshotStore(context).load("fake-test-token").getJSONObject("adjustments");
+    assertEquals("New root", afterImport.getJSONObject("mappings").getString("Old"));
+    assertEquals("Unknown root", afterImport.getJSONObject("mappings").getString("Missing"));
+    assertEquals("Work", afterImport.getJSONObject("mappings").getString("Another archive"));
+    assertEquals(1, afterImport.getJSONArray("archivedParents").length());
+    assertEquals("Imported parent", afterImport.getJSONArray("archivedParents").getString(0));
+    assertTrue(file.delete());
+    CountDownLatch invalid = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              observer =
+                  value -> {
+                    state.set(value);
+                    if (value.message.startsWith("Could not save project adjustments"))
+                      invalid.countDown();
+                  };
+              model.state().observeForever(observer);
+              model.saveAdjustments(
+                  "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Old\":42},\"archivedParents\":[]}");
+            });
+    assertTrue(invalid.await(10, TimeUnit.SECONDS));
+    assertEquals(
+        "Unknown root",
+        new SnapshotStore(context)
+            .load("fake-test-token")
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Missing"));
+    CountDownLatch demo = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              observer =
+                  value -> {
+                    state.set(value);
+                    if (value.demo && !value.loading) demo.countDown();
+                  };
+              model.state().observeForever(observer);
+              model.showDemo();
+            });
+    assertTrue(demo.await(10, TimeUnit.SECONDS));
+    InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.saveAdjustments("{}"));
+    assertTrue(state.get().demo);
+    assertEquals(
+        "Unknown root",
+        new SnapshotStore(context)
+            .load("fake-test-token")
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Missing"));
     context
         .getSharedPreferences("rules", Context.MODE_PRIVATE)
         .edit()

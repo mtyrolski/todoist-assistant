@@ -74,7 +74,8 @@ public final class DashboardViewModel extends AndroidViewModel {
                   savedModel = new DashboardModel(snapshot, Clock.systemDefaultZone());
               } catch (Exception exception) {
                 warning =
-                    "Saved history could not be opened. Sync to recover it, or reconnect in Control Panel.";
+                    "Saved history could not be opened. Sync to recover it, or reconnect in Control"
+                        + " Panel.";
               }
               String message = warning;
               main.post(
@@ -267,12 +268,7 @@ public final class DashboardViewModel extends AndroidViewModel {
 
   void importAdjustments(Uri uri) {
     State current = state.getValue();
-    if (current == null
-        || current.syncing
-        || current.loading
-        || current.demo
-        || token.isEmpty()
-        || savedModel == null) return;
+    if (!canEditAdjustments(current)) return;
     int request = generation.incrementAndGet();
     state.setValue(
         new State(current.model, true, false, false, true, "Importing project adjustments…"));
@@ -289,19 +285,13 @@ public final class DashboardViewModel extends AndroidViewModel {
                     throw new java.io.IOException("File too large");
                   output.write(buffer, 0, count);
                 }
-                JSONObject next = new JSONObject(snapshot.toString());
-                next.put(
-                    "adjustments",
-                    ProjectAdjustments.parse(
-                        output.toString(java.nio.charset.StandardCharsets.UTF_8.name())));
-                DashboardModel model = new DashboardModel(next, Clock.systemDefaultZone());
-                if (generation.get() != request || Thread.currentThread().isInterrupted()) return;
-                store.save(next, token);
-                snapshot = next;
-                savedModel = model;
-                post(
+                applyAdjustments(
+                    ProjectAdjustments.merge(
+                        snapshot.optJSONObject("adjustments"),
+                        ProjectAdjustments.parse(
+                            output.toString(java.nio.charset.StandardCharsets.UTF_8.name()))),
                     request,
-                    new State(model, false, false, false, true, "Project adjustments imported."));
+                    "Project adjustments imported.");
               } catch (Exception exception) {
                 post(
                     request,
@@ -311,9 +301,66 @@ public final class DashboardViewModel extends AndroidViewModel {
                         false,
                         false,
                         true,
-                        "Could not import adjustments. Choose the JSON file exported from the desktop dashboard."));
+                        "Could not import adjustments. Choose the JSON file exported from the"
+                            + " desktop dashboard."));
               }
             });
+  }
+
+  void saveAdjustments(String text) {
+    State current = state.getValue();
+    if (!canEditAdjustments(current)) return;
+    int request = generation.incrementAndGet();
+    state.setValue(
+        new State(current.model, true, false, false, true, "Saving project adjustments…"));
+    task =
+        worker.submit(
+            () -> {
+              try {
+                if (text == null
+                    || text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 256 * 1024)
+                  throw new IllegalArgumentException("Invalid adjustments");
+                applyAdjustments(
+                    ProjectAdjustments.parse(text), request, "Project adjustments saved.");
+              } catch (Exception exception) {
+                post(
+                    request,
+                    new State(
+                        current.model,
+                        false,
+                        false,
+                        false,
+                        true,
+                        "Could not save project adjustments. Check the project names and try"
+                            + " again."));
+              }
+            });
+  }
+
+  private boolean canEditAdjustments(State current) {
+    return current != null
+        && !current.syncing
+        && !current.loading
+        && !current.demo
+        && !token.isEmpty()
+        && savedModel != null;
+  }
+
+  private void applyAdjustments(JSONObject adjustments, int request, String message)
+      throws Exception {
+    JSONObject next = new JSONObject(snapshot.toString()).put("adjustments", adjustments);
+    DashboardModel model = new DashboardModel(next, Clock.systemDefaultZone());
+    if (generation.get() != request || Thread.currentThread().isInterrupted()) return;
+    committing.set(true);
+    try {
+      if (generation.get() != request) return;
+      store.save(next, token);
+      snapshot = next;
+      savedModel = model;
+      post(request, new State(model, false, false, false, true, message));
+    } finally {
+      committing.set(false);
+    }
   }
 
   void disconnect() {
@@ -346,8 +393,10 @@ public final class DashboardViewModel extends AndroidViewModel {
                               false,
                               false,
                               settingsCleared
-                                  ? "Account disconnected. Local history and settings have been removed."
-                                  : "Account disconnected. Could not remove local settings; clear app data in Android Settings.")));
+                                  ? "Account disconnected. Local history and settings have been"
+                                      + " removed."
+                                  : "Account disconnected. Could not remove local settings; clear"
+                                      + " app data in Android Settings.")));
             });
   }
 
@@ -361,7 +410,8 @@ public final class DashboardViewModel extends AndroidViewModel {
   private static String errorMessage(Exception exception) {
     if (exception instanceof java.net.UnknownHostException
         || exception instanceof java.net.ConnectException)
-      return "You're offline or Todoist is unreachable. Saved data is still available; try Sync when connected.";
+      return "You're offline or Todoist is unreachable. Saved data is still available; try Sync"
+          + " when connected.";
     if (exception instanceof java.net.SocketTimeoutException)
       return "The connection timed out. Saved data is unchanged; try again on a stable connection.";
     if (exception instanceof InterruptedException || exception instanceof SyncCancelledException)
