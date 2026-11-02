@@ -13,7 +13,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,20 +37,14 @@ final class DashboardModel {
       if (raw != null) for (int i = 0; i < raw.length(); i++) names.add(raw.optString(i));
       labels = Collections.unmodifiableList(names);
     }
-
-    String searchText() {
-      return (content + " " + project + " " + String.join(" ", labels)).toLowerCase(Locale.ROOT);
-    }
   }
 
   static final class Project {
     final String id, path;
-    final List<Task> tasks;
 
-    Project(String id, String path, List<Task> tasks) {
+    Project(String id, String path) {
       this.id = id;
       this.path = path;
-      this.tasks = Collections.unmodifiableList(tasks);
     }
   }
 
@@ -76,10 +69,11 @@ final class DashboardModel {
   final LocalDate weekStart;
   final int[] weeks, priorities;
   final List<Map<String, Integer>> weeklyProjects;
-  final int forecast, undone, eventCount;
+  final Map<String, Integer> projectForecasts;
+  final Map<String, String> projectColors;
+  final int forecast;
   final boolean forecastAvailable, historyAvailable;
   final String historyWarning;
-  final String historyStart;
 
   DashboardModel(JSONObject snapshot, Clock clock) throws Exception {
     syncedAt = Instant.parse(snapshot.getString("syncedAt"));
@@ -87,7 +81,6 @@ final class DashboardModel {
         Instant.parse(snapshot.optString("activitySyncedAt", syncedAt.toString()));
     historyAvailable = !snapshot.optBoolean("activityUnavailable");
     historyWarning = snapshot.optString("activityWarning", snapshot.optString("metadataWarning"));
-    historyStart = snapshot.getString("historyStart");
     weekStart = LocalDate.now(clock).with(DayOfWeek.MONDAY);
     Map<String, JSONObject> known = new LinkedHashMap<>();
     JSONArray active = snapshot.getJSONArray("projects");
@@ -103,9 +96,15 @@ final class DashboardModel {
         archivedRoots.add(rootName(project.optString("id"), known));
     for (int i = 0; i < active.length(); i++)
       archivedRoots.remove(rootName(active.getJSONObject(i).optString("id"), known));
+    Map<String, String> colors = new LinkedHashMap<>();
+    for (var project : known.values()) {
+      String parent = project.optString("parent_id");
+      if (!known.containsKey(parent))
+        colors.put(project.optString("name"), project.optString("color", "grey"));
+    }
+    projectColors = Collections.unmodifiableMap(colors);
     priorities = new int[4];
     List<Task> taskList = new ArrayList<>();
-    Map<String, List<Task>> byProject = new HashMap<>();
     JSONArray rawTasks = snapshot.getJSONArray("tasks");
     for (int i = 0; i < rawTasks.length(); i++) {
       JSONObject item = rawTasks.getJSONObject(i);
@@ -113,7 +112,6 @@ final class DashboardModel {
       Task task = new Task(item, projectPath(item.optString("project_id"), known));
       taskList.add(task);
       priorities[4 - task.priority]++;
-      byProject.computeIfAbsent(task.projectId, id -> new ArrayList<>()).add(task);
     }
     Comparator<Task> order =
         Comparator.comparingInt((Task task) -> -task.priority)
@@ -122,28 +120,23 @@ final class DashboardModel {
     taskList.sort(order);
     tasks = Collections.unmodifiableList(taskList);
     List<Project> projectList = new ArrayList<>();
+    java.util.Set<String> projectIds = new java.util.HashSet<>();
     for (int i = 0; i < active.length(); i++) {
       JSONObject item = active.getJSONObject(i);
       String id = item.getString("id");
-      List<Task> children = byProject.remove(id);
-      if (children == null) children = new ArrayList<>();
-      children.sort(order);
-      projectList.add(new Project(id, projectPath(id, known), children));
+      projectIds.add(id);
+      projectList.add(new Project(id, projectPath(id, known)));
     }
     // A project can disappear between the project and task requests. Keep its tasks visible.
-    for (var entry : byProject.entrySet()) {
-      entry.getValue().sort(order);
-      projectList.add(
-          new Project(entry.getKey(), projectPath(entry.getKey(), known), entry.getValue()));
-    }
+    for (var task : tasks)
+      if (projectIds.add(task.projectId))
+        projectList.add(new Project(task.projectId, task.project));
     projectList.sort(Comparator.comparing(project -> project.path, String.CASE_INSENSITIVE_ORDER));
     projects = Collections.unmodifiableList(projectList);
     JSONArray rawEvents = snapshot.getJSONArray("activities");
-    eventCount = rawEvents.length();
     List<CompletionLedger.Event> events = new ArrayList<>();
     Map<String, String> completionProjects = new HashMap<>();
     List<Activity> activityList = new ArrayList<>();
-    int undoCount = 0;
     for (int i = 0; i < rawEvents.length(); i++) {
       JSONObject item = rawEvents.getJSONObject(i);
       Instant time = Instant.parse(item.getString("event_date"));
@@ -163,10 +156,7 @@ final class DashboardModel {
       events.add(
           new CompletionLedger.Event(id, item.getString("object_id"), kind, time, recurring));
       completionProjects.put(id, rootName(item.optString("parent_project_id"), known));
-      if (kind.equals("uncompleted")
-          && !time.atZone(clock.getZone()).toLocalDate().isBefore(weekStart)) undoCount++;
     }
-    undone = undoCount;
     activityList.sort(
         Comparator.comparing((Activity event) -> event.date)
             .reversed()
@@ -193,7 +183,7 @@ final class DashboardModel {
     double fraction =
         Duration.between(begin, historyAsOf).toMillis()
             / (double) Duration.between(begin, end).toMillis();
-    int estimate = 0;
+    Map<String, Integer> estimates = new LinkedHashMap<>();
     for (var entry : projectWeeks.entrySet()) {
       int[] values = entry.getValue();
       int first = 0;
@@ -203,12 +193,14 @@ final class DashboardModel {
       for (int i = first; i < 8; i++) history[i - first] = values[i];
       boolean recentlyActive =
           values[8] > 0 || values[7] > 0 || values[6] > 0 || values[5] > 0 || values[4] > 0;
-      estimate +=
+      estimates.put(
+          entry.getKey(),
           forecastAvailable && recentlyActive && !archivedRoots.contains(entry.getKey())
               ? Forecast.total(values[8], history, fraction)
-              : values[8];
+              : values[8]);
     }
-    forecast = estimate;
+    projectForecasts = Collections.unmodifiableMap(estimates);
+    forecast = estimates.values().stream().mapToInt(Integer::intValue).sum();
     List<Map<String, Integer>> breakdowns = new ArrayList<>();
     for (int week = 0; week < 9; week++) {
       Map<String, Integer> breakdown = new HashMap<>();

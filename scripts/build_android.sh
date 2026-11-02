@@ -10,6 +10,7 @@ if [ -z "$android_sdk" ] && [ ! -f "$repo_root/android/local.properties" ]; then
     echo 'Set ANDROID_HOME to an Android SDK with platforms;android-35 and build-tools;35.0.0 installed.' >&2
     exit 1
 fi
+npm --prefix "$repo_root/frontend" ci --no-audit --no-fund
 "$repo_root/android/gradlew" -p "$repo_root/android" --no-daemon \
     :app:spotlessJavaCheck :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "$@"
 mkdir -p "$repo_root/dist/android"

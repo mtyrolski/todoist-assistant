@@ -1,5 +1,0 @@
-<resources>
-    <string name="offline_privacy">Private on your device · works offline</string>
-    <string name="demo_timestamp">DEMO · %1$s</string>
-    <string name="saved_timestamp">Saved · %1$s</string>
-</resources>

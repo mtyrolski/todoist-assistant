@@ -115,14 +115,22 @@ public class DashboardModelTest {
 
   @Test
   public void demoHasConsistentWeeklyProjectTotals() throws Exception {
-    DashboardModel model = new DashboardModel(DemoData.create(CLOCK), CLOCK);
+    JSONObject demo = DemoData.create(CLOCK);
+    DashboardModel model = new DashboardModel(demo, CLOCK);
     assertEquals(40, model.tasks.size());
     assertEquals(
         model.weeks[8],
         model.weeklyProjects.get(8).values().stream().mapToInt(Integer::intValue).sum());
     assertTrue(model.forecast >= model.weeks[8]);
-    assertEquals(1, model.undone);
-    assertEquals(model.eventCount - 2, java.util.Arrays.stream(model.weeks).sum());
+    assertEquals(
+        demo.getJSONArray("activities").length() - 2, java.util.Arrays.stream(model.weeks).sum());
+    JSONObject payload = MobilePayload.model(model);
+    assertEquals(40, payload.getJSONArray("tasks").length());
+    assertEquals(model.weeks[8], payload.getJSONArray("weeks").getInt(8));
+    int estimate = 0;
+    JSONObject forecasts = payload.getJSONObject("projectForecasts");
+    for (var keys = forecasts.keys(); keys.hasNext(); ) estimate += forecasts.getInt(keys.next());
+    assertEquals(payload.getInt("forecast"), estimate);
   }
 
   @Test

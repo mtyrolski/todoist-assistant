@@ -20,6 +20,8 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     buildFeatures { buildConfig true }
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/web-assets'))
+    androidResources.ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
     buildTypes { release { minifyEnabled false } }
     testOptions { unitTests.returnDefaultValues = true
         unitTests.all { systemProperty 'completionFixtures', rootProject.file('../tests/fixtures/completion_scenarios.json').absolutePath } }
@@ -29,14 +31,31 @@ dependencies {
     implementation 'androidx.activity:activity:1.10.1'
     implementation 'androidx.lifecycle:lifecycle-viewmodel:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-livedata-core:2.8.7'
-    implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    implementation 'androidx.webkit:webkit:1.14.0'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test:core:1.6.1'
-    androidTestImplementation 'androidx.test:rules:1.6.1'
-    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
 }
+
+def frontendDir = rootProject.file('../frontend')
+def webAssets = tasks.register('buildWebAssets', Exec) {
+    workingDir frontendDir
+    environment 'TODOIST_ANDROID_EXPORT', '1'
+    environment 'TODOIST_NEXT_DIST_DIR', '.next-android'
+    commandLine(System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm', 'run', 'build')
+    inputs.dir(new File(frontendDir, 'app'))
+    inputs.files(new File(frontendDir, 'package-lock.json'), new File(frontendDir, 'next.config.js'), new File(frontendDir, 'tsconfig.json'))
+    outputs.dir(layout.buildDirectory.dir('generated/web-assets'))
+    doLast {
+        if (!new File(frontendDir, '.next-android/android.html').isFile()) throw new GradleException('Android dashboard export is missing')
+        project.sync {
+            from new File(frontendDir, '.next-android')
+            into layout.buildDirectory.dir('generated/web-assets')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn(webAssets) }
 
 spotless {
     java {
