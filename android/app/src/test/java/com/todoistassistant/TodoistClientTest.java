@@ -181,21 +181,21 @@ public class TodoistClientTest {
           @Override
           public JSONObject get(String path) throws Exception {
             if (path.equals("user"))
-              return new JSONObject().put("id", user).put("joined_at", "2025-05-10T12:00:00Z");
+              return new JSONObject().put("id", user).put("joined_at", "2026-08-03T12:00:00Z");
             if (path.startsWith("activities")) {
               paths.add(path);
-              if (path.contains("date_from=2025-11-06T12%3A00%3A00Z") && !interrupted) {
+              if (path.contains("date_from=2026-09-02T12%3A00%3A00Z") && !interrupted) {
                 interrupted = true;
                 throw new IOException("offline");
               }
-              if (path.contains("date_from=2025-05-10T12%3A00%3A00Z"))
+              if (path.contains("date_from=2026-08-03T12%3A00%3A00Z"))
                 return page(
-                    new JSONArray().put(event("oldest", "2025-06-01T00:00:00Z")), JSONObject.NULL);
-              if (path.contains("date_from=2025-11-06T12%3A00%3A00Z"))
+                    new JSONArray().put(event("oldest", "2026-08-15T00:00:00Z")), JSONObject.NULL);
+              if (path.contains("date_from=2026-09-02T12%3A00%3A00Z"))
                 return page(
-                    new JSONArray().put(event("middle", "2026-01-01T00:00:00Z")), JSONObject.NULL);
+                    new JSONArray().put(event("middle", "2026-09-15T00:00:00Z")), JSONObject.NULL);
               return page(
-                  new JSONArray().put(event("recent", "2026-09-01T00:00:00Z")), JSONObject.NULL);
+                  new JSONArray().put(event("recent", "2026-10-15T00:00:00Z")), JSONObject.NULL);
             }
             return super.get(path);
           }
@@ -211,12 +211,12 @@ public class TodoistClientTest {
     assertEquals(1, checkpoints.size());
     JSONObject partial = checkpoints.get(0);
     assertFalse(partial.getBoolean("historyComplete"));
-    assertEquals("2026-05-05T12:00:00Z", partial.getString("historyStart"));
+    assertEquals("2026-10-02T12:00:00Z", partial.getString("historyStart"));
     assertEquals(1, partial.getJSONArray("activities").length());
 
     JSONObject resumed = client.snapshot(partial, false);
     assertTrue(resumed.getBoolean("historyComplete"));
-    assertEquals("2025-05-10T12:00:00Z", resumed.getString("historyStart"));
+    assertEquals("2026-08-03T12:00:00Z", resumed.getString("historyStart"));
     assertEquals(3, resumed.getJSONArray("activities").length());
   }
 
@@ -271,6 +271,8 @@ public class TodoistClientTest {
     assertEquals(30000, HttpTransport.retryDelay(String.valueOf(Long.MAX_VALUE), 0));
     assertEquals(500, HttpTransport.retryDelay("-100", 0));
     assertEquals(2000, HttpTransport.retryDelay(null, 1));
+    assertEquals(16000, HttpTransport.retryDelay(null, 4));
+    assertEquals(30000, HttpTransport.retryDelay(null, 8));
   }
 
   @Test

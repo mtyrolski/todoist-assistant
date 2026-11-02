@@ -19,7 +19,7 @@ final class HttpTransport implements ApiTransport {
 
   @Override
   public JSONObject get(String path) throws Exception {
-    for (int attempt = 0; attempt < 3; attempt++) {
+    for (int attempt = 0; attempt < 5; attempt++) {
       checkCancelled();
       HttpURLConnection current =
           (HttpURLConnection)
@@ -33,7 +33,7 @@ final class HttpTransport implements ApiTransport {
       try {
         int status = current.getResponseCode();
         checkCancelled();
-        if ((status == 429 || status >= 500) && attempt < 2) {
+        if ((status == 429 || status >= 500) && attempt < 4) {
           long delay = retryDelay(current.getHeaderField("Retry-After"), attempt);
           current.disconnect();
           Thread.sleep(delay);
@@ -64,7 +64,7 @@ final class HttpTransport implements ApiTransport {
         }
       } catch (IOException exception) {
         checkCancelled();
-        if (exception instanceof java.net.SocketTimeoutException && attempt < 2) continue;
+        if (exception instanceof java.net.SocketTimeoutException && attempt < 4) continue;
         throw exception;
       } finally {
         current.disconnect();
@@ -78,7 +78,7 @@ final class HttpTransport implements ApiTransport {
     try {
       return Math.max(500, Math.min(30, Long.parseLong(retryAfter)) * 1000);
     } catch (NumberFormatException ignored) {
-      return 1000L * (attempt + 1);
+      return Math.min(30000, 1000L << Math.min(attempt, 5));
     }
   }
 

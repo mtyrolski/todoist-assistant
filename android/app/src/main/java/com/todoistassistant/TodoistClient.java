@@ -127,6 +127,7 @@ final class TodoistClient {
     }
     data.put("historyIdRepair", repairing);
     boolean fetchedActivity = false;
+    int historyWindows = 0;
     try {
       if (baseline.has("syncedAt")) {
         Instant recentStart = activitySyncedAt.minus(Duration.ofDays(1));
@@ -136,7 +137,7 @@ final class TodoistClient {
       activitySyncedAt = started;
       data.put("activitySyncedAt", started.toString());
       while (!complete && historyStart.isAfter(joined)) {
-        Instant from = historyStart.minus(Duration.ofDays(180));
+        Instant from = historyStart.minus(Duration.ofDays(30));
         if (from.isBefore(joined)) from = joined;
         fetchActivity(
             merged,
@@ -147,11 +148,14 @@ final class TodoistClient {
         fetchedActivity = true;
         historyStart = from;
         complete = !historyStart.isAfter(joined);
-        data.put("historyStart", historyStart.toString());
-        data.put("historyComplete", complete);
-        data.put("activities", new JSONArray(merged.values()));
-        discardReopenedParents(known, archived, baseline, merged.values());
-        checkpoint.save(data);
+        historyWindows++;
+        if (historyWindows == 1 || historyWindows % 3 == 0 || complete) {
+          data.put("historyStart", historyStart.toString());
+          data.put("historyComplete", complete);
+          data.put("activities", new JSONArray(merged.values()));
+          discardReopenedParents(known, archived, baseline, merged.values());
+          checkpoint.save(data);
+        }
       }
       if (!complete) complete = true;
     } catch (DataAccessException unavailable) {
