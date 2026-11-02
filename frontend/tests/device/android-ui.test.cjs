@@ -62,10 +62,9 @@ test("bundled desktop charts and fonts work offline without saving demo account 
   await expect(chart).toBeVisible({ timeout: 30000 });
   await page.waitForFunction(() => document.fonts.status === "loaded");
   const bounds = await chart.boundingBox();
-  assert.ok(
-    bounds.y < (await page.evaluate(() => visualViewport.height * 0.75)),
-    "The chart should be visible on the first screen",
-  );
+  const viewportHeight = await page.evaluate(() => visualViewport.height);
+  const visibleHeight = Math.max(0, Math.min(viewportHeight, bounds.y + bounds.height) - Math.max(0, bounds.y));
+  assert.ok(visibleHeight >= bounds.height * 0.4, "At least 40% of the chart should be visible on the first screen");
   const traces = await chart.evaluate((node) => node.data);
   const actual = traces.filter((trace) => trace.mode === "markers");
   const forecast = traces.filter(

@@ -35,7 +35,7 @@ export function PlotCard({
 
   return (
     <section
-      className={`card${fillHeight ? " cardFillHeight" : ""}`}
+      className={`card${legendContent ? " cardWithLegend" : ""}${fillHeight ? " cardFillHeight" : ""}`}
       style={fillHeight ? { height: "100%", minHeight: 0 } : undefined}
     >
       <header className="cardHeader">

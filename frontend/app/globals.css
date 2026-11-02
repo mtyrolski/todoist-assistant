@@ -2618,13 +2618,14 @@ textarea.textInput {
 .mobilePlotControls {
   justify-content: space-between;
 }
+.androidPage .cardWithLegend { gap: 6px; }
 .mobilePlotLegend {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 12px;
   max-height: 156px;
   overflow-y: auto;
-  margin: 0 0 8px;
+  margin: 0;
 }
 .mobilePlotLegend button {
   display: inline-flex;
