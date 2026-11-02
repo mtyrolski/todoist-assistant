@@ -113,7 +113,13 @@ public final class DashboardViewModel extends AndroidViewModel {
                         message ->
                             post(
                                 request,
-                                new State(visible, false, true, false, !token.isEmpty(), message)));
+                                new State(
+                                    savedModel == null ? visible : savedModel,
+                                    false,
+                                    true,
+                                    false,
+                                    !token.isEmpty(),
+                                    message)));
                 JSONObject next =
                     client.snapshot(
                         snapshot,

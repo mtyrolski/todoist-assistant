@@ -113,6 +113,9 @@ public class SyncLifecycleTest {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
     while (!fake.block && System.nanoTime() < deadline) Thread.sleep(20);
     assertTrue(fake.block);
+    while (state.get().model == null && System.nanoTime() < deadline) Thread.sleep(20);
+    assertTrue(state.get().syncing);
+    assertNotNull(state.get().model);
     InstrumentationRegistry.getInstrumentation().runOnMainSync(model::cancelSync);
     JSONObject saved = new SnapshotStore(context).load("fake-test-token");
     assertFalse(saved.getBoolean("historyComplete"));
