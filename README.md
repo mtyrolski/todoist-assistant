@@ -43,11 +43,11 @@ The Android app uses the web dashboard's styles, fonts and charts. It syncs dire
 
 Screenshots show sample data.
 
-Download the debug APK from [Android APK workflow artifacts](https://github.com/mtyrolski/todoist-summary-plugin/actions/workflows/android.yml), or build it with JDK 17 and Android SDK 35:
+Download the Preview APK from [Android APK workflow artifacts](https://github.com/mtyrolski/todoist-summary-plugin/actions/workflows/android.yml), or build it with JDK 17 and Android SDK 36:
 
 ```bash
-make build_android
-adb install -r dist/android/todoist-assistant-debug.apk
+make build_android_preview
+adb install -r dist/android/todoist-assistant-preview.apk
 ```
 
 Android includes weekly charts, project contributions, task search, recent activity and alert settings. See [Android build instructions](docs/ANDROID.md) for requirements and device tests.
