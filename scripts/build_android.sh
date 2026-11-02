@@ -11,13 +11,14 @@ if ! command -v java >/dev/null 2>&1 && [ -z "${JAVA_HOME:-}" ]; then
     exit 1
 fi
 android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-if [ -z "$android_sdk" ] && [ ! -f "$repo_root/android/local.properties" ]; then
+if [ -z "$android_sdk" ] && { [ "$mode" = preview ] || [ ! -f "$repo_root/android/local.properties" ]; }; then
     echo 'Set ANDROID_HOME to an Android SDK with platforms;android-36 and build-tools;35.0.0 installed.' >&2
     exit 1
 fi
 if [ "$mode" = preview ]; then
     signing_dir="${ANDROID_PREVIEW_SIGNING_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/todoist-assistant/signing/preview}"
     mkdir -p "$signing_dir"
+    signing_dir="$(cd -- "$signing_dir" && pwd)"
     chmod 700 "$signing_dir"
     if [ ! -f "$signing_dir/preview.keystore" ]; then
         if [ -e "$signing_dir/password" ]; then
