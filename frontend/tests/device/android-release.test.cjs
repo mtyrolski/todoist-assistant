@@ -1,6 +1,5 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const { _android, expect: baseExpect } = require("playwright/test");
 const expect = baseExpect.configure({ timeout: 20000 });
 
@@ -53,11 +52,8 @@ test("optimized release works offline with search, keyboard, rotation and produc
   assert.match((await device.shell(`run-as ${pkg} id 2>&1`)).toString(), /not debuggable/);
   await tap(text("Explore a demo"));
   await wait(text("Back to my data"));
-  // Android 15 omits Plotly's SVG legend from its native accessibility tree.
   await wait(text("Completed tasks"));
-  const screenshots = `frontend/test-results/device/${device.serial()}`;
-  fs.mkdirSync(screenshots, { recursive: true });
-  await device.screenshot({ path: `${screenshots}/release-overview.png` });
+  await wait(text("All projects"));
   await tap(text("Projects"));
   await tap({ clazz: "android.widget.EditText", pkg });
   await device.fill({ clazz: "android.widget.EditText", pkg }, "release");
