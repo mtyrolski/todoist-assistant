@@ -173,7 +173,7 @@ export function completionFigure(
   const dates = model.weeks.map((_, i) => weekDate(model.weekStart, i - current, 6));
   const from = range > 0 ? Math.max(0, model.weeks.length - range) : 0;
   const names = [
-    ...new Set(model.weeklyProjects.flatMap((counts) => Object.keys(counts))),
+    ...new Set(model.weeklyProjects.slice(from).flatMap((counts) => Object.keys(counts))),
   ].sort();
   const data: unknown[] = [];
   for (const name of ["All projects", ...names]) {

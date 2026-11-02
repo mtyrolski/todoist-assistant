@@ -100,7 +100,7 @@ test.beforeEach(async ({ page }) => {
     });
     window.addEventListener("test-long-history", () => {
       model.weeks.unshift(...Array(20).fill(10));
-      model.weeklyProjects.unshift(...Array.from({ length: 20 }, () => ({ Work: 6, Personal: 4 })));
+      model.weeklyProjects.unshift(...Array.from({ length: 20 }, () => ({ Work: 6, Personal: 4, Historic: 1 })));
       send();
     });
     window.Todoist = {
@@ -267,7 +267,9 @@ test("all history is selectable without changing the current week", async ({ pag
   await page.evaluate(() => window.dispatchEvent(new Event("test-long-history")));
   const chart = page.locator(".js-plotly-plot").first();
   await expect(chart).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole("button", { name: "Historic", exact: true })).toHaveCount(0);
   await page.getByLabel("Range").selectOption("0");
+  await expect(page.getByRole("button", { name: "Historic", exact: true })).toHaveCount(2);
   await expect.poll(() => chart.evaluate((node) =>
     (node as HTMLElement & { data: { y: number[] }[] }).data[0].y.length,
   )).toBe(28);
