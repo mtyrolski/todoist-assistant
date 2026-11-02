@@ -1,51 +1,65 @@
 # Todoist Assistant
 
-Todoist Assistant is a local dashboard for Todoist activity and project history. It stores fetched activity on disk and uses that cache to build charts, priorities, project hierarchy views, and the project timeline.
+A local dashboard for Todoist activity, completion history and projects. Available in a browser and as a standalone Android app.
 
-![Dashboard overview](img/fig1.png)
+![Desktop dashboard with sample data](img/dashboard.webp)
 
-## Quick start
+The dashboard includes completion charts and forecasts, a project hierarchy, project timelines, priority counts and configurable attention alerts. Data stays in a local cache and remains available between syncs.
 
-Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js 20.9+, and a Todoist API token.
+Completions are counted from cached events. Reopening an ordinary task removes its completion from the original period; recurring occurrences stay counted. Forecasts are estimates, with the total calculated from project forecasts.
+
+<details>
+<summary>Project timeline</summary>
+
+![Project timeline with sample data](img/project-timeline.webp)
+
+</details>
+
+## Run locally
+
+Requires Python 3.11–3.13, [uv](https://docs.astral.sh/uv/), Node.js 20.9+ and Make.
 
 ```bash
-git clone https://github.com/mtyrolski/todoist-assistant.git
-cd todoist-assistant
-cp .env.example .env
-# Set API_KEY in .env
-make setup
+git clone https://github.com/mtyrolski/todoist-summary-plugin.git
+cd todoist-summary-plugin
+uv sync --locked
+npm --prefix frontend ci
 make dashboard
 ```
 
-Open <http://127.0.0.1:3000>. The dashboard refreshes cached activity when needed. You can also fetch activity explicitly:
+Open <http://127.0.0.1:3000> and enter your Todoist API token. You can also copy `.env.example` to `.env` and set `API_KEY` there.
 
 ```bash
-make sync          # incremental activity sync
-make sync_history  # incremental sync plus older history backfill
-make stop_dashboard
+make stop_dashboard  # stop the local servers
+make sync            # fetch recent activity
+make sync_history    # also fetch older history
 ```
 
-Activity updates use a one-day overlap, fetch all pages in the range, and merge under a file lock. History windows are checkpointed on disk. Project adjustments are a full-width page under Operations; they preserve archived project mappings locally.
+## Android
+
+The Android app uses the web dashboard's styles, fonts and charts. It syncs directly with Todoist and keeps its own history on the phone. Saved data and the built-in demo work offline; no PC or Python server is needed.
+
+<img src="img/android.webp" width="340" alt="Android dashboard running the built-in demo">
+
+Screenshots show sample data.
+
+Download the debug APK from [Android APK workflow artifacts](https://github.com/mtyrolski/todoist-summary-plugin/actions/workflows/android.yml), or build it with JDK 17 and Android SDK 35:
+
+```bash
+make build_android
+adb install -r dist/android/todoist-assistant-debug.apk
+```
+
+Android includes weekly charts, project contributions, task search, recent activity and alert settings. See [Android build instructions](docs/ANDROID.md) for requirements and device tests.
 
 ## Development
 
 ```bash
-uv sync --locked
-make test
-npm --prefix frontend ci
+make test_all
 npm --prefix frontend run lint
 npm --prefix frontend test
-npm --prefix frontend run build
 npm --prefix frontend exec -- playwright install chromium
 npm --prefix frontend run test:e2e
 ```
 
-The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The Android app bundles the same dashboard UI and keeps its own local event cache. Build an installable APK with `make build_android`, or download the artifact from the Android APK workflow. See [Android build and usage](docs/ANDROID.md).
-
-Completion charts use cached events. Undoing an ordinary completion removes it from its original period; recurring occurrences remain counted. Raw actions stay in activity history. Forecasts combine up to eight prior periods, including empty periods, with the current pace; totals sum project forecasts.
-
-The dashboard refreshes saved data in the background every minute. Failed syncs keep the last view and show a warning.
-
-## Packaging
-
-Windows and macOS packaging remains available through manually triggered workflows; see [Windows installer notes](docs/windows_installer.md).
+[Docker](docs/DOCKER.md) · [Windows and macOS builds](docs/BUILDING.md)
