@@ -268,7 +268,8 @@ public class TodoistClientTest {
 
   @Test
   public void extremeRetryAfterCannotOverflowIntoAnImmediateRetry() {
-    assertEquals(30000, HttpTransport.retryDelay(String.valueOf(Long.MAX_VALUE), 0));
+    assertEquals(300000, HttpTransport.retryDelay(String.valueOf(Long.MAX_VALUE), 0));
+    assertEquals(300000, HttpTransport.retryDelay("300", 0));
     assertEquals(500, HttpTransport.retryDelay("-100", 0));
     assertEquals(2000, HttpTransport.retryDelay(null, 1));
     assertEquals(16000, HttpTransport.retryDelay(null, 4));

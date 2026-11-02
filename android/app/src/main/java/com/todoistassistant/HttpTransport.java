@@ -10,11 +10,17 @@ import org.json.JSONObject;
 /** HTTPS-only transport with bounded retries and immediate connection cancellation. */
 final class HttpTransport implements ApiTransport {
   private final String token;
+  private TodoistClient.Progress progress = ignored -> {};
   private volatile boolean cancelled;
   private volatile HttpURLConnection connection;
 
   HttpTransport(String token) {
     this.token = token;
+  }
+
+  @Override
+  public void setProgress(TodoistClient.Progress progress) {
+    this.progress = progress;
   }
 
   @Override
@@ -36,6 +42,8 @@ final class HttpTransport implements ApiTransport {
         if ((status == 429 || status >= 500) && attempt < 4) {
           long delay = retryDelay(current.getHeaderField("Retry-After"), attempt);
           current.disconnect();
+          progress.update(
+              "Todoist is temporarily unavailable · retrying in " + (delay / 1000) + "s");
           Thread.sleep(delay);
           continue;
         }
@@ -76,7 +84,7 @@ final class HttpTransport implements ApiTransport {
 
   static long retryDelay(String retryAfter, int attempt) {
     try {
-      return Math.max(500, Math.min(30, Long.parseLong(retryAfter)) * 1000);
+      return Math.max(500, Math.min(300, Long.parseLong(retryAfter)) * 1000);
     } catch (NumberFormatException ignored) {
       return Math.min(30000, 1000L << Math.min(attempt, 5));
     }

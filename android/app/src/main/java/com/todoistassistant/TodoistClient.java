@@ -32,6 +32,7 @@ final class TodoistClient {
     this.transport = transport;
     this.clock = clock;
     this.progress = progress;
+    transport.setProgress(progress);
   }
 
   JSONArray list(String path, String label) throws Exception {
