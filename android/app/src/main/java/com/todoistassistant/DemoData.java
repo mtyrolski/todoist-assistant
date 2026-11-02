@@ -12,13 +12,23 @@ final class DemoData {
     LocalDate today = LocalDate.now(clock), monday = today.with(DayOfWeek.MONDAY);
     JSONArray projects =
         new JSONArray()
-            .put(new JSONObject().put("id", "work").put("name", "Work").put("color", "blue"))
+            .put(
+                new JSONObject()
+                    .put("id", "work")
+                    .put("name", "Work")
+                    .put("color", "blue")
+                    .put("created_at", today.minusDays(150).toString()))
             .put(
                 new JSONObject()
                     .put("id", "product")
                     .put("name", "Product launch")
-                    .put("parent_id", "work"))
-            .put(new JSONObject().put("id", "life").put("name", "Personal"));
+                    .put("parent_id", "work")
+                    .put("created_at", today.minusDays(120).toString()))
+            .put(
+                new JSONObject()
+                    .put("id", "life")
+                    .put("name", "Personal")
+                    .put("created_at", today.minusDays(180).toString()));
     JSONArray tasks = new JSONArray(), events = new JSONArray();
     for (int i = 1; i <= 40; i++) {
       String project = i % 3 == 0 ? "life" : "product";
@@ -45,6 +55,21 @@ final class DemoData {
       LocalDate date = today.minusDays(day);
       for (int j = 0; j < 3 + day % 8; j++) {
         String id = "completion-" + day + "-" + j;
+        if (j == 0 && day % 7 == 0)
+          events.put(
+              new JSONObject()
+                  .put("id", "added-" + day)
+                  .put("object_id", id)
+                  .put("object_type", "item")
+                  .put("event_type", "added")
+                  .put("parent_project_id", "life")
+                  .put(
+                      "event_date",
+                      date.minusDays(1 + day % 9)
+                          .atTime(10, 0)
+                          .atZone(clock.getZone())
+                          .toInstant()
+                          .toString()));
         events.put(
             new JSONObject()
                 .put("id", id)
@@ -52,7 +77,13 @@ final class DemoData {
                 .put("object_type", "item")
                 .put("event_type", "completed")
                 .put("parent_project_id", j % 3 == 0 ? "life" : "product")
-                .put("event_date", date.atStartOfDay(clock.getZone()).toInstant().toString())
+                .put(
+                    "event_date",
+                    date.atTime(
+                            day == 0 ? 0 : 7 + (j * 3 + day) % 14, day == 0 ? 0 : (day + j) % 60)
+                        .atZone(clock.getZone())
+                        .toInstant()
+                        .toString())
                 .put(
                     "extra_data",
                     new JSONObject().put("content", "Completed milestone " + (day + j))));

@@ -122,8 +122,13 @@ public class DashboardModelTest {
         model.weeks[8],
         model.weeklyProjects.get(8).values().stream().mapToInt(Integer::intValue).sum());
     assertTrue(model.forecast >= model.weeks[8]);
-    assertEquals(
-        demo.getJSONArray("activities").length() - 2, java.util.Arrays.stream(model.weeks).sum());
+    int completionActions = 0;
+    for (int i = 0; i < demo.getJSONArray("activities").length(); i++)
+      if (demo.getJSONArray("activities")
+          .getJSONObject(i)
+          .optString("event_type")
+          .equals("completed")) completionActions++;
+    assertEquals(completionActions - 1, java.util.Arrays.stream(model.weeks).sum());
     JSONObject payload = MobilePayload.model(model);
     assertEquals(40, payload.getJSONArray("tasks").length());
     assertEquals(model.weeks[8], payload.getJSONArray("weeks").getInt(8));
@@ -233,5 +238,62 @@ public class DashboardModelTest {
     } catch (IllegalArgumentException expected) {
       assertEquals("Unexpected file format", expected.getMessage());
     }
+  }
+
+  @Test
+  public void editorPayloadRetainsUnresolvedMappingsAndPromotedParents() throws Exception {
+    JSONObject adjustments =
+        new JSONObject()
+            .put("mappings", new JSONObject().put("Missing child", "Missing root"))
+            .put("archivedParents", new JSONArray().put("Missing archive"));
+    DashboardModel model = new DashboardModel(empty().put("adjustments", adjustments), CLOCK);
+    adjustments.getJSONObject("mappings").put("Missing child", "Changed after construction");
+    JSONObject exposed = MobilePayload.model(model).getJSONObject("adjustments");
+    assertEquals("Missing root", exposed.getJSONObject("mappings").getString("Missing child"));
+    assertEquals("Missing archive", exposed.getJSONArray("archivedParents").getString(0));
+    JSONObject defaults =
+        MobilePayload.model(new DashboardModel(empty(), CLOCK)).getJSONObject("adjustments");
+    assertEquals(0, defaults.getJSONObject("mappings").length());
+    assertEquals(0, defaults.getJSONArray("archivedParents").length());
+  }
+
+  @Test
+  public void importMergesPhoneRulesAndIncomingMappingsWinConflicts() throws Exception {
+    JSONObject existing =
+        new JSONObject()
+            .put(
+                "mappings",
+                new JSONObject().put("Conflict", "Old target").put("Phone only", "Saved root"))
+            .put("archivedParents", new JSONArray().put("Phone parent").put("Shared parent"));
+    JSONObject incoming =
+        ProjectAdjustments.parse(
+            "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Conflict\":\"New"
+                + " target\",\"Missing child\":\"Missing root\"},\"archivedParents\":[\"Shared"
+                + " parent\",\"Imported parent\"]}");
+    JSONObject merged = ProjectAdjustments.merge(existing, incoming);
+    assertEquals("New target", merged.getJSONObject("mappings").getString("Conflict"));
+    assertEquals("Saved root", merged.getJSONObject("mappings").getString("Phone only"));
+    assertEquals("Missing root", merged.getJSONObject("mappings").getString("Missing child"));
+    assertEquals(3, merged.getJSONArray("archivedParents").length());
+    assertEquals("Old target", existing.getJSONObject("mappings").getString("Conflict"));
+    assertEquals(2, existing.getJSONArray("archivedParents").length());
+  }
+
+  @Test
+  public void importedMappingReplacesPhonePromotionUnlessFileAlsoPromotesIt() throws Exception {
+    JSONObject phone =
+        new JSONObject()
+            .put("mappings", new JSONObject())
+            .put("archivedParents", new JSONArray().put("Conflict").put("Unrelated"));
+    JSONObject imported =
+        ProjectAdjustments.parse(
+            "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Conflict\":\"Root\"},\"archivedParents\":[]}");
+    JSONObject merged = ProjectAdjustments.merge(phone, imported);
+    assertEquals("Root", merged.getJSONObject("mappings").getString("Conflict"));
+    assertEquals(1, merged.getJSONArray("archivedParents").length());
+    assertEquals("Unrelated", merged.getJSONArray("archivedParents").getString(0));
+    imported.getJSONArray("archivedParents").put("Conflict");
+    assertEquals(
+        2, ProjectAdjustments.merge(phone, imported).getJSONArray("archivedParents").length());
   }
 }

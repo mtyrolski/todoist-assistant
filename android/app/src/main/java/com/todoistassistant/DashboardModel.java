@@ -71,6 +71,8 @@ final class DashboardModel {
   final List<Map<String, Integer>> weeklyProjects;
   final Map<String, Integer> projectForecasts;
   final Map<String, String> projectColors;
+  final JSONObject adjustments;
+  final JSONObject plotData;
   final int forecast;
   final boolean forecastAvailable, historyAvailable;
   final String historyWarning;
@@ -95,6 +97,12 @@ final class DashboardModel {
         adjustments == null ? new JSONObject() : adjustments.optJSONObject("mappings");
     if (mappings == null) mappings = new JSONObject();
     JSONArray promoted = adjustments == null ? null : adjustments.optJSONArray("archivedParents");
+    this.adjustments =
+        new JSONObject()
+            .put("mappings", new JSONObject(mappings.toString()))
+            .put(
+                "archivedParents",
+                promoted == null ? new JSONArray() : new JSONArray(promoted.toString()));
     java.util.Set<String> promotedNames = new java.util.HashSet<>();
     if (promoted != null)
       for (int i = 0; i < promoted.length(); i++) promotedNames.add(promoted.optString(i));
@@ -244,6 +252,9 @@ final class DashboardModel {
       breakdowns.add(Collections.unmodifiableMap(sortedCounts));
     }
     weeklyProjects = Collections.unmodifiableList(breakdowns);
+    plotData =
+        PlotData.build(
+            snapshot, clock, historyAsOf, known, mappings, promotedNames, firstWeek, completed);
   }
 
   static String dateValue(Object value) {
@@ -277,7 +288,7 @@ final class DashboardModel {
     return parts.isEmpty() ? "Unknown project" : String.join(" / ", parts);
   }
 
-  private static String rootName(
+  static String rootName(
       String id,
       Map<String, JSONObject> projects,
       JSONObject mappings,
