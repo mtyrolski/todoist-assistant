@@ -38,12 +38,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
-      - run: bash scripts/build_android.sh
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+      - run: bash scripts/build_android.sh preview
+      - run: bash scripts/build_android.sh bundle
       - uses: actions/upload-artifact@v4
         with:
-          name: todoist-assistant-android-debug
-          path: dist/android/*.apk
+          name: todoist-assistant-android
+          path: dist/android/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
@@ -51,19 +52,28 @@ jobs:
           name: android-check-reports
           path: |
             android/app/build/reports/tests/
-            android/app/build/reports/lint-results-debug.*
+            android/app/build/reports/lint-results-*.*
 
   device-tests:
     name: Android ${{ matrix.api }} interaction tests
+    env:
+      ANDROID_REQUIRE_PRODUCTION_OS: ${{ matrix.target == 'google_apis_playstore' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - api: 35
+            target: google_apis
             width: 1440
             height: 3120
             density: 560
           - api: '37.0'
+            target: google_apis
+            width: 1080
+            height: 2340
+            density: 420
+          - api: 36
+            target: google_apis_playstore
             width: 1080
             height: 2340
             density: 420
@@ -82,9 +92,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
         working-directory: frontend
+      - run: npm exec -- playwright install android
+        working-directory: frontend
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -94,7 +106,7 @@ jobs:
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
-          target: google_apis
+          target: ${{ matrix.target }}
           profile: pixel_6
           ram-size: 4096M
           disable-animations: true
@@ -105,6 +117,9 @@ jobs:
             ./android/gradlew -p android --no-daemon connectedDebugAndroidTest
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             node --test frontend/tests/device/android-ui.test.cjs
+            bash scripts/build_android.sh preview
+            adb install -r dist/android/todoist-assistant-preview.apk
+            node --test frontend/tests/device/android-release.test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
