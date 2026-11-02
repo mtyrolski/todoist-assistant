@@ -151,14 +151,19 @@ public class MainActivity extends ComponentActivity {
                 .put("deadline", alert.deadline));
       }
       payload.put("preferences", new JSONObject(new Bridge().getSettings()));
-      web.evaluateJavascript(
-          "window.dispatchEvent(new CustomEvent('todoist-state',{detail:" + payload + "}))", null);
+      web.evaluateJavascript(stateEvent(payload), null);
     } catch (Exception exception) {
       web.evaluateJavascript(
           "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not open dashboard"
               + " data. Retry sync.'}))",
           null);
     }
+  }
+
+  static String stateEvent(JSONObject payload) {
+    return "window.dispatchEvent(new CustomEvent('todoist-state',{detail:JSON.parse("
+        + JSONObject.quote(payload.toString())
+        + ")}))";
   }
 
   private final class Bridge {
