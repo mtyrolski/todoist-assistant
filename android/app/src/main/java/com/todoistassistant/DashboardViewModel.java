@@ -114,6 +114,15 @@ public final class DashboardViewModel extends AndroidViewModel {
                                 request,
                                 new State(visible, false, true, false, !token.isEmpty(), message)));
                 JSONObject next = client.snapshot(snapshot, trustLegacy);
+                post(
+                    request,
+                    new State(
+                        visible,
+                        false,
+                        true,
+                        false,
+                        !token.isEmpty(),
+                        "Preparing your dashboard…"));
                 DashboardModel model = new DashboardModel(next, Clock.systemDefaultZone());
                 if (generation.get() != request || Thread.currentThread().isInterrupted()) return;
                 committing.set(true);

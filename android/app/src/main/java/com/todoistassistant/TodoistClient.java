@@ -35,7 +35,7 @@ final class TodoistClient {
     JSONArray all = new JSONArray();
     Set<String> cursors = new HashSet<>();
     String cursor = "";
-    int pages = 0;
+    progress.update(label + "…");
     do {
       if (Thread.currentThread().isInterrupted()) throw new SyncCancelledException();
       JSONObject page =
@@ -46,7 +46,7 @@ final class TodoistClient {
                   + (cursor.isEmpty() ? "" : "&cursor=" + encode(cursor)));
       JSONArray items = page.getJSONArray("results");
       for (int i = 0; i < items.length(); i++) all.put(items.getJSONObject(i));
-      progress.update(label + " · " + all.length() + " records · page " + ++pages);
+      progress.update(label + " · " + all.length() + " loaded");
       Object next = page.opt("next_cursor");
       cursor = next == null || next == JSONObject.NULL ? "" : String.valueOf(next);
       if (!cursor.isEmpty() && !cursors.add(cursor))

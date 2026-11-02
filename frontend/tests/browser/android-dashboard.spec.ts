@@ -246,3 +246,14 @@ test("privacy information and bundled licenses are readable in Control Panel", a
   await page.getByRole("button", { name: "Open-source licenses", exact: true }).click();
   await expect(page.locator("pre")).toContainText("SIL OPEN FONT LICENSE");
 });
+
+test("first sync explains the current stage and can be cancelled", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", {
+    detail: { model: null, demo: false, syncing: true, message: "Loading active tasks · 200 loaded" },
+  })));
+  const status = page.getByRole("status");
+  await expect(status).toContainText("Syncing with Todoist");
+  await expect(status).toContainText("Loading active tasks · 200 loaded");
+  await expect(status).toContainText("first sync loads about 12 weeks");
+  await expect(page.getByRole("button", { name: "Cancel sync" })).toBeVisible();
+});

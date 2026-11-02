@@ -148,7 +148,7 @@ public class TodoistClientTest {
         };
     assertEquals(2, new TodoistClient(fake, CLOCK, progress::add).list("tasks", "Tasks").length());
     assertTrue(fake.paths.get(1).contains("next+%2B%2F%26%3F"));
-    assertEquals(2, progress.size());
+    assertEquals(List.of("Tasks…", "Tasks · 1 loaded", "Tasks · 2 loaded"), progress);
   }
 
   @Test

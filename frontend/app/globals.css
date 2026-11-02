@@ -2662,6 +2662,14 @@ textarea.textInput {
 .mobileNotice {
   margin: 12px 0;
 }
+.mobileSync {
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(106, 227, 255, 0.06);
+}
 .androidPage .mobileSearch {
   margin: 0;
   flex-wrap: nowrap;

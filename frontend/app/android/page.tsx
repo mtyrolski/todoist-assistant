@@ -209,14 +209,19 @@ export default function AndroidDashboard() {
           {error}
         </p>
       )}
-      {state?.message && !state.demo && (
-        <p
-          className={`tiny ${state.syncing ? "muted" : "mobileNotice"}`}
-          role="status"
-        >
-          {state.message}
-        </p>
-      )}
+      {state?.syncing ? (
+        <div className="mobileSync" role="status" aria-live="polite">
+          <strong>Syncing with Todoist</strong>
+          <span>{state.message}</span>
+          <span className="muted tiny">
+            {model
+              ? "You can browse your saved data while syncing."
+              : "The first sync loads about 12 weeks of history and may take a few minutes."}
+          </span>
+        </div>
+      ) : state?.message && !state.demo ? (
+        <p className="tiny mobileNotice" role="status">{state.message}</p>
+      ) : null}
       {!state && !error && <p className="muted">Opening dashboard…</p>}
 
       {state && (!model || ui.tab === "Control Panel") && (
