@@ -6,17 +6,31 @@ import { LeaderboardCard } from "../components/LeaderboardCard";
 import { LoadingBar } from "../components/LoadingBar";
 import { MobileAbout } from "../components/MobileAbout";
 import { MobilePlotCard } from "../components/MobilePlotCard";
+import { PlotCard } from "../components/PlotCard";
 import { StatCard } from "../components/StatCard";
+import { DeferredPlot } from "./DeferredPlot";
+import { ProjectGrouping } from "./ProjectGrouping";
 import { PLOT_HELP } from "../lib/dashboardCopy";
 import {
   command,
   completionFigure,
   mobileSettings,
   mobileSettingsRequest,
+  mobileForecastAvailable,
   projectColor,
   weekDate,
 } from "../lib/mobile";
 import type { MobileState } from "../lib/mobile";
+import {
+  calendarCompletionFigure,
+  eventsFigure,
+  heatmapFigure,
+  hierarchyFigure,
+  lifespanFigure,
+  projectTimelineFigure,
+  taskCountsFigure,
+  weeklyPaceFigure,
+} from "../lib/mobilePlots";
 
 const TABS = ["Overview", "Projects", "Activity", "Control Panel"] as const;
 type Tab = (typeof TABS)[number];
@@ -26,6 +40,7 @@ const INITIAL_UI = {
   priority: 0,
   range: 8,
   week: 7,
+  granularity: "week" as "week" | "month" | "quarter",
 };
 
 export default function AndroidDashboard() {
@@ -34,6 +49,9 @@ export default function AndroidDashboard() {
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [persist, setPersist] = useState(false);
+  const [paceWindow, setPaceWindow] = useState(3);
+  const [lifespanAll, setLifespanAll] = useState(true);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("todoist-ui") ?? "null");
@@ -80,16 +98,25 @@ export default function AndroidDashboard() {
     () =>
       model
         ? [false, true].map((cumulative) =>
-            completionFigure(
-              model,
-              ui.range,
-              JSON.parse(eventsKey),
-              cumulative,
-            ),
+            ui.granularity === "week"
+              ? completionFigure(model, ui.range, JSON.parse(eventsKey), cumulative)
+              : calendarCompletionFigure(model, ui.range, ui.granularity, cumulative),
           )
         : [],
-    [model, ui.range, eventsKey],
+    [model, ui.range, ui.granularity, eventsKey],
   );
+  const analysis = useMemo(() => {
+    if (!model?.plotData) return null;
+    return {
+      pace: weeklyPaceFigure(model, paceWindow),
+      lifespan: lifespanFigure(model, ui.range, lifespanAll),
+      hierarchy: hierarchyFigure(model, ui.range),
+      heatmap: heatmapFigure(model, ui.range),
+      events: eventsFigure(model, ui.range),
+      taskCounts: taskCountsFigure(model, ui.range),
+      timeline: timelineOpen ? projectTimelineFigure(model, ui.range) : null,
+    };
+  }, [model, ui.range, paceWindow, lifespanAll, timelineOpen]);
   const busy = state?.loading || state?.syncing;
   const matches =
     model?.tasks.filter(
@@ -279,20 +306,12 @@ export default function AndroidDashboard() {
                 </button>
               )}
             </div>
-            {state.connected && model && !state.demo && (
-              <div className="stack">
-                <button type="button" className="button buttonSmall buttonGhost" disabled={busy}
-                  onClick={() => command("import-adjustments")}>
-                  Import project adjustments
-                </button>
-                <p className="muted tiny">Choose the JSON file exported from Project Adjustments on your computer.</p>
-              </div>
-            )}
           </form>
         </section>
       )}
       {state && ui.tab === "Control Panel" && (
         <>
+          <ProjectGrouping model={model ?? null} enabled={Boolean(state.connected && model && !state.demo)} busy={Boolean(busy)} message={state.message} />
           <DashboardSettings
             request={mobileSettingsRequest}
             onAfterMutation={() => setError("")}
@@ -338,14 +357,16 @@ export default function AndroidDashboard() {
             </section>
           </div>
           {!model.historyAvailable ? (
-            <p className="pill pill-warn">
-              Completion history unavailable. {model.historyWarning}
-            </p>
+            <>
+              <p className="pill pill-warn">Completion history unavailable. {model.historyWarning}</p>
+              {analysis && <><p className="muted tiny">Only the current active-task snapshot is available.</p><DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} /></DeferredPlot></>}
+            </>
           ) : (
             <>
               {model.historyWarning && (
                 <p className="pill pill-warn">{model.historyWarning}</p>
               )}
+              {model.plotData?.historyComplete === false && <p className="muted tiny">History is incomplete; earlier periods may change as sync continues.</p>}
               <div className="controls mobilePlotControls">
                 <label className="control">
                   <span className="muted tiny">Range</span>
@@ -363,17 +384,46 @@ export default function AndroidDashboard() {
                     <option value={0}>All history</option>
                   </select>
                 </label>
-                {model.forecastAvailable && (
+                {model.plotData?.dailyActivity.some((day) => day.projects !== undefined) && (
+                  <label className="control">
+                    <span className="muted tiny">Period</span>
+                    <select className="select" value={ui.granularity} onChange={(event) => patch({ granularity: event.target.value as typeof ui.granularity })}>
+                      <option value="week">Weekly</option>
+                      <option value="month">Monthly</option>
+                      <option value="quarter">Quarterly</option>
+                    </select>
+                  </label>
+                )}
+                {mobileForecastAvailable(model) && ui.granularity === "week" && (
                   <span className="pill pill-neutral">
                     Forecast: {model.forecast}
                   </span>
                 )}
               </div>
+              {ui.granularity !== "week" && <p className="muted tiny">Calendar periods show actual completions; the current period is still in progress.</p>}
+              {analysis && (
+                <>
+                  <div className="controls mobilePlotControls">
+                    <label className="control"><span className="muted tiny">Weekly pace comparison</span>
+                      <select className="select" value={paceWindow} onChange={(event) => setPaceWindow(Number(event.target.value))}>
+                        <option value={3}>3-week baseline</option><option value={6} disabled={model.weeks.length - 1 < 6}>Add 6-week baseline</option><option value={12} disabled={model.weeks.length - 1 < 12}>Add 12-week baseline</option><option value={24} disabled={model.weeks.length - 1 < 24}>Add 24-week baseline</option>
+                      </select>
+                    </label>
+                  </div>
+                  <DeferredPlot title="Weekly Completion Trend" height={310}><MobilePlotCard title="Weekly Completion Trend" figure={analysis.pace} height={310} help={PLOT_HELP.weeklyCompletionTrend} /></DeferredPlot>
+                  <DeferredPlot title="Task Lifespans: Time to Completion" height={310}><PlotCard title="Task Lifespans: Time to Completion" figure={analysis.lifespan} height={310} compact help={PLOT_HELP.taskLifespans} actions={
+                    <select aria-label="Task lifespan date range" className="select" value={lifespanAll ? "all" : "period"} onChange={(event) => setLifespanAll(event.target.value === "all")}>
+                      <option value="all">All time</option><option value="period">Selected period</option>
+                    </select>
+                  } /></DeferredPlot>
+                  <DeferredPlot title="Project Hierarchy" height={380}><PlotCard title="Project Hierarchy" figure={analysis.hierarchy} height={380} compact help={PLOT_HELP.activeProjectHierarchy} /></DeferredPlot>
+                </>
+              )}
               <MobilePlotCard
                 title="Completed tasks"
                 figure={figures[0]}
                 height={340}
-                help={PLOT_HELP.completedTasksPeriodically}
+                help={ui.granularity === "week" ? PLOT_HELP.completedTasksPeriodically : "Actual completed tasks per project in each calendar period. The current period is incomplete; forecasts are shown in the weekly view."}
               />
               <section className="card">
                 <header className="cardHeader">
@@ -408,6 +458,20 @@ export default function AndroidDashboard() {
                 figure={figures[1]}
                 height={320}
               />
+              {analysis && (
+                <>
+                  <p className="muted tiny">Dates and activity hours use your device time zone.</p>
+                  <DeferredPlot title="Heatmap of Events by Day and Hour" height={290}><PlotCard title="Heatmap of Events by Day and Hour" figure={analysis.heatmap} height={290} compact help={PLOT_HELP.heatmapEventsByDayHour} /></DeferredPlot>
+                  <DeferredPlot title="Events Over Time" height={310}><MobilePlotCard title="Events Over Time" figure={analysis.events} height={310} help={PLOT_HELP.eventsOverTime} /></DeferredPlot>
+                  <p className="muted tiny">Active-task history is estimated from cached activity and current tasks.</p>
+                  <DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} /></DeferredPlot>
+                  <div className="card">
+                    <div className="cardHeader"><h2>Project Timeline</h2><button type="button" className="button buttonSmall buttonGhost" onClick={() => setTimelineOpen(!timelineOpen)}>{timelineOpen ? "Hide" : "Show"}</button></div>
+                    <p className="muted tiny">Starts use the earliest known date. Where an archive date is missing, the timeline ends at the last observed activity.</p>
+                    {timelineOpen && analysis.timeline && <div style={{ maxHeight: 620, overflowY: "auto" }}><PlotCard title="Timeline" figure={analysis.timeline.figure} height={Math.max(320, analysis.timeline.rows * 26)} compact /></div>}
+                  </div>
+                </>
+              )}
             </>
           )}
         </>

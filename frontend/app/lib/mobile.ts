@@ -1,6 +1,7 @@
 import type { DashboardSettings, PlotEventSetting } from "./dashboardSettings";
 import type { PlotlyFigure } from "../components/PlotCard";
 import type { requestJson } from "./adminApi";
+import type { MobilePlotData } from "./mobilePlots";
 
 export type MobileTask = {
   id: string;
@@ -21,6 +22,8 @@ export type MobileModel = {
   forecastAvailable: boolean;
   historyAvailable: boolean;
   historyWarning: string;
+  plotData?: MobilePlotData;
+  adjustments?: { mappings: Record<string, string>; archivedParents: string[] };
   weeklyProjects: Record<string, number>[];
   projectForecasts: Record<string, number>;
   projectColors: Record<string, string>;
@@ -153,15 +156,28 @@ const COLORS: Record<string, string> = {
   taupe: "#8F7A69",
 };
 export function projectColor(model: MobileModel, name: string): string {
-  const color = model.projectColors[name];
+  const color = Object.prototype.hasOwnProperty.call(model.projectColors, name) ? model.projectColors[name] : undefined;
   return (
-    COLORS[color] ?? (/^#[\da-f]{6}$/i.test(color ?? "") ? color : "#808080")
+    (color && Object.prototype.hasOwnProperty.call(COLORS, color) ? COLORS[color] : undefined) ??
+    (typeof color === "string" && /^#[\da-f]{6}$/i.test(color) ? color : "#808080")
   );
 }
 export function weekDate(start: string, offset: number, days = 0): string {
   const date = new Date(`${start}T12:00:00`);
   date.setDate(date.getDate() + offset * 7 + days);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+export function aggregateProjectIdentity(names: string[]) {
+  let label = "All projects (project)", group = "project:All projects";
+  while (names.includes(label)) label += " (project)";
+  while (names.includes(group)) group += ":";
+  return { label, group };
+}
+export function mobileForecastAvailable(model: MobileModel): boolean {
+  if (!model.forecastAvailable) return false;
+  if (model.plotData?.historyComplete === false)
+    return Boolean(model.plotData.historyStart && model.plotData.historyStart <= weekDate(model.weekStart, -8));
+  return true;
 }
 export function completionFigure(
   model: MobileModel,
@@ -172,31 +188,40 @@ export function completionFigure(
   const current = model.weeks.length - 1;
   const dates = model.weeks.map((_, i) => weekDate(model.weekStart, i - current, 6));
   const from = range > 0 ? Math.max(0, model.weeks.length - range) : 0;
+  const coverage = model.plotData?.historyComplete === false ? model.plotData.historyStart : "";
+  const historyAsOf = model.plotData?.historyAsOf;
+  const covered = (index: number) => {
+    const start = weekDate(model.weekStart, index - current);
+    return (!coverage || start >= coverage) && (!historyAsOf || start <= historyAsOf);
+  };
   const names = [
-    ...new Set(model.weeklyProjects.slice(from).flatMap((counts) => Object.keys(counts))),
+    ...new Set(model.weeklyProjects.flatMap((counts, i) => i >= from && covered(i) ? Object.keys(counts) : [])),
   ].sort();
+  const aggregateProject = aggregateProjectIdentity(names);
   const data: unknown[] = [];
-  for (const name of ["All projects", ...names]) {
-    const total = name === "All projects";
+  for (const series of [{ name: "All projects", total: true }, ...names.map((name) => ({ name, total: false }))]) {
+    const { name, total } = series;
+    const label = !total && name === "All projects" ? aggregateProject.label : name;
     const color = total ? "#F4D35E" : projectColor(model, name);
-    let values = total
+    const raw = total
       ? model.weeks
-      : model.weeklyProjects.map((counts) => counts[name] ?? 0);
-    const actual = values[current];
+      : model.weeklyProjects.map((counts) => Object.prototype.hasOwnProperty.call(counts, name) ? counts[name] : 0);
+    let values: (number | null)[] = raw.map((value, index) => covered(index) ? value : null);
+    const actual = raw[current];
     let forecast = total
       ? model.forecast
-      : (model.projectForecasts[name] ?? actual);
+      : (Object.prototype.hasOwnProperty.call(model.projectForecasts, name) ? model.projectForecasts[name] : actual);
     if (cumulative) {
       let sum = 0;
-      values = values.map((value) => (sum += value));
-      forecast += values[current - 1];
+      values = values.map((value) => value === null ? null : (sum += value));
+      forecast += values[current - 1] ?? 0;
     }
     const group = {
-      name,
-      legendgroup: name,
+      name: label,
+      legendgroup: !total && name === "All projects" ? aggregateProject.group : name,
       line: { color, width: total ? 3 : 2 },
       marker: { color },
-      hovertemplate: `${name}<br>%{x}: %{y} tasks<extra></extra>`,
+      hovertemplate: `${label}<br>%{x}: %{y} tasks<extra></extra>`,
     };
     data.push({
       ...group,
@@ -205,7 +230,7 @@ export function completionFigure(
       mode: "lines+markers",
       type: "scatter",
     });
-    if (model.forecastAvailable)
+    if (mobileForecastAvailable(model))
       data.push({
         ...group,
         x: dates.slice(current - 1),
@@ -214,7 +239,7 @@ export function completionFigure(
         mode: "lines+markers",
         type: "scatter",
         line: { color, width: total ? 3 : 2, dash: "dash" },
-        hovertemplate: `${name}<br>Forecast: %{y} tasks<extra></extra>`,
+        hovertemplate: `${label}<br>Forecast: %{y} tasks<extra></extra>`,
       });
     data.push({
       ...group,
@@ -229,7 +254,7 @@ export function completionFigure(
         symbol: "circle-open",
         line: { color, width: 2 },
       },
-      hovertemplate: `${name}<br>So far: %{y} tasks<extra></extra>`,
+      hovertemplate: `${label}<br>So far: %{y} tasks<extra></extra>`,
     });
   }
   return {

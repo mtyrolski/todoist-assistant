@@ -103,9 +103,67 @@ test.beforeEach(async ({ page }) => {
       model.weeklyProjects.unshift(...Array.from({ length: 20 }, () => ({ Work: 6, Personal: 4, Historic: 1 })));
       send();
     });
+    window.addEventListener("test-analysis", () => {
+      const makeDay = (date: string, completed: number, added: number) => ({
+        date, effectiveCompletions: completed,
+        counts: { added, completed, uncompleted: 0, updated: 0, deleted: 0, rescheduled: 0 },
+        projects: { Work: completed },
+        hours: Array.from({ length: 24 }, (_, hour) => hour === 10 ? added + completed : 0),
+      });
+      const plotData = {
+        historyComplete: true, historyStart: "2026-09-01", historyAsOf: "2026-11-02",
+        dailyActivity: [makeDay("2026-09-30", 2, 7), makeDay("2026-10-01", 4, 0), makeDay("2026-10-12", 1, 7), makeDay("2026-10-19", 1, 0), makeDay("2026-10-26", 1, 0), makeDay("2026-11-02", 3, 0)],
+        lifespans: [{ completedAt: "2026-10-01", seconds: 60 }, { completedAt: "2026-10-02", seconds: 86400 }],
+        hierarchy: [
+          { id: "work", name: "Work", parentId: "", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-01", lastEventAt: "2026-11-02", archivedAt: "", weeklyCounts: { 7: 10, 8: 3 } },
+          { id: "old", name: "Reopened", parentId: "work", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-01", lastEventAt: "2026-10-01", archivedAt: "2025-01-01", weeklyCounts: { 7: 1 } },
+          { id: "old-two", name: "Reopened", parentId: "work", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-02", lastEventAt: "2026-10-01", archivedAt: "", weeklyCounts: { 7: 1 } },
+        ],
+        taskCounts: [{ date: "2026-11-01", total: 2, p1: 1, p2: 1, p3: 0, p4: 0 }, { date: "2026-11-02", total: 3, p1: 2, p2: 1, p3: 0, p4: 0 }],
+      };
+      (model as typeof model & { plotData: typeof plotData }).plotData = plotData;
+      send();
+    });
+    window.addEventListener("test-history-gap", () => {
+      const data = (model as typeof model & { plotData: { historyComplete: boolean; historyStart: string; historyAsOf: string } }).plotData;
+      data.historyComplete = false;
+      data.historyStart = "2026-10-10";
+      data.historyAsOf = "2026-10-20";
+      send();
+    });
+    window.addEventListener("test-history-stale", () => {
+      const data = (model as typeof model & { plotData: { historyComplete: boolean; historyAsOf: string } }).plotData;
+      data.historyComplete = true;
+      data.historyAsOf = "2026-10-10";
+      send();
+    });
+    window.addEventListener("test-special-names", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { dailyActivity: { date: string; effectiveCompletions: number; projects: Record<string, number>; counts: Record<string, number>; hours: number[] }[] } }).plotData;
+      data.dailyActivity = [
+        { date: "2026-10-01", effectiveCompletions: 7, projects: JSON.parse('{"constructor":2,"__proto__":1,"All projects":4}'), counts: { completed: 7 }, hours: Array(24).fill(0) },
+        { date: "2026-11-02", effectiveCompletions: 3, projects: { Work: 3 }, counts: { completed: 3 }, hours: Array(24).fill(0) },
+      ];
+      model.weeklyProjects[7] = JSON.parse('{"constructor":2,"__proto__":1,"All projects":4}');
+      model.weeks[7] = 7;
+      model.weeklyProjects[8] = { Work: 3, Personal: 0 };
+      model.weeks[8] = 3;
+      send();
+    });
+    window.addEventListener("test-grouping-account", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { hierarchy: Record<string, unknown>[] }; adjustments: unknown });
+      for (const id of ["one", "two"]) data.plotData.hierarchy.push({ id, name: "Old", rootName: "Work", parentId: "", archived: true, createdAt: "2026-09-01", lastEventAt: "2026-10-01", archivedAt: "2026-10-01", weeklyCounts: {} });
+      data.plotData.hierarchy.push({ id: "life", name: "Personal", rootName: "Personal", parentId: "", archived: false, createdAt: "2026-09-01", lastEventAt: "2026-10-01", archivedAt: "", weeklyCounts: {} });
+      data.adjustments = { mappings: { Old: "Work", Missing: "Gone", Conflict: "Other" }, archivedParents: ["Legacy", "Conflict"] };
+      state.demo = false;
+      state.connected = true;
+      state.model = model;
+      send();
+    });
     window.Todoist = {
       ready: send,
-      command: (name: string) => {
+      command: (name: string, argument: string) => {
         if (name === "demo") {
           state.demo = true;
           state.model = model;
@@ -116,6 +174,13 @@ test.beforeEach(async ({ page }) => {
           state.model = null;
           sessionStorage.removeItem("test-demo");
         }
+        if (name === "save-adjustments" && state.model) {
+          const { mappings, archivedParents } = JSON.parse(argument);
+          (model as typeof model & { adjustments: unknown }).adjustments = { mappings, archivedParents };
+          sessionStorage.setItem("test-saved-adjustments", JSON.stringify({ mappings, archivedParents }));
+          state.message = "Project adjustments saved.";
+        }
+        if (name === "import-adjustments") sessionStorage.setItem("test-import-requested", "yes");
         send();
       },
       getSettings: () => JSON.stringify(state.preferences),
@@ -279,4 +344,112 @@ test("all history is selectable without changing the current week", async ({ pag
   );
   expect(values[0][0]).toBe(10);
   expect(values[2][0]).toBe(3);
+});
+
+test("mobile exposes desktop plots with calendar-accurate totals and respects partial coverage", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  for (const title of ["Weekly Completion Trend", "Task Lifespans: Time to Completion", "Project Hierarchy", "Heatmap of Events by Day and Hour", "Events Over Time", "Active Tasks by Priority"]) {
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  }
+  const section = (title: string) => page.locator("section.card").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+  await expect(section("Events Over Time").locator(".js-plotly-plot")).toHaveCount(0);
+  await section("Events Over Time").scrollIntoViewIfNeeded();
+  const events = section("Events Over Time").locator(".js-plotly-plot");
+  await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { y: number[] }[] }).data[0].y[0])).toBe(7);
+  for (const size of [{ width: 412, height: 915 }, { width: 915, height: 412 }]) {
+    await page.setViewportSize(size);
+    await section("Events Over Time").scrollIntoViewIfNeeded();
+    await expect(events).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(size.width);
+    const info = section("Events Over Time").getByRole("button", { name: "About Events Over Time" });
+    await info.focus();
+    const tooltip = section("Events Over Time").getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+    const bounds = await tooltip.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(size.width);
+    await info.press("Escape");
+  }
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.getByRole("combobox", { name: "Period", exact: true }).selectOption("month");
+  const completed = section("Completed tasks").locator(".js-plotly-plot");
+  await expect.poll(() => completed.evaluate((node) => (node as HTMLElement & { data: { y: number[] }[] }).data[0].y)).toEqual([2, 7, 3]);
+  await expect(page.getByText("Calendar periods show actual completions; the current period is still in progress.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Period", exact: true }).selectOption("quarter");
+  await expect.poll(() => completed.evaluate((node) => (node as HTMLElement & { data: { y: number[] }[] }).data[0].y)).toEqual([2, 10]);
+  await page.getByRole("button", { name: "Show", exact: true }).click();
+  const timeline = section("Timeline").locator(".js-plotly-plot");
+  await expect(timeline).toBeVisible();
+  await expect.poll(() => timeline.evaluate((node) => (node as HTMLElement & { data: { y: string[] }[] }).data[0].y.filter((name) => name.includes("Reopened")))).toEqual(["Work / Reopened", "Work / Reopened (2)"]);
+  await page.evaluate(() => window.dispatchEvent(new Event("test-history-gap")));
+  await expect(page.getByText("History is incomplete; earlier periods may change as sync continues.")).toBeVisible();
+  await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[]; y: number[] }[] }).data[0].x[0])).toBe("2026-10-12");
+  await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[]; y: number[] }[] }).data[0].y[0])).toBe(7);
+  await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[] }[] }).data[0].x.at(-1))).toBe("2026-10-20");
+  await page.evaluate(() => window.dispatchEvent(new Event("test-history-stale")));
+  await page.getByRole("combobox", { name: "Range", exact: true }).selectOption("4");
+  await page.getByRole("combobox", { name: "Period", exact: true }).selectOption("month");
+  await expect.poll(() => completed.evaluate((node) => (node as HTMLElement & { data: unknown[] }).data.length)).toBe(0);
+});
+
+test("project groupings can be edited, promoted, imported, and kept when names are missing", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-account")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByLabel("Find an archived project").fill("Old");
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
+  await expect(manager.getByText(/2 projects share this name/)).toBeVisible();
+  await manager.getByLabel("Group under").selectOption("Personal");
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings)).toEqual({ Old: "Personal", Missing: "Gone", Conflict: "Other" });
+  await manager.getByRole("button", { name: "Make its own group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").archivedParents)).toEqual(["Legacy", "Conflict", "Old"]);
+  await manager.getByRole("button", { name: "Use automatic grouping" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").archivedParents)).toEqual(["Legacy", "Conflict"]);
+  await manager.getByLabel("Find an archived project").fill("");
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Missing");
+  await expect(manager.getByText(/not in the current project list/)).toBeVisible();
+  await expect(manager.getByLabel("Group under")).toHaveValue("Gone");
+  await manager.getByText("Saved groupings", { exact: false }).click();
+  await expect(manager.getByText("Conflict → Other (own group takes priority when archived)")).toBeVisible();
+  await manager.getByRole("button", { name: "Remove own group for Legacy" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").archivedParents)).toEqual(["Conflict"]);
+  await manager.getByText("Project not listed?").click();
+  await manager.getByLabel("Project name", { exact: true }).fill("Reopened");
+  await manager.getByRole("button", { name: "Use project name" }).click();
+  await expect(manager.getByText(/active subproject follows its Todoist parent/)).toBeVisible();
+  await manager.getByLabel("Group under").selectOption("Personal");
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  await expect(manager.getByRole("button", { name: "Make its own group" })).toBeDisabled();
+  await manager.getByLabel("Project name", { exact: true }).fill("Absent archive");
+  await manager.getByRole("button", { name: "Use project name" }).click();
+  await manager.getByText("Group not listed?").click();
+  await manager.getByLabel("Group name", { exact: true }).fill("Absent group");
+  await manager.getByRole("button", { name: "Use group name" }).click();
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings["Absent archive"])).toBe("Absent group");
+  await manager.getByLabel("Project name", { exact: true }).fill("__proto__");
+  await manager.getByRole("button", { name: "Use project name" }).click();
+  await manager.getByLabel("Group under").selectOption("Personal");
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings["__proto__"])).toBe("Personal");
+  await manager.getByText("Import groupings from your computer").click();
+  await expect(manager.getByText(/file rules win when both places define the same project/)).toBeVisible();
+  await manager.getByRole("button", { name: "Choose desktop export" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("test-import-requested"))).toBe("yes");
+});
+
+test("project names do not collide with JavaScript properties or the aggregate", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-special-names")));
+  const section = page.locator("section.card").filter({ has: page.getByRole("heading", { name: "Completed tasks", exact: true }) });
+  const chart = section.locator(".js-plotly-plot");
+  const traces = () => chart.evaluate((node) => (node as HTMLElement & { data: { name: string; legendgroup: string; y: number[]; showlegend?: boolean }[] }).data);
+  await expect.poll(async () => (await traces()).filter((trace) => trace.legendgroup === "All projects").length).toBe(3);
+  await expect.poll(async () => (await traces()).filter((trace) => trace.legendgroup === "project:All projects").length).toBe(3);
+  expect((await traces()).find((trace) => trace.legendgroup === "project:All projects")!.name).toBe("All projects (project)");
+  await page.getByRole("combobox", { name: "Period", exact: true }).selectOption("month");
+  await expect.poll(async () => (await traces()).find((trace) => trace.legendgroup === "All projects")?.y).toEqual([7, 3]);
+  expect((await traces()).find((trace) => trace.legendgroup === "project:All projects")?.y).toEqual([4, 0]);
+  expect((await traces()).find((trace) => trace.legendgroup === "constructor")?.y).toEqual([2, 0]);
+  expect((await traces()).find((trace) => trace.legendgroup === "__proto__")?.y).toEqual([1, 0]);
 });

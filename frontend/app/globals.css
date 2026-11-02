@@ -2609,9 +2609,28 @@ textarea.textInput {
   );
 }
 .androidPage .cardHeader {
+  position: relative;
   flex-wrap: wrap;
   gap: 12px;
 }
+.androidPage .statTop { position: relative; }
+.androidPage .infoTipPanel { visibility: hidden; }
+.androidPage .infoTipWrap:hover .infoTipPanel,
+.androidPage .infoTipWrap:focus-within .infoTipPanel { visibility: visible; }
+.androidPage .cardHeader .infoTipWrap,
+.androidPage .statTop .infoTipWrap { position: static; }
+.androidPage .cardHeader .infoTipPanel,
+.androidPage .statTop .infoTipPanel {
+  left: 0;
+  right: 0;
+  width: auto;
+  transform: translateY(6px);
+  overflow-wrap: anywhere;
+}
+.androidPage .cardHeader .infoTipWrap:hover .infoTipPanel,
+.androidPage .cardHeader .infoTipWrap:focus-within .infoTipPanel,
+.androidPage .statTop .infoTipWrap:hover .infoTipPanel,
+.androidPage .statTop .infoTipWrap:focus-within .infoTipPanel { transform: translateY(0); }
 .androidPage .cardHeader .select {
   max-width: 200px;
 }
