@@ -259,7 +259,7 @@ public class TodoistClientTest {
   }
 
   @Test
-  public void archiveEventRecoversParentAndRejectsCycles() throws Exception {
+  public void archiveEventProjectContextIsNotTreatedAsAParentLink() throws Exception {
     JSONObject root = new JSONObject().put("id", "root").put("name", "Root");
     JSONObject child = new JSONObject().put("id", "child").put("name", "Child");
     JSONObject archivedEvent =
@@ -289,13 +289,54 @@ public class TodoistClientTest {
         };
     JSONObject next =
         new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+    assertEquals("", TodoistClient.parentId(next.getJSONArray("knownProjects").getJSONObject(0)));
+    assertEquals(1, new DashboardModel(next, CLOCK).weeklyProjects.get(8).get("Child").intValue());
+  }
+
+  @Test
+  public void reopeningAfterPreviousSyncInvalidatesOldArchivedParent() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Root");
+    JSONObject previousChild =
+        new JSONObject()
+            .put("id", "child")
+            .put("name", "Child")
+            .put("is_archived", true)
+            .put("parent_id", "root");
+    JSONObject before =
+        baseline()
+            .put("syncedAt", "2026-10-31T00:00:00Z")
+            .put("activitySyncedAt", "2026-10-28T00:00:00Z")
+            .put("activities", new JSONArray())
+            .put("knownProjects", new JSONArray().put(root).put(previousChild));
+    JSONObject reopened =
+        new JSONObject()
+            .put("id", "reopened")
+            .put("object_type", "project")
+            .put("object_id", "child")
+            .put("event_type", "unarchived")
+            .put("event_date", "2026-10-30T10:00:00Z");
+    JSONObject archived = new JSONObject().put("id", "child").put("name", "Child");
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("projects/archived"))
+              return page(new JSONArray().put(archived), JSONObject.NULL);
+            if (path.startsWith("projects?"))
+              return page(new JSONArray().put(root), JSONObject.NULL);
+            if (path.startsWith("activities"))
+              return page(new JSONArray().put(reopened), JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    JSONObject next = new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false);
+    assertEquals("", TodoistClient.parentId(next.getJSONArray("knownProjects").getJSONObject(1)));
+    assertEquals("root", previousChild.getString("parent_id"));
+    archived.put("parent_id", "root");
+    JSONObject authoritative =
+        new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false);
     assertEquals(
-        "root", next.getJSONArray("knownProjects").getJSONObject(0).getString("parent_id"));
-    assertEquals(1, new DashboardModel(next, CLOCK).weeklyProjects.get(8).get("Root").intValue());
-    root.put("parent_id", "child");
-    JSONObject cyclic =
-        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
-    assertEquals(
-        "", cyclic.getJSONArray("knownProjects").getJSONObject(0).optString("parent_id", ""));
+        "root",
+        TodoistClient.parentId(authoritative.getJSONArray("knownProjects").getJSONObject(1)));
   }
 }

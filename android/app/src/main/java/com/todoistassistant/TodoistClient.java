@@ -132,7 +132,7 @@ final class TodoistClient {
           "Activity access is unavailable for this account. Tasks and projects are saved; completion history was not refreshed.");
     }
     data.put("activities", new JSONArray(merged.values()));
-    recoverArchivedParents(known, merged.values());
+    discardReopenedParents(known, archived, baseline, merged.values());
     data.put("knownProjects", known);
     data.put("historyStart", baseline.optString("historyStart", since.toString()));
     // The API range ended at 'started', not at the later time the last page arrived.
@@ -171,36 +171,31 @@ final class TodoistClient {
     return parent.isEmpty() ? project.optString("v2_parent_id", "") : parent;
   }
 
-  private static void recoverArchivedParents(JSONArray projects, Iterable<JSONObject> events)
+  private static void discardReopenedParents(
+      JSONArray projects, JSONArray archived, JSONObject baseline, Iterable<JSONObject> events)
       throws Exception {
-    Map<String, JSONObject> byId = new LinkedHashMap<>();
-    Map<String, JSONObject> latest = new LinkedHashMap<>();
+    String lastSync = baseline.optString("activitySyncedAt", baseline.optString("syncedAt", ""));
+    if (lastSync.isEmpty()) return;
+    Instant cutoff = Instant.parse(lastSync);
+    Set<String> currentParents = new HashSet<>(), reopened = new HashSet<>();
+    for (int i = 0; i < archived.length(); i++) {
+      JSONObject project = archived.getJSONObject(i);
+      if (!parentId(project).isEmpty()) currentParents.add(project.getString("id"));
+    }
+    for (JSONObject event : events)
+      if (event.optString("object_type").equals("project")
+          && event.optString("event_type").equals("unarchived")
+          && Instant.parse(event.getString("event_date")).isAfter(cutoff))
+        reopened.add(event.optString("object_id"));
     for (int i = 0; i < projects.length(); i++) {
       JSONObject project = projects.getJSONObject(i);
-      byId.put(project.getString("id"), project);
-    }
-    for (JSONObject event : events) {
-      if (!event.optString("object_type").equals("project")) continue;
-      String id = event.optString("object_id");
-      JSONObject previous = latest.get(id);
-      if (previous == null
-          || Instant.parse(event.getString("event_date"))
-              .isAfter(Instant.parse(previous.getString("event_date")))) latest.put(id, event);
-    }
-    for (var entry : latest.entrySet()) {
-      JSONObject project = byId.get(entry.getKey()), event = entry.getValue();
-      String parent = event.optString("parent_project_id", "");
-      if (project == null
-          || !project.optBoolean("is_archived")
-          || !parentId(project).isEmpty()
-          || !event.optString("event_type").equals("archived")
-          || !byId.containsKey(parent)) continue;
-      Set<String> visited = new HashSet<>();
-      visited.add(entry.getKey());
-      String current = parent;
-      while (!current.isEmpty() && visited.add(current) && byId.containsKey(current))
-        current = parentId(byId.get(current));
-      if (current.isEmpty() || !byId.containsKey(current)) project.put("parent_id", parent);
+      String id = project.optString("id");
+      if (project.optBoolean("is_archived")
+          && reopened.contains(id)
+          && !currentParents.contains(id)) {
+        project.remove("parent_id");
+        project.remove("v2_parent_id");
+      }
     }
   }
 
