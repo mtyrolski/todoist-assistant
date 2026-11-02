@@ -4,10 +4,8 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZonedDateTime;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,6 +17,10 @@ import org.json.JSONObject;
 final class TodoistClient {
   interface Progress {
     void update(String message);
+  }
+
+  interface Checkpoint {
+    void save(JSONObject snapshot) throws Exception;
   }
 
   private final ApiTransport transport;
@@ -42,7 +44,7 @@ final class TodoistClient {
           transport.get(
               path
                   + (path.contains("?") ? "&" : "?")
-                  + "limit=100"
+                  + (path.startsWith("activities?") ? "limit=200" : "limit=100")
                   + (cursor.isEmpty() ? "" : "&cursor=" + encode(cursor)));
       JSONArray items = page.getJSONArray("results");
       for (int i = 0; i < items.length(); i++) all.put(items.getJSONObject(i));
@@ -56,6 +58,11 @@ final class TodoistClient {
   }
 
   JSONObject snapshot(JSONObject previous, boolean trustLegacyOwner) throws Exception {
+    return snapshot(previous, trustLegacyOwner, ignored -> {});
+  }
+
+  JSONObject snapshot(JSONObject previous, boolean trustLegacyOwner, Checkpoint checkpoint)
+      throws Exception {
     Instant started = clock.instant();
     progress.update("Checking your account…");
     JSONObject user = transport.get("user");
@@ -87,58 +94,93 @@ final class TodoistClient {
     }
     data.put("projectNamesSyncedAt", namesSynced);
     JSONArray known = knownProjects(baseline, archived, data.getJSONArray("projects"));
+    data.put("knownProjects", known);
+    data.put("syncedAt", started.toString());
+    data.put("schemaVersion", 2);
     Map<String, JSONObject> merged = new LinkedHashMap<>();
-    Instant since =
-        ZonedDateTime.now(clock)
-            .minusWeeks(12)
-            .with(DayOfWeek.MONDAY)
-            .toLocalDate()
-            .atStartOfDay(clock.getZone())
-            .toInstant();
     JSONArray cached = baseline.optJSONArray("activities");
-    Instant newest = null;
     if (cached != null)
       for (int i = 0; i < cached.length(); i++) {
         JSONObject item = cached.getJSONObject(i);
-        Instant time = Instant.parse(item.getString("event_date"));
-        merged.put(item.getString("id"), item);
-        if (!time.isAfter(started) && (newest == null || time.isAfter(newest))) newest = time;
-      }
-    if (newest != null) since = newest.minus(Duration.ofDays(1));
-    try {
-      JSONArray fetched =
-          list(
-              "activities?date_from="
-                  + encode(since.toString())
-                  + "&date_to="
-                  + encode(started.toString()),
-              "Syncing activity");
-      for (int i = 0; i < fetched.length(); i++) {
-        JSONObject item = fetched.getJSONObject(i);
         Instant.parse(item.getString("event_date"));
         merged.put(item.getString("id"), item);
       }
+    Instant joined = parseInstant(user.optString("joined_at"), Instant.EPOCH);
+    if (joined.isAfter(started)) joined = started;
+    Instant historyStart = parseInstant(baseline.optString("historyStart"), started);
+    if (historyStart.isAfter(started)) historyStart = started;
+    Instant activitySyncedAt =
+        parseInstant(
+            baseline.optString("activitySyncedAt", baseline.optString("syncedAt")), started);
+    boolean complete = baseline.optBoolean("historyComplete");
+    boolean fetchedActivity = false;
+    try {
+      if (baseline.has("syncedAt")) {
+        Instant recentStart = activitySyncedAt.minus(Duration.ofDays(1));
+        fetchActivity(merged, recentStart, started, "Updating recent activity");
+        fetchedActivity = true;
+      }
+      activitySyncedAt = started;
       data.put("activitySyncedAt", started.toString());
+      while (!complete && historyStart.isAfter(joined)) {
+        Instant from = historyStart.minus(Duration.ofDays(180));
+        if (from.isBefore(joined)) from = joined;
+        fetchActivity(
+            merged, from, historyStart, "Loading history from " + from.toString().substring(0, 10));
+        fetchedActivity = true;
+        historyStart = from;
+        complete = !historyStart.isAfter(joined);
+        data.put("historyStart", historyStart.toString());
+        data.put("historyComplete", complete);
+        data.put("activities", new JSONArray(merged.values()));
+        discardReopenedParents(known, archived, baseline, merged.values());
+        checkpoint.save(data);
+      }
+      if (!complete) complete = true;
     } catch (DataAccessException unavailable) {
-      data.put(
-          "activitySyncedAt",
-          baseline.optString(
-              "activitySyncedAt", baseline.optString("syncedAt", started.toString())));
+      data.put("activitySyncedAt", activitySyncedAt.toString());
       data.put(
           "activityUnavailable",
-          !baseline.has("syncedAt") || baseline.optBoolean("activityUnavailable"));
+          !fetchedActivity
+              && (!baseline.has("syncedAt") || baseline.optBoolean("activityUnavailable")));
       data.put(
           "activityWarning",
           "Activity access is unavailable for this account. Tasks and projects are saved; completion history was not refreshed.");
     }
     data.put("activities", new JSONArray(merged.values()));
     discardReopenedParents(known, archived, baseline, merged.values());
-    data.put("knownProjects", known);
-    data.put("historyStart", baseline.optString("historyStart", since.toString()));
-    // The API range ended at 'started', not at the later time the last page arrived.
-    data.put("syncedAt", started.toString());
-    data.put("schemaVersion", 2);
+    data.put("historyStart", historyStart.toString());
+    data.put("historyComplete", complete);
     return data;
+  }
+
+  private void fetchActivity(Map<String, JSONObject> merged, Instant from, Instant to, String label)
+      throws Exception {
+    while (to.isAfter(from)) {
+      Instant start = to.minus(Duration.ofDays(365));
+      if (start.isBefore(from)) start = from;
+      JSONArray fetched =
+          list(
+              "activities?date_from="
+                  + encode(start.toString())
+                  + "&date_to="
+                  + encode(to.toString()),
+              label);
+      for (int i = 0; i < fetched.length(); i++) {
+        JSONObject item = fetched.getJSONObject(i);
+        Instant.parse(item.getString("event_date"));
+        merged.put(item.getString("id"), item);
+      }
+      to = start;
+    }
+  }
+
+  private static Instant parseInstant(String value, Instant fallback) {
+    try {
+      return Instant.parse(value);
+    } catch (Exception invalid) {
+      return fallback;
+    }
   }
 
   private static JSONArray knownProjects(JSONObject baseline, JSONArray archived, JSONArray current)

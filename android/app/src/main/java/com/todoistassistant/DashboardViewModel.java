@@ -114,7 +114,34 @@ public final class DashboardViewModel extends AndroidViewModel {
                             post(
                                 request,
                                 new State(visible, false, true, false, !token.isEmpty(), message)));
-                JSONObject next = client.snapshot(snapshot, trustLegacy);
+                JSONObject next =
+                    client.snapshot(
+                        snapshot,
+                        trustLegacy,
+                        partial -> {
+                          String owner = snapshot.optString("userId");
+                          if (snapshot.has("syncedAt")
+                              && !(owner.equals(partial.optString("userId"))
+                                  || (owner.isEmpty() && trustLegacy))) return;
+                          if (generation.get() != request || Thread.currentThread().isInterrupted())
+                            throw new SyncCancelledException();
+                          committing.set(true);
+                          try {
+                            if (generation.get() != request) throw new SyncCancelledException();
+                            JSONObject saved = new JSONObject(partial.toString());
+                            store.save(
+                                saved,
+                                requestedToken,
+                                () -> {
+                                  if (!requestedToken.equals(token)) tokens.save(requestedToken);
+                                });
+                            token = requestedToken;
+                            snapshot = saved;
+                            savedModel = new DashboardModel(saved, Clock.systemDefaultZone());
+                          } finally {
+                            committing.set(false);
+                          }
+                        });
                 post(
                     request,
                     new State(
@@ -161,7 +188,12 @@ public final class DashboardViewModel extends AndroidViewModel {
                   post(
                       request,
                       new State(
-                          visible, false, false, false, !token.isEmpty(), errorMessage(exception)));
+                          savedModel == null ? visible : savedModel,
+                          false,
+                          false,
+                          false,
+                          !token.isEmpty(),
+                          errorMessage(exception)));
               } finally {
                 if (transport == active) transport = null;
               }
@@ -177,7 +209,7 @@ public final class DashboardViewModel extends AndroidViewModel {
     if (task != null) task.cancel(true);
     state.setValue(
         new State(
-            current.model,
+            savedModel == null ? current.model : savedModel,
             false,
             false,
             false,

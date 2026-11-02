@@ -37,7 +37,8 @@ public class TodoistClientTest {
     @Override
     public JSONObject get(String path) throws Exception {
       paths.add(path);
-      if (path.equals("user")) return new JSONObject().put("id", user);
+      if (path.equals("user"))
+        return new JSONObject().put("id", user).put("joined_at", "2026-08-01T00:00:00Z");
       if (path.startsWith("activities")) {
         if (failActivity) throw new IOException("offline");
         return page(new JSONArray().put(event("new", "2026-11-01T10:00:00Z")), JSONObject.NULL);
@@ -52,6 +53,9 @@ public class TodoistClientTest {
   private static JSONObject baseline() throws Exception {
     return new JSONObject()
         .put("userId", "owner")
+        .put("syncedAt", "2026-10-31T12:00:00Z")
+        .put("activitySyncedAt", "2026-10-31T12:00:00Z")
+        .put("historyComplete", true)
         .put("historyStart", "2025-01-01T00:00:00Z")
         .put("activities", new JSONArray().put(event("old", "2026-10-31T12:00:00Z")));
   }
@@ -165,6 +169,91 @@ public class TodoistClientTest {
     assertEquals(2, new TodoistClient(fake, CLOCK, progress::add).list("tasks", "Tasks").length());
     assertTrue(fake.paths.get(1).contains("next+%2B%2F%26%3F"));
     assertEquals(List.of("Tasks…", "Tasks · 1 loaded", "Tasks · 2 loaded"), progress);
+  }
+
+  @Test
+  public void fullHistoryContinuesFromSavedCheckpointAfterFailure() throws Exception {
+    List<JSONObject> checkpoints = new ArrayList<>();
+    Fake fake =
+        new Fake() {
+          boolean interrupted;
+
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", "2025-05-10T12:00:00Z");
+            if (path.startsWith("activities")) {
+              paths.add(path);
+              if (path.contains("date_from=2025-11-06T12%3A00%3A00Z") && !interrupted) {
+                interrupted = true;
+                throw new IOException("offline");
+              }
+              if (path.contains("date_from=2025-05-10T12%3A00%3A00Z"))
+                return page(
+                    new JSONArray().put(event("oldest", "2025-06-01T00:00:00Z")), JSONObject.NULL);
+              if (path.contains("date_from=2025-11-06T12%3A00%3A00Z"))
+                return page(
+                    new JSONArray().put(event("middle", "2026-01-01T00:00:00Z")), JSONObject.NULL);
+              return page(
+                  new JSONArray().put(event("recent", "2026-09-01T00:00:00Z")), JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    TodoistClient client = new TodoistClient(fake, CLOCK, message -> {});
+    try {
+      client.snapshot(
+          new JSONObject(), false, data -> checkpoints.add(new JSONObject(data.toString())));
+      fail("Expected history download to be interrupted");
+    } catch (IOException expected) {
+      assertEquals("offline", expected.getMessage());
+    }
+    assertEquals(1, checkpoints.size());
+    JSONObject partial = checkpoints.get(0);
+    assertFalse(partial.getBoolean("historyComplete"));
+    assertEquals("2026-05-05T12:00:00Z", partial.getString("historyStart"));
+    assertEquals(1, partial.getJSONArray("activities").length());
+
+    JSONObject resumed = client.snapshot(partial, false);
+    assertTrue(resumed.getBoolean("historyComplete"));
+    assertEquals("2025-05-10T12:00:00Z", resumed.getString("historyStart"));
+    assertEquals(3, resumed.getJSONArray("activities").length());
+  }
+
+  @Test
+  public void existingTwelveWeekSnapshotBackfillsOlderHistory() throws Exception {
+    JSONObject old = baseline().put("historyStart", "2026-08-10T00:00:00Z");
+    old.remove("historyComplete");
+    Fake fake = new Fake();
+    JSONObject next = new TodoistClient(fake, CLOCK, message -> {}).snapshot(old, false);
+    assertTrue(next.getBoolean("historyComplete"));
+    assertEquals("2026-08-01T00:00:00Z", next.getString("historyStart"));
+    assertTrue(fake.paths.stream().anyMatch(path -> path.contains("2026-08-01T00%3A00%3A00Z")));
+  }
+
+  @Test
+  public void emptyWindowsDoNotHideOlderHistory() throws Exception {
+    Fake fake =
+        new Fake() {
+          int windows;
+
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", "2024-01-01T00:00:00Z");
+            if (path.startsWith("activities")) {
+              windows++;
+              JSONArray events = new JSONArray();
+              if (windows == 5) events.put(event("old", "2024-09-01T00:00:00Z"));
+              return page(events, JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    JSONObject next =
+        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+    assertTrue(next.getBoolean("historyComplete"));
+    assertEquals("old", next.getJSONArray("activities").getJSONObject(0).getString("id"));
   }
 
   @Test

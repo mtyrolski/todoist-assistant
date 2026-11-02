@@ -59,11 +59,14 @@ public class SyncLifecycleTest {
   private static class Fake implements ApiTransport {
     final CountDownLatch fetching = new CountDownLatch(1), release = new CountDownLatch(1);
     final AtomicBoolean cancelled = new AtomicBoolean();
-    boolean block;
+    volatile boolean block;
 
     @Override
     public JSONObject get(String path) throws Exception {
-      if (path.equals("user")) return new JSONObject().put("id", "test-owner");
+      if (path.equals("user"))
+        return new JSONObject()
+            .put("id", "test-owner")
+            .put("joined_at", java.time.Instant.now().minusSeconds(800L * 86400).toString());
       if (path.startsWith("activities")) {
         fetching.countDown();
         if (block) release.await(10, TimeUnit.SECONDS);
@@ -91,6 +94,31 @@ public class SyncLifecycleTest {
     assertFalse(state.get().syncing);
     assertEquals("", new TokenStore(context).load());
     assertFalse(context.getFileStreamPath("dashboard-v1.json").exists());
+  }
+
+  @Test
+  public void cancellationAfterACompletedWindowKeepsThatHistoryOnDevice() throws Exception {
+    Fake fake =
+        new Fake() {
+          int activityRequests;
+
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("activities") && ++activityRequests == 2) block = true;
+            return super.get(path);
+          }
+        };
+    start(fake);
+    InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("fake-test-token"));
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+    while (!fake.block && System.nanoTime() < deadline) Thread.sleep(20);
+    assertTrue(fake.block);
+    InstrumentationRegistry.getInstrumentation().runOnMainSync(model::cancelSync);
+    JSONObject saved = new SnapshotStore(context).load("fake-test-token");
+    assertFalse(saved.getBoolean("historyComplete"));
+    assertEquals("test-owner", saved.getString("userId"));
+    assertEquals("fake-test-token", new TokenStore(context).load());
+    assertNotNull(state.get().model);
   }
 
   @Test
