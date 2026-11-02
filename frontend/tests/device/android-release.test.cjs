@@ -47,13 +47,39 @@ async function tap(selector) {
   await wait(selector);
   await device.tap(selector);
 }
+async function swipePage(direction) {
+  const { bounds } = await device.info({ clazz: "android.webkit.WebView", pkg });
+  const x = Math.round(bounds.x + bounds.width * 0.95);
+  const top = Math.round(bounds.y + bounds.height * 0.24);
+  const bottom = Math.round(bounds.y + bounds.height * 0.84);
+  await device.input.swipe(
+    { x, y: direction === "down" ? bottom : top },
+    [{ x, y: direction === "down" ? top : bottom }],
+    80,
+  );
+}
+async function scrollTo(label) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if ((await info(text(label)))?.enabled) return;
+    await swipePage("down");
+  }
+  await wait(text(label));
+}
 
 test("optimized release works offline with search, keyboard, rotation and production debugging disabled", async (t) => {
   assert.match((await device.shell(`run-as ${pkg} id 2>&1`)).toString(), /not debuggable/);
   await tap(text("Explore a demo"));
   await wait(text("Back to my data"));
-  await wait(text("Completed tasks"));
+  await scrollTo("Weekly Completion Trend");
+  if (process.env.ANDROID_PLOT_SCREENSHOT) {
+    await swipePage("down");
+    await device.screenshot({ path: process.env.ANDROID_PLOT_SCREENSHOT });
+  }
+  await scrollTo("Task Lifespans: Time to Completion");
+  await scrollTo("Project Hierarchy");
+  await scrollTo("Completed tasks");
   await wait(text("All projects"));
+  for (let i = 0; i < 5; i++) await swipePage("up");
   await tap(text("Projects"));
   await tap({ clazz: "android.widget.EditText", pkg });
   await device.fill({ clazz: "android.widget.EditText", pkg }, "release");
@@ -77,6 +103,7 @@ test("optimized release works offline with search, keyboard, rotation and produc
       return Boolean(node && node.bounds.height > node.bounds.width);
     })
     .toBe(true);
+  for (let i = 0; i < 3; i++) await swipePage("up");
   await tap(text("Activity"));
   await wait(text("Recent activity"));
   await device.input.press("Back");
