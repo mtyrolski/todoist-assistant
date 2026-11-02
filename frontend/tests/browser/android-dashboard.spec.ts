@@ -98,6 +98,11 @@ test.beforeEach(async ({ page }) => {
       }
       send();
     });
+    window.addEventListener("test-long-history", () => {
+      model.weeks.unshift(...Array(20).fill(10));
+      model.weeklyProjects.unshift(...Array.from({ length: 20 }, () => ({ Work: 6, Personal: 4 })));
+      send();
+    });
     window.Todoist = {
       ready: send,
       command: (name: string) => {
@@ -254,6 +259,22 @@ test("first sync explains the current stage and can be cancelled", async ({ page
   const status = page.getByRole("status");
   await expect(status).toContainText("Syncing with Todoist");
   await expect(status).toContainText("Loading active tasks · 200 loaded");
-  await expect(status).toContainText("first sync loads about 12 weeks");
+  await expect(status).toContainText("first sync loads your available history");
   await expect(page.getByRole("button", { name: "Cancel sync" })).toBeVisible();
+});
+
+test("all history is selectable without changing the current week", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-long-history")));
+  const chart = page.locator(".js-plotly-plot").first();
+  await expect(chart).toBeVisible({ timeout: 30000 });
+  await page.getByLabel("Range").selectOption("0");
+  await expect.poll(() => chart.evaluate((node) =>
+    (node as HTMLElement & { data: { y: number[] }[] }).data[0].y.length,
+  )).toBe(28);
+  await expect(page.getByLabel("Contribution week")).toHaveValue("7");
+  const values = await chart.evaluate((node) =>
+    (node as HTMLElement & { data: { y: number[] }[] }).data.slice(0, 3).map((trace) => trace.y),
+  );
+  expect(values[0][0]).toBe(10);
+  expect(values[2][0]).toBe(3);
 });

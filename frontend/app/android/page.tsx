@@ -99,7 +99,7 @@ export default function AndroidDashboard() {
           .toLowerCase()
           .includes(ui.query.trim().toLowerCase()),
     ) ?? [];
-  const counts = model?.weeklyProjects[ui.week] ?? {};
+  const counts = model?.weeklyProjects[ui.week + model.weeks.length - 9] ?? {};
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const leaderboard = model
     ? Object.entries(counts)
@@ -216,7 +216,7 @@ export default function AndroidDashboard() {
           <span className="muted tiny">
             {model
               ? "You can browse your saved data while syncing."
-              : "The first sync loads about 12 weeks of history and may take a few minutes."}
+              : "The first sync loads your available history and may take a while."}
           </span>
         </div>
       ) : state?.message && !state.demo ? (
@@ -307,7 +307,7 @@ export default function AndroidDashboard() {
             {model.historyAvailable ? (
               <StatCard
                 name="This week"
-                value={model.weeks[8]}
+                value={model.weeks[model.weeks.length - 1]}
                 deltaPercent={null}
                 inverseDelta={false}
                 currentPeriod={model.weekStart}
@@ -358,6 +358,9 @@ export default function AndroidDashboard() {
                   >
                     <option value={4}>Last 4 weeks</option>
                     <option value={8}>Last 8 weeks</option>
+                    <option value={26}>Last 26 weeks</option>
+                    <option value={52}>Last 52 weeks</option>
+                    <option value={0}>All history</option>
                   </select>
                 </label>
                 {model.forecastAvailable && (
@@ -384,12 +387,12 @@ export default function AndroidDashboard() {
                     }
                   >
                     {model.weeks.map((_, i) => (
-                      <option key={i} value={i}>
-                        {i === 8
+                      <option key={i} value={i - model.weeks.length + 9}>
+                        {i === model.weeks.length - 1
                           ? "This week"
-                          : i === 7
+                          : i === model.weeks.length - 2
                             ? "Last completed week"
-                            : weekDate(model.weekStart, i - 8)}
+                            : weekDate(model.weekStart, i - model.weeks.length + 1)}
                       </option>
                     ))}
                   </select>

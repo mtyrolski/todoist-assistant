@@ -134,6 +134,34 @@ public class DashboardModelTest {
   }
 
   @Test
+  public void historicalWeeksRemainVisibleWithoutChangingCurrentWeekOrForecast() throws Exception {
+    JSONObject project = new JSONObject().put("id", "p").put("name", "Work");
+    JSONObject recent =
+        new JSONObject()
+            .put("id", "recent")
+            .put("object_id", "recent-task")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("parent_project_id", "p")
+            .put("event_date", "2026-10-30T10:00:00Z");
+    JSONObject old =
+        new JSONObject(recent.toString())
+            .put("id", "old")
+            .put("object_id", "old-task")
+            .put("event_date", "2024-02-01T10:00:00Z");
+    JSONObject data = empty().put("projects", new JSONArray().put(project));
+    DashboardModel recentOnly =
+        new DashboardModel(data.put("activities", new JSONArray().put(recent)), CLOCK);
+    DashboardModel full =
+        new DashboardModel(data.put("activities", new JSONArray().put(old).put(recent)), CLOCK);
+    assertTrue(full.weeks.length > 100);
+    assertEquals(1, full.weeks[0]);
+    assertEquals(1, full.weeklyProjects.get(0).get("Work").intValue());
+    assertEquals(recentOnly.weeks[8], full.weeks[full.weeks.length - 1]);
+    assertEquals(recentOnly.forecast, full.forecast);
+  }
+
+  @Test
   public void archivedRootsKeepActualCountsWithoutForecastingMoreWork() throws Exception {
     Clock wednesday = Clock.fixed(Instant.parse("2026-10-28T12:00:00Z"), CLOCK.getZone());
     JSONObject project = new JSONObject().put("id", "p").put("name", "Shipped");

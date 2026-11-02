@@ -178,18 +178,28 @@ final class DashboardModel {
     recent =
         Collections.unmodifiableList(
             new ArrayList<>(activityList.subList(0, Math.min(200, activityList.size()))));
-    weeks = new int[9];
+    List<CompletionLedger.Event> completed = CompletionLedger.effective(events);
+    LocalDate firstWeek = weekStart.minusWeeks(8);
+    for (var event : completed) {
+      LocalDate day = event.date.atZone(clock.getZone()).toLocalDate();
+      LocalDate week = day.with(DayOfWeek.MONDAY);
+      if (week.isBefore(firstWeek)) firstWeek = week;
+    }
+    int weekCount = (int) java.time.temporal.ChronoUnit.WEEKS.between(firstWeek, weekStart) + 1;
+    int currentWeek = weekCount - 1;
+    weeks = new int[weekCount];
     Map<String, int[]> projectWeeks = new LinkedHashMap<>();
     Map<String, LocalDate> firstCompletion = new HashMap<>();
-    for (var event : CompletionLedger.effective(events)) {
+    for (var event : completed) {
       LocalDate day = event.date.atZone(clock.getZone()).toLocalDate();
       String root = completionProjects.get(event.id);
       firstCompletion.merge(root, day, (first, next) -> first.isBefore(next) ? first : next);
-      long days = java.time.temporal.ChronoUnit.DAYS.between(weekStart.minusWeeks(8), day);
-      if (days < 0 || days >= 63) continue;
+      long days = java.time.temporal.ChronoUnit.DAYS.between(firstWeek, day);
+      if (days < 0 || days >= (long) weekCount * 7) continue;
       int index = (int) (days / 7);
       weeks[index]++;
-      projectWeeks.computeIfAbsent(completionProjects.get(event.id), name -> new int[9])[index]++;
+      projectWeeks
+          .computeIfAbsent(completionProjects.get(event.id), name -> new int[weekCount])[index]++;
     }
     Instant begin = weekStart.atStartOfDay(clock.getZone()).toInstant();
     Instant end = weekStart.plusWeeks(1).atStartOfDay(clock.getZone()).toInstant();
@@ -200,23 +210,27 @@ final class DashboardModel {
     Map<String, Integer> estimates = new LinkedHashMap<>();
     for (var entry : projectWeeks.entrySet()) {
       int[] values = entry.getValue();
-      int first = 0;
+      int first = currentWeek - 8;
       if (!firstCompletion.get(entry.getKey()).isBefore(weekStart.minusWeeks(8)))
-        while (first < 8 && values[first] == 0) first++;
-      double[] history = new double[8 - first];
-      for (int i = first; i < 8; i++) history[i - first] = values[i];
+        while (first < currentWeek && values[first] == 0) first++;
+      double[] history = new double[currentWeek - first];
+      for (int i = first; i < currentWeek; i++) history[i - first] = values[i];
       boolean recentlyActive =
-          values[8] > 0 || values[7] > 0 || values[6] > 0 || values[5] > 0 || values[4] > 0;
+          values[currentWeek] > 0
+              || values[currentWeek - 1] > 0
+              || values[currentWeek - 2] > 0
+              || values[currentWeek - 3] > 0
+              || values[currentWeek - 4] > 0;
       estimates.put(
           entry.getKey(),
           forecastAvailable && recentlyActive && !archivedRoots.contains(entry.getKey())
-              ? Forecast.total(values[8], history, fraction)
-              : values[8]);
+              ? Forecast.total(values[currentWeek], history, fraction)
+              : values[currentWeek]);
     }
     projectForecasts = Collections.unmodifiableMap(estimates);
     forecast = estimates.values().stream().mapToInt(Integer::intValue).sum();
     List<Map<String, Integer>> breakdowns = new ArrayList<>();
-    for (int week = 0; week < 9; week++) {
+    for (int week = 0; week < weekCount; week++) {
       Map<String, Integer> breakdown = new HashMap<>();
       for (var entry : projectWeeks.entrySet())
         if (entry.getValue()[week] > 0) breakdown.put(entry.getKey(), entry.getValue()[week]);

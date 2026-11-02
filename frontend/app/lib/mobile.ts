@@ -169,7 +169,9 @@ export function completionFigure(
   events: PlotEventSetting[],
   cumulative = false,
 ): PlotlyFigure {
-  const dates = model.weeks.map((_, i) => weekDate(model.weekStart, i - 8, 6));
+  const current = model.weeks.length - 1;
+  const dates = model.weeks.map((_, i) => weekDate(model.weekStart, i - current, 6));
+  const from = range > 0 ? Math.max(0, model.weeks.length - range) : 0;
   const names = [
     ...new Set(model.weeklyProjects.flatMap((counts) => Object.keys(counts))),
   ].sort();
@@ -180,14 +182,14 @@ export function completionFigure(
     let values = total
       ? model.weeks
       : model.weeklyProjects.map((counts) => counts[name] ?? 0);
-    const actual = values[8];
+    const actual = values[current];
     let forecast = total
       ? model.forecast
       : (model.projectForecasts[name] ?? actual);
     if (cumulative) {
       let sum = 0;
       values = values.map((value) => (sum += value));
-      forecast += values[7];
+      forecast += values[current - 1];
     }
     const group = {
       name,
@@ -198,16 +200,16 @@ export function completionFigure(
     };
     data.push({
       ...group,
-      x: dates.slice(9 - range, 8),
-      y: values.slice(9 - range, 8),
+      x: dates.slice(from, current),
+      y: values.slice(from, current),
       mode: "lines+markers",
       type: "scatter",
     });
     if (model.forecastAvailable)
       data.push({
         ...group,
-        x: dates.slice(7),
-        y: [values[7], forecast],
+        x: dates.slice(current - 1),
+        y: [values[current - 1], forecast],
         showlegend: false,
         mode: "lines+markers",
         type: "scatter",
@@ -216,8 +218,8 @@ export function completionFigure(
       });
     data.push({
       ...group,
-      x: [dates[8]],
-      y: [values[8]],
+      x: [dates[current]],
+      y: [values[current]],
       showlegend: false,
       type: "scatter",
       mode: "markers",
