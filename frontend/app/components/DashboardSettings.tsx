@@ -15,7 +15,10 @@ const RULES = [
   ["warnOnDeadline", "Attention for deadlines"]
 ] as const;
 
-export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => void }) {
+export function DashboardSettings({ onAfterMutation, request = requestJson }: {
+  onAfterMutation: () => void;
+  request?: typeof requestJson;
+}) {
   const [saved, setSaved] = useState<SettingsDraft | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
   const [labels, setLabels] = useState<string[]>([]);
@@ -31,21 +34,21 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(null); setNotice(null);
     try {
-      const response = await requestJson<SettingsResponse>("/api/admin/dashboard/settings", { signal }, "Could not load dashboard settings");
+      const response = await request<SettingsResponse>("/api/admin/dashboard/settings", { signal }, "Could not load dashboard settings");
       const next = settingsDraft(response.settings); setSaved(next); setDraft(next);
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Could not load dashboard settings");
     } finally { if (!signal?.aborted) setLoading(false); }
-  }, []);
+  }, [request]);
 
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
-    requestJson<LabelsResponse>("/api/admin/dashboard/labels", { signal: controller.signal })
+    request<LabelsResponse>("/api/admin/dashboard/labels", { signal: controller.signal })
       .then((response) => setLabels(response.labels.map((label) => label.name.trim()).filter(Boolean)))
       .catch(() => { if (!controller.signal.aborted) setLabelWarning(true); });
     return () => controller.abort();
-  }, [load]);
+  }, [load, request]);
   useEffect(() => {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -68,7 +71,7 @@ export function DashboardSettings({ onAfterMutation }: { onAfterMutation: () => 
     setSaving(true);
     let updated = false;
     try {
-      const response = await requestJson<SettingsResponse>("/api/admin/dashboard/settings", {
+      const response = await request<SettingsResponse>("/api/admin/dashboard/settings", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       }, "Could not save dashboard settings");
       const next = settingsDraft(response.settings); setSaved(next); setDraft(next); updated = true;

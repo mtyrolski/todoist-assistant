@@ -17,7 +17,8 @@ export function PlotCard({
   help,
   actions,
   height = 420,
-  interactive = false
+  interactive = false,
+  compact = false
 }: {
   title: string;
   figure: PlotlyFigure | null | undefined;
@@ -25,6 +26,7 @@ export function PlotCard({
   actions?: ReactNode;
   height?: number | string;
   interactive?: boolean;
+  compact?: boolean;
 }) {
   const numericHeight = typeof height === "number" ? height : undefined;
   const fillHeight = typeof height === "string" && !numericHeight;
@@ -85,13 +87,13 @@ export function PlotCard({
                 ...(numericHeight ? { height: numericHeight } : {}),
                 paper_bgcolor: "rgba(0,0,0,0)",
                 plot_bgcolor: "rgba(0,0,0,0)",
-                font: { color: "#e8ecf2" },
+                font: { ...(layoutRecord.font as Record<string, unknown> ?? {}), color: "#e8ecf2" },
                 template: "plotly_dark",
                 margin: {
-                  l: Math.max(56, toNumber(margin.l, 56)),
-                  r: Math.max(24, toNumber(margin.r, 24)),
-                  t: Math.max(76, toNumber(margin.t, 76)),
-                  b: Math.max(58, toNumber(margin.b, 58))
+                  l: Math.max(compact ? 32 : 56, toNumber(margin.l, compact ? 32 : 56)),
+                  r: Math.max(compact ? 12 : 24, toNumber(margin.r, compact ? 12 : 24)),
+                  t: Math.max(compact ? 48 : 76, toNumber(margin.t, compact ? 48 : 76)),
+                  b: Math.max(compact ? 36 : 58, toNumber(margin.b, compact ? 36 : 58))
                 },
                 xaxis: withTitleStandoff(xaxis, 18),
                 yaxis: withTitleStandoff(yaxis, 16),
