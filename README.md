@@ -51,7 +51,7 @@ make build_android_preview
 adb install -r dist/android/todoist-assistant-preview.apk
 ```
 
-Android includes weekly charts, project contributions, task search, recent activity and alert settings. See [Android build instructions](docs/ANDROID.md) for requirements and device tests.
+Android includes completion, lifespan, activity and priority charts, a project hierarchy and timeline, task search, recent activity and alert settings. Charts use the phone's time zone; historical active-task counts are estimates. See [Android build instructions](docs/ANDROID.md) for requirements and device tests.
 
 To reuse desktop project adjustments, export the saved mappings from Project Adjustments, copy the JSON file to the phone, and import it in the Android Control Panel.
 
