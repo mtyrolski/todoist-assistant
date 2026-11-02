@@ -204,4 +204,82 @@ public class TodoistClientTest {
     assertTrue(next.has("metadataWarning"));
     assertEquals(CLOCK.instant().toString(), next.getString("activitySyncedAt"));
   }
+
+  @Test
+  public void archivedRefreshRetainsKnownParentWithoutChangingPreviousSnapshot() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Root");
+    JSONObject child =
+        new JSONObject().put("id", "child").put("name", "Child").put("parent_id", "root");
+    JSONObject before = baseline().put("projects", new JSONArray().put(root).put(child));
+    String original = before.toString();
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("projects/archived"))
+              return page(
+                  new JSONArray()
+                      .put(
+                          new JSONObject()
+                              .put("id", "child")
+                              .put("name", "Child")
+                              .put("parent_id", JSONObject.NULL)),
+                  JSONObject.NULL);
+            if (path.startsWith("projects?"))
+              return page(new JSONArray().put(root), JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    JSONObject next = new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false);
+    assertEquals(original, before.toString());
+    assertEquals(
+        "root", next.getJSONArray("knownProjects").getJSONObject(1).getString("parent_id"));
+    assertEquals(
+        "Root / Child",
+        DashboardModel.projectPath(
+            "child",
+            java.util.Map.of(
+                "root", root, "child", next.getJSONArray("knownProjects").getJSONObject(1))));
+  }
+
+  @Test
+  public void archiveEventRecoversParentAndRejectsCycles() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Root");
+    JSONObject child = new JSONObject().put("id", "child").put("name", "Child");
+    JSONObject archivedEvent =
+        new JSONObject()
+            .put("id", "archive")
+            .put("event_date", "2026-10-31T12:00:00Z")
+            .put("object_type", "project")
+            .put("object_id", "child")
+            .put("event_type", "archived")
+            .put("parent_project_id", "root");
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("projects/archived"))
+              return page(new JSONArray().put(child), JSONObject.NULL);
+            if (path.startsWith("projects?"))
+              return page(new JSONArray().put(root), JSONObject.NULL);
+            if (path.startsWith("activities"))
+              return page(
+                  new JSONArray()
+                      .put(archivedEvent)
+                      .put(event("done", "2026-11-01T10:00:00Z").put("parent_project_id", "child")),
+                  JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    JSONObject next =
+        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+    assertEquals(
+        "root", next.getJSONArray("knownProjects").getJSONObject(0).getString("parent_id"));
+    assertEquals(1, new DashboardModel(next, CLOCK).weeklyProjects.get(8).get("Root").intValue());
+    root.put("parent_id", "child");
+    JSONObject cyclic =
+        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+    assertEquals(
+        "", cyclic.getJSONArray("knownProjects").getJSONObject(0).optString("parent_id", ""));
+  }
 }

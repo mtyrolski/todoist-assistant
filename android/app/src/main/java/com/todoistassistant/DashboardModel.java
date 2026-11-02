@@ -98,7 +98,7 @@ final class DashboardModel {
       archivedRoots.remove(rootName(active.getJSONObject(i).optString("id"), known));
     Map<String, String> colors = new LinkedHashMap<>();
     for (var project : known.values()) {
-      String parent = project.optString("parent_id");
+      String parent = TodoistClient.parentId(project);
       if (!known.containsKey(parent))
         colors.put(project.optString("name"), project.optString("color", "grey"));
     }
@@ -243,7 +243,7 @@ final class DashboardModel {
       JSONObject project = projects.get(id);
       if (project == null) break;
       parts.add(project.optString("name", "Unknown project"));
-      id = project.isNull("parent_id") ? "" : project.optString("parent_id");
+      id = TodoistClient.parentId(project);
     }
     Collections.reverse(parts);
     return parts.isEmpty() ? "Unknown project" : String.join(" / ", parts);
@@ -256,7 +256,7 @@ final class DashboardModel {
       JSONObject project = projects.get(id);
       if (project == null) break;
       name = project.optString("name", name);
-      id = project.isNull("parent_id") ? "" : project.optString("parent_id");
+      id = TodoistClient.parentId(project);
     }
     return name;
   }

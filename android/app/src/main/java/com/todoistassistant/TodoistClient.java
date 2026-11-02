@@ -85,7 +85,7 @@ final class TodoistClient {
       }
     }
     data.put("projectNamesSyncedAt", namesSynced);
-    data.put("knownProjects", knownProjects(baseline, archived, data.getJSONArray("projects")));
+    JSONArray known = knownProjects(baseline, archived, data.getJSONArray("projects"));
     Map<String, JSONObject> merged = new LinkedHashMap<>();
     Instant since =
         ZonedDateTime.now(clock)
@@ -131,6 +131,8 @@ final class TodoistClient {
           "Activity access is unavailable for this account. Tasks and projects are saved; completion history was not refreshed.");
     }
     data.put("activities", new JSONArray(merged.values()));
+    recoverArchivedParents(known, merged.values());
+    data.put("knownProjects", known);
     data.put("historyStart", baseline.optString("historyStart", since.toString()));
     // The API range ended at 'started', not at the later time the last page arrived.
     data.put("syncedAt", started.toString());
@@ -145,11 +147,14 @@ final class TodoistClient {
     if (old == null) old = baseline.optJSONArray("projects");
     if (old != null)
       for (int i = 0; i < old.length(); i++) {
-        JSONObject project = old.getJSONObject(i);
+        JSONObject project = new JSONObject(old.getJSONObject(i).toString());
         known.put(project.getString("id"), project);
       }
     for (int i = 0; i < archived.length(); i++) {
-      JSONObject project = archived.getJSONObject(i);
+      JSONObject project = new JSONObject(archived.getJSONObject(i).toString());
+      JSONObject previous = known.get(project.getString("id"));
+      if (parentId(project).isEmpty() && previous != null && !parentId(previous).isEmpty())
+        project.put("parent_id", parentId(previous));
       project.put("is_archived", true);
       known.put(project.getString("id"), project);
     }
@@ -158,6 +163,44 @@ final class TodoistClient {
       known.put(project.getString("id"), project);
     }
     return new JSONArray(known.values());
+  }
+
+  static String parentId(JSONObject project) {
+    String parent = project.optString("parent_id", "");
+    return parent.isEmpty() ? project.optString("v2_parent_id", "") : parent;
+  }
+
+  private static void recoverArchivedParents(JSONArray projects, Iterable<JSONObject> events)
+      throws Exception {
+    Map<String, JSONObject> byId = new LinkedHashMap<>();
+    Map<String, JSONObject> latest = new LinkedHashMap<>();
+    for (int i = 0; i < projects.length(); i++) {
+      JSONObject project = projects.getJSONObject(i);
+      byId.put(project.getString("id"), project);
+    }
+    for (JSONObject event : events) {
+      if (!event.optString("object_type").equals("project")) continue;
+      String id = event.optString("object_id");
+      JSONObject previous = latest.get(id);
+      if (previous == null
+          || Instant.parse(event.getString("event_date"))
+              .isAfter(Instant.parse(previous.getString("event_date")))) latest.put(id, event);
+    }
+    for (var entry : latest.entrySet()) {
+      JSONObject project = byId.get(entry.getKey()), event = entry.getValue();
+      String parent = event.optString("parent_project_id", "");
+      if (project == null
+          || !project.optBoolean("is_archived")
+          || !parentId(project).isEmpty()
+          || !event.optString("event_type").equals("archived")
+          || !byId.containsKey(parent)) continue;
+      Set<String> visited = new HashSet<>();
+      visited.add(entry.getKey());
+      String current = parent;
+      while (!current.isEmpty() && visited.add(current) && byId.containsKey(current))
+        current = parentId(byId.get(current));
+      if (current.isEmpty() || !byId.containsKey(current)) project.put("parent_id", parent);
+    }
   }
 
   private static String encode(String value) throws Exception {
