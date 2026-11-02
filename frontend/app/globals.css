@@ -2518,3 +2518,161 @@ textarea.textInput {
 .settingsAddLabel { display: flex; flex-wrap: wrap; gap: 10px; }
 .settingsAddLabel input { flex: 1 1 200px; min-width: 0; }
 .settingsError { padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(255,133,142,.5); color: #ffb0b6; overflow-wrap: anywhere; }
+
+/* Android reuses the dashboard components; only the narrow layout differs. */
+.androidPage {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+  gap: 14px;
+  animation: none;
+  line-height: 1.4;
+}
+.androidPage h1 {
+  font-size: 26px;
+  margin: 6px 0;
+}
+.androidPage .topbar {
+  gap: 12px;
+  margin-bottom: 0;
+  flex-direction: row;
+  align-items: flex-start;
+}
+.androidPage .topbar .controls {
+  gap: 8px;
+  width: auto;
+  flex-shrink: 0;
+}
+.androidPage .topbar .button {
+  width: auto;
+  max-width: 110px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.mobileNav {
+  display: flex;
+}
+.mobileNav .seg {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 4px;
+  font-size: 12px;
+}
+.mobileStats {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.mobileStats .stat {
+  padding: 14px;
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+}
+.mobileStats .stat p {
+  margin: 0;
+}
+.mobileStats .statValue {
+  font-size: 36px;
+}
+.mobileStats .statTop {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mobileStats .statTitleRow .muted {
+  font-size: 13px;
+}
+.mobileStats .statPeriods {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.mobileRuleLink {
+  color: var(--text);
+  background: transparent;
+  padding: 0;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.mobileUrgency .tiny {
+  line-height: 1.4;
+}
+.mobileUrgency[data-level="2"] {
+  border-color: rgba(255, 123, 123, 0.35);
+  background: linear-gradient(
+    145deg,
+    rgba(255, 123, 123, 0.15),
+    rgba(255, 255, 255, 0.04)
+  );
+}
+.androidPage .cardHeader {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.androidPage .cardHeader .select {
+  max-width: 200px;
+}
+.mobilePlotControls {
+  justify-content: space-between;
+}
+.mobilePlotControls .control {
+  width: auto;
+}
+@media (max-width: 900px) {
+  .androidPage .controls {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .androidPage .topbar .controls:empty {
+    display: none;
+  }
+}
+.mobileNotice {
+  margin: 12px 0;
+}
+.androidPage .mobileSearch {
+  margin: 0;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+}
+.mobileSearch .control {
+  width: auto;
+}
+.mobileSearch .control:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.mobileTask {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mobileTask:last-child {
+  border-bottom: 0;
+}
+.mobileTask strong {
+  overflow-wrap: anywhere;
+}
+.mobileTask .pill {
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.mobileProject summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+.mobileProject[open] summary {
+  margin-bottom: 12px;
+}
+.androidPage .statusPills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}

@@ -96,3 +96,5 @@ frontend/playwright-report/
 
 frontend/.next-e2e/
 frontend/next-env.d.ts
+frontend/.next-android/
+frontend/out/

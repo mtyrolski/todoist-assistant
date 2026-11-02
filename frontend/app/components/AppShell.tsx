@@ -30,6 +30,7 @@ function isActive(pathname: string, href: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
+  if (pathname.startsWith("/android")) return <main className="page androidPage">{children}</main>;
 
   return (
     <div className="appShell">

@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
+const androidExport = process.env.TODOIST_ANDROID_EXPORT === "1";
 module.exports = {
-  output: "standalone",
+  output: androidExport ? "export" : "standalone",
   distDir: process.env.TODOIST_NEXT_DIST_DIR || ".next",
   // TypeScript checking runs through npm run lint; no ESLint toolchain is used.
   eslint: { ignoreDuringBuilds: true },
@@ -13,3 +14,4 @@ module.exports = {
     ];
   }
 };
+if (androidExport) delete module.exports.rewrites;
