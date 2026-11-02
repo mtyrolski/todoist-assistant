@@ -40,7 +40,7 @@ npm --prefix frontend exec -- playwright install chromium
 npm --prefix frontend run test:e2e
 ```
 
-The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The Android app is a standalone native client with its own local event cache. Build an installable APK with `make build_android`, or download the artifact from the Android APK workflow. See [Android build and usage](docs/ANDROID.md).
+The Python data and sync code is separate from the web API and frontend. Plots remain in the dashboard modules. The Android app bundles the same dashboard UI and keeps its own local event cache. Build an installable APK with `make build_android`, or download the artifact from the Android APK workflow. See [Android build and usage](docs/ANDROID.md).
 
 Completion charts use cached events. Undoing an ordinary completion removes it from its original period; recurring occurrences remain counted. Raw actions stay in activity history. Forecasts combine up to eight prior periods, including empty periods, with the current pace; totals sum project forecasts.
 
