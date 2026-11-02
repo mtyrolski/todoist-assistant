@@ -274,6 +274,82 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void largeNumericIdsRemainDistinctWithoutChangingTextOrOtherNumbers() throws Exception {
+    String first = "1234567890123456789012345678901234567";
+    String second = "1234567890123456789012345678901234568";
+    String content = "quoted \\\"id\\\":1234567890123456789012345678901234567";
+    String json =
+        "{\"results\":[{\"id\":"
+            + first
+            + ",\"object_id\":42,\"priority\":3,\"content\":\""
+            + content
+            + "\"},{\"id\":"
+            + second
+            + "}],\"offset\":42}";
+    JSONObject parsed = new JSONObject(HttpTransport.protectIdentifiers(json));
+    JSONObject a = parsed.getJSONArray("results").getJSONObject(0);
+    JSONObject b = parsed.getJSONArray("results").getJSONObject(1);
+    assertEquals(first, a.getString("id"));
+    assertEquals(second, b.getString("id"));
+    assertEquals("42", a.getString("object_id"));
+    assertEquals(3, a.getInt("priority"));
+    assertEquals("quoted \"id\":1234567890123456789012345678901234567", a.getString("content"));
+    assertEquals(42, parsed.getInt("offset"));
+  }
+
+  @Test
+  public void syncRepairsRoundedCachedIdsWithoutCountingTheSameEventTwice() throws Exception {
+    String exact = "1234567890123456789012345678901234567";
+    JSONObject original = event(exact, "2026-10-31T10:00:00Z").put("object_id", "task");
+    JSONObject rounded = new JSONObject(original.toString()).put("id", Double.parseDouble(exact));
+    JSONObject old = baseline().put("activities", new JSONArray().put(rounded));
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("activities"))
+              return page(new JSONArray().put(original), JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    List<JSONObject> checkpoints = new ArrayList<>();
+    JSONObject next =
+        new TodoistClient(fake, CLOCK, message -> {})
+            .snapshot(old, false, partial -> checkpoints.add(new JSONObject(partial.toString())));
+    assertTrue(next.getBoolean("historyComplete"));
+    assertTrue(next.getBoolean("historyIdRepair"));
+    assertFalse(checkpoints.isEmpty());
+    assertEquals(1, next.getJSONArray("activities").length());
+    assertEquals(exact, next.getJSONArray("activities").getJSONObject(0).getString("id"));
+  }
+
+  @Test
+  public void ambiguousRoundedIdsAreKeptInsteadOfDiscardingAnEvent() throws Exception {
+    String first = "1234567890123456789012345678901234567";
+    String second = "1234567890123456789012345678901234568";
+    JSONObject a = event(first, "2026-10-31T10:00:00Z").put("object_id", "task");
+    JSONObject b = new JSONObject(a.toString()).put("id", second);
+    JSONObject old =
+        baseline()
+            .put(
+                "activities",
+                new JSONArray()
+                    .put(new JSONObject(a.toString()).put("id", Double.parseDouble(first))));
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("activities"))
+              return page(new JSONArray().put(a).put(b), JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    JSONObject next = new TodoistClient(fake, CLOCK, message -> {}).snapshot(old, false);
+    assertEquals(3, next.getJSONArray("activities").length());
+    assertTrue(next.getString("activityWarning").contains("could not be matched"));
+  }
+
+  @Test
   public void missingActivityPermissionStillSavesCoreDataWithoutInventingHistory()
       throws Exception {
     Fake fake =

@@ -11,6 +11,18 @@ import org.junit.Test;
 public class SnapshotSecurityTest {
   private final Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
+  @Test
+  public void largeIdentifiersStayExactOnAndroid() throws Exception {
+    String id = "1234567890123456789012345678901234567";
+    String json = "{\"id\":" + id + "}";
+    Object original = new org.json.JSONObject(json).get("id");
+    android.util.Log.i(
+        "TodoistIdentifierTest",
+        "Android numeric JSON type: " + original.getClass().getSimpleName());
+    assertEquals(
+        id, new org.json.JSONObject(HttpTransport.protectIdentifiers(json)).getString("id"));
+  }
+
   @After
   public void clear() {
     new SnapshotStore(context).clear();

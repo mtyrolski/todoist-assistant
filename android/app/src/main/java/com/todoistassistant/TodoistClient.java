@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -98,12 +99,17 @@ final class TodoistClient {
     data.put("syncedAt", started.toString());
     data.put("schemaVersion", 2);
     Map<String, JSONObject> merged = new LinkedHashMap<>();
+    Map<String, String> rounded = new HashMap<>();
     JSONArray cached = baseline.optJSONArray("activities");
     if (cached != null)
       for (int i = 0; i < cached.length(); i++) {
         JSONObject item = cached.getJSONObject(i);
         Instant.parse(item.getString("event_date"));
-        merged.put(item.getString("id"), item);
+        Object id = item.get("id");
+        boolean imprecise = id instanceof Double || id instanceof Float;
+        String key = (imprecise ? "rounded:" : "") + id;
+        merged.put(key, item);
+        if (imprecise) rounded.put(eventIdentity(item, ((Number) id).doubleValue()), key);
       }
     Instant joined = parseInstant(user.optString("joined_at"), Instant.EPOCH);
     if (joined.isAfter(started)) joined = started;
@@ -113,11 +119,18 @@ final class TodoistClient {
         parseInstant(
             baseline.optString("activitySyncedAt", baseline.optString("syncedAt")), started);
     boolean complete = baseline.optBoolean("historyComplete");
+    boolean repairing = baseline.optBoolean("historyIdRepair");
+    if (!rounded.isEmpty() && !repairing) {
+      historyStart = started;
+      complete = false;
+      repairing = true;
+    }
+    data.put("historyIdRepair", repairing);
     boolean fetchedActivity = false;
     try {
       if (baseline.has("syncedAt")) {
         Instant recentStart = activitySyncedAt.minus(Duration.ofDays(1));
-        fetchActivity(merged, recentStart, started, "Updating recent activity");
+        fetchActivity(merged, rounded, recentStart, started, "Updating recent activity");
         fetchedActivity = true;
       }
       activitySyncedAt = started;
@@ -126,7 +139,11 @@ final class TodoistClient {
         Instant from = historyStart.minus(Duration.ofDays(180));
         if (from.isBefore(joined)) from = joined;
         fetchActivity(
-            merged, from, historyStart, "Loading history from " + from.toString().substring(0, 10));
+            merged,
+            rounded,
+            from,
+            historyStart,
+            "Loading history from " + from.toString().substring(0, 10));
         fetchedActivity = true;
         historyStart = from;
         complete = !historyStart.isAfter(joined);
@@ -151,10 +168,18 @@ final class TodoistClient {
     discardReopenedParents(known, archived, baseline, merged.values());
     data.put("historyStart", historyStart.toString());
     data.put("historyComplete", complete);
+    if (complete && !rounded.isEmpty() && !data.has("activityWarning"))
+      data.put(
+          "activityWarning", "Some older saved events could not be matched to Todoist's history.");
     return data;
   }
 
-  private void fetchActivity(Map<String, JSONObject> merged, Instant from, Instant to, String label)
+  private void fetchActivity(
+      Map<String, JSONObject> merged,
+      Map<String, String> rounded,
+      Instant from,
+      Instant to,
+      String label)
       throws Exception {
     while (to.isAfter(from)) {
       Instant start = to.minus(Duration.ofDays(365));
@@ -166,13 +191,48 @@ final class TodoistClient {
                   + "&date_to="
                   + encode(to.toString()),
               label);
+      Map<String, Integer> candidates = new HashMap<>();
+      if (!rounded.isEmpty())
+        for (int i = 0; i < fetched.length(); i++) {
+          JSONObject item = fetched.getJSONObject(i);
+          String identity = roundedIdentity(item);
+          if (identity != null && rounded.containsKey(identity))
+            candidates.merge(identity, 1, Integer::sum);
+        }
       for (int i = 0; i < fetched.length(); i++) {
         JSONObject item = fetched.getJSONObject(i);
         Instant.parse(item.getString("event_date"));
-        merged.put(item.getString("id"), item);
+        String identity = rounded.isEmpty() ? null : roundedIdentity(item);
+        if (identity != null && candidates.getOrDefault(identity, 0) == 1) {
+          String old = rounded.remove(identity);
+          if (old != null) merged.remove(old);
+        }
+        merged.put(String.valueOf(item.get("id")), item);
       }
       to = start;
     }
+  }
+
+  private static String roundedIdentity(JSONObject event) {
+    try {
+      return eventIdentity(event, Double.parseDouble(String.valueOf(event.get("id"))));
+    } catch (Exception invalid) {
+      return null;
+    }
+  }
+
+  private static String eventIdentity(JSONObject event, double roundedId) {
+    return roundedId
+        + "\u0000"
+        + event.optString("object_id")
+        + "\u0000"
+        + event.optString("object_type")
+        + "\u0000"
+        + event.optString("event_type")
+        + "\u0000"
+        + event.optString("event_date")
+        + "\u0000"
+        + event.optString("parent_project_id");
   }
 
   private static Instant parseInstant(String value, Instant fallback) {

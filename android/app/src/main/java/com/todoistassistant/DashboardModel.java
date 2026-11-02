@@ -165,7 +165,7 @@ final class DashboardModel {
       else if (due != null && due.opt("is_recurring") instanceof Boolean)
         recurring = (Boolean) due.opt("is_recurring");
       else if (extra.optBoolean("sub_tasks_reset")) recurring = Boolean.TRUE;
-      String kind = item.optString("event_type"), id = item.getString("id");
+      String kind = item.optString("event_type"), id = String.valueOf(item.get("id"));
       events.add(
           new CompletionLedger.Event(id, item.getString("object_id"), kind, time, recurring));
       completionProjects.put(
