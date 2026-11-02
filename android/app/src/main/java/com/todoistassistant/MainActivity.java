@@ -116,6 +116,8 @@ public class MainActivity extends ComponentActivity {
     try {
       JSONObject payload =
           new JSONObject()
+              .put("version", BuildConfig.VERSION_NAME)
+              .put("preview", BuildConfig.APPLICATION_ID.endsWith(".preview"))
               .put("loading", state.loading)
               .put("syncing", state.syncing)
               .put("connected", state.connected)
@@ -218,6 +220,7 @@ public class MainActivity extends ComponentActivity {
                 model.cancelSync();
                 break;
               case "disconnect":
+                android.webkit.WebStorage.getInstance().deleteAllData();
                 model.disconnect();
                 break;
               case "close":

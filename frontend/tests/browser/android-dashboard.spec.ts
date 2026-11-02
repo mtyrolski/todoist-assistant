@@ -75,6 +75,8 @@ test.beforeEach(async ({ page }) => {
       labels: ["fire", "next"],
     };
     const state = {
+      version: "0.4.1",
+      preview: true,
       loading: false,
       syncing: false,
       connected: false,
@@ -208,4 +210,13 @@ test("Android reuses the validated control panel and saves disabled monitoring",
   await expect(
     page.getByText("Monitoring paused", { exact: true }),
   ).toBeVisible();
+});
+
+test("privacy information and bundled licenses are readable in Control Panel", async ({ page }) => {
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  await page.getByText("Privacy & app info", { exact: true }).click();
+  await expect(page.getByText("Version 0.4.1 · Preview", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Not affiliated with or endorsed by Doist/)).toBeVisible();
+  await page.getByRole("button", { name: "Open-source licenses", exact: true }).click();
+  await expect(page.locator("pre")).toContainText("SIL OPEN FONT LICENSE");
 });

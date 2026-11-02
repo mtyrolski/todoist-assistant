@@ -35,6 +35,8 @@ export type MobileModel = {
   }[];
 };
 export type MobileState = {
+  version?: string;
+  preview?: boolean;
   loading: boolean;
   syncing: boolean;
   connected: boolean;

@@ -32,6 +32,7 @@ public class SyncLifecycleTest {
               });
     new SnapshotStore(context).clear();
     new TokenStore(context).clear();
+    context.getSharedPreferences("rules", Context.MODE_PRIVATE).edit().clear().commit();
   }
 
   private void start(ApiTransport transport) throws Exception {
@@ -92,7 +93,7 @@ public class SyncLifecycleTest {
   }
 
   @Test
-  public void successfulSyncCommitsCredentialsAndSnapshotTogether() throws Exception {
+  public void syncAndDisconnectSaveThenRemoveLocalAccountData() throws Exception {
     Fake fake = new Fake();
     start(fake);
     CountDownLatch saved = new CountDownLatch(1);
@@ -113,5 +114,27 @@ public class SyncLifecycleTest {
     assertEquals(
         "test-owner", new SnapshotStore(context).load("fake-test-token").getString("userId"));
     assertEquals(0, state.get().model.tasks.size());
+    context
+        .getSharedPreferences("rules", Context.MODE_PRIVATE)
+        .edit()
+        .putString("web", "private-label")
+        .commit();
+    CountDownLatch disconnected = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              observer =
+                  value -> {
+                    if (!value.loading && !value.connected && value.model == null)
+                      disconnected.countDown();
+                  };
+              model.state().observeForever(observer);
+              model.disconnect();
+            });
+    assertTrue(disconnected.await(10, TimeUnit.SECONDS));
+    assertEquals("", new TokenStore(context).load());
+    assertFalse(context.getFileStreamPath("dashboard-v1.json").exists());
+    assertTrue(context.getSharedPreferences("rules", Context.MODE_PRIVATE).getAll().isEmpty());
   }
 }

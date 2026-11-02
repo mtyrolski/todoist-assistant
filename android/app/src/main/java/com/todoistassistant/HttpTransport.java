@@ -41,7 +41,7 @@ final class HttpTransport implements ApiTransport {
         }
         if (status == 401)
           throw new IOException(
-              "Your Todoist token was rejected. Enter a valid token in Settings.");
+              "Your Todoist token was rejected. Enter a valid token in Control Panel.");
         if (status == 403)
           throw new DataAccessException(
               "Todoist denied access to this data. Check your account permissions and plan.");

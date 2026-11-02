@@ -73,7 +73,7 @@ public final class DashboardViewModel extends AndroidViewModel {
                   savedModel = new DashboardModel(snapshot, Clock.systemDefaultZone());
               } catch (Exception exception) {
                 warning =
-                    "Saved history could not be opened. Sync to recover it, or reconnect in Settings.";
+                    "Saved history could not be opened. Sync to recover it, or reconnect in Control Panel.";
               }
               String message = warning;
               main.post(
@@ -228,6 +228,12 @@ public final class DashboardViewModel extends AndroidViewModel {
             () -> {
               store.clear();
               tokens.clear();
+              boolean settingsCleared =
+                  getApplication()
+                      .getSharedPreferences("rules", android.content.Context.MODE_PRIVATE)
+                      .edit()
+                      .clear()
+                      .commit();
               token = "";
               snapshot = new JSONObject();
               savedModel = null;
@@ -240,7 +246,9 @@ public final class DashboardViewModel extends AndroidViewModel {
                               false,
                               false,
                               false,
-                              "Account disconnected. Local history has been removed.")));
+                              settingsCleared
+                                  ? "Account disconnected. Local history and settings have been removed."
+                                  : "Account disconnected. Could not remove local settings; clear app data in Android Settings.")));
             });
   }
 

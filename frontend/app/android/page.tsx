@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardSettings } from "../components/DashboardSettings";
 import { LeaderboardCard } from "../components/LeaderboardCard";
 import { LoadingBar } from "../components/LoadingBar";
+import { MobileAbout } from "../components/MobileAbout";
 import { PlotCard } from "../components/PlotCard";
 import { StatCard } from "../components/StatCard";
 import { PLOT_HELP } from "../lib/dashboardCopy";
@@ -277,10 +278,13 @@ export default function AndroidDashboard() {
         </section>
       )}
       {state && ui.tab === "Control Panel" && (
-        <DashboardSettings
-          request={mobileSettingsRequest}
-          onAfterMutation={() => setError("")}
-        />
+        <>
+          <DashboardSettings
+            request={mobileSettingsRequest}
+            onAfterMutation={() => setError("")}
+          />
+          <MobileAbout version={state.version} preview={state.preview} />
+        </>
       )}
 
       {model && ui.tab === "Overview" && (
