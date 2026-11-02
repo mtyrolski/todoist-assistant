@@ -76,6 +76,22 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void importedAdjustmentsStayWithTheirAccountOnRefresh() throws Exception {
+    JSONObject before =
+        baseline()
+            .put(
+                "adjustments",
+                new JSONObject().put("mappings", new JSONObject().put("Old", "Work")));
+    Fake fake = new Fake();
+    JSONObject same = new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false);
+    assertEquals(
+        "Work", same.getJSONObject("adjustments").getJSONObject("mappings").getString("Old"));
+    fake.user = "other-owner";
+    JSONObject other = new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false);
+    assertFalse(other.has("adjustments"));
+  }
+
+  @Test
   public void schemaOneHistoryOnlyMigratesWithTheSavedCredential() throws Exception {
     JSONObject old = baseline();
     old.remove("userId");

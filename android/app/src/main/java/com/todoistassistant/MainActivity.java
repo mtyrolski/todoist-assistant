@@ -11,6 +11,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import androidx.activity.ComponentActivity;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -31,6 +32,12 @@ public class MainActivity extends ComponentActivity {
   private DashboardModel renderedModel;
   private JSONObject modelPayload;
   private boolean ready;
+  private final androidx.activity.result.ActivityResultLauncher<String[]> adjustmentsPicker =
+      registerForActivityResult(
+          new ActivityResultContracts.OpenDocument(),
+          uri -> {
+            if (uri != null && model != null) model.importAdjustments(uri);
+          });
 
   @SuppressLint("SetJavaScriptEnabled")
   @Override
@@ -222,6 +229,9 @@ public class MainActivity extends ComponentActivity {
               case "disconnect":
                 android.webkit.WebStorage.getInstance().deleteAllData();
                 model.disconnect();
+                break;
+              case "import-adjustments":
+                adjustmentsPicker.launch(new String[] {"application/json", "text/plain"});
                 break;
               case "close":
                 finish();

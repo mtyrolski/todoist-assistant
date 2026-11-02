@@ -279,6 +279,15 @@ export default function AndroidDashboard() {
                 </button>
               )}
             </div>
+            {state.connected && model && !state.demo && (
+              <div className="stack">
+                <button type="button" className="button buttonSmall buttonGhost" disabled={busy}
+                  onClick={() => command("import-adjustments")}>
+                  Import project adjustments
+                </button>
+                <p className="muted tiny">Choose the JSON file exported from Project Adjustments on your computer.</p>
+              </div>
+            )}
           </form>
         </section>
       )}

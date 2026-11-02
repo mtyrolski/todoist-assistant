@@ -68,6 +68,7 @@ final class TodoistClient {
     JSONObject baseline = sameAccount ? previous : new JSONObject();
     JSONObject data = new JSONObject();
     data.put("userId", userId);
+    if (baseline.has("adjustments")) data.put("adjustments", baseline.getJSONObject("adjustments"));
     data.put("projects", list("projects", "Loading projects"));
     data.put("tasks", list("tasks", "Loading active tasks"));
     JSONArray archived = new JSONArray();

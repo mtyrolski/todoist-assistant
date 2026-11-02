@@ -1,6 +1,7 @@
 package com.todoistassistant;
 
 import android.app.Application;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.lifecycle.AndroidViewModel;
@@ -224,6 +225,57 @@ public final class DashboardViewModel extends AndroidViewModel {
   void exitDemo() {
     generation.incrementAndGet();
     state.setValue(new State(savedModel, false, false, false, !token.isEmpty(), ""));
+  }
+
+  void importAdjustments(Uri uri) {
+    State current = state.getValue();
+    if (current == null
+        || current.syncing
+        || current.loading
+        || current.demo
+        || token.isEmpty()
+        || savedModel == null) return;
+    int request = generation.incrementAndGet();
+    state.setValue(
+        new State(current.model, true, false, false, true, "Importing project adjustments…"));
+    task =
+        worker.submit(
+            () -> {
+              try (var input = getApplication().getContentResolver().openInputStream(uri);
+                  var output = new java.io.ByteArrayOutputStream()) {
+                if (input == null) throw new java.io.IOException("File unavailable");
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                  if (output.size() + count > 256 * 1024)
+                    throw new java.io.IOException("File too large");
+                  output.write(buffer, 0, count);
+                }
+                JSONObject next = new JSONObject(snapshot.toString());
+                next.put(
+                    "adjustments",
+                    ProjectAdjustments.parse(
+                        output.toString(java.nio.charset.StandardCharsets.UTF_8.name())));
+                DashboardModel model = new DashboardModel(next, Clock.systemDefaultZone());
+                if (generation.get() != request || Thread.currentThread().isInterrupted()) return;
+                store.save(next, token);
+                snapshot = next;
+                savedModel = model;
+                post(
+                    request,
+                    new State(model, false, false, false, true, "Project adjustments imported."));
+              } catch (Exception exception) {
+                post(
+                    request,
+                    new State(
+                        current.model,
+                        false,
+                        false,
+                        false,
+                        true,
+                        "Could not import adjustments. Choose the JSON file exported from the desktop dashboard."));
+              }
+            });
   }
 
   void disconnect() {

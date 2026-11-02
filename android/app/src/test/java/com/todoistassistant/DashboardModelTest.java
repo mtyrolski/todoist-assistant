@@ -161,4 +161,49 @@ public class DashboardModelTest {
     assertEquals(1, archived.forecast);
     assertEquals(1, archived.weeklyProjects.get(8).get("Shipped").intValue());
   }
+
+  @Test
+  public void importedAdjustmentsGroupArchivedCompletionsAndHonorPromotedParents()
+      throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Work").put("color", "blue");
+    JSONObject child =
+        new JSONObject().put("id", "old").put("name", "Old").put("is_archived", true);
+    JSONObject event =
+        new JSONObject()
+            .put("id", "e")
+            .put("object_id", "t")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("event_date", "2026-11-01T10:00:00Z")
+            .put("parent_project_id", "old");
+    JSONObject data =
+        empty()
+            .put("projects", new JSONArray().put(root))
+            .put("knownProjects", new JSONArray().put(root).put(child))
+            .put("activities", new JSONArray().put(event))
+            .put(
+                "adjustments",
+                new JSONObject()
+                    .put("mappings", new JSONObject().put("Old", "Work"))
+                    .put("archivedParents", new JSONArray()));
+    DashboardModel grouped = new DashboardModel(data, CLOCK);
+    assertEquals(1, grouped.weeklyProjects.get(8).get("Work").intValue());
+    assertEquals("blue", grouped.projectColors.get("Work"));
+    data.getJSONObject("adjustments").put("archivedParents", new JSONArray().put("Old"));
+    assertEquals(1, new DashboardModel(data, CLOCK).weeklyProjects.get(8).get("Old").intValue());
+  }
+
+  @Test
+  public void importRejectsFilesThatAreNotProjectAdjustments() throws Exception {
+    JSONObject valid =
+        ProjectAdjustments.parse(
+            "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Old\":\"Work\"},\"archivedParents\":[]}");
+    assertEquals("Work", valid.getJSONObject("mappings").getString("Old"));
+    try {
+      ProjectAdjustments.parse("{\"mappings\":{\"Old\":\"Work\"},\"archivedParents\":[]}");
+      fail("Expected unrecognized format to be rejected");
+    } catch (IllegalArgumentException expected) {
+      assertEquals("Unexpected file format", expected.getMessage());
+    }
+  }
 }

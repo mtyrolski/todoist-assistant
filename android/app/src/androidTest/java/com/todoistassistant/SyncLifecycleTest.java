@@ -4,6 +4,7 @@ import static org.junit.Assert.*;
 
 import android.app.Application;
 import android.content.Context;
+import android.net.Uri;
 import androidx.lifecycle.Observer;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.concurrent.CountDownLatch;
@@ -114,6 +115,34 @@ public class SyncLifecycleTest {
     assertEquals(
         "test-owner", new SnapshotStore(context).load("fake-test-token").getString("userId"));
     assertEquals(0, state.get().model.tasks.size());
+    var file = new java.io.File(context.getCacheDir(), "test-adjustments.json");
+    try (var output = new java.io.FileOutputStream(file)) {
+      output.write(
+          "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{\"Old\":\"Work\"},\"archivedParents\":[]}"
+              .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    CountDownLatch imported = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              observer =
+                  value -> {
+                    state.set(value);
+                    if (value.message.equals("Project adjustments imported.")) imported.countDown();
+                  };
+              model.state().observeForever(observer);
+              model.importAdjustments(Uri.fromFile(file));
+            });
+    assertTrue(imported.await(10, TimeUnit.SECONDS));
+    assertEquals(
+        "Work",
+        new SnapshotStore(context)
+            .load("fake-test-token")
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Old"));
+    assertTrue(file.delete());
     context
         .getSharedPreferences("rules", Context.MODE_PRIVATE)
         .edit()

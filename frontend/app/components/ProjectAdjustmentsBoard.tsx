@@ -455,6 +455,18 @@ export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
             <button className="button buttonSmall" type="button" onClick={saveAdjustments} disabled={saving || loading}>
               {saving ? "Saving…" : "Save mappings"}
             </button>
+            <button className="button buttonSmall buttonGhost" type="button" disabled={loading || !adjustments} onClick={() => {
+              if (!adjustments) return;
+              const blob = new Blob([JSON.stringify({ format: "todoist-assistant-project-adjustments-v1", mappings: { ...adjustments.automaticMappings, ...adjustments.mappings }, archivedParents: adjustments.archivedParentProjects }, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "todoist-project-adjustments.json";
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}>
+              Export saved mappings for Android
+            </button>
           </div>
         </div>
       </header>
