@@ -6,6 +6,7 @@ from todoist.api import TodoistEndpoints
 from todoist.api.client import RequestSpec
 from todoist.core.types import Project
 from todoist.database.db_projects import DatabaseProjects
+from todoist.database.db_projects import preserve_archived_parent_links
 
 
 def _project(project_id: str, parent_id: str | None = None, *, archived: bool = False):
@@ -182,6 +183,32 @@ def test_fetch_mapping_project_id_to_root_uses_v2_parent_when_parent_is_missing(
         patch.object(db_projects, "fetch_archived_projects", return_value=[child]),
     ):
         assert db_projects.fetch_mapping_project_id_to_root()["child"].id == "root"
+
+
+def test_preserve_archived_parents_uses_observed_ids_and_respects_newer_information():
+    root = _project("root")
+    other = _project("other")
+    previous = [_project("child", "root"), _project("reopened", "root")]
+    child = _project("child", archived=True)
+    reopened = _project("reopened", archived=True)
+    explicit = _project("explicit", "other", archived=True)
+    previous.append(_project("explicit", "root"))
+    preserve_archived_parent_links(
+        [root, other], [child, reopened, explicit], previous, {"reopened"}
+    )
+    assert child.project_entry.parent_id == "root"
+    assert reopened.project_entry.parent_id is None
+    assert explicit.project_entry.parent_id == "other"
+
+
+def test_preserve_archived_parents_rejects_missing_ancestors_and_cycles():
+    a = _project("a", archived=True)
+    b = _project("b", archived=True)
+    orphan = _project("orphan", archived=True)
+    previous = [_project("a", "b"), _project("b", "a"), _project("orphan", "missing")]
+    preserve_archived_parent_links([], [a, b, orphan], previous, set())
+    assert not (a.project_entry.parent_id == "b" and b.project_entry.parent_id == "a")
+    assert orphan.project_entry.parent_id is None
 
 
 def test_fetch_mapping_project_id_to_root_falls_back_only_for_missing_parent(

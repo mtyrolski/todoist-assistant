@@ -16,6 +16,7 @@ from tests.web_api_helpers import (
 )
 import todoist.web.api as web_api
 import todoist.web.routes.dashboard as dashboard_routes
+from todoist.web.api_components import dashboard_runtime
 
 # pylint: disable=protected-access
 
@@ -211,21 +212,45 @@ def test_project_refresh_reuses_snapshot_when_activity_signature_changes(
 ) -> None:
     cache = _dashboard_cache(monkeypatch, tmp_path)
     project = make_project(project_id="cached")
+    old_child = make_project(
+        project_id="archived", parent_id="cached", is_archived=True
+    )
     refreshed_at = datetime.now(timezone.utc).timestamp() - 3600
     _save_dashboard_snapshot(
-        cache, active_projects=[project], last_refresh_s=refreshed_at
+        cache,
+        active_projects=[project],
+        archived_projects=[old_child],
+        last_refresh_s=refreshed_at,
     )
     cache.activity.save({make_event("new-event")})
     _clear_dashboard_state()
 
     assert web_api._load_state_from_disk_cache(demo_mode=False) is False
-    projects, snapshot_time = web_api._call_dashboard_runtime(
+    projects, archived, snapshot_time = web_api._call_dashboard_runtime(
         "_project_refresh_baseline", demo_mode=False
     )
 
     assert projects is not None
     assert [item.id for item in projects] == ["cached"]
+    assert [item.id for item in archived] == ["archived"]
+    assert archived[0].project_entry.parent_id == "cached"
     assert snapshot_time == refreshed_at
+
+
+def test_reopened_projects_use_only_events_after_the_saved_snapshot() -> None:
+    now = datetime.now(timezone.utc)
+    reopened = make_event("reopened", date=now)
+    reopened.event_entry.object_type = "project"
+    reopened.event_entry.event_type = "unarchived"
+    reopened.event_entry.object_id = "child"
+    reopened.event_entry.v2_object_id = "child-v2"
+    older = make_event("older", date=now - timedelta(days=2))
+    older.event_entry.object_type = "project"
+    older.event_entry.event_type = "unarchived"
+    older.event_entry.object_id = "old-child"
+    assert dashboard_runtime._reopened_project_ids(
+        {reopened, older}, (now - timedelta(days=1)).timestamp()
+    ) == {"child", "child-v2"}
 
 
 def test_project_refresh_counts_events_since_snapshot_even_if_already_cached() -> None:

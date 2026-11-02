@@ -19,6 +19,43 @@ from todoist.core.utils import (
 )
 
 
+def preserve_archived_parent_links(
+    active: list[Project],
+    archived: list[Project],
+    previous: list[Project],
+    reopened_ids: set[str],
+) -> None:
+    """Keep last observed links when archived metadata omits a parent."""
+    current = {project.id: project for project in [*archived, *active]}
+    old = {project.id: project for project in previous}
+    for project in archived:
+        entry = project.project_entry
+        prior = old.get(project.id)
+        if (
+            entry.parent_id
+            or entry.v2_parent_id
+            or prior is None
+            or project.id in reopened_ids
+        ):
+            continue
+        candidates = (prior.project_entry.parent_id, prior.project_entry.v2_parent_id)
+        parent = next((value for value in candidates if value in current), None)
+        if parent is None:
+            continue
+        seen = {project.id}
+        cursor: str | None = parent
+        while cursor and cursor not in seen:
+            seen.add(cursor)
+            item = current.get(cursor)
+            cursor = (
+                (item.project_entry.parent_id or item.project_entry.v2_parent_id)
+                if item
+                else None
+            )
+        if not cursor:
+            entry.parent_id = parent
+
+
 class DatabaseProjects:
     def __init__(self):
         super().__init__()

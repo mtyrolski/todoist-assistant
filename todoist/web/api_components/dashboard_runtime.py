@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from todoist.core.types import Event, Project
 from todoist.database.base import Database
+from todoist.database.db_projects import preserve_archived_parent_links
 from todoist.features.activity import (
     activity_history_boundary,
     activity_project_ids,
@@ -582,39 +583,52 @@ def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     return True
 
 
-def _project_refresh_baseline(*, demo_mode: bool) -> tuple[list[Project] | None, float]:
+def _project_refresh_baseline(
+    *, demo_mode: bool
+) -> tuple[list[Project] | None, list[Project], float]:
     """Reuse project tasks even when a new activity event invalidates plot data."""
     if (
         _state.active_projects is not None
         and _state.demo_mode == demo_mode
         and _state.last_refresh_s > 0
     ):
-        return _state.active_projects, _state.last_refresh_s
+        return (
+            _state.active_projects,
+            _state.archived_projects or [],
+            _state.last_refresh_s,
+        )
 
     try:
         payload = Cache().dashboard_state.load()
     except LocalStorageError:
-        return None, 0.0
+        return None, [], 0.0
     if not isinstance(payload, dict):
-        return None, 0.0
+        return None, [], 0.0
     if payload.get("version") != _DASHBOARD_STATE_SCHEMA_VERSION:
-        return None, 0.0
+        return None, [], 0.0
     if bool(payload.get("demo_mode", False)) != demo_mode:
-        return None, 0.0
+        return None, [], 0.0
     if (
         demo_mode
         and payload.get("demo_state_version") != _DEMO_DASHBOARD_STATE_SCHEMA_VERSION
     ):
-        return None, 0.0
+        return None, [], 0.0
     projects = payload.get("active_projects")
     refreshed_at = payload.get("last_refresh_s")
     if not isinstance(projects, list) or not all(
         isinstance(project, Project) for project in projects
     ):
-        return None, 0.0
+        return None, [], 0.0
     if not isinstance(refreshed_at, (int, float)) or refreshed_at <= 0:
-        return None, 0.0
-    return projects, float(refreshed_at)
+        return None, [], 0.0
+    archived = payload.get("archived_projects")
+    previous_archived = (
+        archived
+        if isinstance(archived, list)
+        and all(isinstance(project, Project) for project in archived)
+        else []
+    )
+    return projects, previous_archived, float(refreshed_at)
 
 
 def _project_ids_changed_since(events: set[Event], refreshed_at: float) -> set[str]:
@@ -630,6 +644,26 @@ def _project_ids_changed_since(events: set[Event], refreshed_at: float) -> set[s
         return event_date.astimezone(timezone.utc) >= cutoff
 
     return activity_project_ids(event for event in events if _after_cutoff(event))
+
+
+def _reopened_project_ids(events: set[Event], refreshed_at: float) -> set[str]:
+    if refreshed_at <= 0:
+        return set()
+    ids: set[str] = set()
+    for event in events:
+        entry = event.event_entry
+        when = (
+            event.date if event.date.tzinfo else event.date.replace(tzinfo=timezone.utc)
+        )
+        if (
+            entry.object_type == "project"
+            and entry.event_type == "unarchived"
+            and when.timestamp() > refreshed_at
+        ):
+            ids.update(
+                str(value) for value in (entry.object_id, entry.v2_object_id) if value
+            )
+    return ids
 
 
 def _activity_fetch_window_config() -> tuple[int, int]:
@@ -656,9 +690,10 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             detail="Checking activity changes before reconciling projects",
         )
         dbio = Database(str(_resolve_env_path()))
-        previous_projects, previous_refresh_s = _project_refresh_baseline(
-            demo_mode=demo_mode
+        previous_projects, previous_archived, previous_refresh_s = (
+            _project_refresh_baseline(demo_mode=demo_mode)
         )
+        previous_hierarchy = [*(previous_projects or []), *previous_archived]
 
         try:
             cached_events = load_activity_cache()
@@ -753,6 +788,13 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             changed_project_ids,
         )
         archived_projects = dbio.fetch_archived_projects()
+
+        preserve_archived_parent_links(
+            active_projects,
+            archived_projects,
+            previous_hierarchy,
+            _reopened_project_ids(cached_events, previous_refresh_s),
+        )
 
         if _resolve_api_key():
             try:
