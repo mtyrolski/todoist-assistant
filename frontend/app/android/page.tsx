@@ -5,7 +5,7 @@ import { DashboardSettings } from "../components/DashboardSettings";
 import { LeaderboardCard } from "../components/LeaderboardCard";
 import { LoadingBar } from "../components/LoadingBar";
 import { MobileAbout } from "../components/MobileAbout";
-import { PlotCard } from "../components/PlotCard";
+import { MobilePlotCard } from "../components/MobilePlotCard";
 import { StatCard } from "../components/StatCard";
 import { PLOT_HELP } from "../lib/dashboardCopy";
 import {
@@ -352,11 +352,10 @@ export default function AndroidDashboard() {
                   </span>
                 )}
               </div>
-              <PlotCard
+              <MobilePlotCard
                 title="Completed tasks"
                 figure={figures[0]}
                 height={340}
-                compact
                 help={PLOT_HELP.completedTasksPeriodically}
               />
               <section className="card">
@@ -387,11 +386,10 @@ export default function AndroidDashboard() {
                   <p className="muted">No completions in this week.</p>
                 )}
               </section>
-              <PlotCard
+              <MobilePlotCard
                 title="Cumulative completions"
                 figure={figures[1]}
                 height={320}
-                compact
               />
             </>
           )}

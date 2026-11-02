@@ -234,7 +234,7 @@ export function completionFigure(
     data,
     layout: {
       font: { family: "Space Grotesk, sans-serif", size: 11 },
-      legend: { orientation: "h", y: 1.2, x: 0 },
+      showlegend: false,
       hovermode: "closest",
       dragmode: false,
       xaxis: { type: "date", tickformat: "%b %-d", showgrid: false },

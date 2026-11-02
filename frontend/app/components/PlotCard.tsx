@@ -16,6 +16,7 @@ export function PlotCard({
   figure,
   help,
   actions,
+  legendContent,
   height = 420,
   interactive = false,
   compact = false
@@ -24,6 +25,7 @@ export function PlotCard({
   figure: PlotlyFigure | null | undefined;
   help?: string;
   actions?: ReactNode;
+  legendContent?: ReactNode;
   height?: number | string;
   interactive?: boolean;
   compact?: boolean;
@@ -43,6 +45,7 @@ export function PlotCard({
         </div>
         {actions}
       </header>
+      {legendContent}
       <div
         className={`cardBody${fillHeight ? " cardBodyFill" : ""}`}
         style={numericHeight ? { height: numericHeight } : fillHeight ? { minHeight: 0 } : undefined}
@@ -92,7 +95,7 @@ export function PlotCard({
                 margin: {
                   l: Math.max(compact ? 32 : 56, toNumber(margin.l, compact ? 32 : 56)),
                   r: Math.max(compact ? 12 : 24, toNumber(margin.r, compact ? 12 : 24)),
-                  t: Math.max(compact ? 48 : 76, toNumber(margin.t, compact ? 48 : 76)),
+                  t: Math.max(compact ? (legendContent ? 12 : 48) : 76, toNumber(margin.t, compact ? (legendContent ? 12 : 48) : 76)),
                   b: Math.max(compact ? 36 : 58, toNumber(margin.b, compact ? 36 : 58))
                 },
                 xaxis: withTitleStandoff(xaxis, 18),

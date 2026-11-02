@@ -2314,10 +2314,12 @@ textarea.textInput {
 
 .leaderboard {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
 .leaderRow {
+  min-width: 0;
   padding: 10px 10px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
@@ -2521,6 +2523,7 @@ textarea.textInput {
 
 /* Android reuses the dashboard components; only the narrow layout differs. */
 .androidPage {
+  grid-template-columns: minmax(0, 1fr);
   max-width: 1100px;
   margin: 0 auto;
   padding: 16px;
@@ -2615,6 +2618,34 @@ textarea.textInput {
 .mobilePlotControls {
   justify-content: space-between;
 }
+.mobilePlotLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  max-height: 156px;
+  overflow-y: auto;
+  margin: 0 0 8px;
+}
+.mobilePlotLegend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+.mobilePlotLegend button[aria-pressed="false"] { opacity: .45; }
+.mobilePlotLegend span { overflow-wrap: anywhere; }
+.mobilePlotLegend i { width: 20px; height: 3px; border-radius: 3px; flex: none; }
 .mobilePlotControls .control {
   width: auto;
 }

@@ -54,9 +54,7 @@ test.beforeEach(async ({ page }) => {
         },
       ],
     };
-    const preferences = JSON.parse(
-      sessionStorage.getItem("test-preferences") ?? "null",
-    ) ?? {
+    const preferences = JSON.parse(sessionStorage.getItem("test-preferences") ?? "null") ?? {
       rules: {
         enabled: true,
         fire: true,
@@ -88,9 +86,18 @@ test.beforeEach(async ({ page }) => {
     };
     if (state.demo) state.model = model;
     const send = () =>
-      window.dispatchEvent(
-        new CustomEvent("todoist-state", { detail: structuredClone(state) }),
-      );
+      window.dispatchEvent(new CustomEvent("todoist-state", { detail: structuredClone(state) }));
+    window.addEventListener("test-many-projects", () => {
+      for (let i = 0; i < 12; i++) {
+        const name = `Long project name ${i} with research and planning`;
+        model.weeklyProjects.forEach((week) => {
+          (week as Record<string, number>)[name] = i + 1;
+        });
+        (model.projectForecasts as Record<string, number>)[name] = i + 1;
+        (model.projectColors as Record<string, string>)[name] = "blue";
+      }
+      send();
+    });
     window.Todoist = {
       ready: send,
       command: (name: string) => {
@@ -111,27 +118,70 @@ test.beforeEach(async ({ page }) => {
         const value = JSON.parse(json);
         state.preferences = { ...state.preferences, ...value };
         state.alert.enabled = value.rules.enabled;
-        sessionStorage.setItem(
-          "test-preferences",
-          JSON.stringify(state.preferences),
-        );
+        sessionStorage.setItem("test-preferences", JSON.stringify(state.preferences));
         setTimeout(send, 0);
         return json;
       },
     };
   });
   await page.goto("/android");
-  await page
-    .getByRole("button", { name: "Explore a demo", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Back to my data", exact: true }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "Explore a demo", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
 });
 
-test("Android uses desktop Plotly cards and keeps actual/forecast colors together", async ({
-  page,
-}) => {
+test("many project labels stay outside both plots in portrait and landscape", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-many-projects")));
+  for (const size of [
+    { width: 412, height: 915 },
+    { width: 915, height: 412 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const title of ["Completed tasks", "Cumulative completions"]) {
+      const card = page
+        .locator("section.card")
+        .filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+      const legend = card.locator(".mobilePlotLegend");
+      const chart = card.locator(".js-plotly-plot");
+      await expect(legend.getByRole("button")).toHaveCount(15);
+      await expect(chart).toBeVisible();
+      const [legendBox, chartBox] = await Promise.all([legend.boundingBox(), chart.boundingBox()]);
+      expect(legendBox!.y + legendBox!.height).toBeLessThanOrEqual(chartBox!.y);
+      const overflow = await page.evaluate(() =>
+        [...document.querySelectorAll("body *")]
+          .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+          .slice(0, 12)
+          .map(
+            (element) => `${element.tagName}.${element.className}: ${element.getBoundingClientRect().right}`,
+          ),
+      );
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+        JSON.stringify(overflow),
+      ).toBeLessThanOrEqual(size.width);
+    }
+  }
+  const card = page
+    .locator("section.card")
+    .filter({ has: page.getByRole("heading", { name: "Completed tasks", exact: true }) });
+  const project = card.getByRole("button", { name: "Long project name 0 with research and planning" });
+  await project.click();
+  await expect(project).toHaveAttribute("aria-pressed", "false");
+  await expect
+    .poll(() =>
+      card
+        .locator(".js-plotly-plot")
+        .evaluate((node) =>
+          (node as HTMLElement & { data: { legendgroup: string; visible: string }[] }).data
+            .filter((trace) => trace.legendgroup === "Long project name 0 with research and planning")
+            .map((trace) => trace.visible),
+        ),
+    )
+    .toEqual(["legendonly", "legendonly", "legendonly"]);
+  await project.click();
+  await expect(project).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Android uses desktop Plotly cards and keeps actual/forecast colors together", async ({ page }) => {
   const chart = page.locator(".js-plotly-plot").first();
   await expect(chart).toBeVisible({ timeout: 30000 });
   const traces = await chart.evaluate(
@@ -155,9 +205,7 @@ test("Android uses desktop Plotly cards and keeps actual/forecast colors togethe
   expect(traces[0].y).toHaveLength(7);
   expect(traces[1].y[1]).toBe(40);
   expect(traces[2].y[0]).toBe(3);
-  await expect(
-    page.getByText(/undone completions this week|SAVED ON THIS DEVICE/),
-  ).toHaveCount(0);
+  await expect(page.getByText(/undone completions this week|SAVED ON THIS DEVICE/)).toHaveCount(0);
   const size = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth,
     viewport: innerWidth,
@@ -169,47 +217,25 @@ test("Android uses desktop Plotly cards and keeps actual/forecast colors togethe
   });
 });
 
-test("project filters and search survive a page recreation", async ({
-  page,
-}) => {
+test("project filters and search survive a page recreation", async ({ page }) => {
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   const query = page.getByRole("searchbox");
   await query.fill("release");
-  await expect(
-    page.getByText("Review the release checklist", { exact: true }),
-  ).toBeVisible();
-  await page
-    .getByLabel("Filter task priority", { exact: true })
-    .selectOption("4");
-  await expect(
-    page.getByText("No tasks match.", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Review the release checklist", { exact: true })).toBeVisible();
+  await page.getByLabel("Filter task priority", { exact: true }).selectOption("4");
+  await expect(page.getByText("No tasks match.", { exact: true })).toBeVisible();
   await page.reload();
   await expect(query).toHaveValue("release");
-  await expect(
-    page.getByText("No tasks match.", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("No tasks match.", { exact: true })).toBeVisible();
 });
 
-test("Android reuses the validated control panel and saves disabled monitoring", async ({
-  page,
-}) => {
-  await page
-    .getByRole("button", { name: "Control Panel", exact: true })
-    .click();
-  await page
-    .getByLabel("Enable attention monitoring", { exact: true })
-    .uncheck();
-  await page
-    .getByRole("button", { name: "Save settings", exact: true })
-    .click();
-  await expect(
-    page.locator("#dashboard-settings").getByRole("status"),
-  ).toContainText("Settings saved");
+test("Android reuses the validated control panel and saves disabled monitoring", async ({ page }) => {
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  await page.getByLabel("Enable attention monitoring", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "Save settings", exact: true }).click();
+  await expect(page.locator("#dashboard-settings").getByRole("status")).toContainText("Settings saved");
   await page.getByRole("button", { name: "Overview", exact: true }).click();
-  await expect(
-    page.getByText("Monitoring paused", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Monitoring paused", { exact: true })).toBeVisible();
 });
 
 test("privacy information and bundled licenses are readable in Control Panel", async ({ page }) => {
