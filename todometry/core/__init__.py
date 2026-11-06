@@ -1,1 +1,1 @@
-"""Core shared helpers for Telemetry for Todoist."""
+"""Core shared helpers for todometry."""

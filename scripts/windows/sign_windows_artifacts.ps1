@@ -32,7 +32,7 @@ $targets = @()
 if ($MsiPath) {
   $targets += $MsiPath
 } else {
-  $msiCandidate = Get-ChildItem -Path $DistRoot -Filter "telemetry-for-todoist-*.msi" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $msiCandidate = Get-ChildItem -Path $DistRoot -Filter "todometry-*.msi" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
   if ($msiCandidate) {
     $targets += $msiCandidate.FullName
   }
@@ -41,7 +41,7 @@ if ($MsiPath) {
 if ($SetupPath) {
   $targets += $SetupPath
 } else {
-  $setupCandidate = Join-Path $DistRoot "TelemetryForTodoistSetup.exe"
+  $setupCandidate = Join-Path $DistRoot "TodometrySetup.exe"
   if (Test-Path $setupCandidate) {
     $targets += $setupCandidate
   }

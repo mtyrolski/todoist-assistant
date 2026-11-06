@@ -43,7 +43,7 @@ def dashboard_state_dir() -> Path:
     override = os.getenv("DASHBOARD_STATE_DIR")
     if override:
         return Path(override).expanduser().resolve()
-    return REPO_ROOT / ".cache" / "telemetry-for-todoist" / "dashboard"
+    return REPO_ROOT / ".cache" / "todometry" / "dashboard"
 
 
 def dashboard_pid_dir() -> Path:

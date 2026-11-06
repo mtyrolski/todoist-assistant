@@ -2,10 +2,10 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product
     Id="*"
-    Name="Telemetry for Todoist"
+    Name="todometry"
     Language="1033"
     Version="$(var.ProductVersion)"
-    Manufacturer="Telemetry for Todoist"
+    Manufacturer="todometry"
     UpgradeCode="E7F91D5E-1B5F-4A6D-81C6-2AE4D8022C1A">
     <Package
       InstallerVersion="500"
@@ -14,15 +14,15 @@
       InstallScope="perMachine"
       InstallPrivileges="elevated"
     />
-    <Condition Message="Telemetry for Todoist requires a 64-bit version of Windows.">VersionNT64</Condition>
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Telemetry for Todoist is already installed." />
+    <Condition Message="todometry requires a 64-bit version of Windows.">VersionNT64</Condition>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of todometry is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Property Id="MSIINSTALLPERUSER" Value="0" />
     <Property Id="REMOVE_APPDATA" Value="0" />
     <Property Id="MsiLogging" Value="voicewarmupx" />
     <PropertyRef Id="WIX_ACCOUNT_USERS" />
 
-    <Feature Id="MainFeature" Title="Telemetry for Todoist" Level="1">
+    <Feature Id="MainFeature" Title="todometry" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentGroupRef Id="ConfigFiles" />
       <ComponentGroupRef Id="TodoistAssistantComponents" />

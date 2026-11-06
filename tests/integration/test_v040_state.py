@@ -260,11 +260,12 @@ def test_launcher_discovers_legacy_default_state(tmp_path, monkeypatch):
     shutil.copyfile(FIXTURE / "activity.joblib", old / "cache/activity.joblib")
     shutil.copyfile(FIXTURE / "dashboard.yaml", old / "config/dashboard.yaml")
     shutil.copyfile(
-        FIXTURE / "archived_root_projects.py", old / "personal/archived_root_projects.py"
+        FIXTURE / "archived_root_projects.py",
+        old / "personal/archived_root_projects.py",
     )
     (old / ".env").write_text("API_KEY=legacy\n", encoding="utf-8")
     new = _default_data_dir()
-    assert new == tmp_path / ".local/share/telemetry-for-todoist"
+    assert new == tmp_path / ".local/share/todometry"
     assert {event.id for event in Cache(str(new / "cache")).activity.load()} == {
         "event-v040"
     }
@@ -283,7 +284,7 @@ def test_clean_default_cache_and_explicit_override(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
-    assert Path(resolve_cache_dir()) == tmp_path / ".cache/telemetry-for-todoist"
+    assert Path(resolve_cache_dir()) == tmp_path / ".cache/todometry"
     assert not (tmp_path / ".cache/todoist-assistant").exists()
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path / "custom"))
     assert Path(resolve_cache_dir()) == tmp_path / "custom"
@@ -297,8 +298,51 @@ def test_source_checkout_discovers_v040_cache(tmp_path, monkeypatch):
     shutil.copyfile(FIXTURE / "activity.joblib", legacy / "activity.joblib")
 
     cache = Cache()
-    assert Path(cache.path) == tmp_path / ".cache/telemetry-for-todoist"
+    assert Path(cache.path) == tmp_path / ".cache/todometry"
     assert {event.id for event in cache.activity.load()} == {"event-v040"}
     assert (legacy / "activity.joblib").read_bytes() == (
         Path(cache.path) / "activity.joblib"
     ).read_bytes()
+
+
+def test_both_legacy_data_directories_are_migrated_once(tmp_path, monkeypatch):
+    import sys
+
+    from todometry.launcher import _default_data_dir
+
+    monkeypatch.delenv(str(EnvVar.DATA_DIR), raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    parent = tmp_path / ".local/share"
+    previous = parent / "telemetry-for-todoist"
+    legacy = parent / "todoist-assistant"
+    for source in (previous, legacy):
+        (source / "personal").mkdir(parents=True)
+    (previous / ".env").write_text("newer", encoding="utf-8")
+    (legacy / ".env").write_text("older", encoding="utf-8")
+    (legacy / "personal/mapping.py").write_text("preserved", encoding="utf-8")
+
+    target = _default_data_dir()
+    assert target == parent / "todometry"
+    assert (target / ".env").read_text() == "newer"
+    assert (target / "personal/mapping.py").read_text() == "preserved"
+    assert (previous / ".env").read_text() == "newer"
+    assert (legacy / ".env").read_text() == "older"
+    assert (target / ".telemetry-migration-complete").exists()
+    assert (target / ".v040-migration-complete").exists()
+    (previous / ".env").write_text("later", encoding="utf-8")
+    assert _default_data_dir() == target
+    assert (target / ".env").read_text() == "newer"
+
+
+def test_previous_named_checkout_cache_is_discovered(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
+    previous = tmp_path / ".cache/telemetry-for-todoist"
+    previous.mkdir(parents=True)
+    shutil.copyfile(FIXTURE / "activity.joblib", previous / "activity.joblib")
+
+    cache = Cache()
+    assert Path(cache.path) == tmp_path / ".cache/todometry"
+    assert {event.id for event in cache.activity.load()} == {"event-v040"}
+    assert (previous / "activity.joblib").exists()

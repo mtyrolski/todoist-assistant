@@ -3,8 +3,8 @@
      xmlns:bal="http://schemas.microsoft.com/wix/BalExtension"
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Bundle
-    Name="Telemetry for Todoist"
-    Manufacturer="Telemetry for Todoist"
+    Name="todometry"
+    Manufacturer="todometry"
     Version="$(var.BundleVersion)"
     UpgradeCode="C52FB79B-B401-49F1-9B2B-C8EFCD068CB5"
     Compressed="yes">

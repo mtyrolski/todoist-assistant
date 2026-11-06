@@ -11,7 +11,7 @@ const grotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Telemetry for Todoist",
+  title: "todometry",
   description: "Local-first activity analytics, project history, and automations."
 };
 

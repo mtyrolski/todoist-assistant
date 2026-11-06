@@ -2,7 +2,7 @@
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-DASHBOARD_STATE_DIR := .cache/telemetry-for-todoist/dashboard
+DASHBOARD_STATE_DIR := .cache/todometry/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 
 sync: ## Refresh recent Todoist activity

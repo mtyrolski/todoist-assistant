@@ -1,5 +1,5 @@
 [project]
-name = "telemetry-for-todoist"
+name = "todometry"
 version = "0.4.1"
 description = "Local-first activity analytics, project history, and automations."
 readme = "README.md"
@@ -38,7 +38,7 @@ notebook = [
 ]
 
 [project.scripts]
-todoist-telemetry = "todometry.cli:app"
+todometry = "todometry.cli:app"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

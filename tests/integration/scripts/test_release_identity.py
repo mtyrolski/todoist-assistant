@@ -17,8 +17,8 @@ def test_release_guard_rejects_old_identity(tmp_path: Path) -> None:
 
 def test_release_guard_accepts_matching_identity(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "telemetry-for-todoist"\nversion = "0.4.1"\n'
-        '[project.scripts]\ntodoist-telemetry = "todometry.cli:app"\n',
+        '[project]\nname = "todometry"\nversion = "0.4.1"\n'
+        '[project.scripts]\ntodometry = "todometry.cli:app"\n',
         encoding="utf-8",
     )
     package = tmp_path / "todometry"
@@ -29,8 +29,8 @@ def test_release_guard_accepts_matching_identity(tmp_path: Path) -> None:
 
 def test_release_guard_rejects_wrong_version_and_entry_point(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "telemetry-for-todoist"\nversion = "0.4.0"\n'
-        '[project.scripts]\ntodoist-telemetry = "todoist.cli:app"\n',
+        '[project]\nname = "todometry"\nversion = "0.4.0"\n'
+        '[project.scripts]\ntodometry = "todoist.cli:app"\n',
         encoding="utf-8",
     )
     package = tmp_path / "todometry"
@@ -43,8 +43,8 @@ def test_release_guard_rejects_wrong_version_and_entry_point(tmp_path: Path) -> 
 
 def test_release_guard_rejects_web_injection_and_type_erasure(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "telemetry-for-todoist"\nversion = "0.4.1"\n'
-        '[project.scripts]\ntodoist-telemetry = "todometry.cli:app"\n'
+        '[project]\nname = "todometry"\nversion = "0.4.1"\n'
+        '[project.scripts]\ntodometry = "todometry.cli:app"\n'
         '[tool.ruff.lint.per-file-ignores]\n"todometry/web/routes/*.py" = ["F821"]\n',
         encoding="utf-8",
     )

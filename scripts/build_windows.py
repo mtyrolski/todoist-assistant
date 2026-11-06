@@ -495,7 +495,7 @@ def _build_msi(
         installer_dir / name for name in ("product.wxs", "components.wxs", "ui.wxs")
     )
     _require_existing([product_wxs, components_wxs, ui_wxs], "WiX installer files")
-    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "telemetry-for-todoist.wxs"
+    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "todometry.wxs"
     _assert_no_localized_accounts([product_wxs, components_wxs, legacy_wxs])
 
     wix_out_dir = str(wixobj_dir) + os.sep
@@ -528,7 +528,7 @@ def _build_msi(
             "No WiX object files generated; candle.exe did not produce outputs"
         )
 
-    msi_path = dist_root / f"telemetry-for-todoist-{msi_version}.msi"
+    msi_path = dist_root / f"todometry-{msi_version}.msi"
     _run(
         [
             wix_tools["light"],
@@ -590,7 +590,7 @@ def _build_bundle(
             "No WiX bundle object files generated; candle.exe did not produce outputs"
         )
 
-    setup_path = dist_root / "TelemetryForTodoistSetup.exe"
+    setup_path = dist_root / "TodometrySetup.exe"
     _run(
         [
             wix_tools["light"],
@@ -628,7 +628,7 @@ def _download_vc_redist(dist_root: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build the Telemetry for Todoist Windows MSI installer."
+        description="Build the todometry Windows MSI installer."
     )
     parser.add_argument(
         "--no-dashboard",
@@ -679,7 +679,7 @@ def main() -> int:
     elif not args.no_dashboard:
         print("Dashboard directory not found; skipping frontend packaging.")
 
-    spec_path = repo_root / "packaging" / "pyinstaller" / "telemetry_for_todoist.spec"
+    spec_path = repo_root / "packaging" / "pyinstaller" / "todometry.spec"
     if not spec_path.exists():
         raise RuntimeError(f"PyInstaller spec file not found: {spec_path}")
 
@@ -706,14 +706,14 @@ def main() -> int:
         cwd=repo_root,
     )
 
-    app_root = pyinstaller_dist / "todoist-telemetry"
+    app_root = pyinstaller_dist / "todometry"
     if not app_root.exists():
         raise RuntimeError(
             "PyInstaller output not found; expected onedir build under dist/windows/pyinstaller"
         )
 
     if signtool_path:
-        payload_exe = app_root / "todoist-telemetry.exe"
+        payload_exe = app_root / "todometry.exe"
         _require_existing([payload_exe], "Expected PyInstaller executable for signing")
         _sign_if_configured(signtool_path, signing_config, payload_exe)
 

@@ -42,7 +42,7 @@ def main() -> int:
             )
             entries = ConfigParser()
             entries.read_string(archive.read(entry_points_file).decode("utf-8"))
-            if entries["console_scripts"].get("todoist-telemetry") != "todometry.cli:app":
+            if entries["console_scripts"].get("todometry") != "todometry.cli:app":
                 raise RuntimeError("Wheel console entry point is missing or incorrect")
             archive.extractall(extracted)
         cache = root / "cache"

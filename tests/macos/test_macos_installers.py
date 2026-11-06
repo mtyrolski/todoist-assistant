@@ -53,8 +53,8 @@ def test_pkg_install_smoke() -> None:
     if not pkg.exists():
         raise AssertionError(f"pkg not found at {pkg}")
 
-    binary = Path("/usr/local/todoist-assistant/todoist-telemetry")
-    shim = Path("/usr/local/bin/todoist-telemetry")
+    binary = Path("/usr/local/todoist-assistant/todometry")
+    shim = Path("/usr/local/bin/todometry")
     config_dir = Path("/usr/local/etc/todoist-assistant")
     for existing in (binary.parent, shim, config_dir):
         if existing.exists():
@@ -72,7 +72,7 @@ def test_pkg_install_smoke() -> None:
     assert _run([str(shim), "--version"]).stdout.strip() == get_version()
 
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/todoist-assistant"])
-    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todoist-telemetry"])
+    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todometry"])
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/etc/todoist-assistant"])
 
     assert not binary.exists(), "CLI bundle still present after removal"
@@ -85,11 +85,11 @@ def test_app_frontend_host(tmp_path: Path) -> None:
     if not app_value:
         pytest.skip("TODOIST_APP_PATH not set")
     app = Path(app_value)
-    executable = app / "Contents" / "MacOS" / "TodoistAssistant"
+    executable = app / "Contents" / "MacOS" / "todometry"
     assert executable.is_file(), f"Missing app executable: {executable}"
     with (app / "Contents" / "Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
-    assert info["CFBundleDisplayName"] == "Telemetry for Todoist"
+    assert info["CFBundleDisplayName"] == "todometry"
     assert info["CFBundleIdentifier"] == "com.todoist.assistant"
     assert info["CFBundleShortVersionString"] == get_version()
     assert info["CFBundleVersion"] == get_version()
@@ -158,7 +158,7 @@ def test_brew_install_smoke() -> None:
     if not formula:
         pytest.skip(f"{EnvVar.BREW_FORMULA} not set")
     if _run(
-        ["brew", "list", "--versions", "telemetry-for-todoist"], check=False
+        ["brew", "list", "--versions", "todometry"], check=False
     ).stdout.strip():
         pytest.fail(
             "Homebrew smoke test requires a runner without the existing formula"
@@ -173,6 +173,6 @@ def test_brew_install_smoke() -> None:
     os.environ.setdefault("HOMEBREW_NO_AUTO_UPDATE", "1")
 
     _run(["brew", "install", "--build-from-source", formula])
-    _run(["todoist-telemetry", "--help"])
-    assert _run(["todoist-telemetry", "--version"]).stdout.strip() == get_version()
-    _run(["brew", "uninstall", "--force", "telemetry-for-todoist"])
+    _run(["todometry", "--help"])
+    assert _run(["todometry", "--version"]).stdout.strip() == get_version()
+    _run(["brew", "uninstall", "--force", "todometry"])

@@ -6,11 +6,11 @@
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="AppStartMenuDir" Name="Telemetry for Todoist" />
+        <Directory Id="AppStartMenuDir" Name="todometry" />
       </Directory>
       <Directory Id="DesktopFolder" />
       <Directory Id="CommonAppDataFolder">
-        <Directory Id="APPDATADIR" Name="TelemetryForTodoist">
+        <Directory Id="APPDATADIR" Name="Todometry">
           <Directory Id="CONFIGDIR" Name="config" />
           <Directory Id="LOGSDIR" Name="logs" />
         </Directory>
@@ -33,9 +33,9 @@
       <Component Id="AppShortcuts" Guid="*" Win64="yes">
         <Shortcut
           Id="StartMenuShortcut"
-          Name="Telemetry for Todoist"
-          Description="Launch Telemetry for Todoist"
-          Target="[INSTALLFOLDER]todoist-telemetry.exe"
+          Name="todometry"
+          Description="Launch todometry"
+          Target="[INSTALLFOLDER]todometry.exe"
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
         <RegistryValue
@@ -55,9 +55,9 @@
         <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
         <Shortcut
           Id="DesktopShortcut"
-          Name="Telemetry for Todoist"
-          Description="Launch Telemetry for Todoist"
-          Target="[INSTALLFOLDER]todoist-telemetry.exe"
+          Name="todometry"
+          Description="Launch todometry"
+          Target="[INSTALLFOLDER]todometry.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
           Root="HKCU"
@@ -98,7 +98,9 @@
   </Fragment>
 
   <Fragment>
-    <util:CloseApplication Id="CloseTelemetryExe" Target="todoist-telemetry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
+    <util:CloseApplication Id="CloseTelemetryExe" Target="todometry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
+    <!-- Close the previous development build as well during an upgrade. -->
+    <util:CloseApplication Id="ClosePreviousTelemetryExe" Target="todoist-telemetry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
     <util:CloseApplication
       Id="CloseTodoistAssistantExe"
       Target="todoist-assistant.exe"

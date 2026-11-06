@@ -110,7 +110,7 @@ jobs:
       - name: Build release tarball
         run: |
           mkdir -p dist/macos
-          tarball="dist/macos/telemetry-for-todoist-${TODOIST_VERSION}-${TODOIST_ARCH_SUFFIX}.tar.gz"
+          tarball="dist/macos/todometry-${TODOIST_VERSION}-${TODOIST_ARCH_SUFFIX}.tar.gz"
           git archive --format=tar.gz -o "$tarball" HEAD
 
       - name: Build macOS pkg
@@ -127,14 +127,14 @@ jobs:
 
       - name: Smoke-test frozen app with legacy state
         run: |
-          uv run python3 -m scripts.smoke_frozen_app "dist/macos/TodoistAssistant.app/Contents/MacOS/TodoistAssistant" --version "${TODOIST_VERSION}"
+          uv run python3 -m scripts.smoke_frozen_app "dist/macos/todometry.app/Contents/MacOS/todometry" --version "${TODOIST_VERSION}"
 
       - name: Run macOS install tests
         env:
-          TODOIST_PKG_PATH: dist/macos/telemetry-for-todoist-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.pkg
-          TODOIST_APP_PATH: dist/macos/TodoistAssistant.app
-          TODOIST_BREW_FORMULA: Formula/telemetry-for-todoist.rb
-          TODOIST_BREW_TARBALL: dist/macos/telemetry-for-todoist-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.tar.gz
+          TODOIST_PKG_PATH: dist/macos/todometry-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.pkg
+          TODOIST_APP_PATH: dist/macos/todometry.app
+          TODOIST_BREW_FORMULA: Formula/todometry.rb
+          TODOIST_BREW_TARBALL: dist/macos/todometry-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.tar.gz
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           uv run python3 -m pytest tests/macos/test_macos_installers.py
@@ -142,11 +142,11 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: telemetry-for-todoist-macos-${{ matrix.arch }}
+          name: todometry-macos-${{ matrix.arch }}
           path: |
-            dist/macos/telemetry-for-todoist-*.pkg
-            dist/macos/telemetry-for-todoist-*.dmg
-            dist/macos/telemetry-for-todoist-*.tar.gz
+            dist/macos/todometry-*.pkg
+            dist/macos/todometry-*.dmg
+            dist/macos/todometry-*.tar.gz
 
   publish-macos-installers:
     if: ${{ inputs.publish && startsWith(github.ref, 'refs/tags/') }}
@@ -163,13 +163,13 @@ jobs:
         run: python -m scripts.check_release_identity
       - uses: actions/download-artifact@v4
         with:
-          pattern: telemetry-for-todoist-macos-*
+          pattern: todometry-macos-*
           path: artifacts
           merge-multiple: true
       - name: Attach artifacts to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/telemetry-for-todoist-*.pkg
-            artifacts/telemetry-for-todoist-*.dmg
-            artifacts/telemetry-for-todoist-*.tar.gz
+            artifacts/todometry-*.pkg
+            artifacts/todometry-*.dmg
+            artifacts/todometry-*.tar.gz

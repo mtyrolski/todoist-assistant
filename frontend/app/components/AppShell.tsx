@@ -40,7 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             *
           </span>
           <div>
-            <p className="brandTitle">Telemetry for Todoist</p>
+            <p className="brandTitle">todometry</p>
             <p className="brandTag">Local-first activity analytics, project history, and automations.</p>
           </div>
         </Link>

@@ -1,4 +1,4 @@
-"""Local launcher for the Telemetry for Todoist dashboard stack."""
+"""Local launcher for the todometry dashboard stack."""
 
 import argparse
 import json
@@ -28,20 +28,37 @@ def _default_data_dir() -> Path:
         return Path(override).expanduser().resolve()
     if os.name == "nt":
         base = os.getenv("PROGRAMDATA") or os.getenv("LOCALAPPDATA") or str(Path.home())
-        parent, old_name, new_name = Path(base), "TodoistAssistant", "TelemetryForTodoist"
+        parent, old_name, previous_name, new_name = (
+            Path(base),
+            "TodoistAssistant",
+            "TelemetryForTodoist",
+            "Todometry",
+        )
     elif sys.platform == "darwin":
         parent = Path.home() / "Library" / "Application Support"
-        old_name, new_name = "TodoistAssistant", "TelemetryForTodoist"
+        old_name, previous_name, new_name = (
+            "TodoistAssistant",
+            "TelemetryForTodoist",
+            "Todometry",
+        )
     else:
         parent = Path.home() / ".local" / "share"
-        old_name, new_name = "todoist-assistant", "telemetry-for-todoist"
+        old_name, previous_name, new_name = (
+            "todoist-assistant",
+            "telemetry-for-todoist",
+            "todometry",
+        )
     target = parent / new_name
-    migrate_legacy_files(
-        parent / old_name,
-        target,
-        (".env", "config", "personal", "logs")
-        + tuple(f"cache/{name}" for name in RUNTIME_CACHE_FILENAMES),
+    entries = (".env", "config", "personal", "logs") + tuple(
+        f"cache/{name}" for name in RUNTIME_CACHE_FILENAMES
     )
+    migrate_legacy_files(
+        parent / previous_name,
+        target,
+        entries,
+        marker_name=".telemetry-migration-complete",
+    )
+    migrate_legacy_files(parent / old_name, target, entries)
     return target
 
 
@@ -124,9 +141,7 @@ def _launcher_log_path() -> str | None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Launch the Telemetry for Todoist dashboard."
-    )
+    parser = argparse.ArgumentParser(description="Launch the todometry dashboard.")
     parser.add_argument(
         "--api-host", default=os.getenv(str(EnvVar.API_HOST), "127.0.0.1")
     )

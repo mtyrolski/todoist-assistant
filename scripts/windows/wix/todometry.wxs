@@ -2,13 +2,13 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Product
     Id="*"
-    Name="Telemetry for Todoist"
+    Name="todometry"
     Language="1033"
     Version="$(var.ProductVersion)"
-    Manufacturer="Telemetry for Todoist"
+    Manufacturer="todometry"
     UpgradeCode="E7F91D5E-1B5F-4A6D-81C6-2AE4D8022C1A">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Telemetry for Todoist is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of todometry is already installed." />
     <MediaTemplate />
     <PropertyRef Id="WIX_ACCOUNT_USERS" />
 
@@ -25,12 +25,12 @@
         </Directory>
       </Directory>
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="APPSTARTMENUDIR" Name="Telemetry for Todoist" />
+        <Directory Id="APPSTARTMENUDIR" Name="todometry" />
       </Directory>
       <Directory Id="DesktopFolder" />
     </Directory>
 
-    <Feature Id="ProductFeature" Title="Telemetry for Todoist" Level="1">
+    <Feature Id="ProductFeature" Title="todometry" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentGroupRef Id="FrontendFiles" />
       <ComponentGroupRef Id="NodeFiles" />
@@ -48,16 +48,16 @@
       <Component Id="AppShortcuts" Guid="*">
         <Shortcut
           Id="StartMenuShortcut"
-          Name="Telemetry for Todoist"
-          Description="Launch Telemetry for Todoist"
-          Target="[INSTALLFOLDER]todoist-telemetry.exe"
+          Name="todometry"
+          Description="Launch todometry"
+          Target="[INSTALLFOLDER]todometry.exe"
           WorkingDirectory="APPDATADIR" />
         <Shortcut
           Id="DesktopShortcut"
           Directory="DesktopFolder"
-          Name="Telemetry for Todoist"
-          Description="Launch Telemetry for Todoist"
-          Target="[INSTALLFOLDER]todoist-telemetry.exe"
+          Name="todometry"
+          Description="Launch todometry"
+          Target="[INSTALLFOLDER]todometry.exe"
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="APPSTARTMENUDIR" On="uninstall" />
         <RegistryValue

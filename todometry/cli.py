@@ -1,4 +1,4 @@
-"""Lightweight CLI entrypoint for Telemetry for Todoist."""
+"""Lightweight CLI entrypoint for todometry."""
 
 import json
 import os
@@ -19,7 +19,7 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
 app = typer.Typer(
-    add_completion=False, no_args_is_help=True, invoke_without_command=True, help="Telemetry for Todoist CLI"
+    add_completion=False, no_args_is_help=True, invoke_without_command=True, help="todometry CLI"
 )
 
 
@@ -28,7 +28,7 @@ def _fetch_latest_release() -> dict:
         RELEASES_API,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "todoist-telemetry",
+            "User-Agent": "todometry",
         },
     )
     with urlopen(request, timeout=10) as response:
@@ -61,9 +61,9 @@ def _select_asset(release: dict, suffixes: tuple[str, ...]) -> tuple[str, str] |
 
 
 def _download(url: str, filename: str) -> Path:
-    temp_dir = Path(tempfile.mkdtemp(prefix="todoist-telemetry-"))
+    temp_dir = Path(tempfile.mkdtemp(prefix="todometry-"))
     target = temp_dir / filename
-    request = Request(url, headers={"User-Agent": "todoist-telemetry"})
+    request = Request(url, headers={"User-Agent": "todometry"})
     with urlopen(request, timeout=30) as response, target.open("wb") as handle:
         handle.write(response.read())
     return target
@@ -122,7 +122,7 @@ def version(
         typer.echo("You are up to date.")
 
     if sys.platform == "darwin":
-        typer.echo("If installed via Homebrew, run: brew upgrade telemetry-for-todoist")
+        typer.echo("If installed via Homebrew, run: brew upgrade todometry")
     elif os.name == "nt":
         typer.echo(
             "For MSI installs, download the latest installer from the releases page."
@@ -140,7 +140,7 @@ def install_windows(
         _print_install_instructions(
             "Windows",
             RELEASES_PAGE,
-            "msiexec /i telemetry-for-todoist-<version>.msi",
+            "msiexec /i todometry-<version>.msi",
         )
         return
 
@@ -181,7 +181,7 @@ def install_macos(
         _print_install_instructions(
             "macOS",
             RELEASES_PAGE,
-            "sudo installer -pkg telemetry-for-todoist-<version>.pkg -target /",
+            "sudo installer -pkg todometry-<version>.pkg -target /",
         )
         return
 

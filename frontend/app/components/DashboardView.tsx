@@ -468,7 +468,7 @@ export function DashboardView({
       ) : null}
       <header className="topbar">
         <div>
-          <p className="eyebrow">Telemetry for Todoist</p>
+          <p className="eyebrow">todometry</p>
           <h1>Dashboard</h1>
           <p className="lede">A fast, local dashboard for your Todoist data.</p>
           <StatusPills

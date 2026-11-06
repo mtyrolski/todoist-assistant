@@ -5,7 +5,7 @@ from pathlib import Path
 
 def get_version() -> str:
     with suppress(metadata.PackageNotFoundError):
-        return metadata.version("telemetry-for-todoist")
+        return metadata.version("todometry")
 
     # Fallback to reading the local pyproject when running from a repo checkout.
     with suppress(Exception):

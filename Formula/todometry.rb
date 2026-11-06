@@ -1,6 +1,6 @@
 require "digest"
 
-class TelemetryForTodoist < Formula
+class Todometry < Formula
   include Language::Python::Virtualenv
 
   desc "Local-first activity analytics and project history for Todoist"
@@ -61,11 +61,11 @@ class TelemetryForTodoist < Formula
 
   def install
     virtualenv_install_with_resources
-    (bin/"todoist-telemetry").write <<~EOS
+    (bin/"todometry").write <<~EOS
       #!/bin/bash
       exec "#{libexec}/bin/python" -m todometry.cli "$@"
     EOS
-    chmod 0755, bin/"todoist-telemetry"
+    chmod 0755, bin/"todometry"
   end
 
   def caveats
@@ -77,6 +77,6 @@ class TelemetryForTodoist < Formula
   end
 
   test do
-    assert_match "Telemetry for Todoist CLI", shell_output("#{bin}/todoist-telemetry --help")
+    assert_match "todometry CLI", shell_output("#{bin}/todometry --help")
   end
 end

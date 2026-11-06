@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-STATE_DIR="${DASHBOARD_STATE_DIR:-${REPO_ROOT}/.cache/telemetry-for-todoist/dashboard}"
+STATE_DIR="${DASHBOARD_STATE_DIR:-${REPO_ROOT}/.cache/todometry/dashboard}"
 PID_DIR="${DASHBOARD_PID_DIR:-${STATE_DIR}/pids}"
 API_LOG_FILE="${STATE_DIR}/api.log"
 FRONTEND_LOG_FILE="${STATE_DIR}/frontend.log"

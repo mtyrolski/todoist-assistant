@@ -14,15 +14,15 @@ def identity_errors(root: Path) -> list[str]:
     with (root / "pyproject.toml").open("rb") as stream:
         project = tomllib.load(stream)["project"]
     errors = []
-    if project.get("name") != "telemetry-for-todoist":
-        errors.append("distribution must be telemetry-for-todoist")
+    if project.get("name") != "todometry":
+        errors.append("distribution must be todometry")
     if project.get("version") != "0.4.1":
         errors.append("release version must be 0.4.1")
     if not (root / "todometry" / "__init__.py").is_file():
         errors.append("todometry package is missing")
-    entry = project.get("scripts", {}).get("todoist-telemetry", "")
+    entry = project.get("scripts", {}).get("todometry", "")
     if not entry.startswith("todometry."):
-        errors.append("todoist-telemetry entry point must use todometry")
+        errors.append("todometry entry point must use todometry")
     for namespace in ("todoist", "todometry"):
         web = root / namespace / "web"
         for path in sorted(web.rglob("*.py")):

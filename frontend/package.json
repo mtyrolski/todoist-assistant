@@ -1,5 +1,5 @@
 {
-  "name": "todoist-dashboard-frontend",
+  "name": "todometry-frontend",
   "version": "0.4.1",
   "description": "Local-first activity analytics, project history, and automations.",
   "private": true,

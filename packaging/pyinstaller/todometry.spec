@@ -24,7 +24,7 @@ ENTRYPOINT = ROOT / "todometry" / "launcher.py"
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 
 binaries = plotly_binaries
-datas = plotly_datas + copy_metadata("telemetry-for-todoist")
+datas = plotly_datas + copy_metadata("todometry")
 hiddenimports = plotly_hiddenimports
 
 # launcher.py imports the FastAPI app object and calls uvicorn.run(api_app, ...),
@@ -61,7 +61,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="todoist-telemetry",
+    name="todometry",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -76,5 +76,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    name="todoist-telemetry",
+    name="todometry",
 )

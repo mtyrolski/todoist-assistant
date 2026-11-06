@@ -43,7 +43,7 @@ jobs:
       - run: bash scripts/build_android.sh bundle
       - uses: actions/upload-artifact@v4
         with:
-          name: telemetry-for-todoist-android
+          name: todometry-android
           path: dist/android/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
@@ -118,7 +118,7 @@ jobs:
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             node --test frontend/tests/device/android-ui.test.cjs
             bash scripts/build_android.sh preview
-            adb install -r dist/android/telemetry-for-todoist-preview.apk
+            adb install -r dist/android/todometry-preview.apk
             node --test frontend/tests/device/android-release.test.cjs
       - uses: actions/upload-artifact@v4
         if: always()

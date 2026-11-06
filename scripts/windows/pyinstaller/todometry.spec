@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metada
 plotly = collect_all("plotly")
 
 binaries = plotly.binaries
-datas = plotly.datas + copy_metadata("telemetry-for-todoist")
+datas = plotly.datas + copy_metadata("todometry")
 hiddenimports = plotly.hiddenimports + collect_submodules("todometry.web") + ["todoist.core.types"]
 
 block_cipher = None
@@ -36,7 +36,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="todoist-telemetry",
+    name="todometry",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

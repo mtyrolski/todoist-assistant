@@ -87,7 +87,7 @@ def main() -> int:
     parser.add_argument("--version", required=True)
     args = parser.parse_args()
     executable = args.executable.resolve(strict=True)
-    with tempfile.TemporaryDirectory(prefix="telemetry-frozen-smoke-") as temp:
+    with tempfile.TemporaryDirectory(prefix="todometry-frozen-smoke-") as temp:
         root = Path(temp)
         data = root / "data"
         _seed_state(data)

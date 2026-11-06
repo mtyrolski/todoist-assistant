@@ -93,13 +93,13 @@ try {
     Copy-Item (Join-Path $repoRoot "configs\\*") $configStage -Recurse -Force
     Copy-Item (Join-Path $repoRoot ".env.example") (Join-Path $configStage ".env.example") -Force
 
-    $specPath = Join-Path $repoRoot "scripts\\windows\\pyinstaller\\todoist-telemetry.spec"
+    $specPath = Join-Path $repoRoot "scripts\\windows\\pyinstaller\\todometry.spec"
     $pyDist = Join-Path $distRoot "pyinstaller"
     & uv run $pythonCmd -m PyInstaller --noconfirm --clean --distpath $pyDist --workpath $buildRoot $specPath
 
     $appStage = Join-Path $stageRoot "app"
     New-Item -ItemType Directory -Path $appStage | Out-Null
-    Copy-Item (Join-Path $pyDist "todoist-telemetry.exe") $appStage -Force
+    Copy-Item (Join-Path $pyDist "todometry.exe") $appStage -Force
 
     $nodeZipName = "node-v$NodeVersion-win-x64.zip"
     $nodeZip = Join-Path $distRoot $nodeZipName
@@ -126,7 +126,7 @@ try {
     $frontendWxs = Join-Path $distRoot "frontend.wxs"
     $nodeWxs = Join-Path $distRoot "node.wxs"
     $configWxs = Join-Path $distRoot "config.wxs"
-    $mainWxs = Join-Path $repoRoot "scripts\\windows\\wix\\telemetry-for-todoist.wxs"
+    $mainWxs = Join-Path $repoRoot "scripts\\windows\\wix\\todometry.wxs"
     $canonicalWxs = Join-Path $repoRoot "windows\\installer\\components.wxs"
 
     Assert-NoLocalizedAccounts -Paths @($mainWxs, $canonicalWxs)
@@ -156,7 +156,7 @@ try {
     & $candle @wixArgs
 
     $wixObjFiles = Get-ChildItem -Path $wixObjRoot -Filter "*.wixobj" | Select-Object -ExpandProperty FullName
-    $msiPath = Join-Path $distRoot ("telemetry-for-todoist-$version.msi")
+    $msiPath = Join-Path $distRoot ("todometry-$version.msi")
     & $light -nologo -ext WixUtilExtension -ext WixUIExtension -out $msiPath @wixObjFiles
 
     Write-Host "MSI created: $msiPath"

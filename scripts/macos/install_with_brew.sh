@@ -11,7 +11,7 @@ require_cmd() {
 }
 
 if [ ! -f "${REPO_ROOT}/pyproject.toml" ]; then
-  echo "Run this script from within the Telemetry for Todoist repo." >&2
+  echo "Run this script from within the todometry repo." >&2
   exit 1
 fi
 

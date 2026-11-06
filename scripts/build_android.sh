@@ -31,7 +31,7 @@ if [ "$mode" = preview ]; then
             "${JAVA_HOME:+$JAVA_HOME/bin/}keytool" -genkeypair -noprompt -storetype PKCS12 \
                 -keystore "$signing_dir/preview.keystore" -alias preview \
                 -storepass:file "$signing_dir/password" -keypass:file "$signing_dir/password" \
-                -keyalg RSA -keysize 3072 -validity 10000 -dname 'CN=Telemetry for Todoist Preview'
+                -keyalg RSA -keysize 3072 -validity 10000 -dname 'CN=todometry Preview'
         )
     fi
     export ANDROID_SIGNING_STORE_FILE="$signing_dir/preview.keystore"
@@ -42,9 +42,9 @@ fi
 npm --prefix "$repo_root/frontend" ci --no-audit --no-fund
 checks=(:app:spotlessJavaCheck :app:testDebugUnitTest)
 case "$mode" in
-    debug) checks+=(:app:lintDebug :app:assembleDebug); artifact='apk/debug/app-debug.apk'; output='telemetry-for-todoist-debug.apk' ;;
-    preview) checks+=(-Ppreview=true :app:lintRelease :app:assembleRelease); artifact='apk/release/app-release.apk'; output='telemetry-for-todoist-preview.apk' ;;
-    bundle) checks+=(:app:lintRelease :app:bundleRelease); artifact='bundle/release/app-release.aab'; output='telemetry-for-todoist-release.aab' ;;
+    debug) checks+=(:app:lintDebug :app:assembleDebug); artifact='apk/debug/app-debug.apk'; output='todometry-debug.apk' ;;
+    preview) checks+=(-Ppreview=true :app:lintRelease :app:assembleRelease); artifact='apk/release/app-release.apk'; output='todometry-preview.apk' ;;
+    bundle) checks+=(:app:lintRelease :app:bundleRelease); artifact='bundle/release/app-release.aab'; output='todometry-release.aab' ;;
 esac
 "$repo_root/android/gradlew" -p "$repo_root/android" --no-daemon "${checks[@]}" "$@"
 mkdir -p "$repo_root/dist/android"

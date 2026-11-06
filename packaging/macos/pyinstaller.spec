@@ -24,7 +24,7 @@ def _collect(module_name):
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 
 binaries = plotly_binaries
-datas = plotly_datas + copy_metadata("telemetry-for-todoist")
+datas = plotly_datas + copy_metadata("todometry")
 hiddenimports = plotly_hiddenimports + collect_submodules("todometry.web") + ["todoist.core.types"]
 
 block_cipher = None
@@ -61,9 +61,9 @@ else:
 
 info_plist.update(
     {
-        "CFBundleName": info_plist.get("CFBundleName", "Telemetry for Todoist"),
+        "CFBundleName": info_plist.get("CFBundleName", "todometry"),
         "CFBundleDisplayName": info_plist.get(
-            "CFBundleDisplayName", "Telemetry for Todoist"
+            "CFBundleDisplayName", "todometry"
         ),
         "CFBundleIdentifier": "com.todoist.assistant",
         "CFBundleShortVersionString": version,
@@ -96,7 +96,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="TodoistAssistant",
+    name="todometry",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -111,12 +111,12 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    name="TodoistAssistant",
+    name="todometry",
 )
 
 app = BUNDLE(
     coll,
-    name="TodoistAssistant.app",
+    name="todometry.app",
     bundle_identifier="com.todoist.assistant",
     info_plist=info_plist,
 )

@@ -172,7 +172,7 @@ export default function AndroidDashboard() {
       <LoadingBar active={Boolean(busy)} />
       <header className="topbar">
         <div>
-          <p className="eyebrow">Telemetry for Todoist</p>
+          <p className="eyebrow">todometry</p>
           <h1>{ui.tab === "Overview" ? "Dashboard" : ui.tab}</h1>
           <div className="statusPills">
             {state?.demo && <span className="pill pill-neutral">Demo</span>}
