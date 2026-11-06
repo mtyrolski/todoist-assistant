@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from tests.factories import make_project, make_project_entry
-from todoist.core.types import Event, EventEntry, events_to_dataframe
+from todometry.core.types import Event, EventEntry, events_to_dataframe
 
 EXPECTED_EVENT_COLUMNS = [
     "id",
@@ -178,7 +178,7 @@ def test_events_to_dataframe_unsupported_event_types(event1, project1):
         v2_object_id="v2_task_unsupported",
     )
 
-    with patch("todoist.core.types.logger") as mock_logger:
+    with patch("todometry.core.types.logger") as mock_logger:
         df = events_to_dataframe(
             {event1, unsupported_event}, {"project1": "Project One"}, {"project1": project1}
         )
@@ -201,7 +201,7 @@ def test_events_to_dataframe_missing_project_mapping(event1, project1):
         v2_parent_project_id="v2_missing_project",
     )
 
-    with patch("todoist.core.types.logger") as mock_logger:
+    with patch("todometry.core.types.logger") as mock_logger:
         df = events_to_dataframe(
             {event1, missing_project_event}, {"project1": "Project One"}, {"project1": project1}
         )

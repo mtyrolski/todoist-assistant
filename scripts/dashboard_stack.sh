@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-STATE_DIR="${DASHBOARD_STATE_DIR:-${REPO_ROOT}/.cache/todoist-assistant/dashboard}"
+STATE_DIR="${DASHBOARD_STATE_DIR:-${REPO_ROOT}/.cache/telemetry-for-todoist/dashboard}"
 PID_DIR="${DASHBOARD_PID_DIR:-${STATE_DIR}/pids}"
 API_LOG_FILE="${STATE_DIR}/api.log"
 FRONTEND_LOG_FILE="${STATE_DIR}/frontend.log"
@@ -165,7 +165,7 @@ is_repo_dashboard_process() {
     cmd="$(process_cmdline "${pid}")"
     case "${service}" in
         api)
-            [[ "${cwd}" == "${REPO_ROOT}" && "${cmd}" == *"uvicorn todoist.web.api:app"* ]]
+            [[ "${cwd}" == "${REPO_ROOT}" && "${cmd}" == *"uvicorn todometry.web.api:app"* ]]
             ;;
         frontend)
             [[ "${cwd}" == "${REPO_ROOT}/frontend" && "${cmd}" == *"next"* ]]
@@ -235,7 +235,7 @@ start_dashboard() {
     trap cleanup_failed_launch ERR
 
     log_note "Starting API on 127.0.0.1:${API_PORT}..."
-    nohup setsid uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
+    nohup setsid uv run uvicorn todometry.web.api:app --host 127.0.0.1 --port "${API_PORT}" </dev/null > "${API_LOG_FILE}" 2>&1 &
     local api_pid="$!"
     echo "${api_pid}" > "${PID_DIR}/api.pid"
     wait_for_process "${api_pid}" "API"

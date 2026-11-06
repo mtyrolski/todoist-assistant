@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from fastapi.testclient import TestClient
 import pytest
 
-import todoist.web.api as web_api
+import todometry.web.api as web_api
 
 
 @pytest.fixture

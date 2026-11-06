@@ -1,5 +1,5 @@
 [project]
-name = "todoist-assistant"
+name = "telemetry-for-todoist"
 version = "0.4.1"
 description = "Local-first activity analytics, project history, and automations."
 readme = "README.md"
@@ -37,25 +37,28 @@ notebook = [
     "nbformat>=5.10.4",
 ]
 
+[project.scripts]
+todoist-telemetry = "todometry.cli:app"
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["todoist", "todoist.*"]
+include = ["todometry", "todometry.*", "todoist", "todoist.core"]
 
 [tool.coverage.run]
 branch = true
-source = ["todoist"]
+source = ["todometry"]
 omit = [
-    "todoist/**/__init__.py",
-    "todoist/core/version.py",
+    "todometry/**/__init__.py",
+    "todometry/core/version.py",
 ]
 
 [tool.coverage.report]
 omit = [
-    "todoist/**/__init__.py",
-    "todoist/core/version.py",
+    "todometry/**/__init__.py",
+    "todometry/core/version.py",
 ]
 exclude_lines = [
     "pragma: no cover",
@@ -71,15 +74,15 @@ target-version = "py311"
 extend-select = ["F"]
 
 [tool.ruff.lint.per-file-ignores]
-"todoist/web/api.py" = [
+"todometry/web/api.py" = [
     # The legacy API module imports shared names that are synced into split route/component modules.
     "F401",
 ]
-"todoist/web/api_components/*.py" = [
+"todometry/web/api_components/*.py" = [
     # Component modules receive shared API helpers through _sync_api_globals at call time.
     "F821",
 ]
-"todoist/web/routes/*.py" = [
+"todometry/web/routes/*.py" = [
     # Route modules receive shared API helpers through _sync_api_globals at request time.
     "F821",
 ]

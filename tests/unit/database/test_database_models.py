@@ -1,6 +1,6 @@
 
 from tests.unit.database.helpers import make_event
-from todoist.core.types import Project, Task
+from todometry.core.types import Project, Task
 
 
 def test_task_equality(sample_task_entry):

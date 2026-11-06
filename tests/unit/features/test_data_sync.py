@@ -3,9 +3,9 @@
 import pytest
 
 from tests.unit.database.helpers import make_event
-from todoist.core.utils import Cache
-from todoist.features.activity import load_activity_cache
-from todoist.features.data_sync import backfill_activity_history, sync_recent_activity
+from todometry.core.utils import Cache
+from todometry.features.activity import load_activity_cache
+from todometry.features.data_sync import backfill_activity_history, sync_recent_activity
 
 
 def test_recent_sync_merges_and_deduplicates(monkeypatch, tmp_path):

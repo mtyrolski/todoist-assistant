@@ -10,7 +10,7 @@
       </Directory>
       <Directory Id="DesktopFolder" />
       <Directory Id="CommonAppDataFolder">
-        <Directory Id="APPDATADIR" Name="TodoistAssistant">
+        <Directory Id="APPDATADIR" Name="TelemetryForTodoist">
           <Directory Id="CONFIGDIR" Name="config" />
           <Directory Id="LOGSDIR" Name="logs" />
         </Directory>
@@ -35,7 +35,7 @@
           Id="StartMenuShortcut"
           Name="Telemetry for Todoist"
           Description="Launch Telemetry for Todoist"
-          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          Target="[INSTALLFOLDER]todoist-telemetry.exe"
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
         <RegistryValue
@@ -57,7 +57,7 @@
           Id="DesktopShortcut"
           Name="Telemetry for Todoist"
           Description="Launch Telemetry for Todoist"
-          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          Target="[INSTALLFOLDER]todoist-telemetry.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
           Root="HKCU"
@@ -98,6 +98,7 @@
   </Fragment>
 
   <Fragment>
+    <util:CloseApplication Id="CloseTelemetryExe" Target="todoist-telemetry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
     <util:CloseApplication
       Id="CloseTodoistAssistantExe"
       Target="todoist-assistant.exe"

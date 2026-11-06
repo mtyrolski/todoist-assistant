@@ -3,12 +3,12 @@
 from pathlib import Path
 import shutil
 
-from todoist.core.env import EnvVar
-from todoist.core.utils import CACHE_STORAGE_REGISTRY, Cache
-from todoist.dashboard.settings import load_dashboard_config
-from todoist.database.dataframe import load_adjustments_file
-from todoist.features.activity import load_activity_cache
-import todoist.web.api as web_api
+from todometry.core.env import EnvVar
+from todometry.core.utils import CACHE_STORAGE_REGISTRY, Cache
+from todometry.dashboard.settings import load_dashboard_config
+from todometry.database.dataframe import load_adjustments_file
+from todometry.features.activity import load_activity_cache
+import todometry.web.api as web_api
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "v040"
@@ -67,8 +67,8 @@ def _write_incompatible_cache(path, monkeypatch):
 
 def test_incompatible_activity_is_not_presented_as_empty(tmp_path, monkeypatch):
     import pytest
-    from todoist.core.utils import IncompatibleCacheError
-    from todoist.database.dataframe import load_activity_data
+    from todometry.core.utils import IncompatibleCacheError
+    from todometry.database.dataframe import load_activity_data
 
     path = tmp_path / "activity.joblib"
     original = _write_incompatible_cache(path, monkeypatch)
@@ -81,7 +81,7 @@ def test_incompatible_activity_is_not_presented_as_empty(tmp_path, monkeypatch):
 
 def test_incompatible_dashboard_snapshot_is_not_discarded(tmp_path, monkeypatch):
     import pytest
-    from todoist.core.utils import IncompatibleCacheError
+    from todometry.core.utils import IncompatibleCacheError
 
     path = tmp_path / "dashboard_state.joblib"
     original = _write_incompatible_cache(path, monkeypatch)
@@ -114,7 +114,7 @@ def test_incompatible_dashboard_snapshot_is_not_overwritten_by_refresh(
 
 def test_incompatible_archived_scan_cache_is_not_overwritten(tmp_path, monkeypatch):
     import pytest
-    from todoist.core.utils import IncompatibleCacheError
+    from todometry.core.utils import IncompatibleCacheError
 
     path = tmp_path / "archived_activity_scans.joblib"
     original = _write_incompatible_cache(path, monkeypatch)
@@ -129,7 +129,7 @@ def test_incompatible_archived_scan_cache_is_not_overwritten(tmp_path, monkeypat
 
 def test_refresh_does_not_hide_incompatible_activity_data(tmp_path, monkeypatch):
     import pytest
-    from todoist.core.utils import IncompatibleCacheError
+    from todometry.core.utils import IncompatibleCacheError
 
     class FakeDatabase:
         def __init__(self, _path):
@@ -159,7 +159,7 @@ def test_refresh_does_not_hide_incompatible_activity_data(tmp_path, monkeypatch)
 def test_v040_activity_rebuilds_history_with_legacy_project_mapping(
     tmp_path, monkeypatch
 ):
-    from todoist.database.dataframe import load_activity_data
+    from todometry.database.dataframe import load_activity_data
 
     for filename in ("activity.joblib", "dashboard_state.joblib"):
         shutil.copyfile(FIXTURE / filename, tmp_path / filename)
@@ -184,3 +184,106 @@ def test_v040_activity_rebuilds_history_with_legacy_project_mapping(
     assert list(frame["title"]) == ["fixture completion"]
     assert list(frame["parent_project_name"]) == ["Legacy project"]
     assert list(frame["root_project_name"]) == ["Work"]
+
+
+def test_migration_preserves_retained_files_and_existing_destinations(tmp_path):
+    from todometry.core.utils import migrate_legacy_files
+
+    legacy, target = tmp_path / "old", tmp_path / "new"
+    (legacy / "cache").mkdir(parents=True)
+    (legacy / "config").mkdir()
+    (legacy / "personal").mkdir()
+    shutil.copyfile(FIXTURE / "activity.joblib", legacy / "cache/activity.joblib")
+    (legacy / "cache/observer_state.joblib").write_bytes(b"unused")
+    (legacy / "config/dashboard.yaml").write_text("legacy settings", encoding="utf-8")
+    (legacy / "personal/mapping.py").write_text("legacy mapping", encoding="utf-8")
+    (target / "config").mkdir(parents=True)
+    (target / "config/dashboard.yaml").write_text("new settings", encoding="utf-8")
+    entries = ("cache/activity.joblib", "config", "personal")
+
+    migrate_legacy_files(legacy, target, entries)
+    assert {event.id for event in Cache(str(target / "cache")).activity.load()} == {
+        "event-v040"
+    }
+    assert (target / "config/dashboard.yaml").read_text() == "new settings"
+    assert (target / "personal/mapping.py").read_text() == "legacy mapping"
+    assert not (target / "cache/observer_state.joblib").exists()
+    assert (legacy / "cache/activity.joblib").read_bytes() == (
+        target / "cache/activity.joblib"
+    ).read_bytes()
+
+    (legacy / "personal/mapping.py").write_text("later", encoding="utf-8")
+    migrate_legacy_files(legacy, target, entries)
+    assert (target / "personal/mapping.py").read_text() == "legacy mapping"
+
+
+def test_interrupted_migration_resumes_without_overwriting(tmp_path, monkeypatch):
+    import os
+    import pytest
+
+    from todometry.core.utils import migrate_legacy_files
+
+    legacy, target = tmp_path / "old", tmp_path / "new"
+    legacy.mkdir()
+    (legacy / "a").write_text("first", encoding="utf-8")
+    (legacy / "b").write_text("second", encoding="utf-8")
+    link = os.link
+
+    def interrupt(source, destination):
+        if Path(destination).name == "b":
+            raise OSError("interrupted")
+        return link(source, destination)
+
+    monkeypatch.setattr(os, "link", interrupt)
+    with pytest.raises(OSError, match="interrupted"):
+        migrate_legacy_files(legacy, target, ("a", "b"))
+    assert not (target / ".v040-migration-complete").exists()
+    (target / "a").write_text("edited", encoding="utf-8")
+    monkeypatch.setattr(os, "link", link)
+    migrate_legacy_files(legacy, target, ("a", "b"))
+    assert (target / "a").read_text() == "edited"
+    assert (target / "b").read_text() == "second"
+
+
+def test_launcher_discovers_legacy_default_state(tmp_path, monkeypatch):
+    import sys
+
+    from todometry.launcher import _default_data_dir
+
+    monkeypatch.delenv(str(EnvVar.DATA_DIR), raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    old = tmp_path / ".local/share/todoist-assistant"
+    (old / "cache").mkdir(parents=True)
+    (old / "config").mkdir()
+    (old / "personal").mkdir()
+    shutil.copyfile(FIXTURE / "activity.joblib", old / "cache/activity.joblib")
+    shutil.copyfile(FIXTURE / "dashboard.yaml", old / "config/dashboard.yaml")
+    shutil.copyfile(
+        FIXTURE / "archived_root_projects.py", old / "personal/archived_root_projects.py"
+    )
+    (old / ".env").write_text("API_KEY=legacy\n", encoding="utf-8")
+    new = _default_data_dir()
+    assert new == tmp_path / ".local/share/telemetry-for-todoist"
+    assert {event.id for event in Cache(str(new / "cache")).activity.load()} == {
+        "event-v040"
+    }
+    assert load_adjustments_file(new / "personal/archived_root_projects.py")[0] == {
+        "Legacy project": "Work"
+    }
+    assert (new / "config/dashboard.yaml").read_bytes() == (
+        old / "config/dashboard.yaml"
+    ).read_bytes()
+    assert (new / ".env").read_text() == "API_KEY=legacy\n"
+    assert _default_data_dir() == new
+
+
+def test_clean_default_cache_and_explicit_override(tmp_path, monkeypatch):
+    from todometry.core.utils import resolve_cache_dir
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
+    assert Path(resolve_cache_dir()) == tmp_path / ".cache/telemetry-for-todoist"
+    assert not (tmp_path / ".cache/todoist-assistant").exists()
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path / "custom"))
+    assert Path(resolve_cache_dir()) == tmp_path / "custom"

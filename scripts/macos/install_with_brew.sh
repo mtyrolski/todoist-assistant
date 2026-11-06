@@ -11,7 +11,7 @@ require_cmd() {
 }
 
 if [ ! -f "${REPO_ROOT}/pyproject.toml" ]; then
-  echo "Run this script from within the todoist-assistant repo." >&2
+  echo "Run this script from within the Telemetry for Todoist repo." >&2
   exit 1
 fi
 
@@ -41,10 +41,10 @@ if grep -q "PUT YOUR API HERE" "${REPO_ROOT}/.env"; then
 fi
 
 if [ "${needs_api}" -eq 1 ]; then
-  echo "Edit ${REPO_ROOT}/.env and set API_KEY, then run: make init_local_env" >&2
+  echo "Edit ${REPO_ROOT}/.env and set API_KEY, then run: make sync" >&2
 else
   echo "Initializing local cache (this may take a few minutes)..." >&2
-  (cd "${REPO_ROOT}" && make init_local_env)
+  (cd "${REPO_ROOT}" && make sync)
 fi
 
 echo "Next steps:" >&2

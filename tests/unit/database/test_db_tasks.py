@@ -1,11 +1,11 @@
 import inspect
 from unittest.mock import patch
 
-from todoist.api import TodoistEndpoints
-from todoist.api.client import RequestSpec
+from todometry.api import TodoistEndpoints
+from todometry.api.client import RequestSpec
 
 
-@patch("todoist.database.db_tasks.TodoistAPIClient.request_json")
+@patch("todometry.database.db_tasks.TodoistAPIClient.request_json")
 def test_insert_task_basic(mock_request_json, db_tasks):
     mock_request_json.return_value = {
         "id": "3501",

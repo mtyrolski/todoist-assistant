@@ -2,10 +2,10 @@
 
 import pytest
 
-import todoist.database.dataframe as dataframe_module
-from todoist.core.utils import MaxRetriesExceeded
-import todoist.web.api as web_api
-from todoist.web.services.project_adjustments import _resolve_automatic_project_mappings
+import todometry.database.dataframe as dataframe_module
+from todometry.core.utils import MaxRetriesExceeded
+import todometry.web.api as web_api
+from todometry.web.services.project_adjustments import _resolve_automatic_project_mappings
 
 # pylint: disable=protected-access
 

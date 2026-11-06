@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from todoist.core.runtime_env import (
+from todometry.core.runtime_env import (
     resolve_runtime_env_path,
 )
 

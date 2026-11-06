@@ -1,6 +1,7 @@
 """Build a wheel and smoke-test the installed files in an isolated directory."""
 
 from email.parser import Parser
+from configparser import ConfigParser
 from pathlib import Path
 import shutil
 import subprocess
@@ -36,6 +37,13 @@ def main() -> int:
                 or metadata["Version"] != project["version"]
             ):
                 raise RuntimeError("Wheel metadata does not match pyproject.toml")
+            entry_points_file = next(
+                n for n in archive.namelist() if n.endswith(".dist-info/entry_points.txt")
+            )
+            entries = ConfigParser()
+            entries.read_string(archive.read(entry_points_file).decode("utf-8"))
+            if entries["console_scripts"].get("todoist-telemetry") != "todometry.cli:app":
+                raise RuntimeError("Wheel console entry point is missing or incorrect")
             archive.extractall(extracted)
         cache = root / "cache"
         cache.mkdir()
@@ -46,13 +54,13 @@ def main() -> int:
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-import todoist
+import todometry
 from fastapi.testclient import TestClient
-from todoist.core.utils import Cache
-from todoist.core.version import get_version
-from todoist.features.activity import load_activity_cache
-from todoist.web.api import app
-assert Path(todoist.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())
+from todometry.core.utils import Cache
+from todometry.core.version import get_version
+from todometry.features.activity import load_activity_cache
+from todometry.web.api import app
+assert Path(todometry.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())
 assert get_version() == sys.argv[3]
 assert {event.id for event in load_activity_cache(cache=Cache(sys.argv[2]))} == {"event-v040"}
 with TestClient(app) as client:
@@ -74,7 +82,7 @@ print("Wheel import, legacy activity and API health passed")
             cwd=root,
             check=True,
         )
-        cli = 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv = ["todoist.cli", *sys.argv[1:]]; runpy.run_module("todoist.cli", run_name="__main__")'
+        cli = 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv = ["todometry.cli", *sys.argv[1:]]; runpy.run_module("todometry.cli", run_name="__main__")'
         for option in ("--help", "--version"):
             result = subprocess.run(
                 [sys.executable, "-I", "-c", cli, str(extracted), option],

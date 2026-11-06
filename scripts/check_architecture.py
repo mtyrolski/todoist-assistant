@@ -11,19 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 # Temporary ceilings for code that predates this check. Reduce these as it is removed;
 # do not move or increase them to accommodate new injection.
 LEGACY = {
-    "todoist/web/api.py": {"sync": 1, "globals_subscript": 1},
-    "todoist/web/api_components/dashboard_runtime.py": {
+    "todometry/web/api.py": {"sync": 1, "globals_subscript": 1},
+    "todometry/web/api_components/dashboard_runtime.py": {
         "sync": 1,
         "globals_subscript": 4,
         "api_namespace": 1,
     },
-    "todoist/web/routes/admin_settings.py": {"sync": 2},
-    "todoist/web/routes/common.py": {"sync": 1, "api_namespace": 1},
-    "todoist/web/routes/dashboard.py": {"sync": 6},
+    "todometry/web/routes/admin_settings.py": {"sync": 2},
+    "todometry/web/routes/common.py": {"sync": 1, "api_namespace": 1},
+    "todometry/web/routes/dashboard.py": {"sync": 6},
 }
 LEGACY_F821_PATHS = {
-    "todoist/web/api_components/*.py",
-    "todoist/web/routes/*.py",
+    "todometry/web/api_components/*.py",
+    "todometry/web/routes/*.py",
 }
 
 
@@ -141,7 +141,7 @@ def check_tree(root: Path) -> list[str]:
 
 def report_size(root: Path) -> None:
     groups = {
-        "python": (root / "todoist", {".py"}),
+        "python": (root / "todometry", {".py"}),
         "frontend": (root / "frontend" / "app", {".ts", ".tsx", ".css"}),
         "android": (root / "android" / "app" / "src" / "main", {".kt", ".java"}),
     }

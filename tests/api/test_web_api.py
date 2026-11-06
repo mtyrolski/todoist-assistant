@@ -14,9 +14,9 @@ from tests.web_api_helpers import (
     _single_event_df,
     _stub_all_figures,
 )
-import todoist.web.api as web_api
-import todoist.web.routes.dashboard as dashboard_routes
-from todoist.web.api_components import dashboard_runtime
+import todometry.web.api as web_api
+import todometry.web.routes.dashboard as dashboard_routes
+from todometry.web.api_components import dashboard_runtime
 
 # pylint: disable=protected-access
 
@@ -741,7 +741,7 @@ def test_stale_ready_state_refreshes_in_background_without_blocking_cached_reads
 ):
     import asyncio
     import time
-    import todoist.web.api_components.dashboard_runtime as runtime
+    import todometry.web.api_components.dashboard_runtime as runtime
 
     state = web_api._DashboardState()
     state.df_activity = _single_event_df()
@@ -775,7 +775,7 @@ def test_stale_ready_state_refreshes_in_background_without_blocking_cached_reads
 def test_failed_background_refresh_keeps_cached_data_and_throttles_retries(monkeypatch):
     import asyncio
     import time
-    import todoist.web.api_components.dashboard_runtime as runtime
+    import todometry.web.api_components.dashboard_runtime as runtime
 
     state = web_api._DashboardState()
     state.df_activity = _single_event_df()
@@ -806,7 +806,7 @@ def test_failed_background_refresh_keeps_cached_data_and_throttles_retries(monke
 
 def test_explicit_refresh_joins_an_existing_background_sync(monkeypatch):
     import asyncio
-    import todoist.web.api_components.dashboard_runtime as runtime
+    import todometry.web.api_components.dashboard_runtime as runtime
 
     state = web_api._DashboardState()
     monkeypatch.setattr(web_api, "_state", state)
@@ -849,7 +849,7 @@ def test_state_refresh_uses_the_runtime_credential_file(monkeypatch, tmp_path):
 
 def test_background_refresh_preserves_partial_sync_warnings(monkeypatch):
     import asyncio
-    import todoist.web.api_components.dashboard_runtime as runtime
+    import todometry.web.api_components.dashboard_runtime as runtime
 
     state = web_api._DashboardState()
     monkeypatch.setattr(web_api, "_state", state)
@@ -871,7 +871,7 @@ def test_background_refresh_preserves_partial_sync_warnings(monkeypatch):
 def test_failed_mode_change_does_not_return_data_from_the_previous_mode(monkeypatch):
     import asyncio
     import pytest
-    import todoist.web.api_components.dashboard_runtime as runtime
+    import todometry.web.api_components.dashboard_runtime as runtime
 
     state = web_api._DashboardState()
     state.df_activity = _single_event_df()

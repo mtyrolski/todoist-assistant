@@ -1,5 +1,5 @@
 from tests.unit.database.helpers import make_event
-from todoist.features.activity import activity_project_ids
+from todometry.features.activity import activity_project_ids
 
 
 def test_activity_project_ids_includes_direct_v2_and_moved_project_ids() -> None:

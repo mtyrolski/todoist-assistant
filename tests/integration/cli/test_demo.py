@@ -6,13 +6,13 @@ from typing import cast
 import pytest
 from tests.factories import make_project, make_project_entry, make_task
 
-from todoist.database.demo import (
+from todometry.database.demo import (
     _ProjectTheme,
     anonymize_activity_dates,
     anonymize_label_names,
     anonymize_project_names,
 )
-from todoist.web.dashboard_payload import normalize_activity_df
+from todometry.web.dashboard_payload import normalize_activity_df
 
 BASE = datetime(2024, 1, 1, 9)
 
@@ -180,7 +180,7 @@ def test_anonymize_project_names_uses_stable_hierarchy_themes():
 
 def test_anonymize_project_names_uses_theme_specific_subprojects(monkeypatch):
     monkeypatch.setattr(
-        "todoist.database.demo._PROJECT_THEME_CATALOG",
+        "todometry.database.demo._PROJECT_THEME_CATALOG",
         (
             _ProjectTheme(
                 "North Star Studio",
@@ -265,7 +265,7 @@ def test_anonymize_label_names_handles_partial_catalog_without_error():
 
 def test_anonymize_label_names_raises_when_catalog_is_too_small(monkeypatch):
     monkeypatch.setattr(
-        "todoist.database.demo._LABEL_NAMES",
+        "todometry.database.demo._LABEL_NAMES",
         ("one", "two"),
     )
     active_projects = [

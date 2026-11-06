@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.request import urlopen
 from xml.etree import ElementTree
 
-from todoist.core.version import get_version
+from todometry.core.version import get_version
 
 SIGNING_CERT_ENV = "WINDOWS_SIGNING_CERTIFICATE"
 SIGNING_PASSWORD_ENV = "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
@@ -32,7 +32,7 @@ def _run(
 
 def _read_version(repo_root: Path) -> tuple[str, str]:
     _ = repo_root
-    return get_version(), "todoist.core.version"
+    return get_version(), "todometry.core.version"
 
 
 def _normalize_msi_version(version: str) -> str:
@@ -495,7 +495,7 @@ def _build_msi(
         installer_dir / name for name in ("product.wxs", "components.wxs", "ui.wxs")
     )
     _require_existing([product_wxs, components_wxs, ui_wxs], "WiX installer files")
-    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "todoist-assistant.wxs"
+    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "telemetry-for-todoist.wxs"
     _assert_no_localized_accounts([product_wxs, components_wxs, legacy_wxs])
 
     wix_out_dir = str(wixobj_dir) + os.sep
@@ -528,7 +528,7 @@ def _build_msi(
             "No WiX object files generated; candle.exe did not produce outputs"
         )
 
-    msi_path = dist_root / f"todoist-assistant-{msi_version}.msi"
+    msi_path = dist_root / f"telemetry-for-todoist-{msi_version}.msi"
     _run(
         [
             wix_tools["light"],
@@ -590,7 +590,7 @@ def _build_bundle(
             "No WiX bundle object files generated; candle.exe did not produce outputs"
         )
 
-    setup_path = dist_root / "TodoistAssistantSetup.exe"
+    setup_path = dist_root / "TelemetryForTodoistSetup.exe"
     _run(
         [
             wix_tools["light"],
@@ -679,7 +679,7 @@ def main() -> int:
     elif not args.no_dashboard:
         print("Dashboard directory not found; skipping frontend packaging.")
 
-    spec_path = repo_root / "packaging" / "pyinstaller" / "todoist_assistant.spec"
+    spec_path = repo_root / "packaging" / "pyinstaller" / "telemetry_for_todoist.spec"
     if not spec_path.exists():
         raise RuntimeError(f"PyInstaller spec file not found: {spec_path}")
 
@@ -706,14 +706,14 @@ def main() -> int:
         cwd=repo_root,
     )
 
-    app_root = pyinstaller_dist / "todoist-assistant"
+    app_root = pyinstaller_dist / "todoist-telemetry"
     if not app_root.exists():
         raise RuntimeError(
             "PyInstaller output not found; expected onedir build under dist/windows/pyinstaller"
         )
 
     if signtool_path:
-        payload_exe = app_root / "todoist-assistant.exe"
+        payload_exe = app_root / "todoist-telemetry.exe"
         _require_existing([payload_exe], "Expected PyInstaller executable for signing")
         _sign_if_configured(signtool_path, signing_config, payload_exe)
 

@@ -6,13 +6,13 @@ from typing import Any, cast
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
-from todoist.dashboard._plot_periodic import _prepare_completed_periodic_frame
+from todometry.dashboard._plot_periodic import _prepare_completed_periodic_frame
 
-from todoist.dashboard._plot_periodic import (
+from todometry.dashboard._plot_periodic import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
 )
-from todoist.dashboard._plot_weekly_trend import plot_weekly_completion_trend
+from todometry.dashboard._plot_weekly_trend import plot_weekly_completion_trend
 
 
 def _weekly_completion_df() -> pd.DataFrame:
@@ -197,7 +197,7 @@ def _archived_current_period_sparse_df() -> pd.DataFrame:
 
 
 def _freeze_periodic_now(monkeypatch: Any, now: datetime) -> None:
-    import todoist.dashboard._plot_periodic as periodic_module
+    import todometry.dashboard._plot_periodic as periodic_module
 
     class FixedDateTime(datetime):
         @classmethod
@@ -749,7 +749,7 @@ def test_quarterly_counts_use_calendar_quarter_boundaries():
 
 
 def test_project_forecast_history_includes_recent_idle_weeks():
-    from todoist.dashboard._plot_periodic import (
+    from todometry.dashboard._plot_periodic import (
         _history_totals_for_project,
         _PeriodicForecastContext,
         _PERIODIC_CONFIG,

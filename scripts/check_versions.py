@@ -58,7 +58,7 @@ def read_uv_lock_version(path: Path) -> str | None:
 
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     for package in data.get("package", []):
-        if isinstance(package, dict) and package.get("name") == "todoist-assistant":
+        if isinstance(package, dict) and package.get("name") == "telemetry-for-todoist":
             version = package.get("version")
             if isinstance(version, str) and version.strip():
                 return version.strip()
@@ -128,19 +128,19 @@ def main() -> int:
     uv_lock = repo_root / "uv.lock"
     uv_lock_version = read_uv_lock_version(uv_lock)
     if uv_lock.exists() and uv_lock_version is None:
-        mismatches.append("uv.lock is missing todoist-assistant version")
+        mismatches.append("uv.lock is missing telemetry-for-todoist version")
     elif uv_lock_version and uv_lock_version != version:
         mismatches.append(
-            f"uv.lock todoist-assistant version {uv_lock_version} != pyproject {version}"
+            f"uv.lock telemetry-for-todoist version {uv_lock_version} != pyproject {version}"
         )
 
-    formula = repo_root / "Formula" / "todoist-assistant.rb"
+    formula = repo_root / "Formula" / "telemetry-for-todoist.rb"
     formula_version = read_formula_version(formula)
     if formula.exists() and formula_version is None:
-        mismatches.append("Formula/todoist-assistant.rb is missing version")
+        mismatches.append("Formula/telemetry-for-todoist.rb is missing version")
     elif formula_version and formula_version != version:
         mismatches.append(
-            f"Formula/todoist-assistant.rb version {formula_version} != pyproject {version}"
+            f"Formula/telemetry-for-todoist.rb version {formula_version} != pyproject {version}"
         )
 
     if mismatches:

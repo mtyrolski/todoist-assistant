@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 import requests
 
-from todoist.core.env import EnvVar
-from todoist.core.version import get_version
+from todometry.core.env import EnvVar
+from todometry.core.version import get_version
 
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -53,8 +53,8 @@ def test_pkg_install_smoke() -> None:
     if not pkg.exists():
         raise AssertionError(f"pkg not found at {pkg}")
 
-    binary = Path("/usr/local/todoist-assistant/todoist-assistant")
-    shim = Path("/usr/local/bin/todoist-assistant")
+    binary = Path("/usr/local/todoist-assistant/todoist-telemetry")
+    shim = Path("/usr/local/bin/todoist-telemetry")
     config_dir = Path("/usr/local/etc/todoist-assistant")
     for existing in (binary.parent, shim, config_dir):
         if existing.exists():
@@ -72,7 +72,7 @@ def test_pkg_install_smoke() -> None:
     assert _run([str(shim), "--version"]).stdout.strip() == get_version()
 
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/todoist-assistant"])
-    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todoist-assistant"])
+    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todoist-telemetry"])
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/etc/todoist-assistant"])
 
     assert not binary.exists(), "CLI bundle still present after removal"
@@ -158,7 +158,7 @@ def test_brew_install_smoke() -> None:
     if not formula:
         pytest.skip(f"{EnvVar.BREW_FORMULA} not set")
     if _run(
-        ["brew", "list", "--versions", "todoist-assistant"], check=False
+        ["brew", "list", "--versions", "telemetry-for-todoist"], check=False
     ).stdout.strip():
         pytest.fail(
             "Homebrew smoke test requires a runner without the existing formula"
@@ -173,6 +173,6 @@ def test_brew_install_smoke() -> None:
     os.environ.setdefault("HOMEBREW_NO_AUTO_UPDATE", "1")
 
     _run(["brew", "install", "--build-from-source", formula])
-    _run(["todoist-assistant", "--help"])
-    assert _run(["todoist-assistant", "--version"]).stdout.strip() == get_version()
-    _run(["brew", "uninstall", "--force", "todoist-assistant"])
+    _run(["todoist-telemetry", "--help"])
+    assert _run(["todoist-telemetry", "--version"]).stdout.strip() == get_version()
+    _run(["brew", "uninstall", "--force", "telemetry-for-todoist"])

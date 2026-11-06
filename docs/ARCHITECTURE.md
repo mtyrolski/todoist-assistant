@@ -5,24 +5,24 @@ boundaries. It does not imply that every planned release migration is complete.
 
 ## Data and history
 
-`todoist/api/` accesses Todoist; `todoist/database/` fetches projects and
-activity. `todoist/features/activity.py` and `todoist/features/data_sync.py`
-merge and checkpoint activity, while `todoist/sync.py` exposes recent and history
-sync. `todoist/core/utils.py` stores the activity cache, dashboard snapshot and
+`todometry/api/` accesses Todoist; `todometry/database/` fetches projects and
+activity. `todometry/features/activity.py` and `todometry/features/data_sync.py`
+merge and checkpoint activity, while `todometry/sync.py` exposes recent and history
+sync. `todometry/core/utils.py` stores the activity cache, dashboard snapshot and
 archived-activity scan state locally, with atomic writes and locking.
 
-`todoist/database/dataframe.py` transforms activity and applies local project
-adjustments; `todoist/web/services/project_adjustments.py` resolves manual and
+`todometry/database/dataframe.py` transforms activity and applies local project
+adjustments; `todometry/web/services/project_adjustments.py` resolves manual and
 inferred mappings. The project timeline is a semantic payload built by
-`todoist/dashboard/_plot_project_lifecycle.py` and rendered by the frontend.
+`todometry/dashboard/_plot_project_lifecycle.py` and rendered by the frontend.
 Other retained dashboard charts still use Plotly.
 
 ## Runtime and presentation
 
-`todoist/launcher.py`, `scripts/dashboard_stack.sh` and `todoist/sync.py` run
+`todometry/launcher.py`, `scripts/dashboard_stack.sh` and `todometry/sync.py` run
 the installed or source workflows. Desktop demo mode is an anonymized local
-dashboard. The web entrypoint is `todoist/web/api.py`, with routes in
-`todoist/web/routes/` and runtime helpers in `todoist/web/api_components/`.
+dashboard. The web entrypoint is `todometry/web/api.py`, with routes in
+`todometry/web/routes/` and runtime helpers in `todometry/web/api_components/`.
 The intended boundary is a thin FastAPI composition root with explicit shared
 state and imports. **Current debt:** dashboard and settings routes and dashboard
 runtime still synchronize the API namespace dynamically. The architecture check
@@ -37,7 +37,7 @@ retained review must be read-only and must not mutate Todoist.
 
 ## Local state and compatibility
 
-For a source checkout, the default cache is `.cache/todoist-assistant` under
+For a source checkout, the default cache is `.cache/telemetry-for-todoist` under
 the working directory; `TODOIST_CACHE_DIR` overrides it. The runtime resolves
 `.env` using `TODOIST_DATA_DIR`, `TODOIST_CACHE_DIR`, the working directory and
 repository fallback in that order. Dashboard settings use
@@ -46,10 +46,14 @@ path. Project adjustment files live in `personal/`, with
 `TODOIST_PERSONAL_DIR` available as an override.
 
 The installed launcher sets data, config, cache and log directories. Its
-platform defaults are in `todoist/launcher.py`. The current v0.4.0 cache paths
-remain in use; a future identity rename must discover or migrate existing
-history, mappings and settings without silent loss. Keep compatibility only
-for real upgrades or documented external consumers, not internal facades.
+platform defaults are in `todometry/launcher.py`. When the old default data or
+cache directory exists, retained files are copied
+into the new default directory once. Existing destination files win conflicts;
+source files remain untouched, and an interrupted copy resumes on the next run.
+Explicit path overrides are never migrated. A small `todoist.core.types` shim
+allows old joblib activity and dashboard snapshots to be read; newly saved
+objects use `todometry`. Keep compatibility only for real upgrades or documented
+external consumers, not internal facades.
 
 ## Distribution and exclusions
 

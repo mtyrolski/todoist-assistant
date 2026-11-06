@@ -6,5 +6,5 @@ import sys
 
 if __name__ == "__main__":
     raise SystemExit(
-        subprocess.call(["pyright", "--pythonpath", sys.executable, "todoist"])
+        subprocess.call(["pyright", "--pythonpath", sys.executable, "todometry"])
     )

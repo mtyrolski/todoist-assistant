@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from scripts.clear_local_env import clear_local_env, main
-from todoist.core.env import EnvVar
-from todoist.core.utils import RUNTIME_MIGRATABLE_FILENAMES
+from todometry.core.env import EnvVar
+from todometry.core.utils import RUNTIME_MIGRATABLE_FILENAMES
 
 
 def _write_runtime_files(root: Path) -> None:

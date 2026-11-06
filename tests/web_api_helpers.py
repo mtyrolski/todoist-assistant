@@ -3,8 +3,8 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-import todoist.web.api as web_api
-import todoist.web.routes.dashboard as dashboard_routes
+import todometry.web.api as web_api
+import todometry.web.routes.dashboard as dashboard_routes
 
 # pylint: disable=protected-access
 

@@ -15,9 +15,9 @@ import urllib.request
 
 from joblib import dump, load
 
-from todoist.core.env import EnvVar
-from todoist.database.dataframe import load_activity_data
-from todoist.web.api import _DASHBOARD_STATE_SCHEMA_VERSION
+from todometry.core.env import EnvVar
+from todometry.database.dataframe import load_activity_data
+from todometry.web.api import _DASHBOARD_STATE_SCHEMA_VERSION
 
 
 ROOT = Path(__file__).resolve().parents[1]

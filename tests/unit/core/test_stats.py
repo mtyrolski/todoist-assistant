@@ -1,11 +1,11 @@
-"""Tests for statistics and date helper functions in ``todoist.features.stats``."""
+"""Tests for statistics and date helper functions in ``todometry.features.stats``."""
 
 from datetime import datetime
 from functools import partial
 
 import pytest
 
-from todoist.features.stats import (
+from todometry.features.stats import (
     extract_task_due_date,
     p1_tasks,
     p2_tasks,

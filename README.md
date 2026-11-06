@@ -33,9 +33,10 @@ not required to run the dashboard.
 ## Install or run from source
 
 Windows and macOS installer and build instructions are in
-[Windows and macOS builds](docs/BUILDING.md). Existing installer filenames,
-package names and local data paths retain their legacy identifiers until the
-technical migration; they identify the same project.
+[Windows and macOS builds](docs/BUILDING.md). The Python distribution is
+`telemetry-for-todoist`, its namespace is `todometry`, and its CLI is
+`todoist-telemetry`. Existing local state is copied to the new default path
+on upgrade; the original files are retained.
 
 For a source checkout, use Python 3.11–3.13, [uv](https://docs.astral.sh/uv/),
 Node.js 20.9+ and Make:
@@ -73,7 +74,7 @@ or build it with JDK 17 and Android SDK 36:
 
 ```bash
 make build_android_preview
-adb install -r dist/android/todoist-assistant-preview.apk
+adb install -r dist/android/telemetry-for-todoist-preview.apk
 ```
 
 See [Android build instructions](docs/ANDROID.md) for device tests and signing.

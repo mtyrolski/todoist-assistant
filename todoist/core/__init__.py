@@ -1,1 +1,1 @@
-"""Core shared helpers for Telemetry for Todoist."""
+"""Compatibility package for v0.4.0 cached types."""

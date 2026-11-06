@@ -2,29 +2,26 @@
 
 This doc captures the current build structure and the GitHub Actions workflows.
 
-**Release blocked:** the technical migration to `telemetry-for-todoist`,
-`todometry` and `todoist-telemetry` and its upgrade validation are not complete.
-The current outputs below still use legacy technical names. The publishing jobs
-require an explicit `publish` input on a tag and check the target identity and
-known web-injection debt. Passing that guard does not prove product coverage,
-state migration or native smoke checks. Do not publish until those checks pass
-on the actual release artifacts. See the [draft release notes](releases/v0.4.1.md).
+**Release blocked:** web namespace injection and the remaining product and
+native upgrade validation are not complete. Publishing jobs require an explicit
+`publish` input on a tag and check identity and known web debt. See the
+[draft release notes](releases/v0.4.1.md).
 
 ## Build outputs
-- Android: `dist/android/todoist-assistant-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
+- Android: `dist/android/telemetry-for-todoist-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
 - Windows: `dist/windows/`
-  - `TodoistAssistantSetup.exe` (Burn bootstrapper used by end users)
-  - `todoist-assistant-<version>.msi` (raw MSI for deployment and automation)
+  - `TelemetryForTodoistSetup.exe` (Burn bootstrapper used by end users)
+  - `telemetry-for-todoist-<version>.msi` (raw MSI for deployment and automation)
 - macOS: `dist/macos/`
   - `TodoistAssistant.app` (app bundle)
-  - `todoist-assistant-<version>.pkg` and `todoist-assistant-<version>.dmg` from local scripts
-  - `todoist-assistant-<version>-macos-<arch>.pkg` and `todoist-assistant-<version>-macos-<arch>.dmg` from CI/release runs that pass `--output-suffix macos-<arch>`
+  - `telemetry-for-todoist-<version>.pkg` and `telemetry-for-todoist-<version>.dmg` from local scripts
+  - `telemetry-for-todoist-<version>-macos-<arch>.pkg` and `telemetry-for-todoist-<version>-macos-<arch>.dmg` from CI/release runs that pass `--output-suffix macos-<arch>`
 
 ## Windows build (MSI + bootstrapper)
 
 ### Structure
 - `scripts/build_windows.py` orchestrates the full Windows build.
-- PyInstaller spec: `packaging/pyinstaller/todoist_assistant.spec`
+- PyInstaller spec: `packaging/pyinstaller/telemetry_for_todoist.spec`
 - MSI authoring: `windows/installer/*.wxs`
 - Burn bundle: `windows/bootstrapper/bundle.wxs`
 - Bootstrapper license: `windows/bootstrapper/license.rtf`
@@ -86,7 +83,7 @@ The pkg and dmg scripts write versioned artifacts into `dist/macos/`; the releas
 ## CI workflows
 
 - `/.github/workflows/windows-installer.yml`
-  - Builds MSI + `TodoistAssistantSetup.exe`
+  - Builds MSI + `TelemetryForTodoistSetup.exe`
   - Runs smoke tests (silent install, launch, uninstall)
   - Optionally signs artifacts when signing secrets are present
 

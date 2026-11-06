@@ -8,8 +8,8 @@ import argparse
 from pathlib import Path
 from collections.abc import Sequence
 
-from todoist.core.env import EnvVar
-from todoist.core.utils import RUNTIME_MIGRATABLE_FILENAMES, resolve_cache_dir
+from todometry.core.env import EnvVar
+from todometry.core.utils import RUNTIME_MIGRATABLE_FILENAMES, resolve_cache_dir
 
 
 def _resolve_data_dir() -> Path:

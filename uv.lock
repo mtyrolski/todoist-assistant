@@ -1357,7 +1357,7 @@ wheels = [
 ]
 
 [[package]]
-name = "todoist-assistant"
+name = "telemetry-for-todoist"
 version = "0.4.1"
 source = { editable = "." }
 dependencies = [

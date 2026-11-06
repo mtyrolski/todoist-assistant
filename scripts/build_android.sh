@@ -42,9 +42,9 @@ fi
 npm --prefix "$repo_root/frontend" ci --no-audit --no-fund
 checks=(:app:spotlessJavaCheck :app:testDebugUnitTest)
 case "$mode" in
-    debug) checks+=(:app:lintDebug :app:assembleDebug); artifact='apk/debug/app-debug.apk'; output='todoist-assistant-debug.apk' ;;
-    preview) checks+=(-Ppreview=true :app:lintRelease :app:assembleRelease); artifact='apk/release/app-release.apk'; output='todoist-assistant-preview.apk' ;;
-    bundle) checks+=(:app:lintRelease :app:bundleRelease); artifact='bundle/release/app-release.aab'; output='todoist-assistant-release.aab' ;;
+    debug) checks+=(:app:lintDebug :app:assembleDebug); artifact='apk/debug/app-debug.apk'; output='telemetry-for-todoist-debug.apk' ;;
+    preview) checks+=(-Ppreview=true :app:lintRelease :app:assembleRelease); artifact='apk/release/app-release.apk'; output='telemetry-for-todoist-preview.apk' ;;
+    bundle) checks+=(:app:lintRelease :app:bundleRelease); artifact='bundle/release/app-release.aab'; output='telemetry-for-todoist-release.aab' ;;
 esac
 "$repo_root/android/gradlew" -p "$repo_root/android" --no-daemon "${checks[@]}" "$@"
 mkdir -p "$repo_root/dist/android"

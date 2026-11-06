@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from tests.factories import make_project, make_task
-from todoist.web.dashboard_payload import (
+from todometry.web.dashboard_payload import (
     add_plot_event_markers,
     apply_date_axis_viewport,
     compute_plot_history_beg,
@@ -288,7 +288,7 @@ def test_urgency_honors_loaded_yaml_rules_and_empty_selections():
 
 
 def test_automatic_plot_range_includes_newest_cached_completion():
-    from todoist.web.dashboard_payload import compute_plot_range
+    from todometry.web.dashboard_payload import compute_plot_range
 
     df = pd.DataFrame(
         {"type": ["completed"]}, index=pd.to_datetime(["2026-10-31T20:00:00"])

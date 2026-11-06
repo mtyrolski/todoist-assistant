@@ -1,4 +1,4 @@
-"""Tests for utility functions in ``todoist.core.utils``."""
+"""Tests for utility functions in ``todometry.core.utils``."""
 
 # pylint: disable=protected-access
 
@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from todoist.core.env import EnvVar
-from todoist.core.utils import (
+from todometry.core.env import EnvVar
+from todometry.core.utils import (
     CACHE_STORAGE_REGISTRY,
     DEFAULT_CACHE_SUBDIR,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
@@ -197,7 +197,7 @@ def test_safe_instantiate_entry_collects_unexpected_fields(
 
 def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
     # pylint: disable=protected-access
-    import todoist.core.utils as utils
+    import todometry.core.utils as utils
 
     @dataclass
     class DataclassWithRequiredAndKwargs:
@@ -205,7 +205,7 @@ def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
         new_api_kwargs: dict[str, Any] | None = None
 
     utils._STATE.missing_required_field_warnings.clear()
-    with patch("todoist.core.utils.logger.warning") as mock_warning:
+    with patch("todometry.core.utils.logger.warning") as mock_warning:
         first = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
         second = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
 
@@ -226,7 +226,7 @@ def test_safe_instantiate_entry_requires_kwargs_field():
 
 
 def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
-    from todoist.core.types import EventEntry, ProjectEntry, TaskEntry
+    from todometry.core.types import EventEntry, ProjectEntry, TaskEntry
 
     project_entry = safe_instantiate_entry(
         ProjectEntry,
@@ -268,8 +268,8 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
 
 def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_payloads():
     # pylint: disable=protected-access
-    import todoist.core.utils as utils
-    from todoist.core.types import ProjectEntry, TaskEntry
+    import todometry.core.utils as utils
+    from todometry.core.types import ProjectEntry, TaskEntry
 
     project_payload = _project_payload(
         is_shared=True,
@@ -279,7 +279,7 @@ def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_paylo
     task_payload = _task_payload(goal_ids=["goal-1"], is_collapsed=False)
 
     utils._STATE.missing_required_field_warnings.clear()
-    with patch("todoist.core.utils.logger.warning") as mock_warning:
+    with patch("todometry.core.utils.logger.warning") as mock_warning:
         project_entry = safe_instantiate_entry(ProjectEntry, **project_payload)
         task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
 
@@ -319,7 +319,7 @@ def test_get_log_level_parses_env_value(
 ):
     with (
         patch.dict(os.environ, _env_value(EnvVar.LOG_LEVEL, env_value), clear=True),
-        patch("todoist.core.utils.logger.warning") as mock_warning,
+        patch("todometry.core.utils.logger.warning") as mock_warning,
     ):
         assert get_log_level() == expected
     assert mock_warning.called is warns
@@ -370,7 +370,7 @@ def test_try_n_times_success_first_attempt():
 
 def test_try_n_times_success_after_failures():
     fn, state = _eventually_successful(failures_before_success=2)
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = try_n_times(fn, 5)
     assert result == "success"
     assert state["count"] == 3
@@ -383,14 +383,14 @@ def test_try_n_times_all_failures_returns_none():
         call_count["count"] += 1
         raise RuntimeError("Always fails")
 
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = try_n_times(_always_fail, 3)
     assert result is None
     assert call_count["count"] == 3
 
 
 def test_try_n_times_exponential_backoff():
-    with patch("todoist.core.utils.time.sleep") as mock_sleep:
+    with patch("todometry.core.utils.time.sleep") as mock_sleep:
         try_n_times(lambda: (_ for _ in ()).throw(ValueError("Fail")), 4)
     assert [call.args[0] for call in mock_sleep.call_args_list] == [8, 16, 32]
 
@@ -471,13 +471,13 @@ def test_cache_uses_dot_cache_default_when_env_missing(monkeypatch, tmp_path):
 
 
 def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypatch):
-    import todoist.core.utils as utils
+    import todometry.core.utils as utils
 
     monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
     log_path = tmp_path / "runtime.log"
     with (
-        patch("todoist.core.utils.logger.remove") as mock_remove,
-        patch("todoist.core.utils.logger.add") as mock_add,
+        patch("todometry.core.utils.logger.remove") as mock_remove,
+        patch("todometry.core.utils.logger.add") as mock_add,
     ):
         configure_runtime_logging(str(log_path), level="debug")
 
@@ -489,12 +489,12 @@ def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypat
 
 
 def test_configure_runtime_logging_is_idempotent(monkeypatch):
-    import todoist.core.utils as utils
+    import todometry.core.utils as utils
 
     monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
     with (
-        patch("todoist.core.utils.logger.remove") as mock_remove,
-        patch("todoist.core.utils.logger.add") as mock_add,
+        patch("todometry.core.utils.logger.remove") as mock_remove,
+        patch("todometry.core.utils.logger.add") as mock_add,
     ):
         configure_runtime_logging(level="info")
         configure_runtime_logging(level="info")
@@ -590,14 +590,14 @@ def test_retry_with_backoff_success_first_attempt():
 
 def test_retry_with_backoff_success_after_failures():
     fn, state = _eventually_successful(failures_before_success=2)
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = retry_with_backoff(fn, max_attempts=5)
     assert result == "success"
     assert state["count"] == 3
 
 
 def test_retry_with_backoff_all_failures_returns_none():
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = retry_with_backoff(
             lambda: (_ for _ in ()).throw(RuntimeError("Always fails")), max_attempts=3
         )
@@ -606,9 +606,9 @@ def test_retry_with_backoff_all_failures_returns_none():
 
 def test_retry_with_backoff_uses_gaussian_values_for_sleep():
     with (
-        patch("todoist.core.utils.time.sleep") as mock_sleep,
+        patch("todometry.core.utils.time.sleep") as mock_sleep,
         patch(
-            "todoist.core.utils.random.gauss", side_effect=[5.5, 12.3, 8.9]
+            "todometry.core.utils.random.gauss", side_effect=[5.5, 12.3, 8.9]
         ) as mock_gauss,
     ):
         retry_with_backoff(
@@ -626,8 +626,8 @@ def test_retry_with_backoff_uses_gaussian_values_for_sleep():
 
 def test_retry_with_backoff_enforces_minimum_wait_time():
     with (
-        patch("todoist.core.utils.time.sleep") as mock_sleep,
-        patch("todoist.core.utils.random.gauss", side_effect=[-5.0, -2.0, 0.05]),
+        patch("todometry.core.utils.time.sleep") as mock_sleep,
+        patch("todometry.core.utils.random.gauss", side_effect=[-5.0, -2.0, 0.05]),
     ):
         retry_with_backoff(
             lambda: (_ for _ in ()).throw(ValueError("Fail")), max_attempts=4
@@ -658,7 +658,7 @@ def test_with_retry_success():
 
 
 def test_with_retry_raises_on_failure():
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         with pytest.raises(
             MaxRetriesExceeded,
             match="Failed to execute test operation after 3 retry attempts",
@@ -679,7 +679,7 @@ def test_with_retry_uses_custom_parameters():
             raise ValueError("Not yet")
         return "success"
 
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = with_retry(
             eventually_successful,
             operation_name="custom op",

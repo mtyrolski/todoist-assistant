@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from todoist.core.completions import reconcile_completions, effective_completion_mask
-from todoist.core.types import Event, EventEntry, events_to_dataframe
+from todometry.core.completions import reconcile_completions, effective_completion_mask
+from todometry.core.types import Event, EventEntry, events_to_dataframe
 
 
 def event(id, kind, date, task="task", **extra):

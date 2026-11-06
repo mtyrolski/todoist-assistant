@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from todoist.dashboard.settings import resolve_dashboard_config_path
+from todometry.dashboard.settings import resolve_dashboard_config_path
 
 
 def test_dashboard_config_defaults_to_repository_configs(monkeypatch):

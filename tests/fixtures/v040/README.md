@@ -9,5 +9,6 @@ snapshot uses the version 3 schema and contains a representative archived
 project and activity frame. `dashboard.yaml` comes directly from that tag;
 project mappings and the observer and removed-feature cache are synthetic.
 
-The fixture exercises the existing legacy namespace and paths. It does not
-prove migration to the planned `todometry` package or renamed directories.
+The fixture exercises legacy serialized class names through the small
+`todoist.core.types` compatibility shim, including a copy to the new default
+state location. Native installer upgrades still require platform validation.

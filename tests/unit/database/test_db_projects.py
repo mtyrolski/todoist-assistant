@@ -2,11 +2,11 @@ from unittest.mock import MagicMock, patch
 
 from tests.factories import make_project, make_project_entry, make_task, make_task_entry
 from tests.unit.database.helpers import project_payload
-from todoist.api import TodoistEndpoints
-from todoist.api.client import RequestSpec
-from todoist.core.types import Project
-from todoist.database.db_projects import DatabaseProjects
-from todoist.database.db_projects import preserve_archived_parent_links
+from todometry.api import TodoistEndpoints
+from todometry.api.client import RequestSpec
+from todometry.core.types import Project
+from todometry.database.db_projects import DatabaseProjects
+from todometry.database.db_projects import preserve_archived_parent_links
 
 
 def _project(project_id: str, parent_id: str | None = None, *, archived: bool = False):
@@ -66,7 +66,7 @@ def test_anonymize_sub_db_rewrites_project_cache_and_colors(db_projects):
     )
 
 
-@patch("todoist.database.db_projects.TodoistAPIClient.request_json")
+@patch("todometry.database.db_projects.TodoistAPIClient.request_json")
 def test_fetch_archived_projects_caching(mock_request_json, db_projects):
     mock_request_json.return_value = {
         "results": [project_payload(name="Archived Project", is_archived=True)],
@@ -100,8 +100,8 @@ def test_reset_clears_caches(db_projects):
     assert db_projects.projects_cache is None
 
 
-@patch("todoist.database.db_projects.safe_instantiate_entry")
-@patch("todoist.database.db_projects.TodoistAPIClient.request_json")
+@patch("todometry.database.db_projects.safe_instantiate_entry")
+@patch("todometry.database.db_projects.TodoistAPIClient.request_json")
 def test_fetch_project_by_id(mock_request_json, mock_safe_instantiate, db_projects):
     mock_request_json.return_value = project_payload()
     mock_project_entry = MagicMock()

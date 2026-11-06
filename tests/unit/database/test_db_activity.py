@@ -6,7 +6,7 @@ from time import sleep
 from unittest.mock import patch
 
 from tests.unit.database.helpers import event_payload, make_event
-from todoist.core.utils import set_tqdm_progress_callback
+from todometry.core.utils import set_tqdm_progress_callback
 
 ProgressCall = tuple[
     str,
@@ -20,7 +20,7 @@ ProgressCall = tuple[
 ]
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
     with patch.object(db_activity, "_fetch_activity_range") as mock_fetch_window:
         mock_fetch_window.side_effect = [[], []]
@@ -33,7 +33,7 @@ def test_fetch_activity_adaptively_empty_windows(_mock_logger, db_activity):
     assert mock_fetch_window.call_count == 2
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(
     _mock_logger, db_activity
 ):
@@ -49,7 +49,7 @@ def test_fetch_activity_adaptively_does_not_cap_pages_by_window_size(
     assert first_call_kwargs["max_pages"] is None
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
     event = make_event("event1")
 
@@ -65,7 +65,7 @@ def test_fetch_activity_adaptively_with_events(_mock_logger, db_activity):
     assert mock_fetch_window.call_count == 2
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_checkpoints_each_completed_window(
     _mock_logger, db_activity
 ):
@@ -85,7 +85,7 @@ def test_fetch_activity_adaptively_checkpoints_each_completed_window(
     assert checkpoints == [{first_event}, {second_event}]
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_passes_cached_events_to_range(
     _mock_logger, db_activity
 ):
@@ -104,7 +104,7 @@ def test_fetch_activity_adaptively_passes_cached_events_to_range(
     assert first_call_kwargs["events_already_fetched"] == {cached_event}
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_reports_window_progress(_mock_logger, db_activity):
     progress_calls: list[tuple[str, int, int, str | None]] = []
     set_tqdm_progress_callback(
@@ -133,7 +133,7 @@ def test_fetch_activity_adaptively_reports_window_progress(_mock_logger, db_acti
     )
 
 
-@patch("todoist.database.db_activity.logger")
+@patch("todometry.database.db_activity.logger")
 def test_fetch_activity_adaptively_reports_verbose_window_detail(
     _mock_logger, db_activity
 ):
@@ -166,7 +166,7 @@ def test_fetch_activity_adaptively_reports_verbose_window_detail(
     assert any("empty windows=" in detail for detail in details)
 
 
-@patch("todoist.database.db_activity.TodoistAPIClient.request_json")
+@patch("todometry.database.db_activity.TodoistAPIClient.request_json")
 def test_fetch_activity_range_reports_page_progress(mock_request_json, db_activity):
     mock_request_json.return_value = {"results": [], "next_cursor": None}
     progress_calls: list[tuple[str, int, int, str | None]] = []
@@ -190,7 +190,7 @@ def test_fetch_activity_range_reports_page_progress(mock_request_json, db_activi
     )
 
 
-@patch("todoist.database.db_activity.TodoistAPIClient.request_json")
+@patch("todometry.database.db_activity.TodoistAPIClient.request_json")
 def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(
     mock_request_json, db_activity
 ):
@@ -243,7 +243,7 @@ def test_fetch_activity_range_continues_past_cached_page_to_backfill_gaps(
     assert mock_request_json.call_count == 3
 
 
-@patch("todoist.database.db_activity.TodoistAPIClient.request_json")
+@patch("todometry.database.db_activity.TodoistAPIClient.request_json")
 def test_fetch_activity_range_filters_by_parent_project_id(
     mock_request_json, db_activity
 ):
@@ -354,7 +354,7 @@ def test_fetch_activity_for_parent_projects_runs_projects_in_parallel_and_report
     try:
         with (
             patch(
-                "todoist.database.db_activity.get_max_concurrent_requests",
+                "todometry.database.db_activity.get_max_concurrent_requests",
                 return_value=2,
             ),
             patch.object(
@@ -434,8 +434,8 @@ def test_fetch_activity_incremental_falls_back_without_cached_boundary(db_activi
 
 
 def test_activity_timestamps_with_offsets_are_stored_as_naive_utc():
-    from todoist.core.types import EventEntry
-    from todoist.database.db_activity import DatabaseActivity
+    from todometry.core.types import EventEntry
+    from todometry.database.db_activity import DatabaseActivity
     from datetime import datetime
 
     entry = EventEntry(

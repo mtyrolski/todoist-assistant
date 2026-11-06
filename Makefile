@@ -2,14 +2,14 @@
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
-DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
+DASHBOARD_STATE_DIR := .cache/telemetry-for-todoist/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 
 sync: ## Refresh recent Todoist activity
-	uv run python3 -m todoist.sync
+	uv run python3 -m todometry.sync
 
 sync_history: ## Fetch recent and older Todoist activity
-	uv run python3 -m todoist.sync --history
+	uv run python3 -m todometry.sync --history
 
 ensure_frontend_deps: # installs frontend deps if missing
 	@needs_install=0; \
@@ -32,7 +32,7 @@ reinstall_frontend: # force reinstall frontend deps (clean node_modules)
 	npm --prefix $(FRONTEND_DIR) install
 
 run_api:
-	@uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
+	@uv run uvicorn todometry.web.api:app --reload --host 127.0.0.1 --port 8000
 
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
@@ -73,7 +73,7 @@ run_demo: ensure_frontend_deps
 			wait 2>/dev/null || true; \
 		}; \
 		trap cleanup INT TERM EXIT; \
-		TODOIST_DASHBOARD_DEMO=1 uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
+		TODOIST_DASHBOARD_DEMO=1 uv run uvicorn todometry.web.api:app --reload --host 127.0.0.1 --port 8000 & api_pid="$$!"; pids="$$pids $$api_pid"; \
 		wait_for_api; \
 		TODOIST_DASHBOARD_DEMO=1 npm --prefix frontend run dev -- --port 3000 & fe_pid="$$!"; pids="$$pids $$fe_pid"; \
 		echo "Demo dashboard running (anonymized):"; \
@@ -93,7 +93,7 @@ coverage: ## Run full pytest coverage report
 	PYTHONPATH=. uv run --with coverage python -m coverage report
 
 lint: ## Check Python imports and undefined names
-	PYTHONPATH=. uv run ruff check --select F todoist tests scripts
+	PYTHONPATH=. uv run ruff check --select F todometry todoist tests scripts
 
 ci-python: lint test ## Run Python CI checks
 	uv run python3 -m scripts.check_types

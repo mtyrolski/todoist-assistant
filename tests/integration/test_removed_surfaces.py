@@ -6,15 +6,15 @@ import re
 
 from fastapi.testclient import TestClient
 
-from todoist.database.db_tasks import DatabaseTasks
-from todoist.web.api import app
+from todometry.database.db_tasks import DatabaseTasks
+from todometry.web.api import app
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_removed_task_import_and_multiplication_entry_points_are_absent():
-    assert find_spec("todoist.features.task_tree_import") is None
+    assert find_spec("todometry.features.task_tree_import") is None
     assert not hasattr(DatabaseTasks, "insert_task_from_template")
     assert not hasattr(DatabaseTasks, "insert_tasks_from_templates")
     assert not (ROOT / "scripts" / "create_task_tree.py").exists()

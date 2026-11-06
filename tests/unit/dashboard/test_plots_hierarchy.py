@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import pytest
 
 from tests.factories import make_project, make_project_entry
-from todoist.dashboard._plot_project_hierarchy import (
+from todometry.dashboard._plot_project_hierarchy import (
     plot_active_project_hierarchy_sunburst,
 )
 

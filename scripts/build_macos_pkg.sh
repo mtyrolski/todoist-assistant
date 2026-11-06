@@ -81,25 +81,25 @@ echo "Building PyInstaller CLI bundle..." >&2
 pushd "${REPO_ROOT}" >/dev/null
 uv run python3 -m PyInstaller \
   --clean \
-  --copy-metadata todoist-assistant \
-  --name todoist-assistant \
-  --onedir todoist/cli.py \
+  --copy-metadata telemetry-for-todoist \
+  --name todoist-telemetry \
+  --onedir todometry/cli.py \
   --distpath "${PYINSTALLER_DIST}" \
   --workpath "${BUILD_DIR}/pyinstaller-build"
 popd >/dev/null
 
-if [ ! -d "${PYINSTALLER_DIST}/todoist-assistant" ]; then
-  echo "PyInstaller output not found at ${PYINSTALLER_DIST}/todoist-assistant" >&2
+if [ ! -d "${PYINSTALLER_DIST}/todoist-telemetry" ]; then
+  echo "PyInstaller output not found at ${PYINSTALLER_DIST}/todoist-telemetry" >&2
   exit 1
 fi
 
-cp -R "${PYINSTALLER_DIST}/todoist-assistant/." "${APP_ROOT}/"
+cp -R "${PYINSTALLER_DIST}/todoist-telemetry/." "${APP_ROOT}/"
 
-cat > "${BIN_DIR}/todoist-assistant" <<'EOF'
+cat > "${BIN_DIR}/todoist-telemetry" <<'EOF'
 #!/bin/sh
-exec /usr/local/todoist-assistant/todoist-assistant "$@"
+exec /usr/local/todoist-assistant/todoist-telemetry "$@"
 EOF
-chmod +x "${BIN_DIR}/todoist-assistant"
+chmod +x "${BIN_DIR}/todoist-telemetry"
 
 if [ -d "${REPO_ROOT}/configs" ]; then
   cp -R "${REPO_ROOT}/configs/." "${ETC_DIR}/"
@@ -113,7 +113,7 @@ if [ -f "${REPO_ROOT}/README.md" ]; then
   cp "${REPO_ROOT}/README.md" "${APP_ROOT}/README.md"
 fi
 
-component_pkg="${BUILD_DIR}/todoist-assistant-component.pkg"
+component_pkg="${BUILD_DIR}/telemetry-for-todoist-component.pkg"
 chmod +x "${SCRIPTS_DIR}/postinstall" || true
 pkgbuild \
   --root "${PKG_ROOT}" \
@@ -126,7 +126,7 @@ suffix=""
 if [ -n "${OUTPUT_SUFFIX}" ]; then
   suffix="-${OUTPUT_SUFFIX}"
 fi
-output_pkg="${DIST_DIR}/todoist-assistant-${version}${suffix}.pkg"
+output_pkg="${DIST_DIR}/telemetry-for-todoist-${version}${suffix}.pkg"
 if [ -n "${SIGN_ID}" ]; then
   productbuild --sign "${SIGN_ID}" --package "${component_pkg}" "${output_pkg}"
 else

@@ -4,7 +4,7 @@ import pytest
 
 from tests.factories import make_project, make_task
 from tests.unit.database.helpers import make_event
-from todoist.dashboard._plot_task_counts import (
+from todometry.dashboard._plot_task_counts import (
     plot_task_count_trend,
     reconstruct_task_count_history,
 )

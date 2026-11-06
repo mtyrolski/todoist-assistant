@@ -6,11 +6,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import todoist
-import todoist.web.api_components.runtime as runtime_component
-import todoist.web.api as web_api
-import todoist.web.routes.runtime_admin as runtime_admin
-import todoist.web.api_components.dashboard_runtime as dashboard_runtime_component
+import todometry
+import todometry.web.api_components.runtime as runtime_component
+import todometry.web.api as web_api
+import todometry.web.routes.runtime_admin as runtime_admin
+import todometry.web.api_components.dashboard_runtime as dashboard_runtime_component
 from tests.unit.database.helpers import make_event
 
 # pylint: disable=protected-access
@@ -312,7 +312,7 @@ def test_openapi_includes_app_version(api_client) -> None:
     res = api_client.get("/openapi.json")
     assert res.status_code == 200
     payload = res.json()
-    assert payload["info"]["version"] == web_api.app.version == todoist.__version__
+    assert payload["info"]["version"] == web_api.app.version == todometry.__version__
 
 
 @pytest.mark.parametrize(
