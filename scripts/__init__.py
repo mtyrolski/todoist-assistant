@@ -1,1 +1,1 @@
-"""Utility scripts for Todoist Assistant."""
+"""Utility scripts for Telemetry for Todoist."""

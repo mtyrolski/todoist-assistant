@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Remove local runtime state created by the Todoist Assistant."""
+"""Remove local runtime state created by the Telemetry for Todoist."""
 
 import os
 import shutil
@@ -60,7 +60,7 @@ def clear_local_env() -> list[Path]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Remove local Todoist Assistant runtime state."
+        description="Remove local Telemetry for Todoist runtime state."
     )
     parser.add_argument(
         "-v",
