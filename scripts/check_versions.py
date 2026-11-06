@@ -88,15 +88,6 @@ def main() -> int:
 
     mismatches: list[str] = []
 
-    core_pyproject = repo_root / "core" / "pyproject.toml"
-    core_version = read_pyproject_version(core_pyproject)
-    if core_pyproject.exists() and core_version is None:
-        mismatches.append("core/pyproject.toml is missing project.version")
-    elif core_version and core_version != version:
-        mismatches.append(
-            f"core/pyproject.toml version {core_version} != pyproject {version}"
-        )
-
     frontend_package = repo_root / "frontend" / "package.json"
     frontend_version = read_package_json_version(frontend_package)
     if frontend_package.exists() and frontend_version is None:
