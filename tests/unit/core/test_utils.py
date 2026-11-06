@@ -18,7 +18,6 @@ from todoist.core.utils import (
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
-    MIGRATION_BACKUP_DIRNAME,
     RETRY_BACKOFF_MEAN,
     RETRY_BACKOFF_STD,
     RETRY_MAX_ATTEMPTS,
@@ -504,21 +503,29 @@ def test_configure_runtime_logging_is_idempotent(monkeypatch):
     assert mock_add.call_count == 1
 
 
-def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
+@pytest.mark.parametrize("custom_cache", [False, True])
+def test_cache_reads_v040_state_without_moving_it(monkeypatch, tmp_path, custom_cache):
     monkeypatch.chdir(tmp_path)
-    legacy_activity = tmp_path / "activity.joblib"
-    LocalStorage(str(legacy_activity), set).save({"event1"})
+    cache_dir = tmp_path / ("custom-cache" if custom_cache else DEFAULT_CACHE_SUBDIR)
+    cache_dir.mkdir(parents=True)
+    saved = {
+        "activity": {"event1"},
+        "dashboard_state": {"version": 1},
+        "archived_activity_scans": {"project": "2026-01-01"},
+    }
+    for name, payload in saved.items():
+        filename, default = CACHE_STORAGE_REGISTRY[name]
+        LocalStorage(str(cache_dir / filename), default).save(payload)
+    if custom_cache:
+        monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
+    else:
+        monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
 
-    with patch.dict(os.environ, {}, clear=True):
-        cache = Cache()
+    cache = Cache()
 
-    cache_root = Path(cache.path)
-    backup_root = tmp_path / MIGRATION_BACKUP_DIRNAME
-
-    assert cache.activity.load() == {"event1"}
-    assert (cache_root / "activity.joblib").exists()
-    assert (backup_root / "activity.joblib").exists()
-    assert not legacy_activity.exists()
+    assert Path(cache.path) == cache_dir
+    for name, payload in saved.items():
+        assert getattr(cache, name).load() == payload
 
 
 @pytest.mark.parametrize(

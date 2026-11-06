@@ -4,7 +4,6 @@ from dataclasses import MISSING, dataclass, field
 import time
 import random
 import os
-import shutil
 import sys
 import tempfile
 from threading import RLock
@@ -47,8 +46,6 @@ LOCAL_STORAGE_EXCEPTIONS = (
     KeyError,
 )
 DEFAULT_CACHE_SUBDIR = Path(".cache") / "todoist-assistant"
-MIGRATION_BACKUP_DIRNAME = ".cache-migration-backup"
-MIGRATION_BACKUP_REMOVAL_VERSION = "v0.3.3"
 CacheStorageSpec = tuple[str, Callable[[], Any]]
 CACHE_STORAGE_REGISTRY: dict[str, CacheStorageSpec] = {
     "activity": ("activity.joblib", set),
@@ -62,7 +59,6 @@ RUNTIME_LOG_FILENAMES: tuple[str, ...] = ()
 RUNTIME_MIGRATABLE_FILENAMES: tuple[str, ...] = (
     RUNTIME_CACHE_FILENAMES + RUNTIME_LOG_FILENAMES
 )
-_MIGRATED_CACHE_DIRS: set[str] = set()
 DEFAULT_LOG_LEVEL = "INFO"
 VALID_LOG_LEVELS = frozenset(
     {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
@@ -81,7 +77,6 @@ TqdmProgressCallback = Callable[..., None]
 @dataclass
 class _RuntimeState:
     tqdm_progress_callback: TqdmProgressCallback | None = None
-    migration_warning_logged: bool = False
     runtime_logging_signature: tuple[str | None, str] | None = None
     missing_required_field_warnings: set[tuple[str, str]] = field(default_factory=set)
 
@@ -194,84 +189,6 @@ def configure_runtime_logging(
         Path(resolved_log_path).parent.mkdir(parents=True, exist_ok=True)
         logger.add(resolved_log_path, rotation="500 MB", level=resolved_level)
     _STATE.runtime_logging_signature = signature
-
-
-def _migration_backup_path(legacy_root: Path, filename: str) -> Path:
-    backup_dir = legacy_root / MIGRATION_BACKUP_DIRNAME
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    backup_path = backup_dir / filename
-    if not backup_path.exists():
-        return backup_path
-
-    timestamp = int(time.time())
-    return backup_dir / f"{filename}.{timestamp}.bak"
-
-
-def _legacy_cache_roots(cache_root: Path) -> list[Path]:
-    candidates: list[Path] = []
-    data_dir = getenv(str(EnvVar.DATA_DIR))
-    if data_dir:
-        candidates.append(Path(data_dir).expanduser().resolve())
-    candidates.append(Path.cwd().resolve())
-
-    roots: list[Path] = []
-    for candidate in candidates:
-        if candidate == cache_root:
-            continue
-        if candidate in roots:
-            continue
-        roots.append(candidate)
-    return roots
-
-
-def migrate_legacy_runtime_files(cache_dir: str | None = None) -> None:
-    cache_root = Path(resolve_cache_dir(cache_dir))
-    cache_root.mkdir(parents=True, exist_ok=True)
-
-    cache_root_key = str(cache_root)
-    if cache_root_key in _MIGRATED_CACHE_DIRS:
-        return
-    _MIGRATED_CACHE_DIRS.add(cache_root_key)
-
-    for legacy_root in _legacy_cache_roots(cache_root):
-        for filename in RUNTIME_MIGRATABLE_FILENAMES:
-            legacy_path = legacy_root / filename
-            if not legacy_path.exists() or not legacy_path.is_file():
-                continue
-
-            try:
-                target_path = cache_root / filename
-                copied = False
-                if not target_path.exists():
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(legacy_path, target_path)
-                    copied = True
-
-                backup_path = _migration_backup_path(legacy_root, filename)
-                shutil.move(str(legacy_path), str(backup_path))
-
-                if copied:
-                    logger.warning(
-                        f"Migrated legacy runtime file '{legacy_path}' -> '{target_path}' "
-                        f"(backup: '{backup_path}')"
-                    )
-                else:
-                    logger.warning(
-                        f"Found legacy runtime file '{legacy_path}' with existing target '{target_path}'. "
-                        f"Skipped copy to avoid overwrite and moved legacy file to backup '{backup_path}'"
-                    )
-
-                if not _STATE.migration_warning_logged:
-                    logger.warning(
-                        f"Legacy cache migration backups are temporary and will be removed in "
-                        f"{MIGRATION_BACKUP_REMOVAL_VERSION}."
-                    )
-                    _STATE.migration_warning_logged = True
-            except OSError as exc:
-                logger.warning(
-                    f"Failed to migrate legacy runtime file '{legacy_path}' into cache "
-                    f"'{cache_root}': {exc}"
-                )
 
 
 def get_all_fields_of_dataclass(cls: Type[Any]) -> KeysView[str]:
@@ -504,10 +421,7 @@ class LocalStorage(Generic[T]):
 
 class Cache:
     def __init__(self, path: str | None = None):
-        explicit_path = path is not None
         self.path = resolve_cache_dir(path)
-        if not explicit_path:
-            migrate_legacy_runtime_files(self.path)
         Path(self.path).mkdir(parents=True, exist_ok=True)
         for name, (_filename, default_factory) in CACHE_STORAGE_REGISTRY.items():
             setattr(self, name, self.storage(name, default_factory))
