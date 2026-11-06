@@ -12,6 +12,19 @@ from todometry.core.env import EnvVar
 _ALLOWED_MSIEXEC_CODES = {0, 3010, 1641}
 
 
+def test_windows_installer_data_directory_matches_launcher():
+    import xml.etree.ElementTree as etree
+
+    root = Path(__file__).resolve().parents[2]
+    for path in (
+        root / "windows/installer/components.wxs",
+        root / "scripts/windows/wix/todometry.wxs",
+    ):
+        directories = etree.parse(path).findall(".//{*}Directory[@Id='APPDATADIR']")
+        assert len(directories) == 1
+        assert directories[0].get("Name") == "Todometry"
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only installer test")
 def test_windows_msi_contents() -> None:
     repo_root = Path(__file__).resolve().parents[2]

@@ -20,7 +20,7 @@
         </Directory>
       </Directory>
       <Directory Id="ProgramDataFolder">
-        <Directory Id="APPDATADIR" Name="TodoistAssistant">
+        <Directory Id="APPDATADIR" Name="Todometry">
           <Directory Id="CONFIGDIR" Name="config" />
         </Directory>
       </Directory>
