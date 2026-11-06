@@ -14,7 +14,6 @@ import zipfile
 
 from loguru import logger
 
-from todoist.core import telemetry
 from todoist.core.env import EnvVar
 from todoist.core.utils import configure_runtime_logging
 
@@ -314,18 +313,6 @@ def main() -> int:
     _log_startup_paths(install_dir, data_dir, config_dir)
     _ensure_env_and_files(data_dir, config_dir, install_dir=install_dir)
     configure_runtime_logging(log_path=_launcher_log_path())
-    try:
-        telemetry.bootstrap_config(config_dir)
-    except Exception:
-        # Telemetry is best-effort; avoid blocking launch.
-        logger.exception("Telemetry bootstrap failed")
-
-    try:
-        telemetry.maybe_send_install_success(config_dir, data_dir)
-    except Exception:
-        # Telemetry is best-effort; avoid blocking launch.
-        logger.exception("Install-success telemetry failed")
-
     os.chdir(data_dir)
 
     frontend_proc: subprocess.Popen[bytes] | None = None
@@ -373,11 +360,6 @@ def main() -> int:
     except Exception:
         logger.exception("Launcher startup failed")
         traceback.print_exc()
-        try:
-            telemetry.maybe_send_install_failure(config_dir, data_dir)
-        except Exception:
-            # Telemetry is best-effort; avoid masking the original error.
-            logger.exception("Install-failure telemetry failed")
         if getattr(sys, "frozen", False) and os.name == "nt":
             print("\nApplication failed to start or crashed.")
             print("Press Enter to exit...")

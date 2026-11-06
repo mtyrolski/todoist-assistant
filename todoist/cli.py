@@ -12,8 +12,6 @@ from urllib.request import Request, urlopen
 
 import typer  # pyright: ignore[reportMissingImports]
 
-from todoist.core import telemetry
-from todoist.core.env import EnvVar
 from todoist.core.version import get_version
 
 GITHUB_REPO = "mtyrolski/todoist-assistant"
@@ -21,7 +19,7 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
 app = typer.Typer(
-    add_completion=False, no_args_is_help=True, help="Todoist Assistant CLI"
+    add_completion=False, no_args_is_help=True, invoke_without_command=True, help="Todoist Assistant CLI"
 )
 
 
@@ -86,34 +84,7 @@ def _print_install_instructions(label: str, url: str, command: str) -> None:
 @app.callback()
 def main(
     version: bool = typer.Option(False, "--version", help="Show the version and exit"),
-    enable_telemetry: bool = typer.Option(
-        False,
-        "--enable-telemetry",
-        help="Enable telemetry (opt-in only).",
-    ),
-    disable_telemetry: bool = typer.Option(
-        False,
-        "--disable-telemetry",
-        help="Disable telemetry permanently (opt-in only).",
-    ),
 ) -> None:
-    if enable_telemetry and disable_telemetry:
-        typer.echo("Choose only one of --enable-telemetry or --disable-telemetry.")
-        raise typer.Exit(code=2)
-    if enable_telemetry:
-        config_dir = telemetry.resolve_config_dir()
-        telemetry.set_enabled(config_dir, True)
-        typer.echo("Telemetry enabled.")
-        if not os.getenv(str(EnvVar.TELEMETRY_ENDPOINT)):
-            typer.echo(
-                f"NOTE: {EnvVar.TELEMETRY_ENDPOINT} is not set, so no telemetry will be sent."
-            )
-        raise typer.Exit()
-    if disable_telemetry:
-        config_dir = telemetry.resolve_config_dir()
-        telemetry.set_enabled(config_dir, False)
-        typer.echo("Telemetry disabled.")
-        raise typer.Exit()
     if version:
         typer.echo(get_version())
         raise typer.Exit()

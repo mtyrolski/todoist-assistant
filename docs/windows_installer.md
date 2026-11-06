@@ -8,7 +8,7 @@ This repository ships a Windows packaging pipeline that bundles the Python backe
    - If you only have the MSI, download `todoist-assistant-<version>.msi` instead.
 2. Double-click the installer. If SmartScreen appears, click "More info" -> "Run anyway".
 3. Choose an install directory (default: `C:\Program Files\TodoistAssistant`) and finish the wizard.
-   - You can toggle the desktop shortcut and anonymous telemetry (off by default).
+   - You can toggle the desktop shortcut.
 4. Launch Todoist Assistant from the Start Menu or Desktop shortcut.
 5. On first run you will see a guided setup overlay:
    - Step 1: paste your Todoist API token (validated immediately).

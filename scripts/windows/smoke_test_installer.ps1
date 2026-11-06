@@ -80,8 +80,7 @@ $installArgs = @(
   "/log",
   "`"$installLog`"",
   "INSTALLFOLDER=`"$InstallDir`"",
-  "INSTALLDESKTOPSHORTCUT=0",
-  "SKIP_TELEMETRY_REGISTRY=1"
+  "INSTALLDESKTOPSHORTCUT=0"
 )
 $install = Start-Process -FilePath $SetupExe -ArgumentList $installArgs -Wait -PassThru
 if ($allowed -notcontains $install.ExitCode) {
