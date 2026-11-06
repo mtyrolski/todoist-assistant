@@ -18,6 +18,7 @@ scripts/*
 !scripts/build_macos_dmg.sh
 !scripts/get_version.py
 !scripts/check_versions.py
+!scripts/check_architecture.py
 !scripts/check_explicit_any.py
 !scripts/clear_local_env.py
 !scripts/download_models.py
