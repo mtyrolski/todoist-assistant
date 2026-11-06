@@ -1,3 +1,5 @@
+process.env.NEXT_TELEMETRY_DISABLED = "1";
+
 /** @type {import('next').NextConfig} */
 const androidExport = process.env.TODOIST_ANDROID_EXPORT === "1";
 module.exports = {
