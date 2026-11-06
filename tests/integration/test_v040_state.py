@@ -154,3 +154,33 @@ def test_refresh_does_not_hide_incompatible_activity_data(tmp_path, monkeypatch)
     monkeypatch.setattr(web_api, "load_activity_data", incompatible)
     with pytest.raises(IncompatibleCacheError, match="cannot decode old activity"):
         web_api._call_dashboard_runtime("_refresh_state_sync", demo_mode=False)
+
+
+def test_v040_activity_rebuilds_history_with_legacy_project_mapping(
+    tmp_path, monkeypatch
+):
+    from todoist.database.dataframe import load_activity_data
+
+    for filename in ("activity.joblib", "dashboard_state.joblib"):
+        shutil.copyfile(FIXTURE / filename, tmp_path / filename)
+    monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path))
+    monkeypatch.setenv(str(EnvVar.PERSONAL_DIR), str(FIXTURE))
+    project = Cache().dashboard_state.load()["archived_projects"][0]
+
+    class FixtureDatabase:
+        def fetch_mapping_project_id_to_root(self):
+            return {project.id: project}
+
+        def fetch_mapping_project_id_to_name(self):
+            return {project.id: project.project_entry.name}
+
+        def fetch_projects(self, include_tasks=False):
+            return []
+
+        def fetch_archived_projects(self):
+            return [project]
+
+    frame = load_activity_data(FixtureDatabase())
+    assert list(frame["title"]) == ["fixture completion"]
+    assert list(frame["parent_project_name"]) == ["Legacy project"]
+    assert list(frame["root_project_name"]) == ["Work"]
