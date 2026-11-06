@@ -37,7 +37,7 @@ retained review must be read-only and must not mutate Todoist.
 
 ## Local state and compatibility
 
-For a source checkout, the default cache is `.cache/telemetry-for-todoist` under
+For a source checkout, the default cache is `.cache/todometry` under
 the working directory; `TODOIST_CACHE_DIR` overrides it. The runtime resolves
 `.env` using `TODOIST_DATA_DIR`, `TODOIST_CACHE_DIR`, the working directory and
 repository fallback in that order. Dashboard settings use
@@ -46,10 +46,12 @@ path. Project adjustment files live in `personal/`, with
 `TODOIST_PERSONAL_DIR` available as an override.
 
 The installed launcher sets data, config, cache and log directories. Its
-platform defaults are in `todometry/launcher.py`. When the old default data or
-cache directory exists, retained files are copied
-into the new default directory once. Existing destination files win conflicts;
-source files remain untouched, and an interrupted copy resumes on the next run.
+platform defaults are in `todometry/launcher.py`. When either the former
+`telemetry-for-todoist` or `todoist-assistant` default directory exists,
+retained files are copied into the new default directory once. Existing
+destination files win conflicts; the more recent former name is checked first.
+Conflicts are logged, source files remain untouched, and an interrupted copy
+resumes on the next run.
 Explicit path overrides are never migrated. A small `todoist.core.types` shim
 allows old joblib activity and dashboard snapshots to be read; newly saved
 objects use `todometry`. Keep compatibility only for real upgrades or documented

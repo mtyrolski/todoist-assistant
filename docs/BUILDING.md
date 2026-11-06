@@ -11,21 +11,25 @@ The Homebrew formula's source archive checksum must be verified and updated
 against the final release tag before distribution. CI uses a locally generated
 archive for its Homebrew smoke test and does not validate the remote checksum.
 
+The macOS app bundle is now named `todometry.app` and keeps the existing bundle
+identifier. A manually installed `TodoistAssistant.app` may remain alongside
+it; verify the new app and retained data before removing the old bundle.
+
 ## Build outputs
-- Android: `dist/android/telemetry-for-todoist-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
+- Android: `dist/android/todometry-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
 - Windows: `dist/windows/`
-  - `TelemetryForTodoistSetup.exe` (Burn bootstrapper used by end users)
-  - `telemetry-for-todoist-<version>.msi` (raw MSI for deployment and automation)
+  - `TodometrySetup.exe` (Burn bootstrapper used by end users)
+  - `todometry-<version>.msi` (raw MSI for deployment and automation)
 - macOS: `dist/macos/`
-  - `TodoistAssistant.app` (app bundle)
-  - `telemetry-for-todoist-<version>.pkg` and `telemetry-for-todoist-<version>.dmg` from local scripts
-  - `telemetry-for-todoist-<version>-macos-<arch>.pkg` and `telemetry-for-todoist-<version>-macos-<arch>.dmg` from CI/release runs that pass `--output-suffix macos-<arch>`
+  - `todometry.app` (app bundle)
+  - `todometry-<version>.pkg` and `todometry-<version>.dmg` from local scripts
+  - `todometry-<version>-macos-<arch>.pkg` and `todometry-<version>-macos-<arch>.dmg` from CI/release runs that pass `--output-suffix macos-<arch>`
 
 ## Windows build (MSI + bootstrapper)
 
 ### Structure
 - `scripts/build_windows.py` orchestrates the full Windows build.
-- PyInstaller spec: `packaging/pyinstaller/telemetry_for_todoist.spec`
+- PyInstaller spec: `packaging/pyinstaller/todometry.spec`
 - MSI authoring: `windows/installer/*.wxs`
 - Burn bundle: `windows/bootstrapper/bundle.wxs`
 - Bootstrapper license: `windows/bootstrapper/license.rtf`
@@ -87,7 +91,7 @@ The pkg and dmg scripts write versioned artifacts into `dist/macos/`; the releas
 ## CI workflows
 
 - `/.github/workflows/windows-installer.yml`
-  - Builds MSI + `TelemetryForTodoistSetup.exe`
+  - Builds MSI + `TodometrySetup.exe`
   - Runs smoke tests (silent install, launch, uninstall)
   - Optionally signs artifacts when signing secrets are present
 

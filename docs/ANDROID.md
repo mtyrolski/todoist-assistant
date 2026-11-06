@@ -8,12 +8,12 @@ Build requirements: Node.js 20.9+, JDK 17 and Android SDK 36. The app requires A
 sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
 # Set JAVA_HOME and ANDROID_HOME
 make build_android_preview
-adb install -r dist/android/telemetry-for-todoist-preview.apk
+adb install -r dist/android/todometry-preview.apk
 ```
 
 `make build_android_preview` installs locked dependencies, runs Java checks, and builds a signed, optimized release APK with WebView debugging disabled. Preview uses `com.todoistassistant.preview`, so it can coexist with the debug app and has separate account data. Back up `~/.local/share/todoist-assistant/signing/preview/` (or `ANDROID_PREVIEW_SIGNING_DIR`) privately: its keystore and password are needed to sign compatible updates. A fresh CI runner creates a different Preview key.
 
-`make build_android` builds the debug APK. `make build_android_bundle` builds an optimized AAB at `dist/android/telemetry-for-todoist-release.aab`, unsigned unless all four signing variables below are supplied. `ANDROID_VERSION_CODE` overrides the version-derived integer and must increase for each Play upload.
+`make build_android` builds the debug APK. `make build_android_bundle` builds an optimized AAB at `dist/android/todometry-release.aab`, unsigned unless all four signing variables below are supplied. `ANDROID_VERSION_CODE` overrides the version-derived integer and must increase for each Play upload.
 
 For a signed public bundle, set `ANDROID_SIGNING_STORE_FILE` (absolute keystore path), `ANDROID_SIGNING_STORE_PASSWORD`, `ANDROID_SIGNING_KEY_ALIAS`, and `ANDROID_SIGNING_KEY_PASSWORD` in your local environment or CI secrets. Never commit these values. CI retains the R8 mapping files alongside the artifacts.
 
@@ -32,7 +32,7 @@ To run interaction tests on a dedicated emulator:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 node --test frontend/tests/device/android-ui.test.cjs
 npm --prefix frontend exec -- playwright install android
-adb install -r dist/android/telemetry-for-todoist-preview.apk
+adb install -r dist/android/todometry-preview.apk
 node --test frontend/tests/device/android-release.test.cjs
 ```
 

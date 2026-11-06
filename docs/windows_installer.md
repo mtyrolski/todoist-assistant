@@ -4,53 +4,53 @@ This repository ships a Windows packaging pipeline that bundles the Python backe
 
 ## End user install (Windows 10/11)
 
-1. Download `TelemetryForTodoistSetup.exe` from GitHub Releases (recommended).
-   - If you only have the MSI, download `telemetry-for-todoist-<version>.msi` instead.
+1. Download `TodometrySetup.exe` from GitHub Releases (recommended).
+   - If you only have the MSI, download `todometry-<version>.msi` instead.
 2. Double-click the installer. If SmartScreen appears, click "More info" -> "Run anyway".
 3. Choose an install directory (default: `C:\Program Files\TodoistAssistant`) and finish the wizard.
    - You can toggle the desktop shortcut.
-4. Launch Telemetry for Todoist from the Start Menu or Desktop shortcut.
+4. Launch todometry from the Start Menu or Desktop shortcut.
 5. On first run you will see a guided setup overlay:
    - Step 1: paste your Todoist API token (validated immediately).
    - Step 2: optional project hierarchy adjustments (map archived projects to parents).
 6. You can change the token later in Control Panel -> Settings, and adjust mappings in Control Panel -> Project Adjustments.
 
 Manual token setup (optional):
-`C:\ProgramData\TelemetryForTodoist\.env` is created on first run. If you prefer, you can edit it directly.
+`C:\ProgramData\Todometry\.env` is created on first run. If you prefer, you can edit it directly.
 If the `.env` file does not exist yet, run the app once to generate it from
-`C:\ProgramData\TelemetryForTodoist\config\.env.template`, then edit the `.env` file.
+`C:\ProgramData\Todometry\config\.env.template`, then edit the `.env` file.
 `C:\ProgramData` is hidden by default; paste it into File Explorer's address bar.
 
 ### Silent install / uninstall
 
 ```powershell
 # Interactive install
-msiexec /i telemetry-for-todoist-<version>.msi
+msiexec /i todometry-<version>.msi
 
 # Silent install (no UI)
-msiexec /i telemetry-for-todoist-<version>.msi /qn /norestart
+msiexec /i todometry-<version>.msi /qn /norestart
 
 # Install log
-msiexec /i telemetry-for-todoist-<version>.msi /l*v install.log
+msiexec /i todometry-<version>.msi /l*v install.log
 
 # Skip desktop shortcut
-msiexec /i telemetry-for-todoist-<version>.msi INSTALLDESKTOPSHORTCUT=0
+msiexec /i todometry-<version>.msi INSTALLDESKTOPSHORTCUT=0
 
 # Silent uninstall
-msiexec /x telemetry-for-todoist-<version>.msi /qn /norestart
+msiexec /x todometry-<version>.msi /qn /norestart
 ```
 
 ### Launch flags
 
 ```powershell
-"C:\Program Files\TodoistAssistant\todoist-telemetry.exe" --no-frontend
-"C:\Program Files\TodoistAssistant\todoist-telemetry.exe" --api-port 8001 --frontend-port 3001
+"C:\Program Files\TodoistAssistant\todometry.exe" --no-frontend
+"C:\Program Files\TodoistAssistant\todometry.exe" --api-port 8001 --frontend-port 3001
 ```
 
 ## Settings and data locations
 
 - Install dir: `C:\Program Files\TodoistAssistant`
-- Writable data/config: `C:\ProgramData\TelemetryForTodoist`
+- Writable data/config: `C:\ProgramData\Todometry`
   - `config\` (YAML configuration)
   - `.env` (created on first launch)
   - `logs\` (runtime logs and installer logs)
@@ -95,14 +95,14 @@ uv run python3 -m scripts.build_windows --no-dashboard
 Output:
 
 ```
-dist\windows\TelemetryForTodoistSetup.exe
-dist\windows\telemetry-for-todoist-<version>.msi
+dist\windows\TodometrySetup.exe
+dist\windows\todometry-<version>.msi
 ```
 
 ## Runtime layout
 
 - Install dir: `C:\Program Files\TodoistAssistant`
-- Writable data/config: `C:\ProgramData\TelemetryForTodoist`
+- Writable data/config: `C:\ProgramData\Todometry`
   - `config\` (YAML configuration)
   - `.env` (created from `config\.env.template` on first launch)
 End users do not need Python installed; the MSI bundles the runtime via PyInstaller.
@@ -116,7 +116,7 @@ The launcher sets:
 
 - The build script bundles a Node.js runtime when the dashboard is included; pass `--no-dashboard` to skip frontend packaging.
 - The Start Menu/Desktop shortcut launches the API + Next.js dashboard and opens `http://127.0.0.1:3000`.
-- To skip the Desktop shortcut, install with `msiexec /i telemetry-for-todoist-<version>.msi INSTALLDESKTOPSHORTCUT=0`.
+- To skip the Desktop shortcut, install with `msiexec /i todometry-<version>.msi INSTALLDESKTOPSHORTCUT=0`.
 - Uninstall removes the installed files and the ProgramData folder used by the app.
 - Installer ACLs use WiX `WIX_ACCOUNT_USERS` to resolve the localized Built-in Users group; avoid hardcoding `BUILTIN\\Users` in WiX sources to keep non-English Windows installs working.
 
@@ -126,7 +126,7 @@ The launcher sets:
 
 ## Code signing
 
-The Windows MSI is unsigned by default, which is why SmartScreen/UAC show “Unknown publisher”. When you sign the PyInstaller executable and MSI with a trusted code signing certificate, those warnings go away and end users can keep using the single `TelemetryForTodoistSetup.exe` bootstrapper (the cabinet is embedded with the installer via `windows/installer/product.wxs`, so there is no separate `cab1.cab` file to carry alongside the MSI).
+The Windows MSI is unsigned by default, which is why SmartScreen/UAC show “Unknown publisher”. When you sign the PyInstaller executable and MSI with a trusted code signing certificate, those warnings go away and end users can keep using the single `TodometrySetup.exe` bootstrapper (the cabinet is embedded with the installer via `windows/installer/product.wxs`, so there is no separate `cab1.cab` file to carry alongside the MSI).
 
 ### Local builds
 
@@ -138,7 +138,7 @@ $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD = "pfx-password"
 uv run python -m scripts.build_windows
 ```
 
-`WINDOWS_SIGNING_TIMESTAMP_URL` can override the default timestamp server (`http://timestamp.digicert.com`), and `WINDOWS_SIGNTOOL_PATH` points to a custom `signtool.exe` when it is not on `PATH`. Providing the PFX and password causes the build script to sign `todoist-telemetry.exe` before WiX stages it and to sign the final MSI after `light.exe` finishes.
+`WINDOWS_SIGNING_TIMESTAMP_URL` can override the default timestamp server (`http://timestamp.digicert.com`), and `WINDOWS_SIGNTOOL_PATH` points to a custom `signtool.exe` when it is not on `PATH`. Providing the PFX and password causes the build script to sign `todometry.exe` before WiX stages it and to sign the final MSI after `light.exe` finishes.
 
 ### GitHub Actions
 

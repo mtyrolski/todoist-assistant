@@ -1,8 +1,8 @@
-# Telemetry for Todoist
+# todometry
 
 **Local-first activity analytics, project history, and automations.**
 
-Telemetry for Todoist is an independent third-party integration for exploring
+todometry is an independent third-party integration for exploring
 Todoist activity and project history. It is not affiliated with or endorsed by
 Doist. Todoist and Doist are trademarks of their respective owners.
 
@@ -33,10 +33,9 @@ not required to run the dashboard.
 ## Install or run from source
 
 Windows and macOS installer and build instructions are in
-[Windows and macOS builds](docs/BUILDING.md). The Python distribution is
-`telemetry-for-todoist`, its namespace is `todometry`, and its CLI is
-`todoist-telemetry`. Existing local state is copied to the new default path
-on upgrade; the original files are retained.
+[Windows and macOS builds](docs/BUILDING.md). The Python package, namespace and
+terminal command are all named `todometry`. Existing local state is copied to
+the new default path on upgrade; the original files are retained.
 
 For a source checkout, use Python 3.11–3.13, [uv](https://docs.astral.sh/uv/),
 Node.js 20.9+ and Make:
@@ -74,7 +73,7 @@ or build it with JDK 17 and Android SDK 36:
 
 ```bash
 make build_android_preview
-adb install -r dist/android/telemetry-for-todoist-preview.apk
+adb install -r dist/android/todometry-preview.apk
 ```
 
 See [Android build instructions](docs/ANDROID.md) for device tests and signing.
