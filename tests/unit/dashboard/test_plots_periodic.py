@@ -8,11 +8,11 @@ import plotly.graph_objects as go
 import pytest
 from todoist.dashboard._plot_periodic import _prepare_completed_periodic_frame
 
-from todoist.dashboard.plots import (
+from todoist.dashboard._plot_periodic import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
-    plot_weekly_completion_trend,
 )
+from todoist.dashboard._plot_weekly_trend import plot_weekly_completion_trend
 
 
 def _weekly_completion_df() -> pd.DataFrame:

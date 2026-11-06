@@ -6,7 +6,6 @@ from typing import Literal, NotRequired, TypedDict, cast
 import pandas as pd
 
 from todoist.core.completions import effective_completion_mask
-import plotly.graph_objects as go
 
 from todoist.core.types import Project
 
@@ -72,78 +71,10 @@ class _Span:
     archived: bool
 
 
-_STATUS = {
-    "completed": ("Completed / archived", "#61f4b3"),
-    "ongoing": ("Ongoing", "#6ae3ff"),
-    "stalled": ("Active — no completions recorded", "#ffb86c"),
-    "inactive": ("No activity", "#8b929d"),
-}
-_HOVER = (
-    "<b>%{customdata[1]}</b><br>Parent: %{customdata[0]}<br>"
-    "Status: %{customdata[2]}<br>Start: %{customdata[3]}<br>"
-    "End: %{customdata[4]}<br>Duration: %{customdata[5]}<br>"
-    "Completions: %{customdata[6]}<br>Open tasks: %{customdata[7]}<br>"
-    "Archived: %{customdata[8]}<extra></extra>"
-)
 _ARCHIVED_ROOTS_ID = "archived-root-projects"
 _ARCHIVED_ROOTS_NAME = "Archived root projects"
 
 
-def plot_project_lifecycle_timeline(
-    activity: pd.DataFrame,
-    beg: datetime,
-    end: datetime,
-    projects: list[Project],
-) -> go.Figure:
-    window_start, window_end = _timestamp(beg), _timestamp(end)
-    if window_start is None or window_end is None or window_start >= window_end:
-        return _empty("Select a valid period.")
-
-    spans = _lifecycle_spans(activity, projects, window_start, window_end)
-    if not spans:
-        return _empty("No subproject spans overlap this period.")
-
-    grouped: defaultdict[str, list[_Span]] = defaultdict(list)
-    for span in spans:
-        grouped[span.parent].append(span)
-    groups = sorted(
-        grouped.items(),
-        key=lambda item: (-sum(s.completions for s in item[1]), item[0].casefold()),
-    )
-    positioned, ticks, tick_labels = _positions(groups)
-    figure = go.Figure()
-    for status, (label, color) in _STATUS.items():
-        matching = [(span, y) for span, y in positioned if span.status == status]
-        if matching:
-            figure.add_trace(_trace(matching, label, color))
-
-    figure.update_layout(
-        template="plotly_dark",
-        height=max(340, 86 * len(groups) + 32 * len(spans) + 105),
-        margin={"l": 210, "r": 28, "t": 62, "b": 48},
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        hoverlabel={"bgcolor": "#151922", "bordercolor": "rgba(255,255,255,.16)"},
-        legend={"orientation": "h", "x": 0, "y": 1.02, "yanchor": "bottom"},
-        xaxis={
-            "type": "date",
-            "range": [window_start.isoformat(), window_end.isoformat()],
-            "gridcolor": "rgba(255,255,255,0.08)",
-            "tickformat": "%b %-d",
-            "nticks": 9,
-            "zeroline": False,
-        },
-        yaxis={
-            "tickmode": "array",
-            "tickvals": ticks,
-            "ticktext": tick_labels,
-            "range": [max(ticks) + 0.7, min(ticks) - 0.7],
-            "automargin": True,
-            "showgrid": False,
-            "zeroline": False,
-        },
-    )
-    return figure
 
 
 def build_project_lifecycle_data(
@@ -225,21 +156,6 @@ def _lifecycle_spans(
     return _spans(frame, event_column, projects, window_start, window_end)
 
 
-def _trace(matching: list[tuple[_Span, float]], label: str, color: str) -> go.Bar:
-    return go.Bar(
-        x=[
-            max((span.end - span.start).total_seconds(), 21_600) * 1000
-            for span, _ in matching
-        ],
-        base=[span.start for span, _ in matching],
-        y=[y for _, y in matching],
-        customdata=[_details(span) for span, _ in matching],
-        name=label,
-        orientation="h",
-        width=0.42,
-        marker={"color": color},
-        hovertemplate=_HOVER,
-    )
 
 
 def _spans(
@@ -447,23 +363,6 @@ def _span_payload(span: _Span) -> ProjectLifecycleChild:
     }
 
 
-def _positions(
-    groups: list[tuple[str, list[_Span]]],
-) -> tuple[list[tuple[_Span, float]], list[float], list[str]]:
-    positioned: list[tuple[_Span, float]] = []
-    ticks: list[float] = []
-    labels: list[str] = []
-    cursor = 0.0
-    for parent, children in groups:
-        ticks.append(cursor)
-        labels.append(f"<b>{_short(parent, 32)}</b>")
-        for span in children:
-            cursor += 1.0
-            positioned.append((span, cursor))
-            ticks.append(cursor)
-            labels.append(f"  {_short(span.project, 34)}")
-        cursor += 0.9
-    return positioned, ticks, labels
 
 
 def _parent_id(project: Project) -> str | None:
@@ -495,28 +394,7 @@ def _timestamp(value: str | datetime | pd.Timestamp | None) -> pd.Timestamp | No
     return parsed.tz_convert(None) if parsed.tzinfo else parsed
 
 
-def _short(value: str, limit: int = 24) -> str:
-    return value if len(value) <= limit else f"{value[: limit - 1]}…"
 
 
-def _details(span: _Span) -> list[str | int]:
-    return [
-        span.parent,
-        span.project,
-        _STATUS[span.status][0],
-        span.actual_start.strftime("%d %b %Y"),
-        span.actual_end.strftime("%d %b %Y"),
-        f"{max(1, (span.actual_end - span.actual_start).days)} days",
-        span.completions,
-        span.open_tasks,
-        "Yes" if span.archived else "No",
-    ]
 
 
-def _empty(message: str) -> go.Figure:
-    figure = go.Figure()
-    figure.add_annotation(
-        text=message, x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False
-    )
-    figure.update_layout(template="plotly_dark", height=430)
-    return figure

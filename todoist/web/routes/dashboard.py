@@ -9,16 +9,20 @@ from typing import Any, Literal
 from fastapi import APIRouter
 
 from todoist.dashboard._plot_task_counts import plot_task_count_trend
-from todoist.dashboard.plots import (
-    build_project_lifecycle_data,
-    cumsum_completed_tasks_periodically,
-    plot_active_project_hierarchy,
-    plot_completed_tasks_periodically,
+from todoist.dashboard._plot_activity import (
     plot_events_over_time,
     plot_heatmap_of_events_by_day_and_hour,
-    plot_task_lifespans,
-    plot_weekly_completion_trend,
 )
+from todoist.dashboard._plot_lifespans import plot_task_lifespans
+from todoist.dashboard._plot_periodic import (
+    cumsum_completed_tasks_periodically,
+    plot_completed_tasks_periodically,
+)
+from todoist.dashboard._plot_project_hierarchy import (
+    plot_active_project_hierarchy_sunburst as plot_active_project_hierarchy,
+)
+from todoist.dashboard._plot_weekly_trend import plot_weekly_completion_trend
+from todoist.dashboard._plot_project_lifecycle import build_project_lifecycle_data
 from todoist.database.dataframe import (
     get_adjusting_archived_parent_projects,
     get_adjusting_mapping,

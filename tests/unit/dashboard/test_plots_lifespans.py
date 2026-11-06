@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from todoist.dashboard.plots import plot_task_lifespans
+from todoist.dashboard._plot_lifespans import plot_task_lifespans
 
 BASE_DATE = datetime(2024, 1, 1, 12, 0, 0)
 
