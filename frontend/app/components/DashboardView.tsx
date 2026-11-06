@@ -220,7 +220,6 @@ export function DashboardView({
   const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
   const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
-    { id: "executive-review", label: "Review" },
     { id: "insights", label: "Insights" },
     { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
     { id: "stats", label: "Focus" },
