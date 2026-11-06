@@ -6,7 +6,7 @@
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="AppStartMenuDir" Name="Todoist Assistant" />
+        <Directory Id="AppStartMenuDir" Name="Telemetry for Todoist" />
       </Directory>
       <Directory Id="DesktopFolder" />
       <Directory Id="CommonAppDataFolder">
@@ -33,8 +33,8 @@
       <Component Id="AppShortcuts" Guid="*" Win64="yes">
         <Shortcut
           Id="StartMenuShortcut"
-          Name="Todoist Assistant"
-          Description="Launch Todoist Assistant"
+          Name="Telemetry for Todoist"
+          Description="Launch Telemetry for Todoist"
           Target="[INSTALLFOLDER]todoist-assistant.exe"
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
@@ -55,8 +55,8 @@
         <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
         <Shortcut
           Id="DesktopShortcut"
-          Name="Todoist Assistant"
-          Description="Launch Todoist Assistant"
+          Name="Telemetry for Todoist"
+          Description="Launch Telemetry for Todoist"
           Target="[INSTALLFOLDER]todoist-assistant.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue

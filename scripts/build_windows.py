@@ -556,11 +556,10 @@ def _build_bundle(
 ) -> Path:
     bootstrapper_dir = repo_root / "windows" / "bootstrapper"
     bundle_wxs = bootstrapper_dir / "bundle.wxs"
-    icon_path = bootstrapper_dir / "todoist-assistant.ico"
     license_path = bootstrapper_dir / "license.rtf"
 
     _require_existing(
-        [bundle_wxs, icon_path, license_path, vc_redist_path], "Bootstrapper files"
+        [bundle_wxs, license_path, vc_redist_path], "Bootstrapper files"
     )
 
     wixobj_dir = dist_root / "wixobj" / "bundle"
@@ -577,7 +576,6 @@ def _build_bundle(
             "WixUtilExtension",
             f"-dBundleVersion={bundle_version}",
             f"-dMsiPath={msi_path}",
-            f"-dBootstrapperIcon={icon_path}",
             f"-dLicenseFile={license_path}",
             f"-dVCRedistPath={vc_redist_path}",
             "-out",
@@ -630,7 +628,7 @@ def _download_vc_redist(dist_root: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build the Todoist Assistant Windows MSI installer."
+        description="Build the Telemetry for Todoist Windows MSI installer."
     )
     parser.add_argument(
         "--no-dashboard",

@@ -61,9 +61,9 @@ else:
 
 info_plist.update(
     {
-        "CFBundleName": info_plist.get("CFBundleName", "TodoistAssistant"),
+        "CFBundleName": info_plist.get("CFBundleName", "Telemetry for Todoist"),
         "CFBundleDisplayName": info_plist.get(
-            "CFBundleDisplayName", "Todoist Assistant"
+            "CFBundleDisplayName", "Telemetry for Todoist"
         ),
         "CFBundleIdentifier": "com.todoist.assistant",
         "CFBundleShortVersionString": version,
@@ -114,11 +114,9 @@ coll = COLLECT(
     name="TodoistAssistant",
 )
 
-icon_path = repo_root / "packaging" / "macos" / "TodoistAssistant.icns"
 app = BUNDLE(
     coll,
     name="TodoistAssistant.app",
-    icon=str(icon_path) if icon_path.exists() else None,
     bundle_identifier="com.todoist.assistant",
     info_plist=info_plist,
 )

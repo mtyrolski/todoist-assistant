@@ -19,7 +19,7 @@ This doc captures the current build structure and the GitHub Actions workflows.
 - PyInstaller spec: `packaging/pyinstaller/todoist_assistant.spec`
 - MSI authoring: `windows/installer/*.wxs`
 - Burn bundle: `windows/bootstrapper/bundle.wxs`
-- Bootstrapper assets: `windows/bootstrapper/todoist-assistant.ico`, `license.rtf`
+- Bootstrapper license: `windows/bootstrapper/license.rtf`
 
 ### Commands
 ```powershell
