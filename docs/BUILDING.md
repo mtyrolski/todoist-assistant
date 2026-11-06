@@ -5,9 +5,10 @@ This doc captures the current build structure and the GitHub Actions workflows.
 **Release blocked:** the technical migration to `telemetry-for-todoist`,
 `todometry` and `todoist-telemetry` and its upgrade validation are not complete.
 The current outputs below still use legacy technical names. The publishing jobs
-require an explicit `publish` input on a tag and check the target identity;
-passing that identity check alone does not prove state migration or native smoke
-checks. Do not publish until those checks pass on the actual release artifacts.
+require an explicit `publish` input on a tag and check the target identity and
+known web-injection debt. Passing that guard does not prove product coverage,
+state migration or native smoke checks. Do not publish until those checks pass
+on the actual release artifacts. See the [draft release notes](releases/v0.4.1.md).
 
 ## Build outputs
 - Android: `dist/android/todoist-assistant-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
