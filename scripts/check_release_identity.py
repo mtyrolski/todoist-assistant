@@ -1,8 +1,11 @@
-"""Block publication while the promised distribution identity is unfinished."""
+"""Block publication while release identity or known web debt remains unfinished."""
 
-from pathlib import Path
+import ast
+import re
 import tomllib
+from pathlib import Path
 
+from scripts.check_architecture import inspect_python
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,6 +23,53 @@ def identity_errors(root: Path) -> list[str]:
     entry = project.get("scripts", {}).get("todoist-telemetry", "")
     if not entry.startswith("todometry."):
         errors.append("todoist-telemetry entry point must use todometry")
+    for namespace in ("todoist", "todometry"):
+        web = root / namespace / "web"
+        for path in sorted(web.rglob("*.py")):
+            if any(inspect_python(path).values()):
+                errors.append(
+                    f"runtime namespace injection remains in {path.relative_to(root)}"
+                )
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.lstrip().startswith("#") and (
+                    re.search(
+                        r"pyright:.*report(?:UndefinedVariable|UnboundVariable|PossiblyUnboundVariable)\s*=\s*false",
+                        line,
+                        re.IGNORECASE,
+                    )
+                    or re.search(
+                        r"pylint:\s*disable\s*=.*(?:undefined-variable|global-variable-undefined|used-before-assignment)",
+                        line,
+                    )
+                ):
+                    errors.append(
+                        f"undefined-name suppression remains in {path.relative_to(root)}"
+                    )
+                    break
+        stub = web / "api.pyi"
+        if stub.is_file() and any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "__getattr__"
+            for node in ast.walk(ast.parse(stub.read_text(encoding="utf-8")))
+        ):
+            errors.append(f"catch-all API stub remains in {stub.relative_to(root)}")
+    with (root / "pyproject.toml").open("rb") as stream:
+        config = tomllib.load(stream)
+    ruff = config.get("tool", {}).get("ruff", {})
+    for section in (ruff, ruff.get("lint", {})):
+        for key in ("ignore", "extend-ignore"):
+            if {"F", "F821", "ALL"}.intersection(section.get(key, [])):
+                errors.append("global Ruff undefined-name exemption remains")
+        for key in ("per-file-ignores", "extend-per-file-ignores"):
+            for pattern, rules in section.get(key, {}).items():
+                if ("web" in pattern or pattern in ("*", "**/*.py")) and {
+                    "F",
+                    "F821",
+                    "ALL",
+                }.intersection(rules):
+                    errors.append(
+                        f"web Ruff undefined-name exemption remains: {pattern}"
+                    )
     return errors
 
 
@@ -31,7 +81,7 @@ def main() -> int:
             print(f"- {error}")
         return 1
     print(
-        "Release identity check passed; verify migration and native artifacts separately."
+        "Release identity and web debt checks passed; verify product, migration and native artifacts separately."
     )
     return 0
 

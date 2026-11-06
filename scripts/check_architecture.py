@@ -1,11 +1,10 @@
 """Report source size and prevent growth of known web architecture debt."""
 
 import ast
-from collections import Counter
-from pathlib import Path
 import tokenize
 import tomllib
-
+from collections import Counter
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,11 +51,16 @@ def inspect_python(path: Path) -> Counter[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     aliases = {"web_api"}
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "todoist.web":
+        if isinstance(node, ast.ImportFrom) and node.module in {
+            "todoist.web",
+            "todometry.web",
+        }:
             aliases.update(a.asname or a.name for a in node.names if a.name == "api")
         if isinstance(node, ast.Import):
             aliases.update(
-                a.asname or a.name for a in node.names if a.name == "todoist.web.api"
+                a.asname or a.name
+                for a in node.names
+                if a.name in {"todoist.web.api", "todometry.web.api"}
             )
 
     def api_module(node: ast.AST) -> bool:
@@ -67,16 +71,21 @@ def inspect_python(path: Path) -> Counter[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Subscript) and _globals_call(node.value):
             counts["globals_subscript"] += 1
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr == "update" and _globals_call(node.func.value):
-                counts["globals_update"] += 1
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if (
-                node.func.id == "vars"
-                and len(node.args) == 1
-                and api_module(node.args[0])
-            ):
-                counts["api_namespace"] += 1
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "update"
+            and _globals_call(node.func.value)
+        ):
+            counts["globals_update"] += 1
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "vars"
+            and len(node.args) == 1
+            and api_module(node.args[0])
+        ):
+            counts["api_namespace"] += 1
         if (
             isinstance(node, ast.Attribute)
             and node.attr == "__dict__"
@@ -112,7 +121,12 @@ def check_ruff(config: dict) -> list[str]:
 
 def check_tree(root: Path) -> list[str]:
     errors = []
-    for path in sorted((root / "todoist" / "web").rglob("*.py")):
+    paths = [
+        path
+        for namespace in ("todoist", "todometry")
+        for path in (root / namespace / "web").rglob("*.py")
+    ]
+    for path in sorted(paths):
         relative = path.relative_to(root).as_posix()
         for kind, count in inspect_python(path).items():
             allowed = LEGACY.get(relative, {}).get(kind, 0)
