@@ -25,6 +25,7 @@ test("a failed refresh keeps the last loaded counts and explains their status", 
     return route.fulfill({ json: { ...home, refreshWarning: "Activity history is from saved data." } });
   });
   await page.goto("/");
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: /multiplication/i })).toHaveCount(0);
   await expect(page.getByText("349", { exact: true })).toBeVisible();
   await expect(page.getByText("Activity history is from saved data.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
