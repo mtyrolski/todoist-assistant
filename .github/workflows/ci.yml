@@ -19,6 +19,9 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - run: uv sync --locked
       - run: make ci-python
 

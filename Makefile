@@ -96,8 +96,10 @@ lint: ## Check Python imports and undefined names
 	PYTHONPATH=. uv run ruff check --select F todoist tests scripts
 
 ci-python: lint test ## Run Python CI checks
+	uv run python3 -m scripts.check_types
 	uv run python3 -m scripts.check_architecture
 	uv run python3 -m scripts.check_versions
+	uv run python3 -m scripts.smoke_package
 
 ci-frontend: ## Run frontend CI checks (requires installed dependencies and Playwright Chromium)
 	npm --prefix $(FRONTEND_DIR) run lint
