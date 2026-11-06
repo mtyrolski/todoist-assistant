@@ -2,6 +2,13 @@
 
 This doc captures the current build structure and the GitHub Actions workflows.
 
+**Release blocked:** the technical migration to `telemetry-for-todoist`,
+`todometry` and `todoist-telemetry` and its upgrade validation are not complete.
+The current outputs below still use legacy technical names. The publishing jobs
+require an explicit `publish` input on a tag and check the target identity;
+passing that identity check alone does not prove state migration or native smoke
+checks. Do not publish until those checks pass on the actual release artifacts.
+
 ## Build outputs
 - Android: `dist/android/todoist-assistant-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
 - Windows: `dist/windows/`
@@ -83,13 +90,18 @@ The pkg and dmg scripts write versioned artifacts into `dist/macos/`; the releas
   - Optionally signs artifacts when signing secrets are present
 
 - `/.github/workflows/macos-installer.yml`
-  - Matrix build for `macos-14` (arm64) and `macos-13` (x86_64)
+  - Matrix build for `macos-15` (arm64) and `macos-15-intel` (x86_64)
   - Builds pkg/app/dmg and runs macOS installer tests
   - Passes `--output-suffix macos-<arch>` so published pkg/dmg assets are architecture-specific
   - Publishes per-arch artifacts
 
 - `/.github/workflows/ci.yml`
-  - General lint/test pipeline
+  - Runs `make ci-python` and `make ci-frontend`, including the wheel smoke test
+
+The installer workflows also run for relevant pull requests. Publication requires
+an explicit manual dispatch on a tag with `publish` enabled. Native installer
+smoke tests install and uninstall system packages, so run them only on a disposable
+runner. The frozen-app smoke uses synthetic legacy data in a temporary directory.
 
 ## Common failure points
 - WiX schema errors: ensure bundle/installer authoring is valid for WiX v3.14.

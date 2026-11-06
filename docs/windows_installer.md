@@ -122,7 +122,7 @@ The launcher sets:
 
 ## macOS build notes
 
-- The macOS smoke test installs the pkg, launches `todoist-assistant --no-browser` on ephemeral API/front-end ports, waits for `http://127.0.0.1:3000` to respond, and only then uninstalls, ensuring the dashboard really hosts on localhost.
+- The macOS smoke tests install the CLI pkg and check its help and version, then launch the app bundle on ephemeral API and frontend ports and verify both services.
 
 ## Code signing
 

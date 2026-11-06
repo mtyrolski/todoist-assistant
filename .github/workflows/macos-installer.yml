@@ -2,6 +2,26 @@ name: macOS Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Attach artifacts to a tagged release
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - 'todoist/**'
+      - 'frontend/**'
+      - 'packaging/**'
+      - 'windows/**'
+      - 'scripts/**'
+      - 'tests/macos/**'
+      - 'tests/windows/**'
+      - 'tests/integration/**'
+      - 'tests/fixtures/v040/**'
+      - 'Formula/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/macos-installer.yml'
 
 permissions:
   contents: read
@@ -16,9 +36,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
-          - runner: macos-13
+          - runner: macos-15-intel
             arch: x86_64
 
     steps:
@@ -104,9 +124,14 @@ jobs:
         run: |
           ./scripts/build_macos_dmg.sh --force --output-suffix "${TODOIST_ARCH_SUFFIX}"
 
+      - name: Smoke-test frozen app with legacy state
+        run: |
+          uv run python3 -m scripts.smoke_frozen_app "dist/macos/TodoistAssistant.app/Contents/MacOS/TodoistAssistant" --version "${TODOIST_VERSION}"
+
       - name: Run macOS install tests
         env:
           TODOIST_PKG_PATH: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.pkg
+          TODOIST_APP_PATH: dist/macos/TodoistAssistant.app
           TODOIST_BREW_FORMULA: Formula/todoist-assistant.rb
           TODOIST_BREW_TARBALL: dist/macos/todoist-assistant-${{ env.TODOIST_VERSION }}-${{ env.TODOIST_ARCH_SUFFIX }}.tar.gz
           HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -123,12 +148,18 @@ jobs:
             dist/macos/todoist-assistant-*.tar.gz
 
   publish-macos-installers:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: ${{ inputs.publish && startsWith(github.ref, 'refs/tags/') }}
     needs: build-macos-installers
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check release identity
+        run: python -m scripts.check_release_identity
       - uses: actions/download-artifact@v4
         with:
           pattern: todoist-assistant-macos-*

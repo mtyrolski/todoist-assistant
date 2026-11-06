@@ -1,12 +1,12 @@
 param(
   [string]$SetupExe,
-  [string]$InstallDir = "C:\\Program Files\\TodoistAssistant",
-  [string]$DataDir = "C:\\ProgramData\\TodoistAssistant",
   [int]$ApiPort = 8001,
   [int]$FrontendPort = 3001
 )
 
 $ErrorActionPreference = "Stop"
+$InstallDir = Join-Path $env:ProgramFiles "TodoistAssistant"
+$DataDir = Join-Path $env:ProgramData "TodoistAssistant"
 
 # Pass criteria:
 # - setup.exe exits 0/3010/1641 for install and uninstall
@@ -52,7 +52,7 @@ function Wait-Http {
 }
 
 $allowed = @(0, 3010, 1641)
-$logDir = Join-Path $env:ProgramData "TodoistAssistant\\logs\\installer"
+$logDir = Join-Path $env:TEMP ("telemetry-installer-logs-" + [guid]::NewGuid().ToString("N"))
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
@@ -69,8 +69,10 @@ if (-not $SetupExe -or -not (Test-Path $SetupExe)) {
   throw "Setup.exe not found. Provide -SetupExe or build dist/windows/TodoistAssistantSetup.exe"
 }
 
-if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
-if (Test-Path $DataDir) { Remove-Item -Recurse -Force $DataDir }
+if ((Test-Path $InstallDir) -and (Get-ChildItem -LiteralPath $InstallDir -Force | Select-Object -First 1)) {
+  throw "Install directory is not empty: $InstallDir. Use a clean runner."
+}
+$runtimeData = Join-Path $env:TEMP ("telemetry-runtime-smoke-" + [guid]::NewGuid().ToString("N"))
 
 Write-Host "Installing: $SetupExe"
 $installArgs = @(
@@ -78,9 +80,7 @@ $installArgs = @(
   "/quiet",
   "/norestart",
   "/log",
-  "`"$installLog`"",
-  "INSTALLFOLDER=`"$InstallDir`"",
-  "INSTALLDESKTOPSHORTCUT=0"
+  "`"$installLog`""
 )
 $install = Start-Process -FilePath $SetupExe -ArgumentList $installArgs -Wait -PassThru
 if ($allowed -notcontains $install.ExitCode) {
@@ -94,7 +94,7 @@ if (-not (Test-Path $exe)) {
 
 $stdoutLog = Join-Path $env:TEMP "todoist-assistant-stdout.log"
 $stderrLog = Join-Path $env:TEMP "todoist-assistant-stderr.log"
-$runArgs = "--api-host 127.0.0.1 --api-port $ApiPort --frontend-host 127.0.0.1 --frontend-port $FrontendPort --no-browser"
+$runArgs = "--api-host 127.0.0.1 --api-port $ApiPort --frontend-host 127.0.0.1 --frontend-port $FrontendPort --no-browser --data-dir `"$runtimeData`""
 Write-Host "Launching app: $exe $runArgs"
 $appProc = Start-Process -FilePath $exe -ArgumentList $runArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
 
@@ -117,7 +117,6 @@ try {
     & taskkill /PID $appProc.Id /T /F | Out-Null
     Start-Sleep -Seconds 2
   }
-  Get-Process todoist-assistant,node -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 
 Write-Host "Uninstalling..."
