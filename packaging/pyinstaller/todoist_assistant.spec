@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 
 def _collect(module_name):
@@ -24,7 +24,7 @@ ENTRYPOINT = ROOT / "todoist" / "launcher.py"
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 
 binaries = plotly_binaries
-datas = plotly_datas
+datas = plotly_datas + copy_metadata("todoist-assistant")
 hiddenimports = plotly_hiddenimports
 
 # launcher.py imports the FastAPI app object and calls uvicorn.run(api_app, ...),

@@ -11,7 +11,7 @@ def get_version() -> str:
     with suppress(Exception):
         import tomllib  # py311+
 
-        repo_root = Path(__file__).resolve().parents[1]
+        repo_root = Path(__file__).resolve().parents[2]
         pyproject = repo_root / "pyproject.toml"
         if pyproject.exists():
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))

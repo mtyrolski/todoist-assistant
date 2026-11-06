@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 plotly = collect_all("plotly")
 
 binaries = plotly.binaries
-datas = plotly.datas
-hiddenimports = plotly.hiddenimports
+datas = plotly.datas + copy_metadata("todoist-assistant")
+hiddenimports = plotly.hiddenimports + collect_submodules("todoist.web")
 
 block_cipher = None
 

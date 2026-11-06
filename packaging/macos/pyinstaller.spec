@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 import plistlib
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 from todoist.core.env import EnvVar
 
 
@@ -24,8 +24,8 @@ def _collect(module_name):
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 
 binaries = plotly_binaries
-datas = plotly_datas
-hiddenimports = plotly_hiddenimports
+datas = plotly_datas + copy_metadata("todoist-assistant")
+hiddenimports = plotly_hiddenimports + collect_submodules("todoist.web")
 
 block_cipher = None
 

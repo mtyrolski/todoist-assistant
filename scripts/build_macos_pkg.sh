@@ -81,6 +81,7 @@ echo "Building PyInstaller CLI bundle..." >&2
 pushd "${REPO_ROOT}" >/dev/null
 uv run python3 -m PyInstaller \
   --clean \
+  --copy-metadata todoist-assistant \
   --name todoist-assistant \
   --onedir todoist/cli.py \
   --distpath "${PYINSTALLER_DIST}" \
