@@ -5,6 +5,7 @@ import pytest
 import todoist.database.dataframe as dataframe_module
 from todoist.core.utils import MaxRetriesExceeded
 import todoist.web.api as web_api
+from todoist.web.services.project_adjustments import _resolve_automatic_project_mappings
 
 # pylint: disable=protected-access
 
@@ -80,7 +81,7 @@ def test_automatic_project_mappings_use_parent_ids_and_manual_overrides() -> Non
         },
     ]
 
-    automatic, details = web_api._resolve_automatic_project_mappings(
+    automatic, details = _resolve_automatic_project_mappings(
         records,
         manual_mappings={"Old Research": "Academy"},
         archived_parent_projects=set(),

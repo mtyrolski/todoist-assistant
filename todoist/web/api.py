@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 import contextlib
 import io
@@ -60,29 +60,12 @@ from todoist.web.dashboard_payload import (
     normalize_plot_events as _normalize_plot_events,
 )
 from todoist.web.routes.api_routes import router as _api_routes_router
-from todoist.web.api_components.logs import (
-    RuntimeLogSpec as _RuntimeLogSpec,
-    display_log_path as _component_display_log_path,
-    read_log_file as _read_log_file,
-    resolve_runtime_log_request as _component_resolve_runtime_log_request,
-    runtime_log_sources as _component_runtime_log_sources,
-)
 from todoist.web.api_components.runtime import (
     REPO_ROOT as _REPO_ROOT,
     dashboard_pid_dir as _dashboard_pid_dir,
     dashboard_state_dir as _dashboard_state_dir,
-    detect_system_timezone as _detect_system_timezone,
-    is_valid_timezone_name as _is_valid_timezone_name,
-    looks_like_api_key as _looks_like_api_key,
-    mask_api_key as _mask_api_key,
-    normalize_api_key as _normalize_api_key,
-    normalize_timezone as _normalize_timezone,
     resolve_api_key as _resolve_api_key,
-    resolve_config_dir as _resolve_config_dir,
-    resolve_data_dir as _resolve_data_dir,
     resolve_env_path as _resolve_env_path,
-    safe_display_path as _safe_display_path,
-    validate_api_token as _validate_api_token,
 )
 from todoist.web.api_components.settings import (
     dashboard_settings_payload as _component_dashboard_settings_payload,
@@ -222,45 +205,7 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-_DATA_DIR = _resolve_data_dir()
-_CONFIG_DIR = _resolve_config_dir()
 _DASHBOARD_CONFIG_PATH = resolve_dashboard_config_path()
-
-
-def _resolve_timezone_status() -> dict[str, Any]:
-    env_path = _resolve_env_path()
-    timezone_key = str(EnvVar.TIMEZONE)
-    system_timezone = _detect_system_timezone()
-
-    override = _normalize_timezone(os.getenv(timezone_key))
-    if not override and env_path.exists():
-        data = dotenv_values(env_path)
-        override = _normalize_timezone(data.get(timezone_key))
-        if override:
-            os.environ[timezone_key] = override
-
-    payload: dict[str, Any] = {
-        "configured": False,
-        "timezone": system_timezone,
-        "source": "system",
-        "override": None,
-        "overrideValid": True,
-        "system": system_timezone,
-        "envPath": _safe_display_path(env_path, root=_REPO_ROOT),
-    }
-    if not override:
-        return payload
-
-    payload["override"] = override
-    if _is_valid_timezone_name(override):
-        payload["configured"] = True
-        payload["timezone"] = override
-        payload["source"] = "env"
-        return payload
-
-    payload["overrideValid"] = False
-    payload["invalidOverride"] = override
-    return payload
 
 
 _REMAPPABLE_ACTIVE_ROOT_PROJECTS = frozenset({"Inbox"})
@@ -288,48 +233,6 @@ del _component_wrapper_name
 _ensure_state = _make_dashboard_runtime_wrapper("_ensure_state")
 _progress_snapshot = _make_dashboard_runtime_wrapper("_progress_snapshot")
 _service_statuses = _make_dashboard_runtime_wrapper("_service_statuses")
-
-
-def _log_files() -> list[dict[str, Any]]:
-    logs: list[dict[str, Any]] = []
-    for item in _runtime_log_sources():
-        logs.append(
-            {
-                "source": item["id"],
-                "label": item["label"],
-                "category": item["kind"],
-                "description": item["description"],
-                "path": item["path"],
-                "available": item["available"],
-                "inspectOnly": item["inspectOnly"],
-                "size": item["size"],
-                "mtime": item["mtime"],
-            }
-        )
-    return logs
-
-
-def _display_log_path(path: Path) -> str:
-    return _component_display_log_path(
-        path, data_dir=_DATA_DIR, cache_dir=Path(Cache().path)
-    )
-
-
-def _runtime_log_sources() -> list[dict[str, Any]]:
-    return _component_runtime_log_sources(
-        data_dir=_DATA_DIR, cache_dir=Path(Cache().path)
-    )
-
-
-def _resolve_runtime_log_request(
-    *, source: str | None = None, path: str | None = None
-) -> tuple[_RuntimeLogSpec, Path]:
-    return _component_resolve_runtime_log_request(
-        data_dir=_DATA_DIR,
-        cache_dir=Path(Cache().path),
-        source=source,
-        path=path,
-    )
 
 
 def _available_mapping_files() -> list[str]:
@@ -446,114 +349,6 @@ def _load_projects_for_adjustments_sync(
         remappable_active_root,
         project_records,
     )
-
-
-def _preferred_adjustment_project_id(
-    project_name: str, project_records: list[dict[str, Any]]
-) -> str | None:
-    matches = [
-        record for record in project_records if record.get("name") == project_name
-    ]
-    active_matches = [record for record in matches if not record.get("isArchived")]
-    preferred = active_matches or matches
-    if len(preferred) != 1:
-        return None
-    return str(preferred[0]["id"])
-
-
-def _resolve_automatic_project_mappings(
-    project_records: list[dict[str, Any]],
-    *,
-    manual_mappings: dict[str, str],
-    archived_parent_projects: set[str],
-) -> tuple[dict[str, str], list[dict[str, str | None]]]:
-    """Infer archived-project root assignments not overridden by saved mappings."""
-
-    candidates: dict[str, set[str]] = {}
-    candidate_details: list[dict[str, str | None]] = []
-    for record in project_records:
-        if not record.get("isArchived"):
-            continue
-        source_name = str(record.get("name") or "")
-        if (
-            not source_name
-            or source_name in manual_mappings
-            or source_name in archived_parent_projects
-        ):
-            continue
-        ancestors = cast(list[dict[str, str]], record.get("ancestors") or [])
-        if not ancestors:
-            continue
-
-        promoted_parent = next(
-            (
-                ancestor
-                for ancestor in ancestors
-                if ancestor["name"] in archived_parent_projects
-            ),
-            None,
-        )
-        manual_ancestor = next(
-            (ancestor for ancestor in ancestors if ancestor["name"] in manual_mappings),
-            None,
-        )
-        if promoted_parent is not None:
-            target_name = promoted_parent["name"]
-            target_id = promoted_parent["id"]
-        elif manual_ancestor is not None:
-            target_name = manual_mappings[manual_ancestor["name"]]
-            target_id = _preferred_adjustment_project_id(target_name, project_records)
-        else:
-            target_name = str(record.get("rootName") or "")
-            target_id = str(record.get("rootId") or "") or None
-        if not target_name or target_name == source_name:
-            continue
-
-        candidates.setdefault(source_name, set()).add(target_name)
-        candidate_details.append(
-            {
-                "sourceProject": source_name,
-                "sourceProjectId": str(record.get("id") or "") or None,
-                "parentProject": target_name,
-                "parentProjectId": target_id,
-                "provenance": "automatic",
-            }
-        )
-
-    automatic_mappings = {
-        source_name: next(iter(target_names))
-        for source_name, target_names in sorted(candidates.items())
-        if len(target_names) == 1
-    }
-    details = [
-        detail
-        for detail in candidate_details
-        if automatic_mappings.get(str(detail["sourceProject"]))
-        == detail["parentProject"]
-    ]
-    return automatic_mappings, details
-
-
-def _manual_project_mapping_details(
-    project_records: list[dict[str, Any]], manual_mappings: dict[str, str]
-) -> list[dict[str, str | None]]:
-    details: list[dict[str, str | None]] = []
-    for source_name, target_name in sorted(manual_mappings.items()):
-        source_records = [
-            record for record in project_records if record.get("name") == source_name
-        ] or [{}]
-        target_id = _preferred_adjustment_project_id(target_name, project_records)
-        for record in source_records:
-            details.append(
-                {
-                    "sourceProject": source_name,
-                    "sourceProjectId": str(record.get("id") or "") or None,
-                    "parentProject": target_name,
-                    "parentProjectId": target_id,
-                    "provenance": "manual",
-                }
-            )
-    return details
 
 
 def _dashboard_settings_payload(config: DictConfig) -> dict[str, Any]:

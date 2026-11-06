@@ -9,6 +9,7 @@ import pytest
 import todoist
 import todoist.web.api_components.runtime as runtime_component
 import todoist.web.api as web_api
+import todoist.web.routes.runtime_admin as runtime_admin
 import todoist.web.api_components.dashboard_runtime as dashboard_runtime_component
 from tests.unit.database.helpers import make_event
 
@@ -50,7 +51,7 @@ def test_runtime_logs_only_return_explicit_allowlist(
     (dashboard_dir / "rogue.log").write_text("rogue line\n", encoding="utf-8")
 
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path / "data")
 
     res = api_client.get("/api/runtime/logs")
     assert res.status_code == 200
@@ -72,7 +73,7 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
     )
 
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path / "data")
 
     client = api_client
     ok = client.get("/api/runtime/logs/read?source=api&tail_lines=2&page=1")
@@ -141,7 +142,7 @@ def test_runtime_logs_lists_curated_sources(
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
@@ -163,7 +164,7 @@ def test_runtime_read_log_rejects_removed_triton_source(
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "triton.log").write_text(
@@ -183,7 +184,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(str(web_api.EnvVar.TIMEZONE), raising=False)
-    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+    monkeypatch.setattr(runtime_admin, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
     res = api_client.get("/api/admin/timezone")
@@ -200,7 +201,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
 def test_admin_timezone_set_and_clear(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+    monkeypatch.setattr(runtime_admin, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
     client = api_client
@@ -243,7 +244,7 @@ def test_admin_timezone_rejects_invalid_timezone(
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+    monkeypatch.setattr(runtime_admin, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
     response = api_client.post(
@@ -259,7 +260,7 @@ def test_admin_api_token_status_uses_safe_env_label(
     monkeypatch, tmp_path, api_client
 ) -> None:
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_env_path", lambda: env_path)
     monkeypatch.setenv("API_KEY", "test_api_key_12345")
 
     res = api_client.get("/api/admin/api_token")
@@ -276,9 +277,9 @@ def test_admin_api_token_save_clear_and_status_cycle(
 ) -> None:
     env_path = tmp_path / ".env"
     token = "a" * 32
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_env_path", lambda: env_path)
     monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.setattr(web_api, "_validate_api_token", lambda _token: (True, None, 3))
+    monkeypatch.setattr(runtime_admin, "_validate_api_token", lambda _token: (True, None, 3))
 
     client = api_client
 

@@ -9,6 +9,10 @@ from typing import Any, cast
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from todoist.web.dashboard_settings import apply_settings_patch, parse_settings_patch
+from todoist.web.services.project_adjustments import (
+    _manual_project_mapping_details,
+    _resolve_automatic_project_mappings,
+)
 from todoist.web.routes.common import _sync_api_globals
 
 
