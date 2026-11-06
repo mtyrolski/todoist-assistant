@@ -11,6 +11,7 @@ from threading import Lock
 from typing import Any, Literal
 
 from todoist.core.types import Event, Project
+from todoist.core.utils import IncompatibleCacheError
 from todoist.database.base import Database
 from todoist.database.db_projects import preserve_archived_parent_links
 from todoist.features.activity import (
@@ -362,6 +363,8 @@ def _load_archived_activity_scan_fingerprints(
 ) -> dict[str, str]:
     try:
         payload = Cache().archived_activity_scans.load()
+    except IncompatibleCacheError:
+        raise
     except LocalStorageError:
         return {}
     if (
@@ -407,8 +410,8 @@ def _save_archived_activity_scan_fingerprints(
         }
     )
     event_ids = sorted({str(event.id) for event in cached_events})
-    Cache().archived_activity_scans.save(
-        {
+    Cache().archived_activity_scans.update(
+        lambda _existing: {
             "version": _ARCHIVED_ACTIVITY_SCAN_STATE_VERSION,
             "activitySentinels": event_ids[:_ARCHIVED_ACTIVITY_SENTINEL_LIMIT],
             "projects": {
@@ -519,7 +522,7 @@ def _persist_state_to_disk_cache(*, demo_mode: bool) -> None:
         "last_refresh_error": _state.last_refresh_error,
     }
     try:
-        Cache().dashboard_state.save(payload)
+        Cache().dashboard_state.update(lambda _existing: payload)
     except (LocalStorageError, OSError, TypeError) as exc:
         logger.warning(f"Failed to persist dashboard state cache: {exc}")
 
@@ -545,6 +548,8 @@ def _dashboard_cache_payload_is_current(
 def _load_state_from_disk_cache(*, demo_mode: bool) -> bool:
     try:
         payload = Cache().dashboard_state.load()
+    except IncompatibleCacheError:
+        raise
     except LocalStorageError:
         return False
     if not isinstance(payload, dict) or not _dashboard_cache_payload_is_current(
@@ -600,6 +605,8 @@ def _project_refresh_baseline(
 
     try:
         payload = Cache().dashboard_state.load()
+    except IncompatibleCacheError:
+        raise
     except LocalStorageError:
         return None, [], 0.0
     if not isinstance(payload, dict):
@@ -697,6 +704,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
         try:
             cached_events = load_activity_cache()
+        except IncompatibleCacheError:
+            raise
         except LocalStorageError:
             cached_events = set()
         had_activity_boundary = bool(cached_events)
@@ -761,6 +770,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                             "history backfill is not needed"
                         ),
                     )
+            except IncompatibleCacheError:
+                raise
             except Exception as exc:  # pragma: no cover - network-dependent
                 logger.warning(f"Failed to refresh activity cache: {exc}")
             finally:
@@ -800,6 +811,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             try:
                 try:
                     cached_events = load_activity_cache()
+                except IncompatibleCacheError:
+                    raise
                 except LocalStorageError:
                     cached_events = set()
                 archived_parent_events = _fetch_configured_archived_parent_activity(
@@ -813,6 +826,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                         len(archived_parent_events),
                         len(merged_events),
                     )
+            except IncompatibleCacheError:
+                raise
             except Exception as exc:  # pragma: no cover - network-dependent
                 logger.warning(
                     f"Failed to fetch scoped archived-parent activity: {exc}"
@@ -825,6 +840,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         )
         try:
             df_activity = _normalize_activity_df(load_activity_data(dbio))
+        except IncompatibleCacheError:
+            raise
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(f"Failed to load activity data; using empty dataset: {exc}")
             df_activity = _empty_activity_df()

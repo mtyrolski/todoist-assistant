@@ -18,7 +18,7 @@ from todoist.core.types import (
     Project,
     events_to_dataframe,
 )
-from todoist.core.utils import Cache, LocalStorageError
+from todoist.core.utils import Cache, IncompatibleCacheError, LocalStorageError
 
 ADJUSTMENTS_VARIABLE_NAME = "link_adjustements"
 DEFAULT_ADJUSTMENTS_FILENAME = "archived_root_projects.py"
@@ -355,6 +355,8 @@ def load_activity_data(_dbio: Database) -> pd.DataFrame:
             and isinstance(event.date, datetime)
             and getattr(event, "event_entry", None) is not None
         }
+    except IncompatibleCacheError:
+        raise
     except LocalStorageError as exc:
         logger.warning("Failed to load activity cache; using empty set: {}", exc)
         activity_db = set()

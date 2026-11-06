@@ -266,6 +266,10 @@ class LocalStorageError(Exception):
         logger.error(f"LocalStorageError: {message}")
 
 
+class IncompatibleCacheError(LocalStorageError):
+    """A cache references code that is unavailable; preserve it for recovery."""
+
+
 @contextmanager
 def exclusive_file_lock(path: Path):
     """Lock a byte across processes on Windows or the whole file on Unix."""
@@ -367,7 +371,7 @@ class LocalStorage(Generic[T]):
                 try:
                     return self._load_unlocked()
                 except (ImportError, AttributeError) as exc:
-                    raise LocalStorageError(
+                    raise IncompatibleCacheError(
                         f"Cannot read cache {self.path}: a required class or module is unavailable; "
                         "the original file was preserved."
                     ) from exc
@@ -404,7 +408,7 @@ class LocalStorage(Generic[T]):
                 try:
                     current = self._load_unlocked()
                 except (ImportError, AttributeError) as exc:
-                    raise LocalStorageError(
+                    raise IncompatibleCacheError(
                         f"Cannot read cache {self.path}: a required class or module is unavailable; "
                         "the original file was preserved."
                     ) from exc
