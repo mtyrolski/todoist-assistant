@@ -122,7 +122,6 @@ The launcher sets:
 
 ## macOS build notes
 
-- The macOS packaging workflow installs PostgreSQL via Homebrew so `pg_config` is available, and then sets the macOS-specific extra (`uv sync --locked --group build --extra macos`) to pin `psycopg2-binary`. If you build locally, run `brew install postgresql` before `uv sync --extra macos` so that `pg_config --version` succeeds and the environment matches CI.
 - The macOS smoke test installs the pkg, launches `todoist-assistant --no-browser` on ephemeral API/front-end ports, waits for `http://127.0.0.1:3000` to respond, and only then uninstalls, ensuring the dashboard really hosts on localhost.
 
 ## Code signing

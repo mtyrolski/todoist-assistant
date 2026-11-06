@@ -50,48 +50,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install PostgreSQL tooling
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: |
-          set -euo pipefail
-          retry() {
-            local attempts="$1"
-            local delay="$2"
-            shift 2
-            local n=1
-            until "$@"; do
-              if [ "${n}" -ge "${attempts}" ]; then
-                echo "Command failed after ${attempts} attempts: $*" >&2
-                return 1
-              fi
-              echo "Command failed (attempt ${n}/${attempts}); retrying in ${delay}s..." >&2
-              sleep "${delay}"
-              n=$((n + 1))
-              delay=$((delay * 2))
-            done
-          }
-          formula=""
-          if brew list --versions postgresql@16 >/dev/null 2>&1; then
-            formula="postgresql@16"
-          elif brew list --versions postgresql >/dev/null 2>&1; then
-            formula="postgresql"
-          else
-            retry 3 5 brew install postgresql@16 || retry 3 5 brew install postgresql
-            if brew list --versions postgresql@16 >/dev/null 2>&1; then
-              formula="postgresql@16"
-            else
-              formula="postgresql"
-            fi
-          fi
-          postgresql_prefix=$(brew --prefix "${formula}")
-          echo "PATH=${postgresql_prefix}/bin:$PATH" >> "$GITHUB_ENV"
-          echo "PG_CONFIG=${postgresql_prefix}/bin/pg_config" >> "$GITHUB_ENV"
-
-      - name: Validate pg_config
-        run: |
-          pg_config --version
-
       - name: Install Python dependencies
         run: |
           set -euo pipefail
