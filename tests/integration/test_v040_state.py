@@ -287,3 +287,18 @@ def test_clean_default_cache_and_explicit_override(tmp_path, monkeypatch):
     assert not (tmp_path / ".cache/todoist-assistant").exists()
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(tmp_path / "custom"))
     assert Path(resolve_cache_dir()) == tmp_path / "custom"
+
+
+def test_source_checkout_discovers_v040_cache(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
+    legacy = tmp_path / ".cache/todoist-assistant"
+    legacy.mkdir(parents=True)
+    shutil.copyfile(FIXTURE / "activity.joblib", legacy / "activity.joblib")
+
+    cache = Cache()
+    assert Path(cache.path) == tmp_path / ".cache/telemetry-for-todoist"
+    assert {event.id for event in cache.activity.load()} == {"event-v040"}
+    assert (legacy / "activity.joblib").read_bytes() == (
+        Path(cache.path) / "activity.joblib"
+    ).read_bytes()

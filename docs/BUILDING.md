@@ -7,6 +7,10 @@ native upgrade validation are not complete. Publishing jobs require an explicit
 `publish` input on a tag and check identity and known web debt. See the
 [draft release notes](releases/v0.4.1.md).
 
+The Homebrew formula's source archive checksum must be verified and updated
+against the final release tag before distribution. CI uses a locally generated
+archive for its Homebrew smoke test and does not validate the remote checksum.
+
 ## Build outputs
 - Android: `dist/android/telemetry-for-todoist-debug.apk`, built with `make build_android`; see [Android instructions](ANDROID.md).
 - Windows: `dist/windows/`
