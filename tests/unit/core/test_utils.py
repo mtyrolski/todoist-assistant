@@ -695,3 +695,34 @@ def test_with_retry_uses_custom_parameters():
 def test_with_retry_zero_attempts_raises_immediately():
     with pytest.raises(MaxRetriesExceeded, match="after 0 retry attempts"):
         with_retry(lambda: "success", operation_name="zero attempts", max_attempts=0)
+
+
+@pytest.mark.parametrize("operation", ["load", "update"])
+@pytest.mark.parametrize("missing_module", [True, False])
+def test_incompatible_cache_is_not_replaced(
+    tmp_path, monkeypatch, operation, missing_module
+):
+    import types
+    from joblib import dump
+
+    module_name = "cache_migration_test_module"
+    module = types.ModuleType(module_name)
+    exec("class CachedRecord: pass", module.__dict__)
+    monkeypatch.setitem(sys.modules, module_name, module)
+    path = tmp_path / "activity.joblib"
+    dump({"record": module.CachedRecord()}, path)
+    original = path.read_bytes()
+    if missing_module:
+        monkeypatch.delitem(sys.modules, module_name)
+    else:
+        del module.CachedRecord
+
+    storage = LocalStorage(str(path), dict)
+    with pytest.raises(LocalStorageError, match="original file was preserved"):
+        if operation == "load":
+            storage.load()
+        else:
+            storage.update(lambda _old: {})
+
+    assert path.read_bytes() == original
+    assert not list(tmp_path.glob("*.corrupt.*"))

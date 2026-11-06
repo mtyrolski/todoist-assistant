@@ -366,6 +366,11 @@ class LocalStorage(Generic[T]):
             with self._locked():
                 try:
                     return self._load_unlocked()
+                except (ImportError, AttributeError) as exc:
+                    raise LocalStorageError(
+                        f"Cannot read cache {self.path}: a required class or module is unavailable; "
+                        "the original file was preserved."
+                    ) from exc
                 except LOCAL_STORAGE_EXCEPTIONS as exc:
                     logger.warning(
                         f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
@@ -398,6 +403,11 @@ class LocalStorage(Generic[T]):
             with self._locked():
                 try:
                     current = self._load_unlocked()
+                except (ImportError, AttributeError) as exc:
+                    raise LocalStorageError(
+                        f"Cannot read cache {self.path}: a required class or module is unavailable; "
+                        "the original file was preserved."
+                    ) from exc
                 except LOCAL_STORAGE_EXCEPTIONS as exc:
                     logger.warning(
                         f"Failed to load data from {self.path}: {type(exc).__name__}: {exc}. "
