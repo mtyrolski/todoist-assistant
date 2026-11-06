@@ -26,7 +26,7 @@ export function MobileAbout({ version, preview }: { version?: string; preview?: 
         Disconnect removes saved history, the token and local settings. This does not delete your Todoist
         account or change its tasks. You can also remove all local data in Android’s app settings.
       </p>
-      <p className="muted tiny">An independent app. Not affiliated with or endorsed by Doist or Todoist.</p>
+      <p className="muted tiny">An independent third-party integration. Not affiliated with or endorsed by Doist. Todoist and Doist are trademarks of their owners.</p>
       <button
         className="button buttonSmall buttonGhost"
         onClick={async () => {

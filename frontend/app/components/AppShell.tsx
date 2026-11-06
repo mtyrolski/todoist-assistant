@@ -40,8 +40,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             *
           </span>
           <div>
-            <p className="brandTitle">Todoist Assistant</p>
-            <p className="brandTag">Local Todoist insights</p>
+            <p className="brandTitle">Telemetry for Todoist</p>
+            <p className="brandTag">Local-first activity analytics, project history, and automations.</p>
           </div>
         </Link>
 
@@ -71,6 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="sidebarFooter">
           <p className="muted tiny">{SURFACE_STATUS_SUMMARY}</p>
+          <p className="muted tiny">An independent integration, not affiliated with or endorsed by Doist. Todoist and Doist are trademarks of their owners.</p>
         </div>
       </aside>
 

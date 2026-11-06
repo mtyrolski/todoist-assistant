@@ -3,7 +3,7 @@ require "digest"
 class TodoistAssistant < Formula
   include Language::Python::Virtualenv
 
-  desc "Local Todoist analytics assistant"
+  desc "Local-first activity analytics and project history for Todoist"
   homepage "https://github.com/mtyrolski/todoist-assistant"
   version "0.4.1"
   tarball = ENV["TODOIST_BREW_TARBALL"]
@@ -77,6 +77,6 @@ class TodoistAssistant < Formula
   end
 
   test do
-    assert_match "Todoist Assistant CLI", shell_output("#{bin}/todoist-assistant --help")
+    assert_match "Telemetry for Todoist CLI", shell_output("#{bin}/todoist-assistant --help")
   end
 end

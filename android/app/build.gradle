@@ -25,7 +25,7 @@ android {
         targetSdk 36
         versionCode appVersionCode
         versionName appVersion
-        resValue 'string', 'app_name', preview ? 'Todoist Assistant Preview' : 'Todoist Assistant'
+        resValue 'string', 'app_name', preview ? 'Telemetry for Todoist Preview' : 'Telemetry for Todoist'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

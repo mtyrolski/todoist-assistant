@@ -1,4 +1,4 @@
-"""Public package exports for Todoist Assistant."""
+"""Public package exports for Telemetry for Todoist."""
 
 from todoist.core.version import get_version
 

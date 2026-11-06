@@ -1,6 +1,7 @@
 {
   "name": "todoist-dashboard-frontend",
   "version": "0.4.1",
+  "description": "Local-first activity analytics, project history, and automations.",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -1,4 +1,4 @@
-"""Local launcher for the Todoist Assistant dashboard stack."""
+"""Local launcher for the Telemetry for Todoist dashboard stack."""
 
 import argparse
 import json
@@ -110,7 +110,7 @@ def _launcher_log_path() -> str | None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Launch the Todoist Assistant dashboard."
+        description="Launch the Telemetry for Todoist dashboard."
     )
     parser.add_argument(
         "--api-host", default=os.getenv(str(EnvVar.API_HOST), "127.0.0.1")

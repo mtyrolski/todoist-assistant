@@ -31,7 +31,7 @@ if [ "$mode" = preview ]; then
             "${JAVA_HOME:+$JAVA_HOME/bin/}keytool" -genkeypair -noprompt -storetype PKCS12 \
                 -keystore "$signing_dir/preview.keystore" -alias preview \
                 -storepass:file "$signing_dir/password" -keypass:file "$signing_dir/password" \
-                -keyalg RSA -keysize 3072 -validity 10000 -dname 'CN=Todoist Assistant Preview'
+                -keyalg RSA -keysize 3072 -validity 10000 -dname 'CN=Telemetry for Todoist Preview'
         )
     fi
     export ANDROID_SIGNING_STORE_FILE="$signing_dir/preview.keystore"

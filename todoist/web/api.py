@@ -91,7 +91,7 @@ from todoist.core.version import get_version
 configure_runtime_logging()
 
 # FastAPI application powering the new web dashboard.
-app = FastAPI(title="Todoist Dashboard API", version=get_version())
+app = FastAPI(title="Telemetry for Todoist API", version=get_version())
 
 # Allow the local Next.js dev server to talk to the API without CORS issues.
 app.add_middleware(

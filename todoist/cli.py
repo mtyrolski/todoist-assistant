@@ -1,4 +1,4 @@
-"""Lightweight CLI entrypoint for Todoist Assistant."""
+"""Lightweight CLI entrypoint for Telemetry for Todoist."""
 
 import json
 import os
@@ -19,7 +19,7 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
 app = typer.Typer(
-    add_completion=False, no_args_is_help=True, invoke_without_command=True, help="Todoist Assistant CLI"
+    add_completion=False, no_args_is_help=True, invoke_without_command=True, help="Telemetry for Todoist CLI"
 )
 
 

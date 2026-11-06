@@ -11,8 +11,8 @@ const grotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Todoist Assistant",
-  description: "Local Todoist analytics and project hierarchy management"
+  title: "Telemetry for Todoist",
+  description: "Local-first activity analytics, project history, and automations."
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

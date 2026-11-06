@@ -1,7 +1,7 @@
 [project]
 name = "todoist-assistant"
 version = "0.4.1"
-description = "Interactive Dashboard"
+description = "Local-first activity analytics, project history, and automations."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
