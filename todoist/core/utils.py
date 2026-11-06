@@ -270,9 +270,9 @@ class LocalStorageError(Exception):
 def exclusive_file_lock(path: Path):
     """Lock a byte across processes on Windows or the whole file on Unix."""
     with path.open("a+b") as lock_file:
-        if fcntl is not None:
+        if sys.platform != "win32" and fcntl is not None:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        elif msvcrt is not None:
+        elif sys.platform == "win32" and msvcrt is not None:
             lock_file.seek(0, os.SEEK_END)
             if lock_file.tell() == 0:
                 lock_file.write(b"\0")
@@ -287,9 +287,9 @@ def exclusive_file_lock(path: Path):
         try:
             yield
         finally:
-            if fcntl is not None:
+            if sys.platform != "win32" and fcntl is not None:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-            elif msvcrt is not None:
+            elif sys.platform == "win32" and msvcrt is not None:
                 lock_file.seek(0)
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 

@@ -115,7 +115,9 @@ def summarize_tracked_habits(
     for offset in reversed(range(history_weeks)):
         end = week_end - timedelta(days=7 * offset)
         beg = end - timedelta(days=7)
-        in_window = filtered[(filtered.index >= beg) & (filtered.index < end)]
+        in_window = cast(
+            pd.DataFrame, filtered[(filtered.index >= beg) & (filtered.index < end)]
+        )
         history.append(
             {
                 "label": (

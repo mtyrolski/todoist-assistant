@@ -53,7 +53,7 @@ class DatabaseActivity:
         progress_desc: str = "Querying activity data",
         date_to: datetime | None = None,
         max_workers: int | None = None,
-        on_events: Callable[[set[Event]], None] | None = None,
+        on_events: Callable[[set[Event]], object] | None = None,
     ) -> list[Event]:
         """
         Fetch activity events from Todoist API in a moving-window pattern.
@@ -320,7 +320,7 @@ class DatabaseActivity:
         date_to: datetime | None = None,
         progress_desc: str = "Fetching activity history",
         max_workers: int | None = None,
-        on_events: Callable[[set[Event]], None] | None = None,
+        on_events: Callable[[set[Event]], object] | None = None,
     ) -> list[Event]:
         """Backfill older activity windows, optionally ending at the cache boundary."""
 

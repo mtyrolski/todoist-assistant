@@ -282,9 +282,10 @@ def plot_task_lifespans(
         lifespan_frame = lifespan_frame[lifespan_frame["completed_at"] >= beg_date]
     if end_date is not None:
         lifespan_frame = lifespan_frame[lifespan_frame["completed_at"] < end_date]
-    lifespan_frame["duration_seconds"] = (
-        lifespan_frame["completed_at"] - lifespan_frame["added_at"]
-    ).dt.total_seconds()
+    elapsed = cast(
+        pd.Series, lifespan_frame["completed_at"] - lifespan_frame["added_at"]
+    )
+    lifespan_frame["duration_seconds"] = elapsed.dt.total_seconds()
     lifespan_frame = cast(
         pd.DataFrame, lifespan_frame[lifespan_frame["duration_seconds"] > 0].copy()
     )

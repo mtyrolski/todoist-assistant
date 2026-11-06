@@ -417,8 +417,11 @@ def extract_metrics_dict(
     df_activity = normalize_activity_df(df_activity)
 
     def counts_in_window(beg: datetime, end: datetime) -> tuple[int, dict[str, int]]:
-        frame = df_activity[(df_activity.index >= beg) & (df_activity.index < end)]
-        counts = frame["type"].value_counts().to_dict()
+        frame = cast(
+            pd.DataFrame,
+            df_activity[(df_activity.index >= beg) & (df_activity.index < end)],
+        )
+        counts = cast(pd.Series, frame["type"]).value_counts().to_dict()
         counts["completed"] = int(effective_completion_mask(frame).sum())
         return len(frame), counts
 
