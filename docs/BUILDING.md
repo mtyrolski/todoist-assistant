@@ -91,10 +91,6 @@ The pkg and dmg scripts write versioned artifacts into `dist/macos/`; the releas
 - `/.github/workflows/ci.yml`
   - General lint/test pipeline
 
-- `/.github/workflows/docker-image.yml`
-  - Builds/pushes API + frontend images to GHCR
-
 ## Common failure points
 - WiX schema errors: ensure bundle/installer authoring is valid for WiX v3.14.
-- `pg_config` on macOS: CI installs Homebrew `postgresql` and validates `pg_config --version`.
 - Node/npm flakiness: CI uses `npm ci` with cache; app build scripts retry downloads and builds.

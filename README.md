@@ -65,4 +65,4 @@ npm --prefix frontend exec -- playwright install chromium
 npm --prefix frontend run test:e2e
 ```
 
-[Docker](docs/DOCKER.md) · [Windows and macOS builds](docs/BUILDING.md)
+[Windows and macOS builds](docs/BUILDING.md)
