@@ -10,7 +10,7 @@ Tests are arranged by runtime boundary:
 Run the full suite:
 
 ```bash
-make test_all
+make ci
 ```
 
 Useful focused runs:

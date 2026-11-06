@@ -49,4 +49,4 @@ fi
 
 echo "Next steps:" >&2
 echo "  - Run the API: make run_api" >&2
-echo "  - Run the dashboard: make run_dashboard" >&2
+echo "  - Run the dashboard: make dashboard" >&2

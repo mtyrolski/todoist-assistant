@@ -55,10 +55,14 @@ Android includes completion, lifespan, activity and priority charts, a project h
 
 To reuse desktop project adjustments, export the saved mappings from Project Adjustments, copy the JSON file to the phone, and import it in the Android Control Panel.
 
+Dashboard settings use OmegaConf to read and update the existing YAML configuration,
+including its interpolation and structured values. Desktop demo mode provides an
+anonymized dashboard for trying the UI without using a Todoist account.
+
 ## Development
 
 ```bash
-make test_all
+make ci
 npm --prefix frontend run lint
 npm --prefix frontend test
 npm --prefix frontend exec -- playwright install chromium

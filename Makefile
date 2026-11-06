@@ -1,19 +1,15 @@
-.PHONY: setup sync sync_history ensure_frontend_deps reinstall reinstall_frontend update_env run_api run_frontend dashboard run_dashboard stop_dashboard status run_demo clear_local_env update_and_run test coverage lint check test_all build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
+.PHONY: sync sync_history ensure_frontend_deps reinstall_frontend run_api run_frontend dashboard stop_dashboard status run_demo clear_local_env test coverage lint ci ci-python ci-frontend build_windows_installer build_macos_pkg build_macos_app build_macos_dmg
 
 FRONTEND_DIR := frontend
 FRONTEND_NEXT := $(FRONTEND_DIR)/node_modules/.bin/next
 DASHBOARD_STATE_DIR := .cache/todoist-assistant/dashboard
 DASHBOARD_PID_DIR := $(DASHBOARD_STATE_DIR)/pids
 
-setup: sync_history ## First-time source setup: fetch Todoist activity history
-
 sync: ## Refresh recent Todoist activity
 	uv run python3 -m todoist.sync
 
 sync_history: ## Fetch recent and older Todoist activity
 	uv run python3 -m todoist.sync --history
-
-update_env: sync ## Compatibility alias for local data refresh
 
 ensure_frontend_deps: # installs frontend deps if missing
 	@needs_install=0; \
@@ -35,17 +31,13 @@ reinstall_frontend: # force reinstall frontend deps (clean node_modules)
 	rm -rf $(FRONTEND_DIR)/node_modules
 	npm --prefix $(FRONTEND_DIR) install
 
-reinstall: reinstall_frontend # convenience alias
-
 run_api:
 	@uv run uvicorn todoist.web.api:app --reload --host 127.0.0.1 --port 8000
 
 run_frontend: ensure_frontend_deps
 	npm --prefix $(FRONTEND_DIR) run dev -- --port 3000
 
-dashboard: run_dashboard ## Start the dashboard
-
-run_dashboard: ensure_frontend_deps ## Start API and frontend
+dashboard: ensure_frontend_deps ## Start API and frontend
 	@DASHBOARD_STATE_DIR="$(DASHBOARD_STATE_DIR)" \
 	DASHBOARD_PID_DIR="$(DASHBOARD_PID_DIR)" \
 	bash ./scripts/dashboard_stack.sh start
@@ -93,11 +85,8 @@ run_demo: ensure_frontend_deps
 clear_local_env:
 	@PYTHONPATH=. uv run python3 -m scripts.clear_local_env $(CLEAR_LOCAL_ENV_ARGS)
 
-update_and_run: sync ## Refresh activity and start the dashboard
-	$(MAKE) dashboard
-
 test: ## Run unit tests with pytest
-	PYTHONPATH=. uv run python3 -m pytest -v --tb=short tests/
+	PYTHONPATH=. API_KEY=dummy_ci_key uv run python3 -m pytest -q tests/
 
 coverage: ## Run full pytest coverage report
 	PYTHONPATH=. uv run --with coverage python -m coverage run -m pytest tests/
@@ -106,9 +95,16 @@ coverage: ## Run full pytest coverage report
 lint: ## Check Python imports and undefined names
 	PYTHONPATH=. uv run ruff check --select F todoist tests scripts
 
-check: lint ## Alias for lint
+ci-python: lint test ## Run Python CI checks
+	uv run python3 -m scripts.check_versions
 
-test_all: lint test ## Run lint and tests
+ci-frontend: ## Run frontend CI checks (requires installed dependencies and Playwright Chromium)
+	npm --prefix $(FRONTEND_DIR) run lint
+	npm --prefix $(FRONTEND_DIR) test
+	npm --prefix $(FRONTEND_DIR) run build
+	npm --prefix $(FRONTEND_DIR) run test:e2e
+
+ci: ci-python ci-frontend ## Run the Python and frontend CI checks
 
 build_windows_installer: ## Build Windows MSI (requires Windows + WiX + Node if dashboard is included)
 	uv run python3 -m scripts.build_windows
