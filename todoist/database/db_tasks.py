@@ -8,7 +8,7 @@ from todoist.core.constants import TaskField
 
 
 class DatabaseTasks:
-    """Task creation used by the task-tree import command."""
+    """Create tasks through the Todoist API."""
 
     def __init__(self):
         super().__init__()
