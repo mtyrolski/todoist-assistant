@@ -74,5 +74,5 @@ if [ -f "${output_dmg}" ] && [ "${FORCE}" -ne 1 ]; then
   exit 1
 fi
 
-hdiutil create -volname "TodoistAssistant" -srcfolder "${APP_PATH}" -ov -format UDZO "${output_dmg}"
+hdiutil create -volname "Telemetry for Todoist" -srcfolder "${APP_PATH}" -ov -format UDZO "${output_dmg}"
 echo "Built macOS DMG: ${output_dmg}"
