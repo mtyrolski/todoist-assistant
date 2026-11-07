@@ -463,6 +463,47 @@ public final class DashboardViewModel extends AndroidViewModel {
   void exitDemo() {
     generation.incrementAndGet();
     state.setValue(new State(savedModel, false, false, false, !token.isEmpty(), ""));
+    refreshClock();
+  }
+
+  void refreshClock() {
+    refreshClock(Clock.systemDefaultZone());
+  }
+
+  void refreshClock(Clock clock) {
+    State current = state.getValue();
+    if (current == null || current.loading || current.syncing || current.model == null) return;
+    if (current.model.zoneId.equals(clock.getZone())
+        && current.model.renderedOn.equals(java.time.LocalDate.now(clock))) return;
+    int request = generation.incrementAndGet();
+    JSONObject saved = snapshot;
+    state.setValue(
+        new State(
+            current.model, true, false, current.demo, !token.isEmpty(), "Updating local dates…"));
+    task =
+        worker.submit(
+            () -> {
+              try {
+                DashboardModel updated =
+                    new DashboardModel(current.demo ? DemoData.create(clock) : saved, clock);
+                if (generation.get() != request || Thread.currentThread().isInterrupted()) return;
+                if (!current.demo) savedModel = updated;
+                post(
+                    request,
+                    new State(
+                        updated, false, false, current.demo, !token.isEmpty(), current.message));
+              } catch (Exception invalid) {
+                post(
+                    request,
+                    new State(
+                        current.model,
+                        false,
+                        false,
+                        current.demo,
+                        !token.isEmpty(),
+                        "Could not update local dates. Saved data is unchanged."));
+              }
+            });
   }
 
   void importAdjustments(Uri uri) {

@@ -161,6 +161,12 @@ public class MainActivity extends ComponentActivity {
     }
   }
 
+  @Override
+  protected void onResume() {
+    super.onResume();
+    if (model != null) model.refreshClock();
+  }
+
   static String stateEvent(JSONObject payload) {
     return "window.dispatchEvent(new CustomEvent('todoist-state',{detail:JSON.parse("
         + JSONObject.quote(payload.toString())
@@ -240,6 +246,9 @@ public class MainActivity extends ComponentActivity {
                 break;
               case "sync":
                 model.sync(argument);
+                break;
+              case "refresh-clock":
+                model.refreshClock();
                 break;
               case "cancel":
                 model.cancelSync();

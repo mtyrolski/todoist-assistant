@@ -51,7 +51,8 @@ final class PlotData {
       JSONObject mappings,
       Set<String> promoted,
       LocalDate firstWeek,
-      List<CompletionLedger.Event> completed)
+      List<CompletionLedger.Event> completed,
+      List<JSONObject> activities)
       throws Exception {
     ZoneId zone = clock.getZone();
     TreeMap<LocalDate, Day> daily = new TreeMap<>();
@@ -60,11 +61,8 @@ final class PlotData {
     Map<String, Instant> firstProjectEvent = new HashMap<>(), lastProjectEvent = new HashMap<>();
     Map<String, Instant> archivedAt = new HashMap<>(), unarchivedAt = new HashMap<>();
     List<Item> itemEvents = new ArrayList<>();
-    JSONArray activities = snapshot.getJSONArray("activities");
-    for (int i = 0; i < activities.length(); i++) {
-      JSONObject event = activities.getJSONObject(i);
+    for (JSONObject event : activities) {
       Instant time = Instant.parse(event.getString("event_date"));
-      if (time.isAfter(historyAsOf)) continue;
       String kind = event.optString("event_type"), objectType = event.optString("object_type");
       JSONObject extra = event.optJSONObject("extra_data");
       if (extra == null) extra = new JSONObject();
@@ -179,7 +177,17 @@ final class PlotData {
                 .put("archivedAt", "")
                 .put("openTasks", 0)
                 .put("weeklyCounts", new JSONObject(entry.getValue())));
-    LocalDate historyStart = DashboardModel.localDate(snapshot.optString("historyStart"), zone);
+    String rawHistoryStart = snapshot.optString("historyStart");
+    LocalDate historyStart = DashboardModel.localDate(rawHistoryStart, zone);
+    if (!snapshot.optBoolean("historyComplete") && historyStart != null) {
+      try {
+        Instant start = Instant.parse(rawHistoryStart);
+        if (start.isAfter(historyStart.atStartOfDay(zone).toInstant()))
+          historyStart = historyStart.plusDays(1);
+      } catch (java.time.format.DateTimeParseException dateOnly) {
+        // Legacy date-only coverage already names its first full calendar day.
+      }
+    }
     Instant syncedAt = Instant.parse(snapshot.getString("syncedAt"));
     boolean staleActivity = historyAsOf.isBefore(syncedAt);
     LocalDate taskDate = syncedAt.atZone(zone).toLocalDate();

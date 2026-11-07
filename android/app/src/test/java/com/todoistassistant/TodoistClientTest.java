@@ -332,6 +332,51 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void adjacentHistoryWindowsUseInclusiveStartAndExclusiveEnd() throws Exception {
+    JSONArray events =
+        new JSONArray()
+            .put(event("before-boundary", "2026-10-02T11:59:59.999Z"))
+            .put(event("at-boundary", "2026-10-02T12:00:00Z"))
+            .put(event("at-upper-bound", "2026-11-01T12:00:00Z"));
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", "2026-09-02T12:00:00Z");
+            if (path.startsWith("activities?")) {
+              Instant from = null, to = null;
+              for (String parameter : path.substring(path.indexOf('?') + 1).split("&")) {
+                String[] parts = parameter.split("=", 2);
+                if (parts.length != 2) continue;
+                String value = java.net.URLDecoder.decode(parts[1], "UTF-8");
+                if (parts[0].equals("date_from")) from = Instant.parse(value);
+                if (parts[0].equals("date_to")) to = Instant.parse(value);
+              }
+              assertNotNull(from);
+              assertNotNull(to);
+              JSONArray included = new JSONArray();
+              for (int i = 0; i < events.length(); i++) {
+                JSONObject item = events.getJSONObject(i);
+                Instant when = Instant.parse(item.getString("event_date"));
+                if (!when.isBefore(from) && when.isBefore(to)) included.put(item);
+              }
+              return page(included, JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    JSONArray saved =
+        new TodoistClient(fake, CLOCK, ignored -> {})
+            .snapshot(new JSONObject(), false)
+            .getJSONArray("activities");
+    assertEquals(2, saved.length());
+    assertEquals("at-boundary", saved.getJSONObject(0).getString("id"));
+    assertEquals("before-boundary", saved.getJSONObject(1).getString("id"));
+  }
+
+  @Test
   public void extremeRetryAfterCannotOverflowIntoAnImmediateRetry() {
     assertEquals(Long.MAX_VALUE, HttpTransport.retryDelay(String.valueOf(Long.MAX_VALUE), 0));
     assertEquals(Long.MAX_VALUE, HttpTransport.retryDelay("9999999999999999999999", 0));
@@ -500,6 +545,40 @@ public class TodoistClientTest {
     assertFalse(model.historyAvailable);
     assertFalse(model.forecastAvailable);
     assertFalse(model.historyWarning.isEmpty());
+  }
+
+  @Test
+  public void deniedActivityRefreshKeepsTheOldActivityTimestampAndHistory() throws Exception {
+    JSONObject previous = baseline();
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.startsWith("activities")) throw new DataAccessException("forbidden");
+            return super.get(path);
+          }
+        };
+    JSONObject next = new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(previous, true);
+    assertEquals(CLOCK.instant().toString(), next.getString("syncedAt"));
+    assertEquals(previous.getString("activitySyncedAt"), next.getString("activitySyncedAt"));
+    assertEquals(
+        previous.getJSONArray("activities").toString(), next.getJSONArray("activities").toString());
+    assertFalse(next.getBoolean("activityUnavailable"));
+    assertTrue(next.getString("activityWarning").contains("not refreshed"));
+    assertEquals(
+        previous.getString("activitySyncedAt"),
+        MobilePayload.model(new DashboardModel(next, CLOCK)).getString("activitySyncedAt"));
+  }
+
+  @Test
+  public void payloadDoesNotInventAnExclusiveActivityTimestampForLegacyOrUnavailableHistory()
+      throws Exception {
+    JSONObject legacy = baseline().put("projects", new JSONArray()).put("tasks", new JSONArray());
+    legacy.remove("activitySyncedAt");
+    assertFalse(MobilePayload.model(new DashboardModel(legacy, CLOCK)).has("activitySyncedAt"));
+    legacy.put("activitySyncedAt", CLOCK.instant().toString()).put("activityUnavailable", true);
+    assertFalse(MobilePayload.model(new DashboardModel(legacy, CLOCK)).has("activitySyncedAt"));
   }
 
   @Test

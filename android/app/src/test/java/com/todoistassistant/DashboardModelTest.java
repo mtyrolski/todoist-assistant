@@ -65,11 +65,183 @@ public class DashboardModelTest {
   }
 
   @Test
-  public void timeBasedDuesUseTheDeviceZone() {
+  public void timestampDatesUseTheDeviceZone() {
     assertEquals(
         LocalDate.of(2026, 11, 2),
         DashboardModel.localDate("2026-11-01T23:30:00Z", ZoneId.of("Europe/Warsaw")));
     assertNull(DashboardModel.localDate("bad", ZoneId.of("UTC")));
+  }
+
+  @Test
+  public void dueDatesKeepTheirCalendarDayWhileCompletionsUseDeviceTime() throws Exception {
+    ZoneId zone = ZoneId.of("America/Los_Angeles");
+    Clock monday = Clock.fixed(Instant.parse("2026-11-02T09:00:00Z"), zone);
+    JSONObject futureDue =
+        task("future", "p", "Future due", 1)
+            .put("due", new JSONObject().put("date", "2026-11-03T00:30:00+14:00"));
+    JSONObject todayDue =
+        task("today", "p", "Today due", 1)
+            .put("due", new JSONObject().put("date", "2026-11-02T23:30:00-10:00"));
+    JSONObject invalidDue =
+        task("invalid", "p", "Invalid due", 1)
+            .put("due", new JSONObject().put("date", "2026-11-02garbage"));
+    JSONObject event =
+        new JSONObject()
+            .put("id", "e")
+            .put("object_id", "done")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("event_date", "2026-11-01T10:30:00Z");
+    JSONObject data =
+        empty()
+            .put("syncedAt", monday.instant().toString())
+            .put("tasks", new JSONArray().put(futureDue).put(todayDue).put(invalidDue))
+            .put("activities", new JSONArray().put(event));
+    DashboardModel model = new DashboardModel(data, monday);
+    assertEquals(zone, model.zoneId);
+    assertEquals(LocalDate.of(2026, 11, 2), model.renderedOn);
+    AlertRules rules = new AlertRules();
+    assertEquals(1, rules.evaluate(model.tasks, LocalDate.of(2026, 11, 2), zone).due);
+    assertEquals(1, model.weeks[model.weeks.length - 2]);
+    assertEquals(0, model.weeks[model.weeks.length - 1]);
+  }
+
+  @Test
+  public void duplicateActivityIdentifiersUseTheLastRecordForEveryProjection() throws Exception {
+    JSONObject first =
+        new JSONObject()
+            .put("id", "e")
+            .put("object_id", "done")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("event_date", "2026-10-20T08:00:00Z");
+    JSONObject last = new JSONObject(first.toString()).put("event_date", "2026-10-30T08:00:00Z");
+    DashboardModel model =
+        new DashboardModel(empty().put("activities", new JSONArray().put(first).put(last)), CLOCK);
+    assertEquals(1, model.recent.size());
+    assertEquals(Instant.parse("2026-10-30T08:00:00Z"), model.recent.get(0).date);
+    assertEquals(1, java.util.Arrays.stream(model.weeks).sum());
+    JSONArray days = model.plotData.getJSONArray("dailyActivity");
+    assertEquals(1, days.length());
+    assertEquals("2026-10-30", days.getJSONObject(0).getString("date"));
+    assertEquals(1, days.getJSONObject(0).getJSONObject("counts").getInt("completed"));
+    assertEquals(1, days.getJSONObject(0).getInt("effectiveCompletions"));
+  }
+
+  @Test
+  public void activitySyncBoundaryIsExclusiveButLegacyFallbackRemainsInclusive() throws Exception {
+    String cutoff = "2026-11-01T12:00:00Z";
+    JSONArray events = new JSONArray();
+    for (int i = -1; i <= 1; i++) {
+      events.put(
+          new JSONObject()
+              .put("id", "e" + i)
+              .put("object_id", "t" + i)
+              .put("object_type", "item")
+              .put("event_type", "completed")
+              .put("event_date", Instant.parse(cutoff).plusSeconds(i).toString()));
+    }
+    JSONObject data = empty().put("activities", events).put("activitySyncedAt", cutoff);
+    DashboardModel explicit = new DashboardModel(data, CLOCK);
+    assertTrue(explicit.activitySyncExclusive);
+    assertEquals(Instant.parse(cutoff), explicit.activitySyncedAt);
+    assertEquals(1, explicit.recent.size());
+    assertEquals(1, java.util.Arrays.stream(explicit.weeks).sum());
+    assertEquals(
+        1,
+        explicit
+            .plotData
+            .getJSONArray("dailyActivity")
+            .getJSONObject(0)
+            .getInt("effectiveCompletions"));
+    data.remove("activitySyncedAt");
+    DashboardModel legacy = new DashboardModel(data, CLOCK);
+    assertFalse(legacy.activitySyncExclusive);
+    assertEquals(legacy.syncedAt, legacy.activitySyncedAt);
+    assertEquals(2, legacy.recent.size());
+    assertEquals(2, java.util.Arrays.stream(legacy.weeks).sum());
+  }
+
+  @Test
+  public void staleActivityDoesNotOfferAFreshForecastWithinTheSameWeek() throws Exception {
+    Clock wednesday = Clock.fixed(Instant.parse("2026-10-28T12:00:00Z"), CLOCK.getZone());
+    JSONObject event =
+        new JSONObject()
+            .put("id", "e")
+            .put("object_id", "t")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("event_date", "2026-10-27T08:00:00Z");
+    JSONObject data =
+        empty()
+            .put("syncedAt", wednesday.instant().toString())
+            .put("activitySyncedAt", "2026-10-27T12:00:00Z")
+            .put("activities", new JSONArray().put(event));
+    DashboardModel stale = new DashboardModel(data, wednesday);
+    assertFalse(stale.forecastAvailable);
+    assertEquals(Instant.parse("2026-10-27T12:00:00Z"), stale.activitySyncedAt);
+    data.put("activitySyncedAt", wednesday.instant().toString());
+    assertTrue(new DashboardModel(data, wednesday).forecastAvailable);
+    data.remove("activitySyncedAt");
+    assertTrue(new DashboardModel(data, wednesday).forecastAvailable);
+  }
+
+  @Test
+  public void emptyAccountHasNoInventedForecast() throws Exception {
+    DashboardModel model = new DashboardModel(empty().put("historyComplete", true), CLOCK);
+    assertEquals(0, model.tasks.size());
+    assertEquals(0, java.util.Arrays.stream(model.weeks).sum());
+    assertEquals(0, model.recent.size());
+    assertFalse(model.forecastAvailable);
+    assertEquals(0, model.plotData.getJSONArray("dailyActivity").length());
+    assertEquals(0, model.plotData.getJSONArray("taskCounts").getJSONObject(0).getInt("total"));
+  }
+
+  @Test
+  public void largeAccountKeepsProjectAndCompletionTotalsConsistent() throws Exception {
+    JSONArray active = new JSONArray(),
+        known = new JSONArray(),
+        tasks = new JSONArray(),
+        events = new JSONArray();
+    for (int i = 0; i < 400; i++) {
+      String id = "project-" + i;
+      JSONObject project = new JSONObject().put("id", id).put("name", "Project " + i);
+      if (i < 200) {
+        active.put(project);
+        tasks.put(task("task-" + i, id, "Task " + i, i % 4 + 1));
+      } else {
+        project.put("is_archived", true);
+      }
+      known.put(project);
+      events.put(
+          new JSONObject()
+              .put("id", "event-" + i)
+              .put("object_id", "done-" + i)
+              .put("object_type", "item")
+              .put("event_type", "completed")
+              .put("parent_project_id", id)
+              .put("event_date", "2026-10-30T08:00:00Z"));
+    }
+    JSONObject data =
+        empty()
+            .put("historyComplete", true)
+            .put("projects", active)
+            .put("knownProjects", known)
+            .put("tasks", tasks)
+            .put("activities", events);
+    DashboardModel model = new DashboardModel(data, CLOCK);
+    assertEquals(200, model.tasks.size());
+    assertEquals(400, java.util.Arrays.stream(model.weeks).sum());
+    assertEquals(
+        400,
+        model.weeklyProjects.get(model.weeks.length - 1).values().stream()
+            .mapToInt(Integer::intValue)
+            .sum());
+    assertEquals(400, model.plotData.getJSONArray("hierarchy").length());
+    JSONObject day = model.plotData.getJSONArray("dailyActivity").getJSONObject(0);
+    assertEquals(400, day.getInt("effectiveCompletions"));
+    assertEquals(400, day.getJSONObject("counts").getInt("completed"));
+    assertEquals(400, day.getJSONObject("projects").length());
   }
 
   @Test

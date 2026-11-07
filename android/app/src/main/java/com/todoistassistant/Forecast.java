@@ -12,10 +12,10 @@ final class Forecast {
       weight *= .75;
     }
     double baseline = weights == 0 ? 0 : sum / weights;
-    if (fraction <= 0) return Math.max(actual, (int) Math.round(baseline));
+    if (fraction <= 0) return Math.max(actual, (int) Math.rint(baseline));
     double pace = actual / Math.max(.25, fraction);
-    if (history.length == 0) return Math.max(actual, (int) Math.round(pace));
+    if (history.length == 0) return Math.max(actual, (int) Math.rint(pace));
     double blend = Math.min(.85, Math.max(.15, fraction));
-    return Math.max(actual, (int) Math.round((1 - blend) * baseline + blend * pace));
+    return Math.max(actual, (int) Math.rint((1 - blend) * baseline + blend * pace));
   }
 }

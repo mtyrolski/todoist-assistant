@@ -27,4 +27,10 @@ public class ForecastTest {
   public void estimatesNeverUndoCompletedWork() {
     assertTrue(Forecast.total(349, new double[] {1, 2, 3}, .9) >= 349);
   }
+
+  @Test
+  public void halfValuesUseTheSameRoundingAsDesktop() {
+    assertEquals(0, Forecast.total(0, new double[] {1}, .5));
+    assertEquals(2, Forecast.total(0, new double[] {3}, .5));
+  }
 }

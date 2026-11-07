@@ -30,22 +30,26 @@ final class MobilePayload {
               .put("date", event.date.toString()));
     JSONArray weeks = new JSONArray();
     for (var counts : model.weeklyProjects) weeks.put(new JSONObject(counts));
-    return new JSONObject()
-        .put("syncedAt", model.syncedAt.toString())
-        .put("weekStart", model.weekStart.toString())
-        .put("weeks", new JSONArray(model.weeks))
-        .put("priorities", new JSONArray(model.priorities))
-        .put("forecast", model.forecast)
-        .put("forecastAvailable", model.forecastAvailable)
-        .put("historyAvailable", model.historyAvailable)
-        .put("historyWarning", model.historyWarning)
-        .put("plotData", model.plotData)
-        .put("weeklyProjects", weeks)
-        .put("projectForecasts", new JSONObject(model.projectForecasts))
-        .put("projectColors", new JSONObject(model.projectColors))
-        .put("adjustments", model.adjustments)
-        .put("tasks", tasks)
-        .put("projects", projects)
-        .put("activity", activity);
+    JSONObject payload =
+        new JSONObject()
+            .put("syncedAt", model.syncedAt.toString())
+            .put("weekStart", model.weekStart.toString())
+            .put("weeks", new JSONArray(model.weeks))
+            .put("priorities", new JSONArray(model.priorities))
+            .put("forecast", model.forecast)
+            .put("forecastAvailable", model.forecastAvailable)
+            .put("historyAvailable", model.historyAvailable)
+            .put("historyWarning", model.historyWarning)
+            .put("plotData", model.plotData)
+            .put("weeklyProjects", weeks)
+            .put("projectForecasts", new JSONObject(model.projectForecasts))
+            .put("projectColors", new JSONObject(model.projectColors))
+            .put("adjustments", model.adjustments)
+            .put("tasks", tasks)
+            .put("projects", projects)
+            .put("activity", activity);
+    if (model.historyAvailable && model.activitySyncExclusive)
+      payload.put("activitySyncedAt", model.activitySyncedAt.toString());
+    return payload;
   }
 }

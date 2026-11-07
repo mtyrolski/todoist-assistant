@@ -163,6 +163,45 @@ public class PlotDataTest {
   }
 
   @Test
+  public void incompleteCoverageStartsAtTheFirstWholeLocalDayAcrossDst() throws Exception {
+    Clock afterDst = Clock.fixed(Instant.parse("2026-10-27T12:00:00Z"), CLOCK.getZone());
+    JSONObject snapshot =
+        new JSONObject()
+            .put("projects", new JSONArray())
+            .put("tasks", new JSONArray())
+            .put("activities", new JSONArray())
+            .put("syncedAt", afterDst.instant().toString())
+            .put("historyComplete", false)
+            .put("historyStart", "2026-10-25T00:30:00Z");
+    assertEquals(
+        "2026-10-26", new DashboardModel(snapshot, afterDst).plotData.getString("historyStart"));
+    assertEquals("2026-10-25T00:30:00Z", snapshot.getString("historyStart"));
+    snapshot.put("historyStart", "2026-10-24T22:00:00Z");
+    assertEquals(
+        "2026-10-25", new DashboardModel(snapshot, afterDst).plotData.getString("historyStart"));
+    snapshot.put("historyStart", "2026-10-25");
+    assertEquals(
+        "2026-10-25", new DashboardModel(snapshot, afterDst).plotData.getString("historyStart"));
+    snapshot.put("historyStart", "2026-10-25T00:30:00Z").put("historyComplete", true);
+    assertEquals(
+        "2026-10-25", new DashboardModel(snapshot, afterDst).plotData.getString("historyStart"));
+
+    ZoneId brazil = ZoneId.of("America/Sao_Paulo");
+    Clock skippedMidnight = Clock.fixed(Instant.parse("2018-11-07T12:00:00Z"), brazil);
+    snapshot
+        .put("syncedAt", skippedMidnight.instant().toString())
+        .put("historyComplete", false)
+        .put("historyStart", "2018-11-04T03:00:00Z");
+    assertEquals(
+        "2018-11-04",
+        new DashboardModel(snapshot, skippedMidnight).plotData.getString("historyStart"));
+    snapshot.put("historyStart", "2018-11-04T03:30:00Z");
+    assertEquals(
+        "2018-11-05",
+        new DashboardModel(snapshot, skippedMidnight).plotData.getString("historyStart"));
+  }
+
+  @Test
   public void oldArchiveDoesNotEndAnActiveOrReopenedProject() throws Exception {
     JSONObject project = new JSONObject().put("id", "p").put("name", "Project");
     JSONArray events =

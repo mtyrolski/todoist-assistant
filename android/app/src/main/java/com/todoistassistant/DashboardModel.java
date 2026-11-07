@@ -65,8 +65,9 @@ final class DashboardModel {
   final List<Project> projects;
   final List<Task> tasks;
   final List<Activity> recent;
-  final Instant syncedAt;
-  final LocalDate weekStart;
+  final Instant syncedAt, activitySyncedAt;
+  final ZoneId zoneId;
+  final LocalDate renderedOn, weekStart;
   final int[] weeks, priorities;
   final List<Map<String, Integer>> weeklyProjects;
   final Map<String, Integer> projectForecasts;
@@ -74,16 +75,23 @@ final class DashboardModel {
   final JSONObject adjustments;
   final JSONObject plotData;
   final int forecast;
-  final boolean forecastAvailable, historyAvailable;
+  final boolean forecastAvailable, historyAvailable, activitySyncExclusive;
   final String historyWarning;
 
   DashboardModel(JSONObject snapshot, Clock clock) throws Exception {
     syncedAt = Instant.parse(snapshot.getString("syncedAt"));
-    Instant historyAsOf =
-        Instant.parse(snapshot.optString("activitySyncedAt", syncedAt.toString()));
+    String activitySync = snapshot.optString("activitySyncedAt", "");
+    activitySyncExclusive = !activitySync.isEmpty() && !activitySync.equals("null");
+    activitySyncedAt =
+        activitySync.isEmpty() || activitySync.equals("null")
+            ? syncedAt
+            : Instant.parse(activitySync);
+    Instant historyAsOf = activitySyncedAt;
     historyAvailable = !snapshot.optBoolean("activityUnavailable");
     historyWarning = snapshot.optString("activityWarning", snapshot.optString("metadataWarning"));
-    weekStart = LocalDate.now(clock).with(DayOfWeek.MONDAY);
+    zoneId = clock.getZone();
+    renderedOn = LocalDate.now(clock);
+    weekStart = renderedOn.with(DayOfWeek.MONDAY);
     Map<String, JSONObject> known = new LinkedHashMap<>();
     JSONArray active = snapshot.getJSONArray("projects");
     JSONArray all = snapshot.optJSONArray("knownProjects");
@@ -155,13 +163,22 @@ final class DashboardModel {
     projectList.sort(Comparator.comparing(project -> project.path, String.CASE_INSENSITIVE_ORDER));
     projects = Collections.unmodifiableList(projectList);
     JSONArray rawEvents = snapshot.getJSONArray("activities");
+    Map<String, JSONObject> uniqueEvents = new LinkedHashMap<>();
+    for (int i = 0; i < rawEvents.length(); i++) {
+      JSONObject item = rawEvents.getJSONObject(i);
+      uniqueEvents.put(String.valueOf(item.get("id")), item);
+    }
+    List<JSONObject> activities = new ArrayList<>();
+    for (JSONObject item : uniqueEvents.values()) {
+      Instant time = Instant.parse(item.getString("event_date"));
+      if (activitySyncExclusive ? time.isBefore(historyAsOf) : !time.isAfter(historyAsOf))
+        activities.add(item);
+    }
     List<CompletionLedger.Event> events = new ArrayList<>();
     Map<String, String> completionProjects = new HashMap<>();
     List<Activity> activityList = new ArrayList<>();
-    for (int i = 0; i < rawEvents.length(); i++) {
-      JSONObject item = rawEvents.getJSONObject(i);
+    for (JSONObject item : activities) {
       Instant time = Instant.parse(item.getString("event_date"));
-      if (time.isAfter(historyAsOf)) continue;
       activityList.add(new Activity(item, known));
       if (!item.optString("object_type").equals("item")) continue;
       JSONObject extra = item.optJSONObject("extra_data");
@@ -211,7 +228,11 @@ final class DashboardModel {
     }
     Instant begin = weekStart.atStartOfDay(clock.getZone()).toInstant();
     Instant end = weekStart.plusWeeks(1).atStartOfDay(clock.getZone()).toInstant();
-    forecastAvailable = historyAvailable && !historyAsOf.isBefore(begin);
+    forecastAvailable =
+        historyAvailable
+            && !completed.isEmpty()
+            && !historyAsOf.isBefore(begin)
+            && !historyAsOf.isBefore(syncedAt);
     double fraction =
         Duration.between(begin, historyAsOf).toMillis()
             / (double) Duration.between(begin, end).toMillis();
@@ -254,7 +275,15 @@ final class DashboardModel {
     weeklyProjects = Collections.unmodifiableList(breakdowns);
     plotData =
         PlotData.build(
-            snapshot, clock, historyAsOf, known, mappings, promotedNames, firstWeek, completed);
+            snapshot,
+            clock,
+            historyAsOf,
+            known,
+            mappings,
+            promotedNames,
+            firstWeek,
+            completed,
+            activities);
   }
 
   static String dateValue(Object value) {

@@ -93,8 +93,8 @@ final class AlertRules {
       boolean[] found = {
         hasFire,
         priority && priorities.contains(task.priority),
-        due && within(task.due, today, dueDays, zone),
-        deadline && within(task.deadline, today, deadlineDays, zone)
+        due && within(task.due, today, dueDays),
+        deadline && within(task.deadline, today, deadlineDays)
       };
       matches.add(found);
       for (int i = 0; i < counts.length; i++) if (found[i]) counts[i]++;
@@ -114,8 +114,23 @@ final class AlertRules {
     return new Status(level, total, counts[0], counts[1], counts[2], counts[3]);
   }
 
-  private static boolean within(String value, LocalDate today, int days, ZoneId zone) {
-    LocalDate date = DashboardModel.localDate(value, zone);
+  private static boolean within(String value, LocalDate today, int days) {
+    LocalDate date;
+    try {
+      // Todoist due dates are calendar dates, even when they contain a time and offset.
+      String normalized = value.trim().replace(' ', 'T');
+      try {
+        date = LocalDate.parse(normalized);
+      } catch (java.time.format.DateTimeParseException timed) {
+        try {
+          date = java.time.OffsetDateTime.parse(normalized).toLocalDate();
+        } catch (java.time.format.DateTimeParseException noOffset) {
+          date = java.time.LocalDateTime.parse(normalized).toLocalDate();
+        }
+      }
+    } catch (RuntimeException invalid) {
+      return false;
+    }
     return date != null && !date.isAfter(today.plusDays(days));
   }
 }

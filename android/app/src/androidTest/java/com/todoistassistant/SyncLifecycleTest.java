@@ -128,6 +128,67 @@ public class SyncLifecycleTest {
   }
 
   @Test
+  public void localDayAndTimezoneChangeRebuildsCachedModelWithoutNetworkOrStorageWrites()
+      throws Exception {
+    AtomicInteger requests = new AtomicInteger();
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            requests.incrementAndGet();
+            return super.get(path);
+          }
+        };
+    start(fake);
+    CountDownLatch synced = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> syncObserver =
+        value -> {
+          if (!value.syncing && value.model != null && value.message.startsWith("Sync complete"))
+            synced.countDown();
+        };
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().observeForever(syncObserver);
+              model.sync("clock-test-token");
+            });
+    assertTrue(synced.await(20, TimeUnit.SECONDS));
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(() -> model.state().removeObserver(syncObserver));
+    int beforeRequests = requests.get();
+    String before = new SnapshotStore(context).load("clock-test-token").toString();
+    java.time.Clock changed =
+        java.time.Clock.fixed(
+            java.time.Instant.parse("2030-01-10T12:00:00Z"), java.time.ZoneId.of("Asia/Tokyo"));
+    CountDownLatch updated = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> updatedObserver =
+        value -> {
+          if (!value.loading
+              && value.model != null
+              && value.model.zoneId.equals(changed.getZone())
+              && value.model.renderedOn.equals(java.time.LocalDate.now(changed)))
+            updated.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(updatedObserver);
+                model.refreshClock(changed);
+                model.refreshClock(changed);
+              });
+      assertTrue(updated.await(20, TimeUnit.SECONDS));
+      assertEquals(beforeRequests, requests.get());
+      assertEquals(before, new SnapshotStore(context).load("clock-test-token").toString());
+      assertEquals(java.time.LocalDate.of(2030, 1, 7), state.get().model.weekStart);
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(updatedObserver));
+    }
+  }
+
+  @Test
   public void interruptedTokenUpdateRecoversTheMatchingCredentialAndHistory() throws Exception {
     TokenStore credentials = new TokenStore(context);
     SnapshotStore history = new SnapshotStore(context);
