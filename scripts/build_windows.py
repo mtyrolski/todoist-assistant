@@ -495,8 +495,7 @@ def _build_msi(
         installer_dir / name for name in ("product.wxs", "components.wxs", "ui.wxs")
     )
     _require_existing([product_wxs, components_wxs, ui_wxs], "WiX installer files")
-    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "todometry.wxs"
-    _assert_no_localized_accounts([product_wxs, components_wxs, legacy_wxs])
+    _assert_no_localized_accounts([product_wxs, components_wxs])
 
     wix_out_dir = str(wixobj_dir) + os.sep
     _run(
