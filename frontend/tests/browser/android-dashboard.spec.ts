@@ -120,13 +120,24 @@ test.beforeEach(async ({ page }) => {
         dailyActivity: [makeDay("2026-09-30", 2, 7), makeDay("2026-10-01", 4, 0), makeDay("2026-10-12", 1, 7), makeDay("2026-10-19", 1, 0), makeDay("2026-10-26", 1, 0), makeDay("2026-11-02", 3, 0)],
         lifespans: [{ completedAt: "2026-10-01", seconds: 60 }, { completedAt: "2026-10-02", seconds: 86400 }],
         hierarchy: [
-          { id: "work", name: "Work", parentId: "", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-01", lastEventAt: "2026-11-02", archivedAt: "", weeklyCounts: { 7: 10, 8: 3 } },
+          { id: "work", name: "Work", parentId: "", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-01", lastEventAt: "2026-11-02", archivedAt: "", openTasks: 1, dailyCompletions: [{date: "2026-10-01", count: 4}, {date: "2026-11-02", count: 3}], dailyEvents: [{date: "2026-10-01", count: 4}, {date: "2026-10-02", count: 1}, {date: "2026-11-02", count: 3}], weeklyCounts: { 7: 10, 8: 3 } },
           { id: "old", name: "Reopened", parentId: "work", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-01", lastEventAt: "2026-10-01", archivedAt: "2025-01-01", weeklyCounts: { 7: 1 } },
           { id: "old-two", name: "Reopened", parentId: "work", rootName: "Work", color: "blue", archived: false, createdAt: "2026-09-02", lastEventAt: "2026-10-01", archivedAt: "", weeklyCounts: { 7: 1 } },
         ],
         taskCounts: [{ date: "2026-11-01", total: 2, p1: 1, p2: 1, p3: 0, p4: 0 }, { date: "2026-11-02", total: 3, p1: 2, p2: 1, p3: 0, p4: 0 }],
       };
       (model as typeof model & { plotData: typeof plotData }).plotData = plotData;
+      send();
+    });
+    window.addEventListener("test-timeline-large", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { hierarchy: Record<string, unknown>[] } }).plotData;
+      const work = data.hierarchy[0];
+      work.dailyEvents = Array.from({ length: 90 }, (_, i) => ({ date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10), count: 1 }));
+      work.dailyCompletions = work.dailyEvents;
+      for (let i = 0; i < 25; i++) data.hierarchy.push({ id: `p${i}`, name: `Project ${i}`, rootName: `Project ${i}`, parentId: "", archived: i === 0, createdAt: "2026-01-01", lastEventAt: "", archivedAt: "", dailyEvents: [], dailyCompletions: [], weeklyCounts: {} });
+      data.hierarchy.push({ id: "unknown", name: "Unknown project", rootName: "Unknown project", parentId: "", archived: false, metadataKnown: false, createdAt: "", lastEventAt: "", archivedAt: "", dailyEvents: [], dailyCompletions: [], weeklyCounts: {} });
+      model.tasks.push({ id: "child", parentId: "a", projectId: "work", project: "Work", content: "A subtask", priority: 1, due: "", deadline: "", labels: [] } as typeof model.tasks[number]);
       send();
     });
     window.addEventListener("test-history-gap", () => {
@@ -668,9 +679,11 @@ test("mobile exposes desktop plots with calendar-accurate totals and respects pa
   await page.getByRole("combobox", { name: "Period", exact: true }).selectOption("quarter");
   await expect.poll(() => completed.evaluate((node) => (node as HTMLElement & { data: { y: number[] }[] }).data[0].y)).toEqual([2, 10]);
   await page.getByRole("button", { name: "Show", exact: true }).click();
-  const timeline = section("Timeline").locator(".js-plotly-plot");
-  await expect(timeline).toBeVisible();
-  await expect.poll(() => timeline.evaluate((node) => (node as HTMLElement & { data: { y: string[] }[] }).data[0].y.filter((name) => name.includes("Reopened")))).toEqual(["Work / Reopened", "Work / Reopened (2)"]);
+  const timeline = page.getByRole("region", { name: "Project Timeline", exact: true });
+  await expect(timeline.locator('[data-project-id="old"]')).toBeVisible();
+  await expect(timeline.locator('[data-project-id="old-two"]')).toBeVisible();
+  await timeline.locator('[data-project-id="work"]').click();
+  await expect(timeline.getByRole("region", { name: "Selected project timeline" })).toContainText("7 recorded completions");
   await page.evaluate(() => window.dispatchEvent(new Event("test-history-gap")));
   await expect(page.getByText("History is incomplete; earlier periods may change or be omitted as sync continues.")).toBeVisible();
   await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[]; y: number[] }[] }).data[0].x[0])).toBe("2026-10-12");
@@ -742,4 +755,68 @@ test("project names do not collide with JavaScript properties or the aggregate",
   expect((await traces()).find((trace) => trace.legendgroup === "project:All projects")?.y).toEqual([4, 0]);
   expect((await traces()).find((trace) => trace.legendgroup === "constructor")?.y).toEqual([2, 0]);
   expect((await traces()).find((trace) => trace.legendgroup === "__proto__")?.y).toEqual([1, 0]);
+});
+
+
+test("timeline filters inclusive dates and keeps selection separate for duplicate names", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  const timeline = page.getByRole("region", { name: "Project Timeline", exact: true });
+  await timeline.getByRole("button", { name: "Show", exact: true }).click();
+  await timeline.getByLabel("Timeline start date").fill("2026-10-01");
+  await timeline.getByLabel("Timeline end date").fill("2026-10-02");
+  await timeline.locator('[data-project-id="work"]').click();
+  const details = timeline.getByRole("region", { name: "Selected project timeline" });
+  await expect(details).toContainText("4 recorded completions");
+  await expect(details).toContainText("5 recorded activity events");
+  await expect(details).toContainText("2026-10-01");
+  await expect(details).toContainText("2026-10-02");
+  await expect(details).not.toContainText("2026-11-02");
+  await expect(timeline.locator('[data-project-id="old"]')).toContainText("ID old");
+  await expect(timeline.locator('[data-project-id="old-two"]')).toContainText("ID old-two");
+  await timeline.locator('[data-project-id="old"]').click();
+  await expect(timeline.locator('[data-project-id="old"]')).toHaveAttribute("aria-pressed", "true");
+  await timeline.locator('[data-project-id="old-two"]').click();
+  await expect(timeline.locator('[data-project-id="old-two"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(timeline.getByLabel("Timeline start date")).toHaveValue("2026-10-01");
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(timeline.locator('[data-project-id="old-two"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(timeline.getByLabel("Timeline start date")).toHaveValue("2026-10-01");
+  await expect(timeline.getByLabel("Timeline end date")).toHaveValue("2026-10-02");
+  await timeline.getByLabel("Timeline end date").fill("2026-09-01");
+  await expect(timeline.getByRole("alert")).toContainText("start date must not be after");
+  await page.setViewportSize({ width: 320, height: 700 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
+test("timeline distinguishes unavailable project history from an empty range", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  const timeline = page.getByRole("region", { name: "Project Timeline", exact: true });
+  await timeline.getByRole("button", { name: "Show", exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-history-gap")));
+  await expect(timeline).toContainText("missing dates are not confirmed as inactive");
+  await timeline.locator('[data-project-id="work"]').click();
+  await timeline.getByLabel("Timeline start date").fill("2025-01-01");
+  await timeline.getByLabel("Timeline end date").fill("2025-02-01");
+  await expect(timeline).toContainText("No recorded activity in this range; history is incomplete");
+});
+
+
+test("large timeline paginates and shows subtask parents", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-timeline-large")));
+  const timeline = page.getByRole("region", { name: "Project Timeline", exact: true });
+  await timeline.getByRole("button", { name: "Show", exact: true }).click();
+  await expect(timeline.locator('[data-project-id]')).toHaveCount(20);
+  await timeline.getByRole("button", { name: "Show more projects" }).click();
+  await expect(timeline.locator('[data-project-id]')).toHaveCount(29);
+  await expect(timeline.locator('[data-project-id="unknown"]')).toContainText("Status unavailable");
+  await timeline.locator('[data-project-id="unknown"]').click();
+  await expect(timeline.getByRole("region", { name: "Selected project timeline" })).toContainText("Project status is unknown");
+  await timeline.locator('[data-project-id="work"]').click();
+  const details = timeline.getByRole("region", { name: "Selected project timeline" });
+  await expect(details).toContainText("90 recorded completions");
+  await expect(details).toContainText("Subtask of Review the release checklist");
+  await expect(details.getByRole("list", { name: "Project activity by day" }).locator("li")).toHaveCount(30);
+  await details.getByRole("button", { name: "Show more activity" }).click();
+  await expect(details.getByRole("list", { name: "Project activity by day" }).locator("li")).toHaveCount(60);
 });

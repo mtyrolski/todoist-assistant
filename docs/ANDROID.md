@@ -37,6 +37,8 @@ For existing desktop project adjustments, save and export them from Project Adju
 
 Overview shows completion trends, forecasts, project contributions and charts derived from the history available on the device, including a project timeline. Projects supports search and priority filters; Activity shows recent actions. Control Panel provides alert settings and project grouping. These mobile charts use locally cached data and do not guarantee full parity with desktop analysis. Alert preferences and history remain local to each client.
 
+In Overview, open **Project Timeline** to select a project, filter inclusive dates and inspect recorded activity, effective completions and open tasks. Project IDs keep history attached across renames; current metadata supplies the displayed names and parents. Missing history and unknown project dates are marked rather than treated as inactivity. Android groups dates in the device time zone; the desktop timeline uses UTC, so activity near midnight can appear on different dates.
+
 Overview counts completion events rather than task due dates. Activity and task snapshots can have different refresh times, and interrupted or permission-limited history is marked accordingly. Todoist may restrict how much activity is returned for an account's plan, so a completed backfill does not prove that every historical event was available.
 
 To run interaction tests on a dedicated emulator:

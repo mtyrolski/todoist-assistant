@@ -20,10 +20,16 @@ export type MobilePlotData = {
     rootName: string;
     color: string;
     archived: boolean;
+    metadataKnown?: boolean;
     createdAt: string;
     lastEventAt: string;
+    updatedAt?: string;
+    createdAtSource?: "metadata" | "activity" | "unknown";
     archivedAt: string;
     weeklyCounts: Record<string, number>;
+    openTasks?: number;
+    dailyCompletions?: { date: string; count: number }[];
+    dailyEvents?: { date: string; count: number }[];
   }[];
   taskCounts: { date: string; total: number; p1: number; p2: number; p3: number; p4: number }[];
 };
@@ -268,30 +274,6 @@ export function hierarchyFigure(model: MobileModel, range: number): PlotlyFigure
     colors.push(projectColor(model, project.rootName));
   }
   return { data: [{ type: "sunburst", ids, labels, parents, values, branchvalues: "remainder", marker: { colors }, hovertemplate: "%{label}<br>%{value} completions<extra></extra>" }], layout: { showlegend: false, margin: { l: 8, r: 8, t: 12, b: 12 } } };
-}
-
-export function projectTimelineFigure(model: MobileModel, range: number): { figure: PlotlyFigure; rows: number } {
-  const start = startDate(model, range), end = localDay(model.syncedAt);
-  const projects = (model.plotData?.hierarchy ?? []).filter((project) => project.createdAt && project.createdAt <= end && (!start || !project.archived || !project.archivedAt || project.archivedAt >= start));
-  projects.sort((a, b) => a.rootName.localeCompare(b.rootName) || a.name.localeCompare(b.name));
-  if (!projects.length) return { figure: empty("No project dates are available in this range."), rows: 0 };
-  const x: number[] = [], base: string[] = [], y: string[] = [], customdata: string[] = [], colors: string[] = [];
-  const usedNames = new Set<string>();
-  for (const project of projects) {
-    const first = start && project.createdAt < start ? start : project.createdAt;
-    const observedEnd = project.archived ? project.archivedAt || project.lastEventAt : end;
-    const last = observedEnd && observedEnd < end ? observedEnd : end;
-    if (!last || last < first) continue;
-    const label = project.rootName === project.name ? project.name : `${project.rootName} / ${project.name}`;
-    let uniqueLabel = label, suffix = 2;
-    while (usedNames.has(uniqueLabel)) uniqueLabel = `${label} (${suffix++})`;
-    usedNames.add(uniqueLabel);
-    base.push(first); x.push(Math.max(DAY, time(last) - time(first) + DAY)); y.push(uniqueLabel);
-    customdata.push(project.archived && !project.archivedAt ? "Archive date not recorded; ends at last observed activity" : project.archived ? "Archived" : "Active");
-    colors.push(projectColor(model, project.rootName));
-  }
-  if (!x.length) return { figure: empty("No project dates are available in this range."), rows: 0 };
-  return { figure: { data: [{ type: "bar", orientation: "h", x, base, y, customdata, marker: { color: colors }, hovertemplate: "%{y}<br>%{base}<br>%{customdata}<extra></extra>" }], layout: { showlegend: false, xaxis: { type: "date" }, yaxis: { automargin: true, autorange: "reversed" }, margin: { l: 100, r: 16, t: 16, b: 40 } } }, rows: x.length };
 }
 
 export function calendarCompletionFigure(

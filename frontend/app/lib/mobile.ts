@@ -6,6 +6,7 @@ import type { MobilePlotData } from "./mobilePlots";
 export type MobileTask = {
   id: string;
   projectId: string;
+  parentId?: string;
   content: string;
   project: string;
   priority: number;

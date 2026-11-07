@@ -22,7 +22,7 @@ import {
   projectColor,
   weekDate,
 } from "../lib/mobile";
-import type { MobileState } from "../lib/mobile";
+import type { MobileModel, MobileState } from "../lib/mobile";
 import {
   calendarCompletionFigure,
   eventsFigure,
@@ -30,7 +30,6 @@ import {
   hierarchyFigure,
   lifespanFigure,
   paceWindowAvailable,
-  projectTimelineFigure,
   taskCountsFigure,
   weeklyPaceFigure,
 } from "../lib/mobilePlots";
@@ -77,6 +76,104 @@ function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
     else valid = false;
   }
   return { ui, valid };
+}
+
+function ProjectTimeline({ model, open, setOpen }: {
+  model: MobileModel;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [projectLimit, setProjectLimit] = useState(20);
+  const [dayLimit, setDayLimit] = useState(30);
+  const [taskLimit, setTaskLimit] = useState(20);
+  const invalid = Boolean(start && end && start > end);
+  const projects = model.plotData?.hierarchy ?? [];
+  const visible = useMemo(() => {
+    if (!open || invalid) return [];
+    return projects.filter((project) =>
+      (!end || !project.createdAt || project.createdAt <= end) &&
+      (!start || !project.archived || !project.archivedAt || project.archivedAt >= start),
+    ).slice().sort((a, b) => a.rootName.localeCompare(b.rootName) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }, [open, invalid, projects, start, end]);
+  const nameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const project of projects) {
+      const key = JSON.stringify([project.parentId, project.name]);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [projects]);
+  const selected = projects.find((project) => project.id === selectedId);
+  const detailAvailable = Boolean(selected && Array.isArray(selected.dailyEvents) && Array.isArray(selected.dailyCompletions));
+  const historyStart = mobileHistoryStart(model);
+  const historyEnd = mobileHistoryEnd(model);
+  const activityTime = model.activitySyncedAt ? Date.parse(model.activitySyncedAt) : NaN;
+  const snapshotTime = Date.parse(model.syncedAt);
+  const incomplete = !model.historyAvailable || !model.plotData?.historyComplete ||
+    Boolean((start && historyStart && start < historyStart) || (end && historyEnd && end > historyEnd) ||
+      (Number.isFinite(activityTime) && Number.isFinite(snapshotTime) && activityTime < snapshotTime));
+  const daily = useMemo(() => {
+    if (!open || !selected || invalid) return [];
+    const days = new Map<string, { date: string; completions: number; events: number }>();
+    for (const [rows, key] of [[selected.dailyCompletions ?? [], "completions"], [selected.dailyEvents ?? [], "events"]] as const) {
+      for (const row of rows) {
+        if ((start && row.date < start) || (end && row.date > end)) continue;
+        const day = days.get(row.date) ?? { date: row.date, completions: 0, events: 0 };
+        day[key] += row.count;
+        days.set(row.date, day);
+      }
+    }
+    return [...days.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [open, selected, invalid, start, end]);
+  const tasks = useMemo(() => selected ? model.tasks.filter((task) => task.projectId === selected.id) : [], [model.tasks, selected]);
+  const taskNames = useMemo(() => new Map(model.tasks.map((task) => [task.id, task.content])), [model.tasks]);
+  const totals = daily.reduce((value, row) => ({ completions: value.completions + row.completions, events: value.events + row.events }), { completions: 0, events: 0 });
+  const choose = (id: string) => { setSelectedId(id); setDayLimit(30); setTaskLimit(20); };
+  return (
+    <section className="card" aria-label="Project Timeline">
+      <div className="cardHeader"><h2>Project Timeline</h2><button type="button" className="button buttonSmall buttonGhost" onClick={() => setOpen(!open)}>{open ? "Hide" : "Show"}</button></div>
+      {open && <>
+        <p className="muted tiny">Select a project to inspect recorded activity. Dates are inclusive and use your device time zone. Project names and parents reflect the latest available metadata.</p>
+        <div className="controls mobilePlotControls">
+          <label className="control"><span className="muted tiny">From</span><input className="select" type="date" aria-label="Timeline start date" value={start} onChange={(event) => { setStart(event.target.value); setProjectLimit(20); setDayLimit(30); }} /></label>
+          <label className="control"><span className="muted tiny">Through</span><input className="select" type="date" aria-label="Timeline end date" value={end} onChange={(event) => { setEnd(event.target.value); setProjectLimit(20); setDayLimit(30); }} /></label>
+        </div>
+        {invalid ? <p role="alert">The start date must not be after the end date.</p> : <>
+          {!model.historyAvailable ? <p className="pill pill-warn">Activity history is unavailable; project metadata may still be shown.</p> : incomplete ? <p className="pill pill-warn">Only available history is shown; missing dates are not confirmed as inactive.</p> : <p className="muted tiny">History is limited to the activity available from Todoist and cached on this device.</p>}
+          {model.historyAvailable && historyEnd && <p className="muted tiny">Activity available through {historyEnd}{historyStart && historyStart !== "9999-12-31" ? `; complete days from ${historyStart}` : ""}.</p>}
+          {!visible.length ? <p>No projects match this date range. Projects with unknown dates remain visible.</p> : <>
+            <p className="muted tiny">{visible.length} project{visible.length === 1 ? "" : "s"}. Select one for its timeline.</p>
+            <div aria-label="Timeline projects" style={{ display: "grid", gap: 6 }}>
+              {visible.slice(0, projectLimit).map((project) => <button type="button" className="button buttonGhost" style={{ textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere" }} aria-pressed={selectedId === project.id} data-project-id={project.id} key={project.id} onClick={() => choose(project.id)}>
+                {project.name}{project.parentId ? ` · ${project.rootName}` : ""}{(nameCounts.get(JSON.stringify([project.parentId, project.name])) ?? 0) > 1 ? ` · ID ${project.id}` : ""} {project.metadataKnown === false ? "· Status unavailable" : project.archived ? "· Archived" : "· Active"}
+              </button>)}
+            </div>
+            {visible.length > projectLimit && <button type="button" className="button buttonSmall" onClick={() => setProjectLimit((value) => value + 20)}>Show more projects</button>}
+          </>}
+          {selected && <section aria-label="Selected project timeline" style={{ marginTop: 16 }}>
+            <h3 style={{ overflowWrap: "anywhere" }}>{selected.name}</h3>
+            {selected.parentId && <p className="muted tiny">Parent project: {projects.find((project) => project.id === selected.parentId)?.name ?? "Unknown project"}</p>}
+            {!visible.some((project) => project.id === selected.id) && <p>Selected project is outside the current date range.</p>}
+            <p>{selected.metadataKnown === false ? "Status unavailable" : selected.archived ? "Archived" : "Active"} · {selected.openTasks ?? tasks.length} open tasks</p>
+            <p className="muted tiny">{selected.createdAt ? `Earliest known start: ${selected.createdAt}${selected.createdAtSource === "activity" ? " (first recorded activity)" : ""}.` : "Start date unavailable."} {selected.metadataKnown === false ? "Project status is unknown." : selected.archived ? selected.archivedAt ? `Archived: ${selected.archivedAt}.` : "Archive date unavailable; the last observed activity is not necessarily the archive date." : "Project is ongoing."}</p>
+            {!model.historyAvailable || !detailAvailable ? <p>Activity details are unavailable.</p> : <>
+              <p><strong>{totals.completions}</strong> recorded completions · <strong>{totals.events}</strong> recorded activity events</p>
+              {!daily.length ? <p>No recorded activity in this range{incomplete ? "; history is incomplete" : ""}.</p> : <>
+                <ol aria-label="Project activity by day" style={{ paddingLeft: 20 }}>
+                  {daily.slice(0, dayLimit).map((day) => <li key={day.date}><time dateTime={day.date}>{day.date}</time> · {day.completions} completed · {day.events} events</li>)}
+                </ol>
+                {daily.length > dayLimit && <button type="button" className="button buttonSmall" onClick={() => setDayLimit((value) => value + 30)}>Show more activity</button>}
+              </>}
+            </>}
+            {tasks.length > 0 && <><h4>Open tasks</h4><ul>{tasks.slice(0, taskLimit).map((task) => <li key={task.id} style={{ overflowWrap: "anywhere" }}>{task.content}{task.parentId && <span className="muted tiny"> · {taskNames.has(task.parentId) ? `Subtask of ${taskNames.get(task.parentId)}` : "Subtask (parent unavailable)"}</span>}</li>)}</ul>{tasks.length > taskLimit && <button type="button" className="button buttonSmall" onClick={() => setTaskLimit((value) => value + 20)}>Show more tasks</button>}</>}
+          </section>}
+        </>}
+      </>}
+    </section>
+  );
 }
 
 export default function AndroidDashboard() {
@@ -199,9 +296,8 @@ export default function AndroidDashboard() {
       heatmap: heatmapFigure(model, ui.range),
       events: eventsFigure(model, ui.range),
       taskCounts: taskCountsFigure(model, ui.range),
-      timeline: timelineOpen ? projectTimelineFigure(model, ui.range) : null,
     };
-  }, [model, ui.range, paceWindow, lifespanAll, timelineOpen]);
+  }, [model, ui.range, paceWindow, lifespanAll]);
   const busy = state?.loading || state?.syncing;
   const matches =
     model?.tasks.filter(
@@ -613,17 +709,13 @@ export default function AndroidDashboard() {
                   <DeferredPlot title="Events Over Time" height={310}><MobilePlotCard title="Events Over Time" figure={analysis.events} height={310} help={PLOT_HELP.eventsOverTime} /></DeferredPlot>
                   <p className="muted tiny">Active-task history is estimated from cached activity and current tasks.</p>
                   <DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} /></DeferredPlot>
-                  <div className="card">
-                    <div className="cardHeader"><h2>Project Timeline</h2><button type="button" className="button buttonSmall buttonGhost" onClick={() => setTimelineOpen(!timelineOpen)}>{timelineOpen ? "Hide" : "Show"}</button></div>
-                    <p className="muted tiny">Starts use the earliest known date. Where an archive date is missing, the timeline ends at the last observed activity.</p>
-                    {timelineOpen && analysis.timeline && <div style={{ maxHeight: 620, overflowY: "auto" }}><PlotCard title="Timeline" figure={analysis.timeline.figure} height={Math.max(320, analysis.timeline.rows * 26)} compact /></div>}
-                  </div>
                 </>
               )}
             </>
           )}
         </>
       )}
+      {model?.plotData && <div hidden={ui.tab !== "Overview"}><ProjectTimeline model={model} open={timelineOpen} setOpen={setTimelineOpen} /></div>}
 
       {model && (ui.tab === "Projects" || ui.tab === "Activity") && (
         <div className="controls mobileSearch">

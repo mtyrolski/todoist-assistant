@@ -42,12 +42,35 @@ beforeEach(async () => {
   });
   await device.shell(`am start -n ${pkg}/.MainActivity`);
   page = await (await created).page();
-  await page
-    .getByRole("button", { name: "Explore a demo", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Back to my data", exact: true }),
-  ).toBeVisible();
+  await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some((button) => button.textContent.trim() === "Explore a demo"), null, { timeout: 120000 });
+  await page.evaluate(() => Array.from(document.querySelectorAll("button")).find((button) => button.textContent.trim() === "Explore a demo").click());
+  await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some((button) => button.textContent.trim() === "Back to my data"), null, { timeout: 120000 });
+});
+
+test("project timeline filters and switches projects offline on the device", async () => {
+  await page.waitForFunction(() => document.querySelector('[aria-label="Project Timeline"] button'));
+  await page.evaluate(() => document.querySelector('[aria-label="Project Timeline"] button').click());
+  await page.waitForFunction(() => document.querySelector('[data-project-id="product"]'));
+  await page.evaluate(() => document.querySelector('[data-project-id="product"]').click());
+  await page.waitForFunction(() => document.querySelector('[aria-label="Project activity by day"] time'));
+  const date = await page.evaluate(() => document.querySelector('[aria-label="Project activity by day"] time').dateTime);
+  await page.evaluate((day) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    for (const label of ["Timeline start date", "Timeline end date"]) {
+      const input = document.querySelector(`input[aria-label="${label}"]`);
+      setter.call(input, day);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }, date);
+  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Project activity by day"] li').length === 1);
+  await page.evaluate(() => document.querySelector('[data-project-id="life"]').click());
+  await page.waitForFunction(() => document.querySelector('[data-project-id="life"]').getAttribute("aria-pressed") === "true");
+  assert.equal(await page.evaluate(() => document.querySelector('input[aria-label="Timeline start date"]').value), date);
+  await page.evaluate(() => document.querySelector('[data-project-id="product"]').click());
+  await page.waitForFunction(() => document.querySelector('[data-project-id="product"]').getAttribute("aria-pressed") === "true");
+  assert.equal(await page.evaluate(() => document.querySelectorAll('[aria-label="Project activity by day"] li').length), 1);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Timeline must fit the screen without horizontal overflow");
 });
 after(async () => {
   if (!device) return;
