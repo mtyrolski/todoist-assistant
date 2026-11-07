@@ -10,6 +10,7 @@ from typing import Any, Mapping, MutableMapping, Optional
 
 import requests
 from loguru import logger
+from requests.structures import CaseInsensitiveDict
 
 from todometry.core.utils import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
@@ -71,10 +72,10 @@ class RequestSpec:
     """Description of a Todoist API call."""
 
     endpoint: Endpoint
-    headers: Optional[Mapping[str, str]] = None
-    params: Optional[Mapping[str, Any]] = None
-    data: Optional[Mapping[str, Any]] = None
-    json_body: Any | None = None
+    headers: Optional[Mapping[str, str]] = field(default=None, repr=False)
+    params: Optional[Mapping[str, Any]] = field(default=None, repr=False)
+    data: Optional[Mapping[str, Any]] = field(default=None, repr=False)
+    json_body: Any | None = field(default=None, repr=False)
     timeout: TimeoutSettings = field(default_factory=TimeoutSettings)
     max_attempts: Optional[int] = None
     rate_limited: bool = False
@@ -82,15 +83,15 @@ class RequestSpec:
 
 @dataclass(slots=True)
 class EndpointCallResult:
-    """Structured response metadata for a Todoist API call."""
+    """Response metadata with authorization and other sensitive headers redacted."""
 
     endpoint: Endpoint
-    request_headers: Mapping[str, str]
-    request_params: Mapping[str, Any]
+    request_headers: Mapping[str, str] = field(repr=False)
+    request_params: Mapping[str, Any] = field(repr=False)
     status_code: int
     elapsed: float
-    text: str
-    json: Any | None
+    text: str = field(repr=False)
+    json: Any | None = field(repr=False)
 
 
 class RateLimitExceeded(RuntimeError):
@@ -162,6 +163,8 @@ class TodoistAPIClient:
                 _wait_for_rate_limit(self._max_requests_per_minute)
             start = perf_counter()
 
+            response: requests.Response | None = None
+            network_error = f"HTTP error calling {spec.endpoint.name}"
             try:
                 response = self._get_session().request(
                     method=spec.endpoint.method,
@@ -172,22 +175,21 @@ class TodoistAPIClient:
                     json=spec.json_body,
                     timeout=timeout.as_tuple(),
                 )
-            except requests.Timeout as exc:
+            except requests.Timeout:
                 logger.warning(
                     "Request timeout",
                     endpoint=spec.endpoint.name,
-                    url=spec.endpoint.url,
                     timeout=timeout.as_tuple(),
                 )
-                raise RuntimeError(f"Timeout calling {spec.endpoint.name}") from exc
+                network_error = f"Timeout calling {spec.endpoint.name}"
             except requests.RequestException as exc:
                 logger.error(
                     "Request error",
                     endpoint=spec.endpoint.name,
-                    url=spec.endpoint.url,
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
-                raise RuntimeError(f"HTTP error calling {spec.endpoint.name}") from exc
+            if response is None:
+                raise RuntimeError(network_error)
 
             elapsed = perf_counter() - start
 
@@ -199,36 +201,45 @@ class TodoistAPIClient:
                 )
                 raise RateLimitExceeded(spec.endpoint.name, retry_after_seconds)
 
+            http_error = False
             try:
                 response.raise_for_status()
-            except requests.HTTPError as exc:
+            except requests.HTTPError:
                 logger.error(
                     "Todoist endpoint returned error\n"
                     f"endpoint={spec.endpoint.name}, "
-                    f"status={response.status_code}, "
-                    f"body={response.text}"
+                    f"status={response.status_code}"
                 )
+                http_error = True
+            if http_error:
                 raise RuntimeError(
                     f"Failed calling {spec.endpoint.name}: {response.status_code}"
-                ) from exc
+                )
 
             json_payload: Any | None = None
             if expect_json and response.content:
+                invalid_json = False
                 try:
                     json_payload = response.json()
-                except ValueError as exc:  # pragma: no cover - network safety
+                except ValueError:
                     logger.error(
                         "Failed to decode JSON response",
                         endpoint=spec.endpoint.name,
-                        body=response.text[:500],
+                        status=response.status_code,
                     )
-                    raise RuntimeError(
-                        f"Invalid JSON returned by {spec.endpoint.name}"
-                    ) from exc
+                    invalid_json = True
+                if invalid_json:
+                    raise RuntimeError(f"Invalid JSON returned by {spec.endpoint.name}")
 
             result = EndpointCallResult(
                 endpoint=spec.endpoint,
-                request_headers=headers,
+                request_headers={
+                    name: "[redacted]"
+                    if name.lower()
+                    in {"authorization", "proxy-authorization", "cookie", "x-api-key", "x-auth-token"}
+                    else value
+                    for name, value in headers.items()
+                },
                 request_params=params,
                 status_code=response.status_code,
                 elapsed=elapsed,
@@ -258,9 +269,9 @@ class TodoistAPIClient:
     def _build_headers(
         self, headers: Optional[Mapping[str, str]]
     ) -> MutableMapping[str, str]:
-        merged: MutableMapping[str, str] = {
-            "Authorization": f"Bearer {get_api_key()}",
-        }
+        merged: MutableMapping[str, str] = CaseInsensitiveDict(
+            {"Authorization": f"Bearer {get_api_key()}"}
+        )
         if headers:
             merged.update(headers)
         return merged
