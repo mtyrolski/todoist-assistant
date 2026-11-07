@@ -33,6 +33,128 @@ public class DashboardModelTest {
   }
 
   @Test
+  public void habitsMatchBackendCompletionAndRescheduleFixture() throws Exception {
+    java.nio.file.Path fixturePath =
+        java.nio.file.Paths.get(System.getProperty("completionFixtures"))
+            .getParent()
+            .resolve("android_habit_conformance.json");
+    JSONObject fixture =
+        new JSONObject(
+            new String(
+                java.nio.file.Files.readAllBytes(fixturePath),
+                java.nio.charset.StandardCharsets.UTF_8));
+    Clock anchor = Clock.fixed(Instant.parse(fixture.getString("anchor")), ZoneId.of("UTC"));
+    JSONObject project = new JSONObject().put("id", "p").put("name", "Health");
+    JSONObject one =
+        task("h1", "p", "Walking", 1).put("labels", new JSONArray().put(" @TRACK_HABIT "));
+    JSONObject two =
+        task("h2", "p", "Reading", 1).put("labels", new JSONArray().put("track_habit"));
+    JSONObject data =
+        empty()
+            .put("syncedAt", anchor.instant().toString())
+            .put("projects", new JSONArray().put(project))
+            .put("tasks", new JSONArray().put(one).put(two))
+            .put("activities", fixture.getJSONArray("events"));
+    JSONObject actual = new DashboardModel(data, anchor).habitTracker;
+    JSONObject expected = fixture.getJSONObject("expected");
+    assertEquals(expected.getString("weekBeg"), actual.getString("weekBeg"));
+    assertEquals(expected.getString("weekEnd"), actual.getString("weekEnd"));
+    assertEquals(expected.getInt("trackedCount"), actual.getInt("trackedCount"));
+    for (var keys = expected.getJSONObject("totals").keys(); keys.hasNext(); ) {
+      String key = keys.next();
+      assertEquals(
+          key,
+          expected.getJSONObject("totals").getInt(key),
+          actual.getJSONObject("totals").getInt(key));
+    }
+    for (int i = 0; i < expected.getJSONArray("items").length(); i++) {
+      JSONObject want = expected.getJSONArray("items").getJSONObject(i);
+      JSONObject got = actual.getJSONArray("items").getJSONObject(i);
+      for (var keys = want.keys(); keys.hasNext(); ) {
+        String key = keys.next();
+        if (want.get(key) instanceof Number)
+          assertEquals(key, want.getDouble(key), got.getDouble(key), 0.00001);
+        else assertEquals(key, want.get(key), got.get(key));
+      }
+    }
+  }
+
+  @Test
+  public void habitWeekBoundaryUsesDeviceLocalDateAcrossDst() throws Exception {
+    ZoneId zone = ZoneId.of("Europe/Warsaw");
+    Clock monday = Clock.fixed(Instant.parse("2026-03-30T10:00:00Z"), zone);
+    JSONObject tracked =
+        task("h", "p", "Habit", 1).put("labels", new JSONArray().put("track_habit"));
+    JSONArray events = new JSONArray();
+    for (String[] value :
+        new String[][] {{"one", "2026-03-29T21:30:00Z"}, {"two", "2026-03-29T22:30:00Z"}})
+      events.put(
+          new JSONObject()
+              .put("id", value[0])
+              .put("object_id", "h")
+              .put("object_type", "item")
+              .put("event_type", "completed")
+              .put("event_date", value[1])
+              .put("extra_data", new JSONObject().put("is_recurring", true)));
+    JSONObject data =
+        empty()
+            .put("syncedAt", monday.instant().toString())
+            .put("tasks", new JSONArray().put(tracked))
+            .put("activities", events);
+    JSONObject habit = new DashboardModel(data, monday).habitTracker;
+    assertEquals("2026-03-23", habit.getString("weekBeg"));
+    assertEquals("2026-03-29", habit.getString("weekEnd"));
+    assertEquals(1, habit.getJSONObject("totals").getInt("weeklyCompleted"));
+    assertEquals(2, habit.getJSONObject("totals").getInt("allTimeCompleted"));
+  }
+
+  @Test
+  public void activityTotalCountsUniqueEventsBeyondTheVisibleLimit() throws Exception {
+    JSONArray events = new JSONArray();
+    for (int i = 0; i < 205; i++)
+      events.put(
+          new JSONObject()
+              .put("id", "e" + i)
+              .put("object_id", "t" + i)
+              .put("object_type", "item")
+              .put("event_type", "added")
+              .put("event_date", "2026-10-31T10:00:00Z"));
+    events.put(events.getJSONObject(0));
+    DashboardModel model = new DashboardModel(empty().put("activities", events), CLOCK);
+    assertEquals(205, model.activityTotal);
+    assertEquals(200, model.recent.size());
+    assertEquals(205, MobilePayload.model(model).getInt("activityTotal"));
+  }
+
+  @Test
+  public void habitReliabilityUsesBackendFloatingPointRounding() throws Exception {
+    JSONObject tracked =
+        task("h", "p", "Habit", 1).put("labels", new JSONArray().put("track_habit"));
+    JSONArray events = new JSONArray();
+    for (int i = 0; i < 160; i++) {
+      JSONObject extra =
+          i < 23
+              ? new JSONObject().put("is_recurring", true)
+              : new JSONObject().put("due_date", "2026-10-30").put("last_due_date", "2026-10-29");
+      events.put(
+          new JSONObject()
+              .put("id", "e" + i)
+              .put("object_id", "h")
+              .put("object_type", "item")
+              .put("event_type", i < 23 ? "completed" : "updated")
+              .put("event_date", "2026-10-29T10:00:00Z")
+              .put("extra_data", extra));
+    }
+    DashboardModel model =
+        new DashboardModel(
+            empty().put("tasks", new JSONArray().put(tracked)).put("activities", events), CLOCK);
+    assertEquals(
+        14.37,
+        model.habitTracker.getJSONArray("items").getJSONObject(0).getDouble("reliability"),
+        0.00001);
+  }
+
+  @Test
   public void projectsMissingDuringSyncDoNotHideTheirTasks() throws Exception {
     JSONObject data = empty().put("tasks", new JSONArray().put(task("t", "missing", "Task", 4)));
     DashboardModel model = new DashboardModel(data, CLOCK);

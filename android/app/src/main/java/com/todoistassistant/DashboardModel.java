@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -75,8 +76,9 @@ final class DashboardModel {
   final Map<String, String> projectColors;
   final JSONObject adjustments;
   final JSONObject plotData;
+  final JSONObject habitTracker;
   final String quotedMobilePayload;
-  final int forecast;
+  final int forecast, activityTotal;
   final boolean forecastAvailable, historyAvailable, activitySyncExclusive;
   final String historyWarning;
 
@@ -202,10 +204,12 @@ final class DashboardModel {
         Comparator.comparing((Activity event) -> event.date)
             .reversed()
             .thenComparing(event -> event.id));
+    activityTotal = activityList.size();
     recent =
         Collections.unmodifiableList(
             new ArrayList<>(activityList.subList(0, Math.min(200, activityList.size()))));
     List<CompletionLedger.Event> completed = CompletionLedger.effective(events);
+    habitTracker = trackedHabits(tasks, completed, activities, known, weekStart, zoneId);
     LocalDate firstWeek = weekStart.minusWeeks(8);
     for (var event : completed) {
       LocalDate day = event.date.atZone(clock.getZone()).toLocalDate();
@@ -287,6 +291,117 @@ final class DashboardModel {
             completed,
             activities);
     quotedMobilePayload = JSONObject.quote(MobilePayload.model(this).toString());
+  }
+
+  private static JSONObject trackedHabits(
+      List<Task> tasks,
+      List<CompletionLedger.Event> completed,
+      List<JSONObject> activities,
+      Map<String, JSONObject> projects,
+      LocalDate weekStart,
+      ZoneId zone)
+      throws Exception {
+    Map<String, Task> tracked = new LinkedHashMap<>();
+    for (Task task : tasks) {
+      for (String label : task.labels)
+        if (label.trim().replaceFirst("^@+", "").toLowerCase(Locale.ROOT).equals("track_habit")) {
+          tracked.put(task.id, task);
+          break;
+        }
+    }
+    Map<String, int[]> counts = new HashMap<>();
+    int[][] history = new int[8][2];
+    for (var event : completed)
+      if (tracked.containsKey(event.taskId))
+        addHabitEvent(
+            counts, history, event.taskId, event.date.atZone(zone).toLocalDate(), weekStart, 0);
+    for (JSONObject event : activities) {
+      if (!event.optString("object_type").equals("item")
+          || !event.optString("event_type").equals("updated")) continue;
+      JSONObject extra = event.optJSONObject("extra_data");
+      String taskId = event.optString("object_id");
+      if (tracked.containsKey(taskId)
+          && extra != null
+          && extra.has("due_date")
+          && extra.has("last_due_date"))
+        addHabitEvent(
+            counts,
+            history,
+            taskId,
+            Instant.parse(event.getString("event_date")).atZone(zone).toLocalDate(),
+            weekStart,
+            1);
+    }
+    List<Task> sorted = new ArrayList<>(tracked.values());
+    sorted.sort(
+        Comparator.<Task>comparingInt(task -> -counts.getOrDefault(task.id, new int[4])[0])
+            .thenComparingInt(task -> counts.getOrDefault(task.id, new int[4])[1])
+            .thenComparingInt(task -> -counts.getOrDefault(task.id, new int[4])[2])
+            .thenComparing(task -> task.content.toLowerCase(Locale.ROOT)));
+    JSONArray items = new JSONArray(), weeks = new JSONArray();
+    int[] totals = new int[4];
+    String[] keys = {
+      "weeklyCompleted", "weeklyRescheduled", "allTimeCompleted", "allTimeRescheduled"
+    };
+    for (Task task : sorted) {
+      int[] values = counts.getOrDefault(task.id, new int[4]);
+      JSONObject project = projects.get(task.projectId);
+      JSONObject item =
+          new JSONObject()
+              .put("taskId", task.id)
+              .put("name", task.content)
+              .put("projectId", task.projectId)
+              .put(
+                  "projectName",
+                  project == null
+                      ? "Unknown project"
+                      : project.optString("name", "Unknown project"))
+              .put("color", project == null ? "grey" : project.optString("color", "grey"));
+      for (int i = 0; i < keys.length; i++) {
+        item.put(keys[i], values[i]);
+        totals[i] += values[i];
+      }
+      int denominator = values[2] + values[3];
+      item.put(
+          "reliability",
+          denominator == 0
+              ? JSONObject.NULL
+              : new java.math.BigDecimal(((double) values[2] / denominator) * 100)
+                  .setScale(2, java.math.RoundingMode.HALF_EVEN)
+                  .doubleValue());
+      items.put(item);
+    }
+    JSONObject total = new JSONObject();
+    for (int i = 0; i < keys.length; i++) total.put(keys[i], totals[i]);
+    for (int i = 0; i < history.length; i++) {
+      LocalDate start = weekStart.minusWeeks(8 - i);
+      weeks.put(
+          new JSONObject()
+              .put("label", start + " to " + start.plusDays(6))
+              .put("completed", history[i][0])
+              .put("rescheduled", history[i][1]));
+    }
+    return new JSONObject()
+        .put("weekBeg", weekStart.minusWeeks(1).toString())
+        .put("weekEnd", weekStart.minusDays(1).toString())
+        .put("trackedCount", tracked.size())
+        .put("items", items)
+        .put("history", weeks)
+        .put("totals", total);
+  }
+
+  private static void addHabitEvent(
+      Map<String, int[]> counts,
+      int[][] history,
+      String task,
+      LocalDate date,
+      LocalDate weekStart,
+      int kind) {
+    int[] values = counts.computeIfAbsent(task, ignored -> new int[4]);
+    values[kind + 2]++;
+    if (!date.isBefore(weekStart.minusWeeks(1)) && date.isBefore(weekStart)) values[kind]++;
+    long days = java.time.temporal.ChronoUnit.DAYS.between(weekStart.minusWeeks(8), date);
+    if (days >= 0 && days < 56) history[(int) (days / 7)][kind]++;
   }
 
   static String dateValue(Object value) {

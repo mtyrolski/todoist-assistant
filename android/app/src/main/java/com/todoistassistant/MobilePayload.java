@@ -41,6 +41,8 @@ final class MobilePayload {
             .put("forecastAvailable", model.forecastAvailable)
             .put("historyAvailable", model.historyAvailable)
             .put("historyWarning", model.historyWarning)
+            .put("activityTotal", model.activityTotal)
+            .put("habitTracker", model.habitTracker)
             .put("plotData", model.plotData)
             .put("weeklyProjects", weeks)
             .put("projectForecasts", new JSONObject(model.projectForecasts))
