@@ -199,6 +199,30 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
 });
 
+test("the dashboard remains usable when UI preferences cannot be saved", async ({ page }) => {
+  await page.getByRole("button", { name: "Back to my data", exact: true }).click();
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "todoist-ui") throw new DOMException("Storage unavailable", "QuotaExceededError");
+      return setItem.call(this, key, value);
+    };
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Todoist account" })).toBeVisible();
+  await expect(page.getByText("View preferences could not be saved on this device.")).toBeVisible();
+  await page.getByRole("button", { name: "Explore a demo", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("many project labels stay outside both plots in portrait and landscape", async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event("test-many-projects")));
   for (const size of [

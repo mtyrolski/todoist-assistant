@@ -48,6 +48,7 @@ export default function AndroidDashboard() {
   const [ui, setUi] = useState(INITIAL_UI);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
+  const [storageUnavailable, setStorageUnavailable] = useState(false);
   const [persist, setPersist] = useState(false);
   const [paceWindow, setPaceWindow] = useState(3);
   const [lifespanAll, setLifespanAll] = useState(true);
@@ -77,7 +78,12 @@ export default function AndroidDashboard() {
     };
   }, []);
   useEffect(() => {
-    if (persist) localStorage.setItem("todoist-ui", JSON.stringify(ui));
+    if (!persist) return;
+    try {
+      localStorage.setItem("todoist-ui", JSON.stringify(ui));
+    } catch {
+      setStorageUnavailable(true);
+    }
   }, [ui, persist]);
   useEffect(() => {
     const back = () =>
@@ -162,7 +168,11 @@ export default function AndroidDashboard() {
       )
     ) {
       command("disconnect");
-      localStorage.removeItem("todoist-ui");
+      try {
+        localStorage.removeItem("todoist-ui");
+      } catch {
+        setStorageUnavailable(true);
+      }
       setUi(INITIAL_UI);
     }
   };
@@ -234,6 +244,11 @@ export default function AndroidDashboard() {
       {error && (
         <p className="pill pill-warn" role="alert">
           {error}
+        </p>
+      )}
+      {storageUnavailable && (
+        <p className="tiny mobileNotice" role="status">
+          View preferences could not be saved on this device.
         </p>
       )}
       {state?.syncing ? (
