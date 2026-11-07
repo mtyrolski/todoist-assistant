@@ -61,6 +61,8 @@ public final class DashboardViewModel extends AndroidViewModel {
   private volatile String token = "";
   private volatile DashboardModel savedModel;
   private volatile long retryAfter;
+  private volatile boolean rejected, hasSavedHistory, recoveryRequired;
+  private volatile String rejectedToken = "";
 
   public DashboardViewModel(Application application) {
     this(application, HttpTransport::new);
@@ -68,24 +70,62 @@ public final class DashboardViewModel extends AndroidViewModel {
 
   DashboardViewModel(
       Application application, java.util.function.Function<String, ApiTransport> transports) {
+    this(application, transports, new TokenStore(application), new SnapshotStore(application));
+  }
+
+  DashboardViewModel(
+      Application application,
+      java.util.function.Function<String, ApiTransport> transports,
+      TokenStore tokens,
+      SnapshotStore store) {
     super(application);
     this.transports = transports;
-    tokens = new TokenStore(application);
-    store = new SnapshotStore(application);
+    this.tokens = tokens;
+    this.store = store;
     task =
         worker.submit(
             () -> {
               String warning = "";
+              hasSavedHistory = store.exists();
               try {
-                token = tokens.load();
-                snapshot = store.load(token);
-                if (snapshot.has("syncedAt"))
-                  savedModel = new DashboardModel(snapshot, Clock.systemDefaultZone());
+                String pending = "";
+                try {
+                  pending = tokens.loadPending();
+                } catch (Exception invalidPending) {
+                  android.util.Log.w("Todometry", "Staged credential could not be opened");
+                }
+                boolean pendingMatches = false;
+                if (!pending.isEmpty()) {
+                  try {
+                    pendingMatches = store.isBoundTo(pending);
+                  } catch (Exception invalidHistory) {
+                    // The normal load below reports the history error without deleting anything.
+                  }
+                }
+                if (pendingMatches) {
+                  JSONObject recovered = store.load(pending);
+                  DashboardModel recoveredModel =
+                      new DashboardModel(recovered, Clock.systemDefaultZone());
+                  tokens.promotePending();
+                  token = pending;
+                  snapshot = recovered;
+                  savedModel = recoveredModel;
+                } else {
+                  token = tokens.load();
+                  snapshot = store.load(token);
+                  if (snapshot.has("syncedAt"))
+                    savedModel = new DashboardModel(snapshot, Clock.systemDefaultZone());
+                  if (!pending.isEmpty()) tokens.discardPending();
+                }
               } catch (Exception exception) {
                 warning =
-                    "Saved history could not be opened. Sync to recover it, or reconnect in Control"
-                        + " Panel.";
+                    "Saved credentials or history could not be opened. Enter your token to recover,"
+                        + " or disconnect to remove saved data.";
               }
+              rejected = tokens.isRejected();
+              if (rejected && !token.isEmpty() && warning.isEmpty())
+                warning =
+                    "Your saved Todoist token was rejected. Enter a new token in Control Panel.";
               String message = warning;
               main.post(
                   () -> {
@@ -100,11 +140,50 @@ public final class DashboardViewModel extends AndroidViewModel {
     return state;
   }
 
+  boolean hasSavedHistory() {
+    return hasSavedHistory;
+  }
+
   void sync(String candidate) {
     State current = state.getValue();
     if (current == null || current.syncing || current.loading) return;
+    if (recoveryRequired) {
+      state.setValue(
+          new State(
+              savedModel,
+              false,
+              false,
+              false,
+              !token.isEmpty(),
+              "Credential update needs recovery. Restart the app before syncing."));
+      return;
+    }
     String requestedToken = candidate.trim().isEmpty() ? token : candidate.trim();
     if (requestedToken.isEmpty()) return;
+    if (requestedToken
+        .chars()
+        .anyMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c))) {
+      state.setValue(
+          new State(
+              current.demo ? savedModel : current.model,
+              false,
+              false,
+              false,
+              !token.isEmpty(),
+              "A Todoist token cannot contain spaces or control characters."));
+      return;
+    }
+    if ((rejected && requestedToken.equals(token)) || requestedToken.equals(rejectedToken)) {
+      state.setValue(
+          new State(
+              current.demo ? savedModel : current.model,
+              false,
+              false,
+              false,
+              !token.isEmpty(),
+              "This Todoist token was rejected. Enter a different token to reconnect."));
+      return;
+    }
     if (android.os.SystemClock.elapsedRealtime() < retryAfter) {
       state.setValue(
           new State(
@@ -136,6 +215,31 @@ public final class DashboardViewModel extends AndroidViewModel {
                     }
                     transport = active;
                   }
+                  JSONObject previous = baseline;
+                  if (hasSavedHistory && !baseline.has("syncedAt")) {
+                    try {
+                      String currentToken = token;
+                      previous =
+                          worker
+                              .submit(
+                                  () -> {
+                                    boolean candidateMatches = store.isBoundTo(requestedToken);
+                                    if (!candidateMatches && currentToken.isEmpty())
+                                      throw new java.io.IOException(
+                                          "History does not match credential");
+                                    String historyToken =
+                                        candidateMatches ? requestedToken : currentToken;
+                                    JSONObject recovered = store.load(historyToken);
+                                    new DashboardModel(recovered, Clock.systemDefaultZone());
+                                    return recovered;
+                                  })
+                              .get();
+                    } catch (java.util.concurrent.ExecutionException invalidHistory) {
+                      throw new HttpTransport.Failure(
+                          "Saved history could not be verified with this token. Re-enter the original token or disconnect to remove saved data.");
+                    }
+                  }
+                  JSONObject previousSnapshot = previous;
                   TodoistClient client =
                       new TodoistClient(
                           active,
@@ -152,11 +256,11 @@ public final class DashboardViewModel extends AndroidViewModel {
                                       message)));
                   JSONObject next =
                       client.snapshot(
-                          baseline,
+                          previousSnapshot,
                           trustLegacy,
                           partial -> {
-                            String owner = baseline.optString("userId");
-                            if (baseline.has("syncedAt")
+                            String owner = previousSnapshot.optString("userId");
+                            if (previousSnapshot.has("syncedAt")
                                 && !(owner.equals(partial.optString("userId"))
                                     || (owner.isEmpty() && trustLegacy))) return;
                             commitSnapshot(
@@ -188,6 +292,28 @@ public final class DashboardViewModel extends AndroidViewModel {
                               ? "Sync complete. Your history is available offline."
                               : "Saved on device. Some history details could not be refreshed."));
                 } catch (Exception exception) {
+                  if (exception instanceof HttpTransport.AuthenticationFailure) {
+                    boolean savedTokenRejected;
+                    synchronized (requestLock) {
+                      savedTokenRejected =
+                          generation.get() == request && requestedToken.equals(token);
+                      if (generation.get() == request) rejectedToken = requestedToken;
+                      if (savedTokenRejected) rejected = true;
+                    }
+                    if (savedTokenRejected) {
+                      try {
+                        worker
+                            .submit(
+                                () -> {
+                                  if (requestedToken.equals(token)) tokens.markRejected();
+                                  return null;
+                                })
+                            .get();
+                      } catch (Exception failure) {
+                        android.util.Log.w("Todometry", "Could not persist authentication status");
+                      }
+                    }
+                  }
                   if (exception instanceof HttpTransport.Failure) {
                     synchronized (requestLock) {
                       long delay = ((HttpTransport.Failure) exception).retryAfterMillis;
@@ -245,11 +371,25 @@ public final class DashboardViewModel extends AndroidViewModel {
                       next,
                       requestedToken,
                       () -> {
-                        if (!requestedToken.equals(token)) tokens.save(requestedToken);
+                        if (!requestedToken.equals(token)) tokens.stage(requestedToken);
                       });
+                  hasSavedHistory = true;
+                  if (!requestedToken.equals(token)) {
+                    try {
+                      if (!store.isBoundTo(requestedToken))
+                        throw new java.io.IOException("Could not verify the saved history");
+                      tokens.promotePending();
+                    } catch (Exception failure) {
+                      recoveryRequired = true;
+                      throw new HttpTransport.Failure(
+                          "Credential update needs recovery. Restart the app before syncing.");
+                    }
+                  }
                   token = requestedToken;
                   snapshot = next;
                   savedModel = model;
+                  rejected = false;
+                  rejectedToken = "";
                   return model;
                 } finally {
                   committing.set(false);
@@ -401,6 +541,7 @@ public final class DashboardViewModel extends AndroidViewModel {
         && !current.syncing
         && !current.loading
         && !current.demo
+        && !recoveryRequired
         && !token.isEmpty()
         && savedModel != null;
   }
@@ -432,7 +573,8 @@ public final class DashboardViewModel extends AndroidViewModel {
         worker.submit(
             () -> {
               store.clear();
-              tokens.clear();
+              boolean historyCleared = !store.exists();
+              boolean credentialsCleared = tokens.clear();
               boolean settingsCleared =
                   getApplication()
                       .getSharedPreferences("rules", android.content.Context.MODE_PRIVATE)
@@ -442,6 +584,10 @@ public final class DashboardViewModel extends AndroidViewModel {
               token = "";
               snapshot = new JSONObject();
               savedModel = null;
+              hasSavedHistory = !historyCleared;
+              rejected = false;
+              rejectedToken = "";
+              recoveryRequired = false;
               main.post(
                   () ->
                       state.setValue(
@@ -451,11 +597,13 @@ public final class DashboardViewModel extends AndroidViewModel {
                               false,
                               false,
                               false,
-                              settingsCleared
-                                  ? "Account disconnected. Local history and settings have been"
-                                      + " removed."
-                                  : "Account disconnected. Could not remove local settings; clear"
-                                      + " app data in Android Settings.")));
+                              !credentialsCleared || !historyCleared
+                                  ? "Could not remove all saved account data. Clear app data in Android Settings."
+                                  : settingsCleared
+                                      ? "Account disconnected. Local history and settings have been"
+                                          + " removed."
+                                      : "Account disconnected. Could not remove local settings; clear"
+                                          + " app data in Android Settings.")));
             });
   }
 

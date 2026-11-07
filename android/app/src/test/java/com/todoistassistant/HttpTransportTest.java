@@ -109,7 +109,10 @@ public class HttpTransportTest {
       Transport transport = new Transport();
       for (int i = 0; i < 3; i++) transport.responses.add(new Response(status, ""));
       IOException error = assertThrows(IOException.class, () -> transport.get("user"));
-      if (status == 401) assertTrue(error.getMessage().contains("token was rejected"));
+      if (status == 401) {
+        assertTrue(error instanceof HttpTransport.AuthenticationFailure);
+        assertTrue(error.getMessage().contains("token was rejected"));
+      }
       if (status == 403) assertTrue(error instanceof DataAccessException);
       if (status == 302 || status == 500) assertTrue(error.getMessage().contains("HTTP " + status));
       assertFalse(error.getMessage().contains("private-test-token"));

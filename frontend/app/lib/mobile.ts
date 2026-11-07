@@ -43,6 +43,7 @@ export type MobileState = {
   loading: boolean;
   syncing: boolean;
   connected: boolean;
+  savedHistory?: boolean;
   demo: boolean;
   message: string;
   model: MobileModel | null;
@@ -78,13 +79,12 @@ export function command(name: string, argument = "") {
 export function mobileSettings(
   preferences: MobileState["preferences"],
 ): DashboardSettings {
-  if (preferences.settings) return preferences.settings;
   const rules = preferences.rules;
   const labels = String(rules.fireLabels ?? "fire")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  return {
+  const fallback: DashboardSettings = {
     enabled: Boolean(rules.enabled),
     dangerOnFireLabel: Boolean(rules.fire),
     warnOnPriority: Boolean(rules.priority),
@@ -99,6 +99,17 @@ export function mobileSettings(
     warnDeadlineWithinDays: Number(rules.deadlineDays),
     warnDeadlineMinCount: Number(rules.deadlineMin),
     plotEvents: [],
+  };
+  const saved = preferences.settings;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return fallback;
+  const events = saved.plotEvents;
+  return {
+    // Android evaluates alerts using these native rules, even if the saved UI copy differs.
+    ...fallback,
+    plotEvents: Array.isArray(events)
+      ? events.filter((item) => item && typeof item.date === "string" && typeof item.label === "string" && typeof item.color === "string")
+      : fallback.plotEvents,
+    ...(typeof saved.configPath === "string" ? { configPath: saved.configPath } : {}),
   };
 }
 export const mobileSettingsRequest: typeof requestJson = async <T>(

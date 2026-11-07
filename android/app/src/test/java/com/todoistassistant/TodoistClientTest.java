@@ -117,13 +117,17 @@ public class TodoistClientTest {
   }
 
   @Test
-  public void switchingAccountsDoesNotMergePrivateHistory() throws Exception {
+  public void switchingAccountsRequiresExplicitRemovalOfSavedHistory() throws Exception {
     Fake fake = new Fake();
     fake.user = "someone-else";
-    JSONObject next = new TodoistClient(fake, CLOCK, message -> {}).snapshot(baseline(), true);
-    assertEquals(1, next.getJSONArray("activities").length());
-    assertEquals("someone-else", next.getString("userId"));
-    assertNotEquals("2025-01-01T00:00:00Z", next.getString("historyStart"));
+    JSONObject previous = baseline();
+    String original = previous.toString();
+    HttpTransport.Failure error =
+        assertThrows(
+            HttpTransport.Failure.class,
+            () -> new TodoistClient(fake, CLOCK, message -> {}).snapshot(previous, true));
+    assertTrue(error.getMessage().contains("Disconnect"));
+    assertEquals(original, previous.toString());
   }
 
   @Test
@@ -138,8 +142,11 @@ public class TodoistClientTest {
     assertEquals(
         "Work", same.getJSONObject("adjustments").getJSONObject("mappings").getString("Old"));
     fake.user = "other-owner";
-    JSONObject other = new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false);
-    assertFalse(other.has("adjustments"));
+    assertThrows(
+        HttpTransport.Failure.class,
+        () -> new TodoistClient(fake, CLOCK, message -> {}).snapshot(before, false));
+    assertEquals(
+        "Work", before.getJSONObject("adjustments").getJSONObject("mappings").getString("Old"));
   }
 
   @Test
@@ -153,12 +160,19 @@ public class TodoistClientTest {
             .snapshot(old, true)
             .getJSONArray("activities")
             .length());
+    assertThrows(
+        HttpTransport.Failure.class,
+        () -> new TodoistClient(fake, CLOCK, message -> {}).snapshot(old, false));
+    old.put("userId", JSONObject.NULL);
     assertEquals(
-        1,
+        2,
         new TodoistClient(fake, CLOCK, message -> {})
-            .snapshot(old, false)
+            .snapshot(old, true)
             .getJSONArray("activities")
             .length());
+    assertThrows(
+        HttpTransport.Failure.class,
+        () -> new TodoistClient(fake, CLOCK, message -> {}).snapshot(old, false));
   }
 
   @Test

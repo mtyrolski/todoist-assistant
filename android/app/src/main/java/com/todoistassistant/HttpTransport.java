@@ -12,7 +12,7 @@ class HttpTransport implements ApiTransport {
   private static final URI BASE = URI.create("https://api.todoist.com/api/v1/");
   private static final int ATTEMPTS = 3;
 
-  static final class Failure extends IOException {
+  static class Failure extends IOException {
     final long retryAfterMillis;
 
     Failure(String message) {
@@ -22,6 +22,12 @@ class HttpTransport implements ApiTransport {
     Failure(String message, long retryAfterMillis) {
       super(message);
       this.retryAfterMillis = retryAfterMillis;
+    }
+  }
+
+  static final class AuthenticationFailure extends Failure {
+    AuthenticationFailure() {
+      super("Your Todoist token was rejected. Enter a valid token in Control Panel.");
     }
   }
 
@@ -81,9 +87,7 @@ class HttpTransport implements ApiTransport {
             continue;
           }
         }
-        if (status == 401)
-          throw new Failure(
-              "Your Todoist token was rejected. Enter a valid token in Control Panel.");
+        if (status == 401) throw new AuthenticationFailure();
         if (status == 403)
           throw new DataAccessException(
               "Todoist denied access to this data. Check your account permissions and plan.");

@@ -17,13 +17,13 @@ final class SnapshotStore {
   }
 
   JSONObject load(String token) throws Exception {
+    if (token.isEmpty()) return new JSONObject();
     JSONObject envelope;
     try {
       envelope = new JSONObject(new String(file.readFully(), StandardCharsets.UTF_8));
     } catch (FileNotFoundException empty) {
       return new JSONObject();
     }
-    if (token.isEmpty()) return new JSONObject();
     String binding = envelope.optString("credentialFingerprint");
     if (!binding.isEmpty()
         && !MessageDigest.isEqual(
@@ -42,6 +42,26 @@ final class SnapshotStore {
     java.time.Instant.parse(data.getString("syncedAt"));
     java.time.Instant.parse(data.getString("historyStart"));
     return data;
+  }
+
+  boolean exists() {
+    File base = file.getBaseFile();
+    return base.exists() || new File(base.getPath() + ".bak").exists();
+  }
+
+  boolean isBoundTo(String token) throws Exception {
+    if (token.isEmpty()) return false;
+    JSONObject envelope;
+    try {
+      envelope = new JSONObject(new String(file.readFully(), StandardCharsets.UTF_8));
+    } catch (FileNotFoundException empty) {
+      return false;
+    }
+    String binding = envelope.optString("credentialFingerprint");
+    return !binding.isEmpty()
+        && MessageDigest.isEqual(
+            binding.getBytes(StandardCharsets.UTF_8),
+            fingerprint(token).getBytes(StandardCharsets.UTF_8));
   }
 
   interface BeforeCommit {

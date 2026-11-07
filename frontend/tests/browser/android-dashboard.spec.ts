@@ -253,6 +253,86 @@ test("a sync update keeps the current navigation and task filters", async ({ pag
   await expect(page.getByText("Review the release checklist")).toBeVisible();
 });
 
+test("invalid saved view preferences are isolated until the user changes the view", async ({ page }) => {
+  const raw = JSON.stringify({ tab: "Projects", query: null, priority: [], range: 8 });
+  await page.addInitScript((value) => localStorage.setItem("todoist-ui", value), raw);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search tasks, projects or activity" })).toHaveValue("");
+  await expect(page.getByText(/Some saved view preferences are invalid/)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("todoist-ui"))).toBe(raw);
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText(/Some saved view preferences are invalid/)).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").tab)).toBe("Activity");
+});
+
+test("unavailable view storage does not prevent startup", async ({ page }) => {
+  await page.addInitScript(() => {
+    const getItem = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (key) {
+      if (key === "todoist-ui") throw new DOMException("Storage unavailable", "SecurityError");
+      return getItem.call(this, key);
+    };
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.reload();
+  await expect(page.getByText("View preferences could not be saved on this device.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("malformed dashboard settings fall back to usable defaults", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.evaluate(() => {
+    const bridge = window.Todoist;
+    if (!bridge) throw new Error("Missing Android bridge");
+    const preferences = JSON.parse(bridge.getSettings());
+    preferences.settings = { fireLabels: 42, warnPriorityThresholds: "bad", plotEvents: [null] };
+    bridge.getSettings = () => JSON.stringify(preferences);
+    window.dispatchEvent(new CustomEvent("todoist-state", { detail: { preferences } }));
+  });
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard settings" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Enable attention monitoring" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("settings reflect native alert rules when saved copies disagree", async ({ page }) => {
+  await page.evaluate(() => {
+    const bridge = window.Todoist;
+    if (!bridge) throw new Error("Missing Android bridge");
+    const preferences = JSON.parse(bridge.getSettings());
+    preferences.rules = { ...preferences.rules, enabled: false, fireLabels: "retained", priorities: [2], dueDays: 3 };
+    preferences.settings = {
+      enabled: true,
+      fireLabels: ["wrong"],
+      warnPriorityThresholds: [3],
+      warnDueWithinDays: 42,
+      warnPriorityMinCount: "invalid",
+      plotEvents: [null, { date: "2026-11-02", label: "Milestone", color: "#123456" }],
+    };
+    bridge.getSettings = () => JSON.stringify(preferences);
+    window.dispatchEvent(new CustomEvent("todoist-state", { detail: { preferences } }));
+  });
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "Enable attention monitoring" })).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "retained", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "P3", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Due within days", { exact: true })).toHaveValue("3");
+  await expect(page.getByLabel("Minimum priority matches", { exact: true })).toHaveValue("1");
+  await expect(page.getByLabel("Label", { exact: true })).toHaveValue("Milestone");
+});
+
+test("unreadable saved history can be explicitly disconnected", async ({ page }) => {
+  await page.getByRole("button", { name: "Back to my data", exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", {
+    detail: { connected: false, savedHistory: true, message: "Saved credentials or history could not be opened." },
+  })));
+  await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible();
+});
+
 test("the dashboard remains usable when UI preferences cannot be saved", async ({ page }) => {
   await page.getByRole("button", { name: "Back to my data", exact: true }).click();
   await page.addInitScript(() => {

@@ -32,11 +32,59 @@ public class SnapshotSecurityTest {
   @Test
   public void deviceKeystoreRoundTripsTheTokenWithoutPlaintextPreferences() throws Exception {
     TokenStore store = new TokenStore(context);
-    store.save("fake-private-token-for-test");
+    store.stage("fake-private-token-for-test");
+    store.promotePending();
     assertEquals("fake-private-token-for-test", store.load());
     String persisted =
         context.getSharedPreferences("auth", Context.MODE_PRIVATE).getString("token", "");
     assertFalse(persisted.contains("fake-private-token-for-test"));
+  }
+
+  @Test
+  public void stagedCredentialDoesNotReplaceTheCurrentCredentialPrematurely() throws Exception {
+    TokenStore store = new TokenStore(context);
+    store.stage("old-secret");
+    store.promotePending();
+    store.stage("new-secret");
+    assertEquals("old-secret", store.load());
+    assertEquals("new-secret", store.loadPending());
+    String preferences =
+        context.getSharedPreferences("auth", Context.MODE_PRIVATE).getAll().toString();
+    assertFalse(preferences.contains("old-secret"));
+    assertFalse(preferences.contains("new-secret"));
+    store.promotePending();
+    assertEquals("new-secret", store.load());
+    assertEquals("", store.loadPending());
+  }
+
+  @Test
+  public void malformedCredentialPreferenceIsReportedWithoutDeletingIt() throws Exception {
+    var prefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE);
+    prefs.edit().putInt("token", 42).commit();
+    assertThrows(java.io.IOException.class, () -> new TokenStore(context).load());
+    assertEquals(42, prefs.getInt("token", 0));
+  }
+
+  @Test
+  public void invalidSettingsUseDefaultsWithoutDeletingStoredValues() throws Exception {
+    var preferences = context.getSharedPreferences("rules", Context.MODE_PRIVATE);
+    preferences.edit().putInt("config", 42).putString("web", "{broken").commit();
+    try {
+      var settings = MainActivity.readSettings(preferences);
+      assertTrue(settings.getJSONObject("rules").getBoolean("enabled"));
+      assertTrue(settings.isNull("settings"));
+      assertEquals(42, preferences.getInt("config", 0));
+      assertEquals("{broken", preferences.getString("web", ""));
+    } finally {
+      preferences.edit().clear().commit();
+    }
+  }
+
+  @Test
+  public void androidBackupIsDisabledForAppData() {
+    assertEquals(
+        0,
+        context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP);
   }
 
   @Test

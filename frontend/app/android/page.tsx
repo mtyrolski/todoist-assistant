@@ -43,24 +43,64 @@ const INITIAL_UI = {
   granularity: "week" as "week" | "month" | "quarter",
 };
 
+function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
+  const ui = { ...INITIAL_UI };
+  if (value === null) return { ui, valid: true };
+  if (typeof value !== "object" || Array.isArray(value)) return { ui, valid: false };
+  const saved = value as Record<string, unknown>;
+  let valid = true;
+  if ("tab" in saved) {
+    if (typeof saved.tab === "string" && TABS.some((tab) => tab === saved.tab)) ui.tab = saved.tab as Tab;
+    else valid = false;
+  }
+  if ("query" in saved) {
+    if (typeof saved.query === "string") ui.query = saved.query;
+    else valid = false;
+  }
+  if ("priority" in saved) {
+    if (typeof saved.priority === "number" && Number.isInteger(saved.priority) && saved.priority >= 0 && saved.priority <= 4) ui.priority = saved.priority;
+    else valid = false;
+  }
+  if ("range" in saved) {
+    if (typeof saved.range === "number" && [0, 4, 8, 26, 52].includes(saved.range)) ui.range = saved.range;
+    else valid = false;
+  }
+  if ("week" in saved) {
+    if (typeof saved.week === "number" && Number.isSafeInteger(saved.week) && saved.week <= 8) ui.week = saved.week;
+    else valid = false;
+  }
+  if ("granularity" in saved) {
+    if (saved.granularity === "week" || saved.granularity === "month" || saved.granularity === "quarter") ui.granularity = saved.granularity;
+    else valid = false;
+  }
+  return { ui, valid };
+}
+
 export default function AndroidDashboard() {
   const [state, setState] = useState<MobileState | null>(null);
   const [ui, setUi] = useState(INITIAL_UI);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [storageUnavailable, setStorageUnavailable] = useState(false);
+  const [storageInvalid, setStorageInvalid] = useState(false);
   const [persist, setPersist] = useState(false);
   const [paceWindow, setPaceWindow] = useState(3);
   const [lifespanAll, setLifespanAll] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(false);
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem("todoist-ui") ?? "null");
-      if (saved) setUi({ ...INITIAL_UI, ...saved });
+      const raw = localStorage.getItem("todoist-ui");
+      try {
+        const saved = restoredUi(JSON.parse(raw ?? "null"));
+        setUi(saved.ui);
+        setStorageInvalid(!saved.valid);
+        setPersist(saved.valid);
+      } catch {
+        setStorageInvalid(true);
+      }
     } catch {
-      /* Start with defaults. */
+      setStorageUnavailable(true);
     }
-    setPersist(true);
     const receive = (event: Event) =>
       setState((previous) => ({
         ...previous,
@@ -98,8 +138,11 @@ export default function AndroidDashboard() {
     window.addEventListener("todoist-back", back);
     return () => window.removeEventListener("todoist-back", back);
   }, [ui.tab]);
-  const patch = (value: Partial<typeof ui>) =>
+  const patch = (value: Partial<typeof ui>) => {
+    setStorageInvalid(false);
+    setPersist(true);
     setUi((current) => ({ ...current, ...value }));
+  };
   const model = state?.model;
   const settings = state?.preferences
     ? mobileSettings(state.preferences)
@@ -177,6 +220,8 @@ export default function AndroidDashboard() {
       } catch {
         setStorageUnavailable(true);
       }
+      setStorageInvalid(false);
+      setPersist(true);
       setUi(INITIAL_UI);
     }
   };
@@ -255,6 +300,11 @@ export default function AndroidDashboard() {
           View preferences could not be saved on this device.
         </p>
       )}
+      {storageInvalid && (
+        <p className="tiny mobileNotice" role="status">
+          Some saved view preferences are invalid. Safe defaults are in use until you change a view.
+        </p>
+      )}
       {state?.syncing ? (
         <div className="mobileSync" role="status" aria-live="polite">
           <strong>Syncing with Todoist</strong>
@@ -315,7 +365,7 @@ export default function AndroidDashboard() {
                   Explore a demo
                 </button>
               )}
-              {state.connected && (
+              {(state.connected || state.savedHistory) && (
                 <button
                   className="button buttonSmall buttonGhost"
                   type="button"

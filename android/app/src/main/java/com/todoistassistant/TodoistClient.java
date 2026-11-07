@@ -75,9 +75,15 @@ final class TodoistClient {
     progress.update("Checking your account…");
     JSONObject user = transport.get("user");
     String userId = requiredId(user, "id");
-    boolean sameAccount =
-        userId.equals(previous.optString("userId"))
-            || (!previous.has("userId") && trustLegacyOwner);
+    String owner = previous.optString("userId", "");
+    boolean knownOwner = !owner.trim().isEmpty() && !owner.equals("null");
+    boolean sameAccount = knownOwner ? userId.equals(owner) : trustLegacyOwner;
+    if (previous.has("syncedAt") && !sameAccount)
+      throw new HttpTransport.Failure(
+          (knownOwner
+                  ? "This account does not match saved history."
+                  : "Saved history cannot be verified for this token.")
+              + " Disconnect to remove saved data before switching accounts.");
     JSONObject baseline = sameAccount ? previous : new JSONObject();
     JSONObject data = new JSONObject();
     data.put("userId", userId);

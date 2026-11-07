@@ -45,12 +45,27 @@ public class SyncLifecycleTest {
       throws Exception {
     new SnapshotStore(context).clear();
     new TokenStore(context).clear();
+    attach(transports);
+  }
+
+  private void attach(java.util.function.Function<String, ApiTransport> transports)
+      throws Exception {
+    attach(transports, new TokenStore(context));
+  }
+
+  private void attach(
+      java.util.function.Function<String, ApiTransport> transports, TokenStore credentials)
+      throws Exception {
     CountDownLatch loaded = new CountDownLatch(1);
     InstrumentationRegistry.getInstrumentation()
         .runOnMainSync(
             () -> {
               model =
-                  new DashboardViewModel((Application) context.getApplicationContext(), transports);
+                  new DashboardViewModel(
+                      (Application) context.getApplicationContext(),
+                      transports,
+                      credentials,
+                      new SnapshotStore(context));
               observer =
                   value -> {
                     state.set(value);
@@ -59,6 +74,21 @@ public class SyncLifecycleTest {
               model.state().observeForever(observer);
             });
     assertTrue(loaded.await(10, TimeUnit.SECONDS));
+  }
+
+  private void detach() {
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(observer);
+              model.onCleared();
+            });
+  }
+
+  private static JSONObject savedHistory() throws Exception {
+    return DemoData.create(java.time.Clock.systemUTC())
+        .put("userId", "test-owner")
+        .put("adjustments", new JSONObject().put("mappings", new JSONObject().put("Old", "Work")));
   }
 
   private static class Fake implements ApiTransport {
@@ -95,6 +125,459 @@ public class SyncLifecycleTest {
     assertFalse(state.get().syncing);
     assertFalse(state.get().connected);
     assertNull(state.get().model);
+  }
+
+  @Test
+  public void interruptedTokenUpdateRecoversTheMatchingCredentialAndHistory() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    credentials.stage("old-token");
+    credentials.promotePending();
+    history.save(savedHistory(), "old-token");
+    credentials.stage("new-token");
+    Fake offline =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            throw new java.net.UnknownHostException();
+          }
+        };
+    attach(token -> offline);
+    assertEquals("old-token", credentials.load());
+    assertEquals("", credentials.loadPending());
+    assertEquals("test-owner", history.load("old-token").getString("userId"));
+    detach();
+
+    credentials.stage("new-token");
+    history.save(savedHistory(), "new-token");
+    attach(token -> offline);
+    assertEquals("new-token", credentials.load());
+    assertEquals("", credentials.loadPending());
+    assertEquals(
+        "Work",
+        history
+            .load("new-token")
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Old"));
+  }
+
+  @Test
+  public void rejectedSavedTokenIsNotRetriedAfterRestartAndCanBeReplaced() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    credentials.stage("revoked-token");
+    credentials.promotePending();
+    history.save(savedHistory(), "revoked-token");
+    AtomicInteger attempts = new AtomicInteger();
+    Fake denied =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            attempts.incrementAndGet();
+            throw new HttpTransport.AuthenticationFailure();
+          }
+        };
+    Fake accepted = new Fake();
+    java.util.function.Function<String, ApiTransport> transports =
+        token -> token.equals("revoked-token") ? denied : accepted;
+    attach(transports);
+    CountDownLatch deniedResult = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> deniedObserver =
+        value -> {
+          if (!value.syncing && value.message.contains("token was rejected"))
+            deniedResult.countDown();
+        };
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(() -> model.state().observeForever(deniedObserver));
+    assertTrue(deniedResult.await(15, TimeUnit.SECONDS));
+    assertTrue(credentials.isRejected());
+    assertEquals(1, attempts.get());
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(() -> model.state().removeObserver(deniedObserver));
+    detach();
+
+    attach(transports);
+    InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync(""));
+    assertEquals(1, attempts.get());
+    assertTrue(state.get().message.contains("rejected"));
+    assertNotNull(state.get().model);
+    CountDownLatch saved = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> savedObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync complete")) saved.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(savedObserver);
+                model.sync("replacement-token");
+              });
+      assertTrue(saved.await(20, TimeUnit.SECONDS));
+      assertEquals("replacement-token", credentials.load());
+      assertFalse(credentials.isRejected());
+      assertEquals(
+          "Work",
+          history
+              .load("replacement-token")
+              .getJSONObject("adjustments")
+              .getJSONObject("mappings")
+              .getString("Old"));
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(savedObserver));
+    }
+  }
+
+  @Test
+  public void corruptCredentialCanBeReenteredWithoutLosingMatchingHistory() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    history.save(savedHistory(), "original-token");
+    context
+        .getSharedPreferences("auth", Context.MODE_PRIVATE)
+        .edit()
+        .putString("token", "broken")
+        .commit();
+    AtomicInteger calls = new AtomicInteger();
+    Fake accepted =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            calls.incrementAndGet();
+            return super.get(path);
+          }
+        };
+    attach(token -> accepted);
+    assertTrue(model.hasSavedHistory());
+    assertFalse(state.get().connected);
+    CountDownLatch mismatch = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> mismatchObserver =
+        value -> {
+          if (!value.syncing && value.message.contains("could not be verified"))
+            mismatch.countDown();
+        };
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().observeForever(mismatchObserver);
+              model.sync("different-token");
+            });
+    assertTrue(mismatch.await(10, TimeUnit.SECONDS));
+    assertEquals(0, calls.get());
+    assertEquals("test-owner", history.load("original-token").getString("userId"));
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(() -> model.state().removeObserver(mismatchObserver));
+    CountDownLatch saved = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> savedObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync complete")) saved.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(savedObserver);
+                model.sync("original-token");
+              });
+      assertTrue(saved.await(20, TimeUnit.SECONDS));
+      assertEquals("original-token", credentials.load());
+      assertEquals(
+          "Work",
+          history
+              .load("original-token")
+              .getJSONObject("adjustments")
+              .getJSONObject("mappings")
+              .getString("Old"));
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(savedObserver));
+    }
+  }
+
+  @Test
+  public void corruptStagedCredentialCanBeReenteredAfterSnapshotWasCommitted() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    credentials.stage("old-token");
+    credentials.promotePending();
+    history.save(savedHistory(), "new-token");
+    context
+        .getSharedPreferences("auth", Context.MODE_PRIVATE)
+        .edit()
+        .putString("pending", "broken")
+        .commit();
+    attach(token -> new Fake());
+    assertTrue(model.hasSavedHistory());
+    assertTrue(state.get().message.contains("could not be opened"));
+    CountDownLatch saved = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> savedObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync complete")) saved.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(savedObserver);
+                model.sync("new-token");
+              });
+      assertTrue(saved.await(20, TimeUnit.SECONDS));
+      assertEquals("new-token", credentials.load());
+      assertEquals(
+          "Work",
+          history
+              .load("new-token")
+              .getJSONObject("adjustments")
+              .getJSONObject("mappings")
+              .getString("Old"));
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(savedObserver));
+    }
+  }
+
+  @Test
+  public void corruptHistoryIsNotOverwrittenByARefresh() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    credentials.clear();
+    new SnapshotStore(context).clear();
+    credentials.stage("valid-token");
+    credentials.promotePending();
+    byte[] damaged = "{damaged history".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    try (var output = context.openFileOutput("dashboard-v1.json", Context.MODE_PRIVATE)) {
+      output.write(damaged);
+    }
+    AtomicInteger calls = new AtomicInteger();
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            calls.incrementAndGet();
+            return super.get(path);
+          }
+        };
+    attach(token -> fake);
+    assertTrue(model.hasSavedHistory());
+    CountDownLatch failed = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> failedObserver =
+        value -> {
+          if (!value.syncing && value.message.contains("could not be verified")) failed.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(failedObserver);
+                model.sync("");
+              });
+      assertTrue(failed.await(10, TimeUnit.SECONDS));
+      assertEquals(0, calls.get());
+      try (var input = context.openFileInput("dashboard-v1.json")) {
+        byte[] actual = new byte[damaged.length];
+        assertEquals(damaged.length, input.read(actual));
+        assertArrayEquals(damaged, actual);
+      }
+      assertEquals("valid-token", credentials.load());
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(failedObserver));
+    }
+  }
+
+  @Test
+  public void invalidReplacementDoesNotInvalidateTheSavedAccount() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    credentials.stage("saved-token");
+    credentials.promotePending();
+    history.save(savedHistory(), "saved-token");
+    Fake offline =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            throw new java.net.UnknownHostException();
+          }
+        };
+    AtomicInteger attempts = new AtomicInteger();
+    Fake denied =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            attempts.incrementAndGet();
+            throw new HttpTransport.AuthenticationFailure();
+          }
+        };
+    attach(token -> token.equals("saved-token") ? offline : denied);
+    CountDownLatch offlineResult = new CountDownLatch(1), deniedResult = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> observer =
+        value -> {
+          if (!value.syncing
+              && (value.message.contains("unreachable") || value.message.contains("No network")))
+            offlineResult.countDown();
+          if (!value.syncing && value.message.contains("token was rejected"))
+            deniedResult.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().observeForever(observer));
+      assertTrue(offlineResult.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("invalid-token"));
+      assertTrue(deniedResult.await(10, TimeUnit.SECONDS));
+      assertEquals("saved-token", credentials.load());
+      assertFalse(credentials.isRejected());
+      assertEquals("test-owner", history.load("saved-token").getString("userId"));
+      InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("invalid-token"));
+      assertEquals(1, attempts.get());
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(observer));
+    }
+  }
+
+  @Test
+  public void differentAccountCannotOverwriteSavedHistoryWithoutDisconnecting() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    credentials.stage("saved-token");
+    credentials.promotePending();
+    history.save(savedHistory(), "saved-token");
+    Fake offline =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            throw new java.net.UnknownHostException();
+          }
+        };
+    AtomicInteger calls = new AtomicInteger();
+    Fake other =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            calls.incrementAndGet();
+            if (path.equals("user")) return new JSONObject().put("id", "different-owner");
+            return super.get(path);
+          }
+        };
+    attach(token -> token.equals("saved-token") ? offline : other);
+    CountDownLatch offlineResult = new CountDownLatch(1), mismatch = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> result =
+        value -> {
+          if (!value.syncing
+              && (value.message.contains("unreachable") || value.message.contains("No network")))
+            offlineResult.countDown();
+          if (!value.syncing && value.message.contains("does not match saved history"))
+            mismatch.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().observeForever(result));
+      assertTrue(offlineResult.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("other-token"));
+      assertTrue(mismatch.await(10, TimeUnit.SECONDS));
+      assertEquals(1, calls.get());
+      assertEquals("saved-token", credentials.load());
+      assertEquals(
+          "Work",
+          history
+              .load("saved-token")
+              .getJSONObject("adjustments")
+              .getJSONObject("mappings")
+              .getString("Old"));
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(result));
+    }
+  }
+
+  @Test
+  public void failedTokenPromotionBlocksWritesUntilRestartRecovery() throws Exception {
+    TokenStore credentials = new TokenStore(context);
+    SnapshotStore history = new SnapshotStore(context);
+    credentials.clear();
+    history.clear();
+    credentials.stage("old-token");
+    credentials.promotePending();
+    history.save(savedHistory(), "old-token");
+    TokenStore failedPromotion =
+        new TokenStore(context) {
+          @Override
+          void promotePending() throws Exception {
+            super.promotePending();
+            throw new java.io.IOException("simulated failed commit after memory update");
+          }
+        };
+    AtomicInteger calls = new AtomicInteger();
+    Fake offline =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            throw new java.net.UnknownHostException();
+          }
+        };
+    Fake accepted =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            calls.incrementAndGet();
+            return super.get(path);
+          }
+        };
+    attach(token -> token.equals("old-token") ? offline : accepted, failedPromotion);
+    CountDownLatch offlineResult = new CountDownLatch(1), recovery = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> result =
+        value -> {
+          if (!value.syncing
+              && (value.message.contains("unreachable") || value.message.contains("No network")))
+            offlineResult.countDown();
+          if (!value.syncing && value.message.contains("needs recovery")) recovery.countDown();
+        };
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(() -> model.state().observeForever(result));
+    assertTrue(offlineResult.await(10, TimeUnit.SECONDS));
+    InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("new-token"));
+    assertTrue(recovery.await(20, TimeUnit.SECONDS));
+    int completedCalls = calls.get();
+    InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("new-token"));
+    assertEquals(completedCalls, calls.get());
+    assertEquals("new-token", credentials.load());
+    assertEquals(
+        "Work",
+        history
+            .load("new-token")
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Old"));
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(() -> model.state().removeObserver(result));
+    detach();
+    attach(token -> offline);
+    assertEquals("new-token", credentials.load());
+    assertNotNull(state.get().model);
+    assertEquals(
+        "Work",
+        history
+            .load("new-token")
+            .getJSONObject("adjustments")
+            .getJSONObject("mappings")
+            .getString("Old"));
   }
 
   @Test

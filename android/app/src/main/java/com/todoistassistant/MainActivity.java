@@ -128,6 +128,7 @@ public class MainActivity extends ComponentActivity {
               .put("loading", state.loading)
               .put("syncing", state.syncing)
               .put("connected", state.connected)
+              .put("savedHistory", model.hasSavedHistory())
               .put("demo", state.demo)
               .put("message", state.message);
       if (force || renderedModel != state.model) {
@@ -135,8 +136,8 @@ public class MainActivity extends ComponentActivity {
         modelPayload = state.model == null ? null : MobilePayload.model(state.model);
         payload.put("model", modelPayload == null ? JSONObject.NULL : modelPayload);
       }
-      AlertRules rules =
-          AlertRules.read(getSharedPreferences("rules", MODE_PRIVATE).getString("config", ""));
+      JSONObject preferences = new JSONObject(new Bridge().getSettings());
+      AlertRules rules = AlertRules.read(preferences.getJSONObject("rules").toString());
       if (state.model != null) {
         var alert = rules.evaluate(state.model.tasks, LocalDate.now(), ZoneId.systemDefault());
         payload.put(
@@ -150,7 +151,7 @@ public class MainActivity extends ComponentActivity {
                 .put("due", alert.due)
                 .put("deadline", alert.deadline));
       }
-      payload.put("preferences", new JSONObject(new Bridge().getSettings()));
+      payload.put("preferences", preferences);
       web.evaluateJavascript(stateEvent(payload), null);
     } catch (Exception exception) {
       web.evaluateJavascript(
@@ -164,6 +165,25 @@ public class MainActivity extends ComponentActivity {
     return "window.dispatchEvent(new CustomEvent('todoist-state',{detail:JSON.parse("
         + JSONObject.quote(payload.toString())
         + ")}))";
+  }
+
+  static JSONObject readSettings(android.content.SharedPreferences prefs)
+      throws org.json.JSONException {
+    var values = prefs.getAll();
+    Object config = values.get("config"), web = values.get("web");
+    JSONObject settings = null;
+    if (web instanceof String) {
+      try {
+        settings = new JSONObject((String) web);
+      } catch (org.json.JSONException invalid) {
+        // Keep the stored value intact until the user saves replacement settings.
+      }
+    }
+    return new JSONObject()
+        .put(
+            "rules",
+            new JSONObject(AlertRules.read(config instanceof String ? (String) config : "").json()))
+        .put("settings", settings == null ? JSONObject.NULL : settings);
   }
 
   private final class Bridge {
@@ -184,15 +204,7 @@ public class MainActivity extends ComponentActivity {
         var current = state;
         if (current != null && current.model != null)
           for (var task : current.model.tasks) labels.addAll(task.labels);
-        return new JSONObject()
-            .put("rules", new JSONObject(AlertRules.read(prefs.getString("config", "")).json()))
-            .put(
-                "settings",
-                prefs.contains("web")
-                    ? new JSONObject(prefs.getString("web", "{}"))
-                    : JSONObject.NULL)
-            .put("labels", new JSONArray(labels))
-            .toString();
+        return readSettings(prefs).put("labels", new JSONArray(labels)).toString();
       } catch (Exception exception) {
         return "{\"error\":\"Could not load settings\"}";
       }
