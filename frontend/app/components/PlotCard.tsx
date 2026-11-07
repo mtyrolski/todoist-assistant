@@ -36,6 +36,7 @@ export function PlotCard({
   return (
     <section
       className={`card${legendContent ? " cardWithLegend" : ""}${fillHeight ? " cardFillHeight" : ""}`}
+      aria-label={title}
       style={fillHeight ? { height: "100%", minHeight: 0 } : undefined}
     >
       <header className="cardHeader">
@@ -51,7 +52,7 @@ export function PlotCard({
         style={numericHeight ? { height: numericHeight } : fillHeight ? { minHeight: 0 } : undefined}
       >
         {!figure ? (
-          <div className="skeleton" />
+          <div className="skeleton" role="status" aria-label={`Loading ${title}`} />
         ) : (
           <Plot
             data={figure.data as PlotParams["data"]}

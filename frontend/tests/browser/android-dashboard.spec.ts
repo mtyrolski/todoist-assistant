@@ -248,6 +248,7 @@ test.beforeEach(async ({ page }) => {
     window.Todoist = {
       ready: send,
       command: (name: string, argument: string) => {
+        if (name === "close") sessionStorage.setItem("test-close", "yes");
         if (name === "demo") {
           state.demo = true;
           state.model = model;
@@ -460,6 +461,55 @@ test("a sync update keeps the current navigation and task filters", async ({ pag
   await expect(page.getByText("Review the release checklist")).toBeVisible();
 });
 
+test("tab changes preserve separate searches, priority and expanded projects", async ({ page }) => {
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  const search = page.getByRole("searchbox");
+  await search.fill("release");
+  await page.getByLabel("Filter task priority").selectOption("3");
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(search).toHaveValue("release");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(search).toHaveValue("");
+  await search.fill("undone");
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(search).toHaveValue("release");
+  await expect(page.getByLabel("Filter task priority")).toHaveValue("3");
+  await search.fill("");
+  await page.getByLabel("Filter task priority").selectOption("0");
+  const project = page.locator(".mobileProject").filter({ hasText: "Work" });
+  await project.locator("summary").click();
+  await expect(project).toHaveAttribute("open", "");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").openProjects)).toContain("work");
+  await page.reload();
+  await expect(project).toHaveAttribute("open", "");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(search).toHaveValue("undone");
+});
+
+test("timeline choices survive recreation and rapid back closes each level", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  const timeline = page.getByRole("region", { name: "Project Timeline", exact: true });
+  await timeline.getByRole("button", { name: "Show", exact: true }).click();
+  await timeline.getByLabel("Timeline start date").fill("2026-10-01");
+  await timeline.getByLabel("Timeline end date").fill("2026-10-02");
+  await timeline.locator('[data-project-id="work"]').click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").timelineProject)).toBe("work");
+  await page.reload();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  await expect(timeline.getByLabel("Timeline start date")).toHaveValue("2026-10-01");
+  await expect(timeline.getByLabel("Timeline end date")).toHaveValue("2026-10-02");
+  await expect(timeline.locator('[data-project-id="work"]')).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.evaluate(() => {
+    for (let i = 0; i < 3; i++) window.dispatchEvent(new Event("todoist-back"));
+  });
+  await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(timeline.getByRole("button", { name: "Show", exact: true })).toHaveAttribute("aria-expanded", "false");
+  expect(await page.evaluate(() => sessionStorage.getItem("test-close"))).toBeNull();
+  await page.evaluate(() => window.dispatchEvent(new Event("todoist-back")));
+  expect(await page.evaluate(() => sessionStorage.getItem("test-close"))).toBe("yes");
+});
+
 test("invalid saved view preferences are isolated until the user changes the view", async ({ page }) => {
   const raw = JSON.stringify({ tab: "Projects", query: null, priority: [], range: 8 });
   await page.addInitScript((value) => localStorage.setItem("todoist-ui", value), raw);
@@ -629,6 +679,17 @@ test("many project labels stay outside both plots in portrait and landscape", as
         ),
     )
     .toEqual(["legendonly", "legendonly", "legendonly"]);
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(project).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => card.locator(".js-plotly-plot").evaluate((node) =>
+    (node as HTMLElement & { data: { legendgroup: string; visible: string }[] }).data
+      .filter((trace) => trace.legendgroup === "Long project name 0 with research and planning")
+      .map((trace) => trace.visible),
+  )).toEqual(["legendonly", "legendonly", "legendonly"]);
+  const bounds = await card.locator(".js-plotly-plot").boundingBox();
+  expect(bounds!.width).toBeGreaterThan(0);
+  expect(bounds!.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
   await project.click();
   await expect(project).toHaveAttribute("aria-pressed", "true");
 });
@@ -690,13 +751,33 @@ test("Android reuses the validated control panel and saves disabled monitoring",
   await expect(page.getByText("Monitoring paused", { exact: true })).toBeVisible();
 });
 
+test("an unsaved control panel draft survives switching tabs", async ({ page }) => {
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const enabled = page.getByLabel("Enable attention monitoring", { exact: true });
+  await enabled.uncheck();
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  await expect(enabled).not.toBeChecked();
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  await page.getByRole("button", { name: "Save settings", exact: true }).click();
+  await expect(page.locator("#dashboard-settings").getByRole("status")).toContainText("Settings saved");
+});
+
 test("privacy information and bundled licenses are readable in Control Panel", async ({ page }) => {
   await page.getByRole("button", { name: "Control Panel", exact: true }).click();
   await page.getByText("Privacy & app info", { exact: true }).click();
   await expect(page.getByText("Version 0.4.1 · Preview", { exact: true })).toBeVisible();
   await expect(page.getByText(/Not affiliated with or endorsed by Doist/)).toBeVisible();
-  await page.getByRole("button", { name: "Open-source licenses", exact: true }).click();
+  const open = page.getByRole("button", { name: "Open-source licenses", exact: true });
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await open.click();
   await expect(page.locator("pre")).toContainText("SIL OPEN FONT LICENSE");
+  const close = page.getByRole("button", { name: "Hide licenses", exact: true });
+  await expect(close).toHaveAttribute("aria-expanded", "true");
+  await close.click();
+  await expect(page.locator("pre")).toBeHidden();
+  await expect(open).toHaveAttribute("aria-expanded", "false");
 });
 
 test("first sync explains the current stage and can be cancelled", async ({ page }) => {

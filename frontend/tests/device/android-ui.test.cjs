@@ -72,6 +72,131 @@ test("project timeline filters and switches projects offline on the device", asy
   assert.equal(await page.evaluate(() => document.querySelectorAll('[aria-label="Project activity by day"] li').length), 1);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Timeline must fit the screen without horizontal overflow");
 });
+
+test("navigation and timeline survive rotation and process recreation", async () => {
+  const clickTab = (name) => page.evaluate((label) => Array.from(document.querySelectorAll('nav[aria-label="Dashboard sections"] button')).find((button) => button.textContent.trim() === label).click(), name);
+  await clickTab("Control Panel");
+  await page.waitForFunction(() => document.querySelector('#dashboard-settings input[type="checkbox"]'));
+  const originalRule = await page.evaluate(() => {
+    const checkbox = document.querySelector('#dashboard-settings input[type="checkbox"]');
+    const checked = checkbox.checked;
+    checkbox.click();
+    return checked;
+  });
+  await page.waitForFunction(() => localStorage.getItem("todometry-android-dashboard-settings-draft") !== null);
+  await clickTab("Projects");
+  await page.waitForFunction(() => document.querySelector('input[aria-label="Search tasks, projects or activity"]'));
+  await page.evaluate(() => {
+    const input = document.querySelector('input[aria-label="Search tasks, projects or activity"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "release");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.waitForFunction(() => document.querySelector('input[aria-label="Search tasks, projects or activity"]').value === "release");
+  await clickTab("Projects");
+  assert.equal(await page.evaluate(() => document.querySelector('input[aria-label="Search tasks, projects or activity"]').value), "release");
+  await clickTab("Activity");
+  await clickTab("Projects");
+  assert.equal(await page.evaluate(() => document.querySelector('input[aria-label="Search tasks, projects or activity"]').value), "release");
+  await clickTab("Overview");
+  await page.evaluate(() => document.querySelector('[aria-label="Project Timeline"] button').click());
+  await page.waitForFunction(() => document.querySelector('[data-project-id="product"]'));
+  await page.evaluate(() => document.querySelector('[data-project-id="product"]').click());
+  await page.waitForFunction(() => document.querySelector('[aria-label="Selected project timeline"]'));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("todoist-ui") || "{}").timelineProject === "product");
+  await page.screenshot({ path: `${screenshots}/navigation-portrait.png` });
+
+  const rotated = page.context().waitForEvent("page", { timeout: 120000 });
+  await device.shell("settings put system user_rotation 1");
+  page = await rotated;
+  await page.waitForFunction(() => document.querySelector('[aria-label="Selected project timeline"]'), null, { timeout: 120000 });
+  assert.equal(await page.evaluate(() => document.querySelector('[data-project-id="product"]').getAttribute("aria-pressed")), "true");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await page.screenshot({ path: `${screenshots}/navigation-landscape.png` });
+
+  await device.shell(`am force-stop ${pkg}`);
+  const recreated = device.waitForEvent("webview", { predicate: (view) => view.pkg() === pkg });
+  await device.shell(`am start -n ${pkg}/.MainActivity`);
+  page = await (await recreated).page();
+  await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some((button) => button.textContent.trim() === "Explore a demo"), null, { timeout: 120000 });
+  await page.evaluate(() => Array.from(document.querySelectorAll("button")).find((button) => button.textContent.trim() === "Explore a demo").click());
+  await page.waitForFunction(() => document.querySelector('[aria-label="Selected project timeline"]'), null, { timeout: 120000 });
+  assert.equal(await page.evaluate(() => document.querySelector('[data-project-id="product"]').getAttribute("aria-pressed")), "true");
+  await clickTab("Control Panel");
+  await page.waitForFunction(() => document.querySelector('#dashboard-settings input[type="checkbox"]'));
+  assert.equal(await page.evaluate(() => document.querySelector('#dashboard-settings input[type="checkbox"]').checked), !originalRule);
+  assert.ok(await page.evaluate(() => document.querySelector("#dashboard-settings").innerText.includes("Unsaved changes")));
+  await clickTab("Overview");
+  await device.shell("input keyevent KEYCODE_BACK");
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Selected project timeline"]'));
+  assert.equal(await page.evaluate(() => document.querySelector('[aria-label="Project Timeline"] button').textContent.trim()), "Hide");
+  await device.shell("input keyevent KEYCODE_BACK");
+  await page.waitForFunction(() => document.querySelector('[aria-label="Project Timeline"] button').textContent.trim() === "Show");
+});
+
+test("larger system text and appearance keep Android navigation usable", async () => {
+  const original = (await device.shell("settings get system font_scale")).toString().trim();
+  assert.match(original, /^(null|\d+(\.\d+)?)$/);
+  const night = (await device.shell("cmd uimode night")).toString().trim().match(/^Night mode: (yes|no|auto)$/);
+  assert.ok(night, "The emulator must report its system appearance");
+  try {
+    const recreated = page.context().waitForEvent("page", { timeout: 120000 });
+    await device.shell("settings put system font_scale 1.3");
+    page = await recreated;
+    await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some((button) => button.textContent.trim() === "Back to my data"), null, { timeout: 120000 });
+    const layout = await page.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="Dashboard sections"]');
+      const buttons = Array.from(nav.querySelectorAll("button")).map((button) => {
+        const rect = button.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+      });
+      return { width: innerWidth, overflow: document.documentElement.scrollWidth, buttons };
+    });
+    assert.ok(layout.overflow <= layout.width + 1, "Large text must not overflow the screen");
+    assert.ok(layout.buttons.every((button) => button.left >= -1 && button.right <= layout.width + 1 && button.width >= 48 && button.height >= 48), "Navigation controls remain visible and touchable");
+    await page.screenshot({ path: `${screenshots}/navigation-large-text.png` });
+    await page.evaluate(() => Array.from(document.querySelectorAll('nav[aria-label="Dashboard sections"] button')).find((button) => button.textContent.trim() === "Activity").click());
+    await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Activity");
+    const beforeColours = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue("--bg"), getComputedStyle(document.documentElement).getPropertyValue("--text")]);
+    const appearance = page.context().waitForEvent("page", { timeout: 120000 });
+    await device.shell(`cmd uimode night ${night[1] === "yes" ? "no" : "yes"}`);
+    page = await appearance;
+    await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Activity", null, { timeout: 120000 });
+    assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue("--bg"), getComputedStyle(document.documentElement).getPropertyValue("--text")]), beforeColours);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.screenshot({ path: `${screenshots}/navigation-alternate-appearance.png` });
+  } finally {
+    await device.shell(`cmd uimode night ${night[1]}`);
+    if (original === "null") await device.shell("settings delete system font_scale");
+    else await device.shell(`settings put system font_scale ${original}`);
+  }
+});
+
+test("Android Back dismisses the keyboard before leaving search", async () => {
+  await page.evaluate(() => Array.from(document.querySelectorAll('nav[aria-label="Dashboard sections"] button')).find((button) => button.textContent.trim() === "Projects").click());
+  await page.waitForFunction(() => document.querySelector('input[aria-label="Search tasks, projects or activity"]'));
+  await page.evaluate(() => document.querySelector('input[aria-label="Search tasks, projects or activity"]').scrollIntoView({ block: "center", behavior: "instant" }));
+  const box = await page.evaluate(() => {
+    const rect = document.querySelector('input[aria-label="Search tasks, projects or activity"]').getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, scale: devicePixelRatio, height: visualViewport.height };
+  });
+  const views = (await device.shell("dumpsys activity top")).toString();
+  const bounds = [...views.matchAll(/android\.webkit\.WebView\{[^}]*\s(\d+),(\d+)-\d+,\d+\}/g)].pop();
+  assert.ok(bounds, "The Android WebView must have screen bounds");
+  const x = Math.round(Number(bounds[1]) + box.x * box.scale);
+  const y = Math.round(Number(bounds[2]) + box.y * box.scale);
+  await device.shell(`input tap ${x} ${y}`);
+  let shown = false;
+  for (let attempt = 0; attempt < 20 && !shown; attempt++) {
+    shown = /mInputShown=true/.test((await device.shell("dumpsys input_method")).toString());
+    if (!shown) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  assert.ok(shown, "The system keyboard should open after touching search");
+  await page.waitForFunction((height) => visualViewport.height < height - 30, box.height, { timeout: 30000 });
+  await page.screenshot({ path: `${screenshots}/keyboard-insets.png` });
+  await device.shell("input keyevent KEYCODE_BACK");
+  await page.waitForFunction((height) => visualViewport.height >= height - 2, box.height, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => document.querySelector("h1").textContent), "Projects");
+});
 after(async () => {
   if (!device) return;
   await device.shell("svc wifi enable");

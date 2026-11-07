@@ -21,5 +21,5 @@ export function DeferredPlot({ title, height, children }: { title: string; heigh
     return () => observer.disconnect();
   }, [mounted]);
 
-  return <div ref={ref}>{mounted ? children : <section className="card" style={{ minHeight: height + 80 }}><header className="cardHeader"><h2>{title}</h2></header></section>}</div>;
+  return <div ref={ref}>{mounted ? children : <section className="card" aria-label={title} aria-busy="true" style={{ minHeight: height + 80 }}><header className="cardHeader"><h2>{title}</h2></header></section>}</div>;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardSettings } from "../components/DashboardSettings";
 import { LeaderboardCard } from "../components/LeaderboardCard";
 import { LoadingBar } from "../components/LoadingBar";
@@ -35,14 +35,23 @@ import {
 } from "../lib/mobilePlots";
 
 const TABS = ["Overview", "Projects", "Activity", "Control Panel"] as const;
+const SETTINGS_DRAFT_KEY = "todometry-android-dashboard-settings-draft";
 type Tab = (typeof TABS)[number];
 const INITIAL_UI = {
   tab: "Overview" as Tab,
-  query: "",
+  projectQuery: "",
+  activityQuery: "",
+  openProjects: [] as string[],
   priority: 0,
   range: 8,
   week: 7,
   granularity: "week" as "week" | "month" | "quarter",
+  paceWindow: 3,
+  lifespanAll: true,
+  timelineOpen: false,
+  timelineStart: "",
+  timelineEnd: "",
+  timelineProject: "",
 };
 
 function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
@@ -56,8 +65,38 @@ function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
     else valid = false;
   }
   if ("query" in saved) {
-    if (typeof saved.query === "string") ui.query = saved.query;
+    if (typeof saved.query === "string") {
+      if (ui.tab === "Activity") ui.activityQuery = saved.query;
+      else ui.projectQuery = saved.query;
+    }
     else valid = false;
+  }
+  for (const key of ["projectQuery", "activityQuery", "timelineProject"] as const) {
+    if (key in saved) {
+      if (typeof saved[key] === "string") ui[key] = saved[key];
+      else valid = false;
+    }
+  }
+  if ("openProjects" in saved) {
+    if (Array.isArray(saved.openProjects) && saved.openProjects.every((id) => typeof id === "string")) ui.openProjects = [...new Set(saved.openProjects as string[])];
+    else valid = false;
+  }
+  for (const key of ["timelineStart", "timelineEnd"] as const) {
+    if (key in saved) {
+      const value = saved[key];
+      if (typeof value === "string" && (value === "" || /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value)) ui[key] = value;
+      else valid = false;
+    }
+  }
+  if ("paceWindow" in saved) {
+    if (typeof saved.paceWindow === "number" && [3, 6, 12, 24].includes(saved.paceWindow)) ui.paceWindow = saved.paceWindow;
+    else valid = false;
+  }
+  for (const key of ["lifespanAll", "timelineOpen"] as const) {
+    if (key in saved) {
+      if (typeof saved[key] === "boolean") ui[key] = saved[key];
+      else valid = false;
+    }
   }
   if ("priority" in saved) {
     if (typeof saved.priority === "number" && Number.isInteger(saved.priority) && saved.priority >= 0 && saved.priority <= 4) ui.priority = saved.priority;
@@ -78,14 +117,12 @@ function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
   return { ui, valid };
 }
 
-function ProjectTimeline({ model, open, setOpen }: {
+function ProjectTimeline({ model, ui, patch }: {
   model: MobileModel;
-  open: boolean;
-  setOpen: (open: boolean) => void;
+  ui: typeof INITIAL_UI;
+  patch: (value: Partial<typeof INITIAL_UI>) => void;
 }) {
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const { timelineOpen: open, timelineStart: start, timelineEnd: end, timelineProject: selectedId } = ui;
   const [projectLimit, setProjectLimit] = useState(20);
   const [dayLimit, setDayLimit] = useState(30);
   const [taskLimit, setTaskLimit] = useState(20);
@@ -131,15 +168,15 @@ function ProjectTimeline({ model, open, setOpen }: {
   const tasks = useMemo(() => selected ? model.tasks.filter((task) => task.projectId === selected.id) : [], [model.tasks, selected]);
   const taskNames = useMemo(() => new Map(model.tasks.map((task) => [task.id, task.content])), [model.tasks]);
   const totals = daily.reduce((value, row) => ({ completions: value.completions + row.completions, events: value.events + row.events }), { completions: 0, events: 0 });
-  const choose = (id: string) => { setSelectedId(id); setDayLimit(30); setTaskLimit(20); };
+  const choose = (id: string) => { patch({ timelineProject: id }); setDayLimit(30); setTaskLimit(20); };
   return (
     <section className="card" aria-label="Project Timeline">
-      <div className="cardHeader"><h2>Project Timeline</h2><button type="button" className="button buttonSmall buttonGhost" onClick={() => setOpen(!open)}>{open ? "Hide" : "Show"}</button></div>
+      <div className="cardHeader"><h2>Project Timeline</h2><button type="button" className="button buttonSmall buttonGhost" aria-expanded={open} onClick={() => patch({ timelineOpen: !open })}>{open ? "Hide" : "Show"}</button></div>
       {open && <>
         <p className="muted tiny">Select a project to inspect recorded activity. Dates are inclusive and use your device time zone. Project names and parents reflect the latest available metadata.</p>
         <div className="controls mobilePlotControls">
-          <label className="control"><span className="muted tiny">From</span><input className="select" type="date" aria-label="Timeline start date" value={start} onChange={(event) => { setStart(event.target.value); setProjectLimit(20); setDayLimit(30); }} /></label>
-          <label className="control"><span className="muted tiny">Through</span><input className="select" type="date" aria-label="Timeline end date" value={end} onChange={(event) => { setEnd(event.target.value); setProjectLimit(20); setDayLimit(30); }} /></label>
+          <label className="control"><span className="muted tiny">From</span><input className="select" type="date" aria-label="Timeline start date" value={start} onChange={(event) => { patch({ timelineStart: event.target.value }); setProjectLimit(20); setDayLimit(30); }} /></label>
+          <label className="control"><span className="muted tiny">Through</span><input className="select" type="date" aria-label="Timeline end date" value={end} onChange={(event) => { patch({ timelineEnd: event.target.value }); setProjectLimit(20); setDayLimit(30); }} /></label>
         </div>
         {invalid ? <p role="alert">The start date must not be after the end date.</p> : <>
           {!model.historyAvailable ? <p className="pill pill-warn">Activity history is unavailable; project metadata may still be shown.</p> : incomplete ? <p className="pill pill-warn">Only available history is shown; missing dates are not confirmed as inactive.</p> : <p className="muted tiny">History is limited to the activity available from Todoist and cached on this device.</p>}
@@ -179,14 +216,15 @@ function ProjectTimeline({ model, open, setOpen }: {
 export default function AndroidDashboard() {
   const [state, setState] = useState<MobileState | null>(null);
   const [ui, setUi] = useState(INITIAL_UI);
+  const currentUi = useRef(ui);
+  const hiddenPlotSeries = useRef(new Map<string, Set<string>>()).current;
+  currentUi.current = ui;
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [storageUnavailable, setStorageUnavailable] = useState(false);
   const [storageInvalid, setStorageInvalid] = useState(false);
   const [persist, setPersist] = useState(false);
-  const [paceWindow, setPaceWindow] = useState(3);
-  const [lifespanAll, setLifespanAll] = useState(true);
-  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [controlVisited, setControlVisited] = useState(false);
   const [habitLimit, setHabitLimit] = useState(20);
   const [, refreshDate] = useState(0);
   useEffect(() => {
@@ -194,6 +232,7 @@ export default function AndroidDashboard() {
       const raw = localStorage.getItem("todoist-ui");
       try {
         const saved = restoredUi(JSON.parse(raw ?? "null"));
+        currentUi.current = saved.ui;
         setUi(saved.ui);
         setStorageInvalid(!saved.valid);
         setPersist(saved.valid);
@@ -220,6 +259,9 @@ export default function AndroidDashboard() {
     };
   }, []);
   useEffect(() => {
+    if (ui.tab === "Control Panel") setControlVisited(true);
+  }, [ui.tab]);
+  useEffect(() => {
     if (!persist) return;
     try {
       localStorage.setItem("todoist-ui", JSON.stringify(ui));
@@ -233,13 +275,27 @@ export default function AndroidDashboard() {
     }
   }, [state?.message]);
   useEffect(() => {
-    const back = () =>
-      ui.tab === "Overview"
-        ? command("close")
-        : setUi((current) => ({ ...current, tab: "Overview" }));
+    const back = () => {
+      const current = currentUi.current;
+      const change = current.tab !== "Overview"
+        ? { tab: "Overview" as const }
+        : current.timelineOpen && current.timelineProject
+          ? { timelineProject: "" }
+          : current.timelineOpen
+            ? { timelineOpen: false }
+            : null;
+      if (!change) {
+        command("close");
+        return;
+      }
+      setStorageInvalid(false);
+      setPersist(true);
+      currentUi.current = { ...current, ...change };
+      setUi(currentUi.current);
+    };
     window.addEventListener("todoist-back", back);
     return () => window.removeEventListener("todoist-back", back);
-  }, [ui.tab]);
+  }, []);
   useEffect(() => {
     let timer = 0;
     const schedule = () => {
@@ -270,7 +326,8 @@ export default function AndroidDashboard() {
   const patch = (value: Partial<typeof ui>) => {
     setStorageInvalid(false);
     setPersist(true);
-    setUi((current) => ({ ...current, ...value }));
+    currentUi.current = { ...currentUi.current, ...value };
+    setUi(currentUi.current);
   };
   const model = state?.model;
   const settings = state?.preferences
@@ -291,14 +348,14 @@ export default function AndroidDashboard() {
   const analysis = useMemo(() => {
     if (!model?.plotData) return null;
     return {
-      pace: weeklyPaceFigure(model, paceWindow),
-      lifespan: lifespanFigure(model, ui.range, lifespanAll),
+      pace: weeklyPaceFigure(model, ui.paceWindow),
+      lifespan: lifespanFigure(model, ui.range, ui.lifespanAll),
       hierarchy: hierarchyFigure(model, ui.range),
       heatmap: heatmapFigure(model, ui.range),
       events: eventsFigure(model, ui.range),
       taskCounts: taskCountsFigure(model, ui.range),
     };
-  }, [model, ui.range, paceWindow, lifespanAll]);
+  }, [model, ui.range, ui.paceWindow, ui.lifespanAll]);
   const busy = state?.loading || state?.syncing;
   const matches =
     model?.tasks.filter(
@@ -306,9 +363,9 @@ export default function AndroidDashboard() {
         (!ui.priority || task.priority === ui.priority) &&
         `${task.content} ${task.project} ${task.labels.join(" ")}`
           .toLowerCase()
-          .includes(ui.query.trim().toLowerCase()),
+          .includes(ui.projectQuery.trim().toLowerCase()),
     ) ?? [];
-  const activityQuery = ui.query.trim().toLowerCase();
+  const activityQuery = ui.activityQuery.trim().toLowerCase();
   const activityMatches = model?.activity.filter((event) =>
     `${event.kind} ${event.kind === "uncompleted" ? "undone" : ""} ${event.content} ${event.project}`
       .toLowerCase().includes(activityQuery),
@@ -389,11 +446,15 @@ export default function AndroidDashboard() {
       command("disconnect");
       try {
         localStorage.removeItem("todoist-ui");
+        localStorage.removeItem(SETTINGS_DRAFT_KEY);
       } catch {
         setStorageUnavailable(true);
       }
       setStorageInvalid(false);
       setPersist(true);
+      setControlVisited(false);
+      hiddenPlotSeries.clear();
+      currentUi.current = INITIAL_UI;
       setUi(INITIAL_UI);
     }
   };
@@ -454,8 +515,10 @@ export default function AndroidDashboard() {
             className={`seg ${ui.tab === tab ? "segActive" : ""}`}
             aria-current={ui.tab === tab ? "page" : undefined}
             onClick={() => {
-              patch({ tab, query: "", priority: 0 });
-              setError("");
+              if (tab !== ui.tab) {
+                patch({ tab });
+                setError("");
+              }
             }}
           >
             {tab}
@@ -551,15 +614,16 @@ export default function AndroidDashboard() {
           </form>
         </section>
       )}
-      {state && ui.tab === "Control Panel" && (
-        <>
+      {state && (controlVisited || ui.tab === "Control Panel") && (
+        <div hidden={ui.tab !== "Control Panel"}>
           <ProjectGrouping model={model ?? null} enabled={Boolean(state.connected && model && !state.demo)} busy={Boolean(busy)} message={state.message} />
           <DashboardSettings
             request={mobileSettingsRequest}
+            draftStorageKey={SETTINGS_DRAFT_KEY}
             onAfterMutation={() => setError("")}
           />
           <MobileAbout version={state.version} preview={state.preview} />
-        </>
+        </div>
       )}
 
       {model && ui.tab === "Overview" && (
@@ -601,7 +665,7 @@ export default function AndroidDashboard() {
           {!model.historyAvailable ? (
             <>
               <p className="pill pill-warn">Completion history unavailable. {model.historyWarning}</p>
-              {analysis && <><p className="muted tiny">Only the current active-task snapshot is available.</p><DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} /></DeferredPlot></>}
+              {analysis && <><p className="muted tiny">Only the current active-task snapshot is available.</p><DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} hiddenByTitle={hiddenPlotSeries} /></DeferredPlot></>}
             </>
           ) : (
             <>
@@ -653,15 +717,15 @@ export default function AndroidDashboard() {
                 <>
                   <div className="controls mobilePlotControls">
                     <label className="control"><span className="muted tiny">Weekly pace comparison</span>
-                      <select className="select" value={paceWindow} onChange={(event) => setPaceWindow(Number(event.target.value))}>
+                      <select className="select" value={ui.paceWindow} onChange={(event) => patch({ paceWindow: Number(event.target.value) })}>
                         <option value={3}>3-week baseline</option><option value={6} disabled={!paceWindowAvailable(model, 6)}>Add 6-week baseline</option><option value={12} disabled={!paceWindowAvailable(model, 12)}>Add 12-week baseline</option><option value={24} disabled={!paceWindowAvailable(model, 24)}>Add 24-week baseline</option>
                       </select>
                     </label>
                   </div>
-                  {paceWindow !== 3 && !paceWindowAvailable(model, paceWindow) && <p className="muted tiny">The selected {paceWindow}-week baseline is unavailable for the current history.</p>}
-                  <DeferredPlot title="Weekly Completion Trend" height={310}><MobilePlotCard title="Weekly Completion Trend" figure={analysis.pace} height={310} help={PLOT_HELP.weeklyCompletionTrend} /></DeferredPlot>
+                  {ui.paceWindow !== 3 && !paceWindowAvailable(model, ui.paceWindow) && <p className="muted tiny">The selected {ui.paceWindow}-week baseline is unavailable for the current history.</p>}
+                  <DeferredPlot title="Weekly Completion Trend" height={310}><MobilePlotCard title="Weekly Completion Trend" figure={analysis.pace} height={310} help={PLOT_HELP.weeklyCompletionTrend} hiddenByTitle={hiddenPlotSeries} /></DeferredPlot>
                   <DeferredPlot title="Task Lifespans: Time to Completion" height={310}><PlotCard title="Task Lifespans: Time to Completion" figure={analysis.lifespan} height={310} compact help={PLOT_HELP.taskLifespans} actions={
-                    <select aria-label="Task lifespan date range" className="select" value={lifespanAll ? "all" : "period"} onChange={(event) => setLifespanAll(event.target.value === "all")}>
+                    <select aria-label="Task lifespan date range" className="select" value={ui.lifespanAll ? "all" : "period"} onChange={(event) => patch({ lifespanAll: event.target.value === "all" })}>
                       <option value="all">All time</option><option value="period">Selected period</option>
                     </select>
                   } /></DeferredPlot>
@@ -672,6 +736,7 @@ export default function AndroidDashboard() {
                 title="Completed tasks"
                 figure={figures[0]}
                 height={340}
+                hiddenByTitle={hiddenPlotSeries}
                 help={ui.granularity === "week" ? PLOT_HELP.completedTasksPeriodically : "Actual completed tasks per project in each calendar period. The current period is incomplete; forecasts are shown in the weekly view."}
               />
               <section className="card">
@@ -708,14 +773,15 @@ export default function AndroidDashboard() {
                 title="Cumulative completions"
                 figure={figures[1]}
                 height={320}
+                hiddenByTitle={hiddenPlotSeries}
               />
               {analysis && (
                 <>
                   <p className="muted tiny">Dates and activity hours use your device time zone.</p>
                   <DeferredPlot title="Heatmap of Events by Day and Hour" height={290}><PlotCard title="Heatmap of Events by Day and Hour" figure={analysis.heatmap} height={290} compact help={PLOT_HELP.heatmapEventsByDayHour} /></DeferredPlot>
-                  <DeferredPlot title="Events Over Time" height={310}><MobilePlotCard title="Events Over Time" figure={analysis.events} height={310} help={PLOT_HELP.eventsOverTime} /></DeferredPlot>
+                  <DeferredPlot title="Events Over Time" height={310}><MobilePlotCard title="Events Over Time" figure={analysis.events} height={310} help={PLOT_HELP.eventsOverTime} hiddenByTitle={hiddenPlotSeries} /></DeferredPlot>
                   <p className="muted tiny">Active-task history is estimated from cached activity and current tasks.</p>
-                  <DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} /></DeferredPlot>
+                  <DeferredPlot title="Active Tasks by Priority" height={310}><MobilePlotCard title="Active Tasks by Priority" figure={analysis.taskCounts} height={310} help={PLOT_HELP.taskCountTrend} hiddenByTitle={hiddenPlotSeries} /></DeferredPlot>
                 </>
               )}
             </>
@@ -736,7 +802,7 @@ export default function AndroidDashboard() {
           </section>}
         </>
       )}
-      {model?.plotData && <div hidden={ui.tab !== "Overview"}><ProjectTimeline model={model} open={timelineOpen} setOpen={setTimelineOpen} /></div>}
+      {model?.plotData && <div hidden={ui.tab !== "Overview"}><ProjectTimeline model={model} ui={ui} patch={patch} /></div>}
 
       {model && (ui.tab === "Projects" || ui.tab === "Activity") && (
         <div className="controls mobileSearch">
@@ -751,8 +817,8 @@ export default function AndroidDashboard() {
                   ? "Tasks, projects, labels"
                   : "Recent activity"
               }
-              value={ui.query}
-              onChange={(event) => patch({ query: event.target.value })}
+              value={ui.tab === "Projects" ? ui.projectQuery : ui.activityQuery}
+              onChange={(event) => patch(ui.tab === "Projects" ? { projectQuery: event.target.value } : { activityQuery: event.target.value })}
             />
           </label>
           {ui.tab === "Projects" && (
@@ -787,12 +853,19 @@ export default function AndroidDashboard() {
             const tasks = matches.filter(
               (task) => task.projectId === project.id,
             );
-            if (!tasks.length && (ui.query || ui.priority)) return null;
+            if (!tasks.length && (ui.projectQuery || ui.priority)) return null;
             return (
               <details
                 key={project.id}
                 className="card mobileProject"
-                open={Boolean(ui.query || ui.priority)}
+                open={Boolean(ui.projectQuery || ui.priority) || ui.openProjects.includes(project.id)}
+                onToggle={(event) => {
+                  if (ui.projectQuery || ui.priority) return;
+                  const opened = event.currentTarget.open;
+                  const previous = currentUi.current.openProjects;
+                  if (opened === previous.includes(project.id)) return;
+                  patch({ openProjects: opened ? [...previous, project.id] : previous.filter((id) => id !== project.id) });
+                }}
               >
                 <summary>
                   <span>{project.path}</span>
@@ -830,7 +903,7 @@ export default function AndroidDashboard() {
               </details>
             );
           })}
-          {!matches.length && (ui.query || ui.priority) && (
+          {!matches.length && (ui.projectQuery || ui.priority) && (
             <p className="muted">No tasks match.</p>
           )}
         </>

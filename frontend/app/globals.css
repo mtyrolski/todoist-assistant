@@ -2523,6 +2523,7 @@ textarea.textInput {
   gap: 14px;
   animation: none;
   line-height: 1.4;
+  color-scheme: dark;
 }
 .androidPage h1 {
   font-size: 26px;
@@ -2533,7 +2534,10 @@ textarea.textInput {
   margin-bottom: 0;
   flex-direction: row;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
+.androidPage .topbar > div { min-width: 0; overflow-wrap: anywhere; }
+.androidPage .controls { min-width: 0; }
 .androidPage .topbar .controls {
   gap: 8px;
   width: auto;
@@ -2546,17 +2550,19 @@ textarea.textInput {
   font-size: 12px;
 }
 .mobileNav {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .mobileNav .seg {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
+  min-height: 48px;
   padding: 8px 4px;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .mobileStats {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
   gap: 12px;
 }
 .mobileStats .stat {
@@ -2585,7 +2591,7 @@ textarea.textInput {
 .mobileRuleLink {
   color: var(--text);
   background: transparent;
-  padding: 0;
+  padding: 8px 0;
   border: 0;
   text-align: left;
   cursor: pointer;
@@ -2606,6 +2612,17 @@ textarea.textInput {
   flex-wrap: wrap;
   gap: 12px;
 }
+.androidPage button,
+.androidPage .select,
+.androidPage .dateInput,
+.androidPage .textInput,
+.androidPage .mobileProject summary { min-height: 48px; }
+.androidPage button { min-width: 48px; overflow-wrap: anywhere; }
+.androidPage .infoTip { width: 48px; height: 48px; flex: none; }
+.androidPage .seg:focus-visible,
+.androidPage .mobileRuleLink:focus-visible,
+.androidPage .mobilePlotLegend button:focus-visible,
+.androidPage summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .androidPage .statTop { position: relative; }
 .androidPage .infoTipPanel { visibility: hidden; }
 .androidPage .infoTipWrap:hover .infoTipPanel,
@@ -2645,7 +2662,7 @@ textarea.textInput {
   gap: 7px;
   max-width: 100%;
   min-width: 0;
-  min-height: 36px;
+  min-height: 48px;
   padding: 3px 0;
   border: 0;
   background: transparent;
@@ -2656,11 +2673,15 @@ textarea.textInput {
   white-space: normal;
   cursor: pointer;
 }
-.mobilePlotLegend button[aria-pressed="false"] { opacity: .45; }
+.mobilePlotLegend button[aria-pressed="false"] { opacity: .75; }
 .mobilePlotLegend span { overflow-wrap: anywhere; }
 .mobilePlotLegend i { width: 20px; height: 3px; border-radius: 3px; flex: none; }
 .mobilePlotControls .control {
   width: auto;
+  min-width: 0;
+}
+@media (max-width: 400px) {
+  .mobileNav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .androidPage .controls {
@@ -2705,6 +2726,7 @@ textarea.textInput {
 .mobileTask:last-child {
   border-bottom: 0;
 }
+.mobileTask > div { min-width: 0; }
 .mobileTask strong {
   overflow-wrap: anywhere;
 }
@@ -2727,4 +2749,12 @@ textarea.textInput {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .androidPage *, .androidPage *::before, .androidPage *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

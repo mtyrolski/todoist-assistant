@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { PlotCard, type PlotlyFigure } from "./PlotCard";
 
 type Trace = { name: string; legendgroup: string; showlegend?: boolean; marker: { color: string } };
@@ -10,13 +10,17 @@ export function MobilePlotCard({
   figure,
   help,
   height,
+  hiddenByTitle,
 }: {
   title: string;
   figure: PlotlyFigure;
   help?: string;
   height: number;
+  hiddenByTitle: Map<string, Set<string>>;
 }) {
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set(hiddenByTitle.get(title)));
+  const currentHidden = useRef(hidden);
+  currentHidden.current = hidden;
   const traces = figure.data as Trace[];
   const displayed = useMemo(
     () => ({
@@ -37,14 +41,14 @@ export function MobilePlotCard({
             type="button"
             key={trace.legendgroup}
             aria-pressed={!hidden.has(trace.legendgroup)}
-            onClick={() =>
-              setHidden((previous) => {
-                const next = new Set(previous);
-                if (next.has(trace.legendgroup)) next.delete(trace.legendgroup);
-                else next.add(trace.legendgroup);
-                return next;
-              })
-            }
+            onClick={() => {
+              const next = new Set(currentHidden.current);
+              if (next.has(trace.legendgroup)) next.delete(trace.legendgroup);
+              else next.add(trace.legendgroup);
+              currentHidden.current = next;
+              hiddenByTitle.set(title, next);
+              setHidden(next);
+            }}
           >
             <i aria-hidden="true" style={{ backgroundColor: trace.marker.color }} />
             <span>{trace.name}</span>

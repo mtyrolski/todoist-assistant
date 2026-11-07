@@ -29,6 +29,9 @@ export function MobileAbout({ version, preview }: { version?: string; preview?: 
       <p className="muted tiny">An independent third-party integration. Not affiliated with or endorsed by Doist. Todoist and Doist are trademarks of their owners.</p>
       <button
         className="button buttonSmall buttonGhost"
+        type="button"
+        aria-expanded={Boolean(licenses)}
+        aria-controls="mobile-licenses"
         onClick={async () => {
           if (licenses) {
             setLicenses("");
@@ -43,11 +46,9 @@ export function MobileAbout({ version, preview }: { version?: string; preview?: 
           }
         }}
       >
-        Open-source licenses
+        {licenses ? "Hide licenses" : "Open-source licenses"}
       </button>
-      {licenses && (
-        <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{licenses}</pre>
-      )}
+      <pre id="mobile-licenses" hidden={!licenses} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{licenses}</pre>
     </details>
   );
 }

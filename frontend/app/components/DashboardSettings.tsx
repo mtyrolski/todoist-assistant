@@ -15,9 +15,21 @@ const RULES = [
   ["warnOnDeadline", "Attention for deadlines"]
 ] as const;
 
-export function DashboardSettings({ onAfterMutation, request = requestJson }: {
+function validStoredDraft(value: unknown): value is SettingsDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const draft = value as Partial<SettingsDraft>;
+  return [draft.enabled, draft.dangerOnFireLabel, draft.warnOnPriority, draft.warnOnDue, draft.warnOnDeadline].every((item) => typeof item === "boolean") &&
+    typeof draft.fireLabel === "string" && Array.isArray(draft.fireLabels) && draft.fireLabels.every((item) => typeof item === "string") &&
+    Array.isArray(draft.warnPriorityThresholds) && draft.warnPriorityThresholds.every((item) => Number.isInteger(item) && item >= 1 && item <= 4) &&
+    NUMBER_FIELDS.every(({ key }) => typeof draft[key] === "string") &&
+    Array.isArray(draft.plotEvents) && draft.plotEvents.every((item) => item && typeof item.date === "string" && typeof item.label === "string" && typeof item.color === "string") &&
+    (draft.configPath === undefined || typeof draft.configPath === "string");
+}
+
+export function DashboardSettings({ onAfterMutation, request = requestJson, draftStorageKey }: {
   onAfterMutation: () => void;
   request?: typeof requestJson;
+  draftStorageKey?: string;
 }) {
   const [saved, setSaved] = useState<SettingsDraft | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
@@ -28,6 +40,8 @@ export function DashboardSettings({ onAfterMutation, request = requestJson }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [draftStorageIssue, setDraftStorageIssue] = useState<string | null>(null);
+  const [draftStorageBlocked, setDraftStorageBlocked] = useState(false);
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(saved);
   const labelOptions = useMemo(() => [...new Set([...labels, ...(draft?.fireLabels ?? [])])].sort((a, b) => a.localeCompare(b)), [labels, draft?.fireLabels]);
 
@@ -35,11 +49,57 @@ export function DashboardSettings({ onAfterMutation, request = requestJson }: {
     setLoading(true); setError(null); setNotice(null);
     try {
       const response = await request<SettingsResponse>("/api/admin/dashboard/settings", { signal }, "Could not load dashboard settings");
-      const next = settingsDraft(response.settings); setSaved(next); setDraft(next);
+      const next = settingsDraft(response.settings);
+      let restored = next;
+      let blocked = false;
+      if (draftStorageKey) {
+        try {
+          const raw = localStorage.getItem(draftStorageKey);
+          if (raw !== null) {
+            const stored: unknown = JSON.parse(raw);
+            if (stored && typeof stored === "object" && !Array.isArray(stored) &&
+                "base" in stored && stored.base === JSON.stringify(next) &&
+                "draft" in stored && validStoredDraft(stored.draft)) {
+              restored = stored.draft;
+              setDraftStorageIssue(null);
+              setNotice("Unsaved settings restored. Save to apply them.");
+            } else {
+              blocked = true;
+              setDraftStorageIssue("A stored settings draft is invalid or based on older settings. It was not applied.");
+            }
+          } else setDraftStorageIssue(null);
+        } catch {
+          blocked = true;
+          setDraftStorageIssue("The stored settings draft could not be opened. Saved settings are unchanged.");
+        }
+      }
+      setDraftStorageBlocked(blocked);
+      setSaved(next); setDraft(restored);
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Could not load dashboard settings");
     } finally { if (!signal?.aborted) setLoading(false); }
-  }, [request]);
+  }, [request, draftStorageKey]);
+
+  useEffect(() => {
+    if (!draftStorageKey || !saved || !draft || draftStorageBlocked) return;
+    try {
+      if (JSON.stringify(draft) === JSON.stringify(saved)) localStorage.removeItem(draftStorageKey);
+      else localStorage.setItem(draftStorageKey, JSON.stringify({ base: JSON.stringify(saved), draft }));
+    } catch {
+      setDraftStorageIssue("Unsaved settings could not be kept after the app closes.");
+    }
+  }, [draftStorageKey, saved, draft, draftStorageBlocked]);
+
+  const clearStoredDraft = (explicit = false) => {
+    if (!draftStorageKey || (draftStorageBlocked && !explicit)) return;
+    try {
+      localStorage.removeItem(draftStorageKey);
+      setDraftStorageBlocked(false);
+      setDraftStorageIssue(null);
+    } catch {
+      setDraftStorageIssue("The stored settings draft could not be removed.");
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -74,7 +134,7 @@ export function DashboardSettings({ onAfterMutation, request = requestJson }: {
       const response = await request<SettingsResponse>("/api/admin/dashboard/settings", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       }, "Could not save dashboard settings");
-      const next = settingsDraft(response.settings); setSaved(next); setDraft(next); updated = true;
+      const next = settingsDraft(response.settings); setSaved(next); setDraft(next); clearStoredDraft(); updated = true;
       setNotice("Settings saved. Dashboard attention rules are updated.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save dashboard settings"); }
     finally { setSaving(false); }
@@ -93,6 +153,7 @@ export function DashboardSettings({ onAfterMutation, request = requestJson }: {
         </div>
         {dirty ? <span className="pill pill-warn">Unsaved changes</span> : null}
       </header>
+      {draftStorageIssue && <div className="stack"><p role="status" className="settingsError">{draftStorageIssue}</p>{draftStorageBlocked && <button type="button" className="button buttonSmall buttonGhost" onClick={() => clearStoredDraft(true)}>Discard stored draft</button>}</div>}
       {loading ? <div className="skeleton" style={{ minHeight: 180 }} /> : !draft ? (
         <div className="stack">
           <p role="alert" className="settingsError">{error ?? "Settings are unavailable."}</p>
@@ -165,7 +226,7 @@ export function DashboardSettings({ onAfterMutation, request = requestJson }: {
               {!draft.plotEvents.length ? <p className="muted tiny">No plot event markers configured.</p> : null}
             </div>
             <div className="adminRowRight">
-              <button className="button buttonSmall buttonGhost" type="button" disabled={!dirty} onClick={() => { setDraft(saved); setError(null); setNotice(null); }}>Discard changes</button>
+              <button className="button buttonSmall buttonGhost" type="button" disabled={!dirty} onClick={() => { setDraft(saved); clearStoredDraft(); setError(null); setNotice(null); }}>Discard changes</button>
               <button className="button buttonSmall" type="submit" disabled={!dirty}>{saving ? "Saving…" : "Save settings"}</button>
             </div>
           </fieldset>
