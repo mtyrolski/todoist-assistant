@@ -41,6 +41,10 @@ In Overview, open **Project Timeline** to select a project, filter inclusive dat
 
 Overview counts completion events rather than task due dates. Activity and task snapshots can have different refresh times, and interrupted or permission-limited history is marked accordingly. Todoist may restrict how much activity is returned for an account's plan, so a completed backfill does not prove that every historical event was available.
 
+The Activity screen shows the most recent 200 cached events; search applies to that displayed subset. Overview summarizes active tasks labelled `track_habit` for the last complete local Monday–Sunday week, using recorded effective completions and reschedules. Missing or stale history is labelled, and reliability describes only recorded events.
+
+Refresh merges events by ID and rereads a 24-hour overlap to catch recent changes made by other clients. A delayed event older than that overlap is not guaranteed to appear after the initial backfill. The Android snapshot remains private to the app; it does not change or synchronize the Python application's local cache.
+
 To run interaction tests on a dedicated emulator:
 
 ```bash

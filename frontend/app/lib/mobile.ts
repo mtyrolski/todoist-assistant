@@ -17,6 +17,29 @@ export type MobileTask = {
 export type MobileModel = {
   syncedAt: string;
   activitySyncedAt?: string;
+  activityTotal?: number;
+  habitTracker?: {
+    weekBeg: string;
+    weekEnd: string;
+    trackedCount: number;
+    items: {
+      taskId: string;
+      name: string;
+      projectName: string;
+      weeklyCompleted: number;
+      weeklyRescheduled: number;
+      allTimeCompleted: number;
+      allTimeRescheduled: number;
+      reliability: number | null;
+    }[];
+    history: { label: string; completed: number; rescheduled: number }[];
+    totals: {
+      weeklyCompleted: number;
+      weeklyRescheduled: number;
+      allTimeCompleted: number;
+      allTimeRescheduled: number;
+    };
+  };
   weekStart: string;
   weeks: number[];
   priorities: number[];

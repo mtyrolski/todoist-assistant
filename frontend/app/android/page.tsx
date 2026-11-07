@@ -187,6 +187,7 @@ export default function AndroidDashboard() {
   const [paceWindow, setPaceWindow] = useState(3);
   const [lifespanAll, setLifespanAll] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [habitLimit, setHabitLimit] = useState(20);
   const [, refreshDate] = useState(0);
   useEffect(() => {
     try {
@@ -307,6 +308,12 @@ export default function AndroidDashboard() {
           .toLowerCase()
           .includes(ui.query.trim().toLowerCase()),
     ) ?? [];
+  const activityQuery = ui.query.trim().toLowerCase();
+  const activityMatches = model?.activity.filter((event) =>
+    `${event.kind} ${event.kind === "uncompleted" ? "undone" : ""} ${event.content} ${event.project}`
+      .toLowerCase().includes(activityQuery),
+  ) ?? [];
+  const activityTruncated = Boolean(model && Number.isSafeInteger(model.activityTotal) && model.activityTotal! > model.activity.length);
   const counts = model?.weeklyProjects[ui.week + model.weeks.length - 9] ?? {};
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const leaderboard = model
@@ -713,6 +720,20 @@ export default function AndroidDashboard() {
               )}
             </>
           )}
+          {model.habitTracker && <section className="card" aria-label="Habit tracker">
+            <h2>Habit tracker</h2>
+            <p className="muted tiny">Active tasks labelled @track_habit · last full week {model.habitTracker.weekBeg} to {model.habitTracker.weekEnd}.</p>
+            {model.habitTracker.trackedCount === 0 ? <p>No active tasks have the @track_habit label.</p> : !model.historyAvailable ? <p>Habit activity is unavailable; saved task labels are still shown.</p> : <>
+              {(!model.plotData?.historyComplete || staleActivity || (!state?.demo && (!model.activitySyncedAt || !Number.isFinite(activityTime))) || (historyAsOf && historyAsOf < model.habitTracker.weekEnd)) && <p className="pill pill-warn">Habit history is incomplete or out of date; recorded counts can change after synchronization.</p>}
+              <p><strong>{model.habitTracker.totals.weeklyCompleted}</strong> recorded completions · <strong>{model.habitTracker.totals.weeklyRescheduled}</strong> recorded reschedules last week</p>
+              <p className="muted tiny">Counts use available Todoist activity. Your plan may limit older history. Reliability is completions divided by recorded completions and reschedules, not a measure of goal adherence.</p>
+              {model.habitTracker.items.slice(0, habitLimit).map((habit) => <article className="mobileTask" key={habit.taskId}>
+                <div><strong>{habit.name}</strong><p className="muted tiny">{habit.projectName} · {habit.weeklyCompleted} completed and {habit.weeklyRescheduled} rescheduled last week</p><p className="muted tiny">Recorded total: {habit.allTimeCompleted} completed · {habit.allTimeRescheduled} rescheduled{habit.reliability === null ? "" : ` · ${habit.reliability}% reliability`}</p></div>
+              </article>)}
+              {model.habitTracker.items.length > habitLimit && <button type="button" className="button buttonSmall" onClick={() => setHabitLimit((value) => value + 20)}>Show more habits</button>}
+              <details><summary>Recorded weekly history</summary><ul>{model.habitTracker.history.map((week) => <li key={week.label}>{week.label} · {week.completed} completed · {week.rescheduled} rescheduled</li>)}</ul></details>
+            </>}
+          </section>}
         </>
       )}
       {model?.plotData && <div hidden={ui.tab !== "Overview"}><ProjectTimeline model={model} open={timelineOpen} setOpen={setTimelineOpen} /></div>}
@@ -819,19 +840,19 @@ export default function AndroidDashboard() {
           <header className="cardHeader">
             <h2>Recent activity</h2>
           </header>
-          {model.activity.length === 0 && (
-            <p className="muted">{model.historyAvailable ? "No activity in the available history." : "Activity history is unavailable."}</p>
+          {state?.demo && <p className="muted tiny">Demo activity; no account data is shown.</p>}
+          {model.historyAvailable ? <>
+            {!state?.demo && (model.activitySyncedAt && Number.isFinite(activityTime) ? <p className={staleActivity ? "pill pill-warn" : "muted tiny"}>Activity last synchronized {new Date(activityTime).toLocaleString()}{staleActivity ? "; this history is out of date." : "."}</p> : <p className="muted tiny">Activity synchronization time is unavailable for this saved history.</p>)}
+            {state?.syncing && <p className="muted tiny">Showing saved activity while synchronization is in progress.</p>}
+            {model.plotData?.historyComplete === false && <p className="pill pill-warn">Earlier activity history is incomplete; missing events are not confirmed absent.</p>}
+            {model.historyWarning && <p className="pill pill-warn">{model.historyWarning}</p>}
+          </> : <p className="pill pill-warn">Activity history is unavailable. {model.historyWarning}</p>}
+          {activityTruncated && <p className="muted tiny">Showing the latest {model.activity.length} of {model.activityTotal} saved events. Search covers these recent events only.</p>}
+          {model.activity.length === 0 && model.historyAvailable && (
+            <p className="muted">No activity in the available history.</p>
           )}
-          {model.activity.length > 0 && ui.query.trim() && !model.activity.some((event) =>
-            `${event.kind === "uncompleted" ? "undone" : event.kind} ${event.content} ${event.project}`.toLowerCase().includes(ui.query.trim().toLowerCase()),
-          ) && <p className="muted">No activity matches your search.</p>}
-          {model.activity
-            .filter((event) =>
-              `${event.kind === "uncompleted" ? "undone" : event.kind} ${event.content} ${event.project}`
-                .toLowerCase()
-                .includes(ui.query.trim().toLowerCase()),
-            )
-            .map((event) => (
+          {model.activity.length > 0 && activityQuery && !activityMatches.length && <p className="muted">{activityTruncated ? "No recent activity matches your search; older saved events are not searched." : "No activity matches your search."}</p>}
+          {activityMatches.map((event) => (
               <article className="mobileTask" key={event.id}>
                 <div>
                   <strong>{event.content || event.project}</strong>

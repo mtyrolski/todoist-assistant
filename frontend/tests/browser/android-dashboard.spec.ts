@@ -91,6 +91,37 @@ test.beforeEach(async ({ page }) => {
       model.activity = [];
       send();
     });
+    window.addEventListener("test-activity-freshness", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = model as typeof model & { activitySyncedAt: string; activityTotal: number; plotData: { historyComplete: boolean } };
+      data.activitySyncedAt = "2026-11-02T08:00:00Z";
+      data.activityTotal = 250;
+      data.plotData.historyComplete = false;
+      model.syncedAt = "2026-11-02T10:00:00Z";
+      model.historyWarning = "Older activity could not be refreshed.";
+      state.demo = false;
+      state.connected = true;
+      send();
+    });
+    window.addEventListener("test-activity-unavailable", () => {
+      model.historyAvailable = false;
+      model.activity = [];
+      model.historyWarning = "Activity access was denied.";
+      state.demo = false;
+      state.connected = true;
+      send();
+    });
+    window.addEventListener("test-habits", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      (model as typeof model & { habitTracker: unknown }).habitTracker = {
+        weekBeg: "2026-10-19", weekEnd: "2026-10-25", trackedCount: 1,
+        totals: { weeklyCompleted: 4, weeklyRescheduled: 2, allTimeCompleted: 8, allTimeRescheduled: 2 },
+        items: [{ taskId: "habit", name: "Take a walk", projectName: "Personal", weeklyCompleted: 4, weeklyRescheduled: 2, allTimeCompleted: 8, allTimeRescheduled: 2, reliability: 80 }],
+        history: [{ label: "2026-10-19 to 2026-10-25", completed: 4, rescheduled: 2 }],
+      };
+      (model as typeof model & { plotData: { historyComplete: boolean } }).plotData.historyComplete = false;
+      send();
+    });
     window.addEventListener("test-many-projects", () => {
       for (let i = 0; i < 12; i++) {
         const name = `Long project name ${i} with research and planning`;
@@ -283,6 +314,56 @@ test("empty activity is described separately from unavailable history", async ({
   await page.evaluate(() => window.dispatchEvent(new Event("test-empty-activity")));
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   await expect(page.getByText("No activity in the available history.")).toBeVisible();
+});
+
+test("activity reports saved scope, freshness and incomplete history while sync fails", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-activity-freshness")));
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText(/Activity last synchronized/)).toContainText("out of date");
+  await expect(page.getByText(/Earlier activity history is incomplete/)).toBeVisible();
+  await expect(page.getByText("Older activity could not be refreshed.")).toBeVisible();
+  await expect(page.getByText("Showing the latest 1 of 250 saved events. Search covers these recent events only.")).toBeVisible();
+  const search = page.getByRole("searchbox", { name: "Search tasks, projects or activity" });
+  await search.fill("not a recent record");
+  await expect(page.getByText("No recent activity matches your search; older saved events are not searched.")).toBeVisible();
+  await search.fill("uncompleted");
+  await expect(page.getByText("Reopened a milestone")).toBeVisible();
+  await search.fill("undone");
+  await expect(page.getByText("Reopened a milestone")).toBeVisible();
+  await search.fill("reopened");
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", { detail: { syncing: true, message: "Updating activity" } })));
+  await expect(page.getByText("Showing saved activity while synchronization is in progress.")).toBeVisible();
+  await expect(search).toHaveValue("reopened");
+  await expect(page.getByText("Reopened a milestone")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", { detail: { syncing: false, message: "No network connection. Saved history is unchanged." } })));
+  await expect(page.getByText("No network connection. Saved history is unchanged.")).toBeVisible();
+  await expect(page.getByText("Reopened a milestone")).toBeVisible();
+  await expect(search).toHaveValue("reopened");
+  await page.setViewportSize({ width: 320, height: 700 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
+test("unavailable activity is not represented as an empty account", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-activity-unavailable")));
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText("Activity history is unavailable. Activity access was denied.")).toBeVisible();
+  await expect(page.getByText("No activity in the available history.")).toHaveCount(0);
+});
+
+test("habit tracker labels recorded counts and hides unavailable activity metrics", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-habits")));
+  const habits = page.getByRole("region", { name: "Habit tracker" });
+  await expect(habits).toContainText("last full week 2026-10-19 to 2026-10-25");
+  await expect(habits).toContainText("Habit history is incomplete or out of date");
+  await expect(habits).toContainText("4 recorded completions");
+  await expect(habits).toContainText("2 recorded reschedules");
+  await expect(habits).toContainText("80% reliability");
+  await expect(habits).toContainText("not a measure of goal adherence");
+  await habits.getByText("Recorded weekly history").click();
+  await expect(habits).toContainText("2026-10-19 to 2026-10-25 · 4 completed · 2 rescheduled");
+  await page.evaluate(() => window.dispatchEvent(new Event("test-activity-unavailable")));
+  await expect(habits).toContainText("Habit activity is unavailable");
+  await expect(habits).not.toContainText("4 recorded completions");
 });
 
 test("an empty account distinguishes no activity from unavailable history", async ({ page }) => {
