@@ -134,9 +134,8 @@ final class TodoistClient {
         if (imprecise) rounded.put(eventIdentity(item, ((Number) id).doubleValue()), key);
       }
     Instant joined = parseInstant(user.optString("joined_at"), null);
-    boolean joinDateKnown = joined != null;
+    boolean joinDateKnown = joined != null && !joined.isAfter(started);
     if (!joinDateKnown) joined = started.minus(Duration.ofDays(84));
-    if (joined.isAfter(started)) joined = started;
     Instant historyStart = parseInstant(baseline.optString("historyStart"), started);
     if (historyStart.isAfter(started)) historyStart = started;
     Instant activitySyncedAt = lastActivity == null ? started : lastActivity;
@@ -199,7 +198,7 @@ final class TodoistClient {
     if (!joinDateKnown && !complete && !data.has("activityWarning"))
       data.put(
           "activityWarning",
-          "Todoist did not provide your account join date. Older activity may be missing.");
+          "Todoist did not provide a usable account join date. Older activity may be missing.");
     if (complete && !rounded.isEmpty() && !data.has("activityWarning"))
       data.put(
           "activityWarning", "Some older saved events could not be matched to Todoist's history.");

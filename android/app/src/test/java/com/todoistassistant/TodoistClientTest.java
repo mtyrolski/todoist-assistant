@@ -84,6 +84,27 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void futureJoinDateStillFetchesRecentActivityWithoutClaimingCompleteHistory()
+      throws Exception {
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", "2026-11-02T12:00:00Z");
+            return super.get(path);
+          }
+        };
+    JSONObject result =
+        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+    assertTrue(fake.paths.stream().anyMatch(path -> path.startsWith("activities")));
+    assertEquals(1, result.getJSONArray("activities").length());
+    assertFalse(result.getBoolean("historyComplete"));
+    assertTrue(result.getString("activityWarning").contains("join date"));
+  }
+
+  @Test
   public void historyResumesWhenJoinDateBecomesAvailable() throws Exception {
     Fake fake =
         new Fake() {
