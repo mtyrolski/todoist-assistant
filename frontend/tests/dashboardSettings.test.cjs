@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { settingsDraft, settingsPayload } = require('../.test-build/dashboardSettings.js');
+const { settingsDraft, settingsPayload } = require('../.test-build/lib/dashboardSettings.js');
 
 function settings() {
   return {

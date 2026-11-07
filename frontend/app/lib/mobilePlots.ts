@@ -1,5 +1,5 @@
 import type { PlotlyFigure } from "../components/PlotCard";
-import { aggregateProjectIdentity, projectColor, weekDate, type MobileModel } from "./mobile";
+import { aggregateProjectIdentity, mobileHistoryEnd, mobileHistoryStart, projectColor, weekDate, type MobileModel } from "./mobile";
 
 export type MobilePlotData = {
   historyComplete?: boolean;
@@ -44,9 +44,8 @@ const localDay = (value: string) => {
   const date = new Date(value);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
-const historyDay = (model: MobileModel) => model.plotData?.historyAsOf || localDay(model.syncedAt);
-const confirmedStart = (model: MobileModel) =>
-  model.plotData?.historyComplete === false ? model.plotData.historyStart || "" : "";
+const historyDay = mobileHistoryEnd;
+const confirmedStart = mobileHistoryStart;
 const startDate = (model: MobileModel, range: number) =>
   range > 0 ? weekDate(model.weekStart, 1 - range) : "";
 const inRange = (day: string, start: string, end: string) =>
@@ -74,34 +73,44 @@ function percentile(values: number[], fraction: number): number {
   return sorted[lower] + (sorted[Math.ceil(index)] - sorted[lower]) * (index - lower);
 }
 
+function paceStats(model: MobileModel, size: number) {
+  if (historyDay(model) < model.weekStart) return null;
+  const coverage = confirmedStart(model);
+  const daily = (model.plotData?.dailyActivity ?? []).filter((day) => !coverage || day.date >= coverage);
+  const counts = new Map(daily.map((day) => [day.date, day.effectiveCompletions]));
+  const firstRecorded = daily.filter((day) => day.effectiveCompletions > 0).map((day) => day.date).sort()[0];
+  if (!firstRecorded) return null;
+  const week = (offset: number) => weekdays.map((_, day) => counts.get(weekDate(model.weekStart, offset, day)) ?? 0);
+  const recorded = Array.from({ length: size }, (_, i) => -size + i)
+    .filter((offset) => weekDate(model.weekStart, offset, coverage ? 0 : 6) >= (coverage || firstRecorded));
+  if (size > 3 && recorded.length < size) return null;
+  const candidates = recorded.map(week).filter((values) => values.some((value) => value > 0));
+  if (!candidates.length) return null;
+  const totals = candidates.map((values) => values.reduce((sum, value) => sum + value, 0));
+  const curves = candidates.map((values, index) => {
+    let sum = 0;
+    return values.map((value) => (sum += value) / totals[index] * 100);
+  });
+  return {
+    avgTotal: totals.reduce((sum, value) => sum + value, 0) / totals.length,
+    avg: weekdays.map((_, day) => curves.reduce((sum, values) => sum + values[day], 0) / curves.length),
+    low: weekdays.map((_, day) => percentile(curves.map((values) => values[day]), 0.25)),
+    high: weekdays.map((_, day) => percentile(curves.map((values) => values[day]), 0.75)),
+  };
+}
+
+export function paceWindowAvailable(model: MobileModel, window: number): boolean {
+  return paceStats(model, window) !== null;
+}
+
 export function weeklyPaceFigure(model: MobileModel, window: number): PlotlyFigure {
   if (historyDay(model) < model.weekStart) return empty("Activity has not been refreshed for the current week.");
   const coverage = confirmedStart(model);
   const daily = (model.plotData?.dailyActivity ?? []).filter((day) => !coverage || day.date >= coverage);
   const counts = new Map(daily.map((day) => [day.date, day.effectiveCompletions]));
-  const firstRecorded = daily.find((day) => day.effectiveCompletions > 0)?.date;
-  if (!firstRecorded) return empty("No completed tasks available yet.");
+  if (!daily.some((day) => day.effectiveCompletions > 0)) return empty("No completed tasks available yet.");
   const week = (offset: number) => weekdays.map((_, day) => counts.get(weekDate(model.weekStart, offset, day)) ?? 0);
-  const stats = (size: number) => {
-    const recorded = Array.from({ length: size }, (_, i) => -size + i)
-      .filter((offset) => weekDate(model.weekStart, offset, coverage ? 0 : 6) >= (coverage || firstRecorded));
-    if (size > 3 && recorded.length < size) return null;
-    const candidates = recorded.map(week)
-      .filter((values) => values.some((value) => value > 0));
-    if (!candidates.length) return null;
-    const totals = candidates.map((values) => values.reduce((sum, value) => sum + value, 0));
-    const curves = candidates.map((values, index) => {
-      let sum = 0;
-      return values.map((value) => (sum += value) / totals[index] * 100);
-    });
-    return {
-      avgTotal: totals.reduce((sum, value) => sum + value, 0) / totals.length,
-      avg: weekdays.map((_, day) => curves.reduce((sum, values) => sum + values[day], 0) / curves.length),
-      low: weekdays.map((_, day) => percentile(curves.map((values) => values[day]), 0.25)),
-      high: weekdays.map((_, day) => percentile(curves.map((values) => values[day]), 0.75)),
-    };
-  };
-  const baseline = stats(3);
+  const baseline = paceStats(model, 3);
   if (!baseline) return empty("Not enough completed-week data for a baseline.");
   const data: unknown[] = [
     line("3-week baseline", "#6CCFF6", weekdays, baseline.low, { showlegend: false, line: { width: 0 }, hoverinfo: "skip" }),
@@ -109,7 +118,7 @@ export function weeklyPaceFigure(model: MobileModel, window: number): PlotlyFigu
     line("3-week baseline", "#6CCFF6", weekdays, baseline.avg, { hovertemplate: "%{x}: %{y:.1f}%<extra></extra>" }),
   ];
   if (window !== 3) {
-    const optional = stats(window);
+    const optional = paceStats(model, window);
     if (optional) data.push(line(`${window}-week baseline`, "#A868FF", weekdays, optional.avg, { hovertemplate: "%{x}: %{y:.1f}%<extra></extra>" }));
   }
   const today = historyDay(model);
@@ -167,7 +176,7 @@ export function heatmapFigure(model: MobileModel, range: number): PlotlyFigure {
 
 export function eventsFigure(model: MobileModel, range: number): PlotlyFigure {
   const coverage = confirmedStart(model);
-  const daily = (model.plotData?.dailyActivity ?? []).filter((day) => !coverage || day.date >= coverage);
+  const daily = (model.plotData?.dailyActivity ?? []).filter((day) => !coverage || day.date >= coverage).sort((a, b) => a.date.localeCompare(b.date));
   if (!daily.length) return empty("No activity recorded yet.");
   const end = historyDay(model), requestedStart = startDate(model, range);
   const start = requestedStart && requestedStart > daily[0].date ? requestedStart : daily[0].date;
@@ -210,8 +219,14 @@ export function hierarchyFigure(model: MobileModel, range: number): PlotlyFigure
   const projects = model.plotData?.hierarchy ?? [];
   const byId = new Map(projects.map((project) => [project.id, project]));
   const first = range > 0 ? Math.max(0, model.weeks.length - range) : 0;
-  const coverage = confirmedStart(model), current = model.weeks.length - 1;
-  const own = new Map(projects.map((project) => [project.id, Object.entries(project.weeklyCounts).reduce((sum, [index, value]) => sum + (Number(index) >= first && (!coverage || weekDate(model.weekStart, Number(index) - current) >= coverage) ? value : 0), 0)]));
+  const coverage = confirmedStart(model), current = model.weeks.length - 1, end = historyDay(model);
+  const own = new Map(projects.map((project) => [project.id, Object.entries(project.weeklyCounts).reduce((sum, [index, value]) => {
+    const position = Number(index);
+    if (!Number.isSafeInteger(position) || position < 0 || position > current || !Number.isSafeInteger(value) || value <= 0) return sum;
+    const start = weekDate(model.weekStart, position - current);
+    const lastDay = position === current ? start : weekDate(model.weekStart, position - current, 6);
+    return sum + (position >= first && (!coverage || start >= coverage) && lastDay <= end ? value : 0);
+  }, 0)]));
   const included = new Set<string>();
   for (const project of projects) {
     if (!(own.get(project.id) ?? 0)) continue;
@@ -286,7 +301,7 @@ export function calendarCompletionFigure(
   cumulative: boolean,
 ): PlotlyFigure {
   const coverage = confirmedStart(model);
-  const days = (model.plotData?.dailyActivity ?? []).filter((day) => day.effectiveCompletions > 0 && (!coverage || day.date >= coverage));
+  const days = (model.plotData?.dailyActivity ?? []).filter((day) => day.effectiveCompletions > 0 && (!coverage || day.date >= coverage)).sort((a, b) => a.date.localeCompare(b.date));
   if (!days.length) return empty("No completed tasks available yet.");
   const start = startDate(model, range);
   const end = historyDay(model);
@@ -297,10 +312,20 @@ export function calendarCompletionFigure(
     return `${date.slice(0, 4)}-${String(firstMonth).padStart(2, "0")}-01`;
   };
   const byPeriod = new Map<string, Record<string, number>>();
+  const totals = new Map<string, number>(), unattributed = new Map<string, number>();
   for (const day of days) {
     if (day.date > end) continue;
     const key = period(day.date), counts = byPeriod.get(key) ?? Object.create(null) as Record<string, number>;
-    for (const [name, count] of Object.entries(day.projects ?? {})) counts[name] = (counts[name] ?? 0) + count;
+    const projects = Object.entries(day.projects ?? {}).filter(([, count]) => Number.isSafeInteger(count) && count >= 0);
+    const attributed = projects.reduce((sum, [, count]) => sum + count, 0);
+    totals.set(key, (totals.get(key) ?? 0) + day.effectiveCompletions);
+    if (attributed <= day.effectiveCompletions) {
+      for (const [name, count] of projects) counts[name] = (counts[name] ?? 0) + count;
+      unattributed.set(key, (unattributed.get(key) ?? 0) + day.effectiveCompletions - attributed);
+    } else {
+      // Inconsistent project metadata must not invent more completions than the actual total.
+      unattributed.set(key, (unattributed.get(key) ?? 0) + day.effectiveCompletions);
+    }
     byPeriod.set(key, counts);
   }
   const firstDay = days[0]?.date;
@@ -315,17 +340,28 @@ export function calendarCompletionFigure(
   const visibleFrom = start ? period(start) : periods[0];
   const from = periods.findIndex((value) => value >= visibleFrom);
   if (from < 0) return empty("No completed tasks in this range.");
+  const currentPeriod = period(localDay(new Date().toISOString()));
+  const coveredPeriod = (key: string) => {
+    const next = new Date(time(key));
+    next.setUTCMonth(next.getUTCMonth() + (granularity === "month" ? 1 : 3));
+    const lastDay = dayString(next.getTime() - DAY);
+    return (!coverage || key >= coverage) && (key === currentPeriod || lastDay <= end);
+  };
   const projects = [...new Set(periods.slice(from).flatMap((key) => Object.keys(byPeriod.get(key) ?? {})))].sort();
   const aggregateProject = aggregateProjectIdentity(projects);
+  let missingLabel = "Unattributed";
+  while (projects.includes(missingLabel)) missingLabel += " (missing project)";
   const data: unknown[] = [];
-  for (const series of [{ name: "All projects", total: true }, ...projects.map((name) => ({ name, total: false }))]) {
-    const { name, total } = series;
+  const series = [{ name: "All projects", total: true, missing: false }, ...projects.map((name) => ({ name, total: false, missing: false }))];
+  if (periods.slice(from).some((key) => (unattributed.get(key) ?? 0) > 0)) series.push({ name: missingLabel, total: false, missing: true });
+  for (const { name, total, missing } of series) {
     const label = !total && name === "All projects" ? aggregateProject.label : name;
     const color = total ? "#F4D35E" : projectColor(model, name);
     let sum = 0;
     const values = periods.map((key) => {
+      if (!coveredPeriod(key)) return null;
       const counts = byPeriod.get(key) ?? Object.create(null) as Record<string, number>;
-      const value = total ? Object.values(counts).reduce((a, b) => a + b, 0) : counts[name] ?? 0;
+      const value = total ? totals.get(key) ?? 0 : missing ? unattributed.get(key) ?? 0 : counts[name] ?? 0;
       sum += value;
       return cumulative ? sum : value;
     });

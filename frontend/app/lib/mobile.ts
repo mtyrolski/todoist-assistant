@@ -15,6 +15,7 @@ export type MobileTask = {
 };
 export type MobileModel = {
   syncedAt: string;
+  activitySyncedAt?: string;
   weekStart: string;
   weeks: number[];
   priorities: number[];
@@ -174,9 +175,37 @@ export function projectColor(model: MobileModel, name: string): string {
   );
 }
 export function weekDate(start: string, offset: number, days = 0): string {
-  const date = new Date(`${start}T12:00:00`);
-  date.setDate(date.getDate() + offset * 7 + days);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const date = new Date(`${start}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset * 7 + days);
+  return date.toISOString().slice(0, 10);
+}
+function validCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+}
+export function mobileHistoryStart(model: MobileModel): string {
+  if (model.plotData?.historyComplete !== false) return "";
+  return validCalendarDate(model.plotData.historyStart) ? model.plotData.historyStart : "9999-12-31";
+}
+export function mobileHistoryEnd(model: MobileModel): string {
+  if (model.activitySyncedAt) {
+    const end = Date.parse(model.activitySyncedAt);
+    if (Number.isFinite(end)) {
+      const boundary = new Date(end);
+      const midnight = new Date(boundary.getFullYear(), boundary.getMonth(), boundary.getDate()).getTime();
+      const today = new Date();
+      const currentDay = boundary.getFullYear() === today.getFullYear()
+        && boundary.getMonth() === today.getMonth() && boundary.getDate() === today.getDate();
+      // A past partial day is not complete. Today may be shown as an explicitly timestamped partial day.
+      const last = new Date(end === midnight || !currentDay ? midnight - 1 : end - 1);
+      return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
+    }
+  }
+  if (model.plotData?.historyAsOf) return validCalendarDate(model.plotData.historyAsOf) ? model.plotData.historyAsOf : "0000-01-01";
+  const last = new Date(model.syncedAt);
+  if (!Number.isFinite(last.getTime())) return "0000-01-01";
+  return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
 }
 export function aggregateProjectIdentity(names: string[]) {
   let label = "All projects (project)", group = "project:All projects";
@@ -185,9 +214,9 @@ export function aggregateProjectIdentity(names: string[]) {
   return { label, group };
 }
 export function mobileForecastAvailable(model: MobileModel): boolean {
-  if (!model.forecastAvailable) return false;
+  if (!model.forecastAvailable || mobileHistoryEnd(model) < model.weekStart) return false;
   if (model.plotData?.historyComplete === false)
-    return Boolean(model.plotData.historyStart && model.plotData.historyStart <= weekDate(model.weekStart, -8));
+    return mobileHistoryStart(model) <= weekDate(model.weekStart, -8);
   return true;
 }
 export function completionFigure(
@@ -199,11 +228,12 @@ export function completionFigure(
   const current = model.weeks.length - 1;
   const dates = model.weeks.map((_, i) => weekDate(model.weekStart, i - current, 6));
   const from = range > 0 ? Math.max(0, model.weeks.length - range) : 0;
-  const coverage = model.plotData?.historyComplete === false ? model.plotData.historyStart : "";
-  const historyAsOf = model.plotData?.historyAsOf;
+  const coverage = mobileHistoryStart(model);
+  const historyAsOf = mobileHistoryEnd(model);
   const covered = (index: number) => {
     const start = weekDate(model.weekStart, index - current);
-    return (!coverage || start >= coverage) && (!historyAsOf || start <= historyAsOf);
+    const end = weekDate(model.weekStart, index - current, 6);
+    return (!coverage || start >= coverage) && (!historyAsOf || (index === current ? start : end) <= historyAsOf);
   };
   const names = [
     ...new Set(model.weeklyProjects.flatMap((counts, i) => i >= from && covered(i) ? Object.keys(counts) : [])),

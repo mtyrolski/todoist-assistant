@@ -17,6 +17,8 @@ import {
   mobileSettings,
   mobileSettingsRequest,
   mobileForecastAvailable,
+  mobileHistoryEnd,
+  mobileHistoryStart,
   projectColor,
   weekDate,
 } from "../lib/mobile";
@@ -27,6 +29,7 @@ import {
   heatmapFigure,
   hierarchyFigure,
   lifespanFigure,
+  paceWindowAvailable,
   projectTimelineFigure,
   taskCountsFigure,
   weeklyPaceFigure,
@@ -87,6 +90,7 @@ export default function AndroidDashboard() {
   const [paceWindow, setPaceWindow] = useState(3);
   const [lifespanAll, setLifespanAll] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [, refreshDate] = useState(0);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("todoist-ui");
@@ -138,6 +142,33 @@ export default function AndroidDashboard() {
     window.addEventListener("todoist-back", back);
     return () => window.removeEventListener("todoist-back", back);
   }, [ui.tab]);
+  useEffect(() => {
+    let timer = 0;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      timer = window.setTimeout(() => {
+        command("refresh-clock");
+        refreshDate((value) => value + 1);
+        schedule();
+      }, Math.max(1, next.getTime() - now.getTime() + 50));
+    };
+    const resume = () => {
+      if (document.visibilityState !== "visible") return;
+      command("refresh-clock");
+      refreshDate((value) => value + 1);
+      schedule();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+    };
+  }, []);
   const patch = (value: Partial<typeof ui>) => {
     setStorageInvalid(false);
     setPersist(true);
@@ -193,6 +224,44 @@ export default function AndroidDashboard() {
         .sort((a, b) => b.completed - a.completed)
     : [];
   const alert = state?.alert;
+  const historyStart = model ? mobileHistoryStart(model) : "";
+  const historyAsOf = model ? mobileHistoryEnd(model) : "";
+  const localNow = new Date();
+  const today = `${localNow.getFullYear()}-${String(localNow.getMonth() + 1).padStart(2, "0")}-${String(localNow.getDate()).padStart(2, "0")}`;
+  const monday = new Date(localNow.getFullYear(), localNow.getMonth(), localNow.getDate() - (localNow.getDay() + 6) % 7);
+  const currentWeek = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, "0")}-${String(monday.getDate()).padStart(2, "0")}`;
+  const snapshotTime = model ? Date.parse(model.syncedAt) : NaN;
+  const activityTime = model?.activitySyncedAt ? Date.parse(model.activitySyncedAt) : snapshotTime;
+  const activityBehindSnapshot = Number.isFinite(activityTime) && Number.isFinite(snapshotTime) && activityTime < snapshotTime;
+  const staleActivity = Boolean(model?.historyAvailable && (
+    (historyAsOf && historyAsOf < today) ||
+    activityBehindSnapshot
+  ));
+  const activityLabel = model?.activitySyncedAt && Number.isFinite(activityTime)
+    ? new Date(activityTime).toLocaleString()
+    : historyAsOf;
+  const weekStart = model?.weekStart ?? "";
+  const weekUnavailable = Boolean(model?.historyAvailable && (
+    weekStart !== currentWeek ||
+    (historyAsOf && historyAsOf < weekStart) ||
+    historyStart === "9999-12-31"
+  ));
+  const weekPartial = Boolean(!weekUnavailable && model?.historyAvailable && (
+    (historyStart && historyStart > weekStart) ||
+    (historyAsOf && historyAsOf >= weekStart && historyAsOf < today) ||
+    activityBehindSnapshot
+  ));
+  const selectedWeek = model ? weekDate(model.weekStart, ui.week - 8) : "";
+  const selectedWeekEnd = model ? weekDate(model.weekStart, ui.week - 8, 6) : "";
+  const selectedUnavailable = Boolean(
+    (historyAsOf && selectedWeek > historyAsOf) ||
+    (historyStart && selectedWeekEnd < historyStart)
+  );
+  const selectedPartial = Boolean(!selectedUnavailable && (
+    (historyStart && selectedWeek < historyStart) ||
+    (historyAsOf && historyAsOf < today && historyAsOf < selectedWeekEnd) ||
+    (activityBehindSnapshot && selectedWeek <= historyAsOf && historyAsOf <= selectedWeekEnd)
+  ));
   const alertTitle = !alert?.enabled
     ? "Monitoring paused"
     : alert.level === 2
@@ -237,7 +306,7 @@ export default function AndroidDashboard() {
             {state?.demo && <span className="pill pill-neutral">Demo</span>}
             {model && (
               <span className="muted tiny">
-                {new Date(model.syncedAt).toLocaleString(undefined, {
+                Tasks and projects: {new Date(model.syncedAt).toLocaleString(undefined, {
                   month: "short",
                   day: "numeric",
                   hour: "2-digit",
@@ -393,9 +462,9 @@ export default function AndroidDashboard() {
       {model && ui.tab === "Overview" && (
         <>
           <div className="statsRow mobileStats">
-            {model.historyAvailable ? (
+            {model.historyAvailable && !weekUnavailable ? (
               <StatCard
-                name="This week"
+                name={weekPartial ? "This week (partial)" : "This week"}
                 value={model.weeks[model.weeks.length - 1]}
                 deltaPercent={null}
                 inverseDelta={false}
@@ -406,19 +475,19 @@ export default function AndroidDashboard() {
             ) : (
               <section className="stat">
                 <p className="muted">Completed this week</p>
-                <p>History unavailable</p>
+                <p>{model.historyAvailable ? "Current week unavailable" : "History unavailable"}</p>
               </section>
             )}
             <section className="stat mobileUrgency" data-level={alert?.level}>
               <div className="statTop">
                 <p className="muted">Urgency</p>
               </div>
-              <p className="statValue">{alert?.matches ?? 0}</p>
+              <p className="statValue">{alert ? alert.matches : "Unavailable"}</p>
               <button
                 className="mobileRuleLink"
                 onClick={() => patch({ tab: "Control Panel" })}
               >
-                {alertTitle}
+                {alert ? alertTitle : "Attention rules unavailable"}
               </button>
               <p className="muted tiny">
                 {model.tasks.length} active tasks · P1 {model.priorities[0]} ·
@@ -433,10 +502,16 @@ export default function AndroidDashboard() {
             </>
           ) : (
             <>
+              {staleActivity && (
+                <p className="pill pill-warn">Activity is out of date{activityLabel ? `; last refreshed ${activityLabel}` : ""}. Refresh to update it.</p>
+              )}
+              {!staleActivity && model.activitySyncedAt && activityLabel && <p className="muted tiny">Activity through {activityLabel}; today is still in progress.</p>}
+              {model.activity.length === 0 && <p className="muted tiny">No activity found in the history stored on this device.</p>}
+              <p className="muted tiny">Totals use activity returned by Todoist; older history may be limited by your plan.</p>
               {model.historyWarning && (
                 <p className="pill pill-warn">{model.historyWarning}</p>
               )}
-              {model.plotData?.historyComplete === false && <p className="muted tiny">History is incomplete; earlier periods may change as sync continues.</p>}
+              {model.plotData?.historyComplete === false && <p className="muted tiny">History is incomplete; earlier periods may change or be omitted as sync continues.</p>}
               <div className="controls mobilePlotControls">
                 <label className="control">
                   <span className="muted tiny">Range</span>
@@ -451,7 +526,7 @@ export default function AndroidDashboard() {
                     <option value={8}>Last 8 weeks</option>
                     <option value={26}>Last 26 weeks</option>
                     <option value={52}>Last 52 weeks</option>
-                    <option value={0}>All history</option>
+                    <option value={0}>All available history</option>
                   </select>
                 </label>
                 {model.plotData?.dailyActivity.some((day) => day.projects !== undefined) && (
@@ -476,10 +551,11 @@ export default function AndroidDashboard() {
                   <div className="controls mobilePlotControls">
                     <label className="control"><span className="muted tiny">Weekly pace comparison</span>
                       <select className="select" value={paceWindow} onChange={(event) => setPaceWindow(Number(event.target.value))}>
-                        <option value={3}>3-week baseline</option><option value={6} disabled={model.weeks.length - 1 < 6}>Add 6-week baseline</option><option value={12} disabled={model.weeks.length - 1 < 12}>Add 12-week baseline</option><option value={24} disabled={model.weeks.length - 1 < 24}>Add 24-week baseline</option>
+                        <option value={3}>3-week baseline</option><option value={6} disabled={!paceWindowAvailable(model, 6)}>Add 6-week baseline</option><option value={12} disabled={!paceWindowAvailable(model, 12)}>Add 12-week baseline</option><option value={24} disabled={!paceWindowAvailable(model, 24)}>Add 24-week baseline</option>
                       </select>
                     </label>
                   </div>
+                  {paceWindow !== 3 && !paceWindowAvailable(model, paceWindow) && <p className="muted tiny">The selected {paceWindow}-week baseline is unavailable for the current history.</p>}
                   <DeferredPlot title="Weekly Completion Trend" height={310}><MobilePlotCard title="Weekly Completion Trend" figure={analysis.pace} height={310} help={PLOT_HELP.weeklyCompletionTrend} /></DeferredPlot>
                   <DeferredPlot title="Task Lifespans: Time to Completion" height={310}><PlotCard title="Task Lifespans: Time to Completion" figure={analysis.lifespan} height={310} compact help={PLOT_HELP.taskLifespans} actions={
                     <select aria-label="Task lifespan date range" className="select" value={lifespanAll ? "all" : "period"} onChange={(event) => setLifespanAll(event.target.value === "all")}>
@@ -509,18 +585,20 @@ export default function AndroidDashboard() {
                     {model.weeks.map((_, i) => (
                       <option key={i} value={i - model.weeks.length + 9}>
                         {i === model.weeks.length - 1
-                          ? "This week"
-                          : i === model.weeks.length - 2
+                          ? weekStart === currentWeek ? "This week" : "Snapshot week"
+                          : i === model.weeks.length - 2 && weekStart === currentWeek
                             ? "Last completed week"
                             : weekDate(model.weekStart, i - model.weeks.length + 1)}
                       </option>
                     ))}
                   </select>
                 </header>
-                {leaderboard.length ? (
-                  <LeaderboardCard items={leaderboard} />
+                {selectedUnavailable ? (
+                  <p className="muted">History is unavailable for this week.</p>
+                ) : leaderboard.length ? (
+                  <>{selectedPartial && <p className="muted tiny">This week has partial history.</p>}<LeaderboardCard items={leaderboard} /></>
                 ) : (
-                  <p className="muted">No completions in this week.</p>
+                  <p className="muted">{selectedPartial ? "No completions recorded in the available part of this week." : "No completions in this week."}</p>
                 )}
               </section>
               <MobilePlotCard
@@ -591,6 +669,7 @@ export default function AndroidDashboard() {
           <p className="muted tiny">
             {matches.length} of {model.tasks.length} active tasks
           </p>
+          {model.projects.length === 0 && <p className="muted">No projects are available on this device.</p>}
           {model.projects.map((project) => {
             const tasks = matches.filter(
               (task) => task.projectId === project.id,
@@ -651,6 +730,9 @@ export default function AndroidDashboard() {
           {model.activity.length === 0 && (
             <p className="muted">{model.historyAvailable ? "No activity in the available history." : "Activity history is unavailable."}</p>
           )}
+          {model.activity.length > 0 && ui.query.trim() && !model.activity.some((event) =>
+            `${event.kind === "uncompleted" ? "undone" : event.kind} ${event.content} ${event.project}`.toLowerCase().includes(ui.query.trim().toLowerCase()),
+          ) && <p className="muted">No activity matches your search.</p>}
           {model.activity
             .filter((event) =>
               `${event.kind === "uncompleted" ? "undone" : event.kind} ${event.content} ${event.project}`

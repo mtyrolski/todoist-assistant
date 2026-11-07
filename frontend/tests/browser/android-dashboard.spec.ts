@@ -108,6 +108,7 @@ test.beforeEach(async ({ page }) => {
       send();
     });
     window.addEventListener("test-analysis", () => {
+      delete (model as typeof model & { activitySyncedAt?: string }).activitySyncedAt;
       const makeDay = (date: string, completed: number, added: number) => ({
         date, effectiveCompletions: completed,
         counts: { added, completed, uncompleted: 0, updated: 0, deleted: 0, rescheduled: 0 },
@@ -139,6 +140,43 @@ test.beforeEach(async ({ page }) => {
       const data = (model as typeof model & { plotData: { historyComplete: boolean; historyAsOf: string } }).plotData;
       data.historyComplete = true;
       data.historyAsOf = "2026-10-10";
+      send();
+    });
+    window.addEventListener("test-current-week-partial", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { historyComplete: boolean; historyStart: string; historyAsOf: string }; activitySyncedAt: string });
+      data.plotData.historyComplete = false;
+      data.plotData.historyStart = "2026-11-03";
+      data.plotData.historyAsOf = "2026-11-03";
+      data.activitySyncedAt = "2026-11-03T10:00:00Z";
+      model.syncedAt = "2026-11-03T10:00:00Z";
+      send();
+    });
+    window.addEventListener("test-stale-same-day", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { historyAsOf: string }; activitySyncedAt: string });
+      data.plotData.historyAsOf = "2026-11-03";
+      data.activitySyncedAt = "2026-11-03T08:00:00Z";
+      model.syncedAt = "2026-11-03T10:00:00Z";
+      send();
+    });
+    window.addEventListener("test-long-pace", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { dailyActivity: { date: string; effectiveCompletions: number; counts: Record<string, number>; hours: number[]; projects: Record<string, number> }[] } }).plotData;
+      data.dailyActivity.unshift({ date: "2026-09-01", effectiveCompletions: 1, counts: { completed: 1 }, hours: Array(24).fill(0), projects: { Work: 1 } });
+      send();
+    });
+    window.addEventListener("test-empty-account", () => {
+      window.dispatchEvent(new Event("test-analysis"));
+      const data = (model as typeof model & { plotData: { historyComplete: boolean; historyStart: string; historyAsOf: string; dailyActivity: unknown[]; taskCounts: unknown[]; hierarchy: unknown[]; lifespans: unknown[] }; activitySyncedAt: string });
+      data.plotData = { historyComplete: true, historyStart: "2026-11-02", historyAsOf: "2026-11-03", dailyActivity: [], taskCounts: [], hierarchy: [], lifespans: [] };
+      data.activitySyncedAt = "2026-11-03T10:00:00Z";
+      model.syncedAt = "2026-11-03T10:00:00Z";
+      model.activity = [];
+      model.projects = [];
+      model.tasks = [];
+      model.weeks = model.weeks.map(() => 0);
+      model.weeklyProjects = model.weeklyProjects.map(() => ({} as { Work: number; Personal: number }));
       send();
     });
     window.addEventListener("test-special-names", () => {
@@ -234,6 +272,83 @@ test("empty activity is described separately from unavailable history", async ({
   await page.evaluate(() => window.dispatchEvent(new Event("test-empty-activity")));
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   await expect(page.getByText("No activity in the available history.")).toBeVisible();
+});
+
+test("an empty account distinguishes no activity from unavailable history", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-03T12:00:00Z"));
+  await page.evaluate(() => window.dispatchEvent(new Event("test-empty-account")));
+  await expect(page.getByText("No activity found in the history stored on this device.")).toBeVisible();
+  await expect(page.getByText("Totals use activity returned by Todoist; older history may be limited by your plan.")).toBeVisible();
+  await expect(page.locator(".mobileStats .stat").first()).toContainText("This week");
+  await expect(page.locator(".mobileStats .stat").first()).toContainText("0");
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.getByText("No projects are available on this device.")).toBeVisible();
+});
+
+test("partial and stale history never presents unavailable weeks as zero", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-03T12:00:00Z"));
+  await page.evaluate(() => window.dispatchEvent(new Event("test-current-week-partial")));
+  await expect(page.locator(".mobileStats .stat").first()).toContainText("This week (partial)");
+  await expect(page.getByText("History is unavailable for this week.")).toBeVisible();
+  await page.getByLabel("Contribution week").selectOption("8");
+  await expect(page.getByText("This week has partial history.")).toBeVisible();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("test-analysis"));
+    window.dispatchEvent(new Event("test-history-stale"));
+  });
+  await expect(page.locator(".mobileStats .stat").first()).toContainText("Current week unavailable");
+  await expect(page.getByText(/Activity is out of date/)).toBeVisible();
+  await expect(page.getByText("History is unavailable for this week.")).toBeVisible();
+});
+
+test("activity lagging a same-day task refresh is marked stale", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-03T12:00:00Z"));
+  await page.evaluate(() => window.dispatchEvent(new Event("test-stale-same-day")));
+  await expect(page.getByText(/Activity is out of date/)).toBeVisible();
+  await expect(page.locator(".mobileStats .stat").first()).toContainText("This week (partial)");
+});
+
+test("an old snapshot does not label its previous week as this week", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  await expect(page.locator(".mobileStats .stat").first()).toContainText("Current week unavailable");
+  await expect(page.getByText(/Activity is out of date/)).toBeVisible();
+  await expect(page.getByLabel("Contribution week").locator("option[value='8']")).toHaveText("Snapshot week");
+});
+
+test("pace filters stay selected if an interrupted refresh leaves insufficient history", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-03T12:00:00Z"));
+  await page.evaluate(() => window.dispatchEvent(new Event("test-long-pace")));
+  const select = page.getByLabel("Weekly pace comparison");
+  await expect(select.locator("option[value='6']")).toBeEnabled();
+  await select.selectOption("6");
+  await page.evaluate(() => window.dispatchEvent(new Event("test-history-gap")));
+  await expect(select).toHaveValue("6");
+  await expect(select.locator("option[value='6']")).toHaveAttribute("disabled", "");
+  await expect(page.getByText("The selected 6-week baseline is unavailable for the current history.")).toBeVisible();
+});
+
+test.describe("local date changes", () => {
+  test.use({ timezoneId: "America/New_York" });
+
+  test("updates current-week labels at local midnight while the dashboard stays open", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-11-09T04:59:50Z") });
+    await page.reload();
+    await page.evaluate(() => {
+      const bridge = window.Todoist;
+      if (!bridge) throw new Error("Missing Android bridge");
+      const command = bridge.command;
+      bridge.command = (name, argument) => {
+        if (name === "refresh-clock") sessionStorage.setItem("clock-refresh", "yes");
+        command(name, argument);
+      };
+    });
+    await expect(page.locator(".mobileStats .stat").first()).not.toContainText("Current week unavailable");
+    await page.clock.fastForward(20_000);
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("clock-refresh"))).toBe("yes");
+    await expect(page.locator(".mobileStats .stat").first()).toContainText("Current week unavailable");
+    await expect(page.getByLabel("Contribution week").locator("option[value='8']")).toHaveText("Snapshot week");
+  });
 });
 
 test("a sync update keeps the current navigation and task filters", async ({ page }) => {
@@ -557,7 +672,7 @@ test("mobile exposes desktop plots with calendar-accurate totals and respects pa
   await expect(timeline).toBeVisible();
   await expect.poll(() => timeline.evaluate((node) => (node as HTMLElement & { data: { y: string[] }[] }).data[0].y.filter((name) => name.includes("Reopened")))).toEqual(["Work / Reopened", "Work / Reopened (2)"]);
   await page.evaluate(() => window.dispatchEvent(new Event("test-history-gap")));
-  await expect(page.getByText("History is incomplete; earlier periods may change as sync continues.")).toBeVisible();
+  await expect(page.getByText("History is incomplete; earlier periods may change or be omitted as sync continues.")).toBeVisible();
   await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[]; y: number[] }[] }).data[0].x[0])).toBe("2026-10-12");
   await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[]; y: number[] }[] }).data[0].y[0])).toBe(7);
   await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { x: string[] }[] }).data[0].x.at(-1))).toBe("2026-10-20");
