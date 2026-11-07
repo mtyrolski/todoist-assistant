@@ -85,6 +85,16 @@ final class TodoistClient {
                   : "Saved history cannot be verified for this token.")
               + " Disconnect to remove saved data before switching accounts.");
     JSONObject baseline = sameAccount ? previous : new JSONObject();
+    String savedActivity = baseline.optString("activitySyncedAt", "");
+    if (savedActivity.isEmpty() || savedActivity.equals("null"))
+      savedActivity = baseline.optString("syncedAt", "");
+    Instant lastActivity = parseInstant(savedActivity, null);
+    if (baseline.has("syncedAt") && lastActivity == null)
+      throw new HttpTransport.Failure(
+          "The saved activity sync time is invalid. Saved history is unchanged.");
+    if (lastActivity != null && lastActivity.isAfter(started))
+      throw new HttpTransport.Failure(
+          "Device date and time are earlier than the saved activity sync. Correct the device clock and retry; saved history is unchanged.");
     JSONObject data = new JSONObject();
     data.put("userId", userId);
     if (baseline.has("adjustments")) data.put("adjustments", baseline.getJSONObject("adjustments"));
@@ -92,7 +102,8 @@ final class TodoistClient {
     data.put("tasks", list("tasks", "Loading active tasks"));
     JSONArray archived = new JSONArray();
     String namesSynced = baseline.optString("projectNamesSyncedAt", "1970-01-01T00:00:00Z");
-    if (Duration.between(Instant.parse(namesSynced), started).toHours() >= 24) {
+    Instant lastNames = parseInstant(namesSynced, Instant.EPOCH);
+    if (lastNames.isAfter(started) || Duration.between(lastNames, started).toHours() >= 24) {
       try {
         archived = list("projects/archived", "Loading archived project names");
         namesSynced = started.toString();
@@ -128,9 +139,7 @@ final class TodoistClient {
     if (joined.isAfter(started)) joined = started;
     Instant historyStart = parseInstant(baseline.optString("historyStart"), started);
     if (historyStart.isAfter(started)) historyStart = started;
-    Instant activitySyncedAt =
-        parseInstant(
-            baseline.optString("activitySyncedAt", baseline.optString("syncedAt")), started);
+    Instant activitySyncedAt = lastActivity == null ? started : lastActivity;
     boolean complete = baseline.optBoolean("historyComplete");
     boolean repairing = baseline.optBoolean("historyIdRepair");
     if (!rounded.isEmpty() && !repairing) {
@@ -179,7 +188,9 @@ final class TodoistClient {
               && (!baseline.has("syncedAt") || baseline.optBoolean("activityUnavailable")));
       data.put(
           "activityWarning",
-          "Activity access is unavailable for this account. Tasks and projects are saved; completion history was not refreshed.");
+          fetchedActivity
+              ? "Some activity was refreshed, but older history is unavailable for this account."
+              : "Activity access is unavailable for this account. Tasks and projects are saved; completion history was not refreshed.");
     }
     data.put("activities", new JSONArray(merged.values()));
     discardReopenedParents(known, archived, baseline, merged.values());
@@ -213,13 +224,16 @@ final class TodoistClient {
                   + encode(to.toString()),
               label);
       Map<String, Integer> candidates = new HashMap<>();
-      if (!rounded.isEmpty())
+      if (!rounded.isEmpty()) {
+        Set<String> seenIds = new HashSet<>();
         for (int i = 0; i < fetched.length(); i++) {
           JSONObject item = fetched.getJSONObject(i);
+          if (!seenIds.add(requiredId(item, "id"))) continue;
           String identity = roundedIdentity(item);
           if (identity != null && rounded.containsKey(identity))
             candidates.merge(identity, 1, Integer::sum);
         }
+      }
       for (int i = 0; i < fetched.length(); i++) {
         JSONObject item = fetched.getJSONObject(i);
         String id = requiredId(item, "id");
@@ -240,7 +254,10 @@ final class TodoistClient {
 
   private static String requiredId(JSONObject item, String key) throws org.json.JSONException {
     Object value = item.get(key);
-    if (!(value instanceof String) && !(value instanceof Number))
+    if ((!(value instanceof String) && !(value instanceof Number))
+        || value instanceof Float
+        || value instanceof Double
+        || value instanceof java.math.BigDecimal)
       throw new org.json.JSONException("Invalid identifier: " + key);
     String id = String.valueOf(value);
     if (id.trim().isEmpty()) throw new org.json.JSONException("Missing identifier: " + key);

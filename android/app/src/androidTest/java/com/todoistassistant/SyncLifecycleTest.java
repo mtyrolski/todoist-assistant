@@ -1031,6 +1031,109 @@ public class SyncLifecycleTest {
   }
 
   @Test
+  public void offlineRetryKeepsHistoryAndMergesAnotherClientsActivityOnce() throws Exception {
+    class Remote extends Fake {
+      volatile boolean offline;
+      volatile int revision;
+      final AtomicInteger userRequests = new AtomicInteger();
+      final String older = java.time.Instant.now().minusSeconds(90).toString();
+      final String newer = java.time.Instant.now().minusSeconds(30).toString();
+
+      JSONObject event(String id, String date) throws Exception {
+        return new JSONObject()
+            .put("id", id)
+            .put("object_type", "item")
+            .put("object_id", "task-" + id)
+            .put("event_type", "completed")
+            .put("event_date", date)
+            .put("parent_project_id", "project");
+      }
+
+      @Override
+      public JSONObject get(String path)
+          throws java.io.IOException, org.json.JSONException, InterruptedException {
+        if (offline) throw new java.net.UnknownHostException("offline");
+        if (path.equals("user")) {
+          userRequests.incrementAndGet();
+          return new JSONObject()
+              .put("id", "test-owner")
+              .put("joined_at", java.time.Instant.now().minusSeconds(86400).toString());
+        }
+        if (path.startsWith("activities")) {
+          try {
+            JSONObject first = event("older", older);
+            JSONArray rows = new JSONArray().put(first).put(first);
+            if (revision > 0) rows.put(event("newer", newer));
+            return new JSONObject().put("results", rows).put("next_cursor", JSONObject.NULL);
+          } catch (Exception invalid) {
+            throw new org.json.JSONException("Invalid test activity");
+          }
+        }
+        return super.get(path);
+      }
+    }
+    Remote remote = new Remote();
+    start(remote);
+    CountDownLatch initial = new CountDownLatch(1),
+        failed = new CountDownLatch(1),
+        refreshed = new CountDownLatch(1);
+    AtomicInteger successful = new AtomicInteger();
+    Observer<DashboardViewModel.State> changes =
+        value -> {
+          if (!value.syncing && value.model != null && value.message.startsWith("Sync complete")) {
+            if (successful.incrementAndGet() == 1) initial.countDown();
+            else refreshed.countDown();
+          }
+          if (!value.syncing
+              && (value.message.contains("unreachable") || value.message.contains("No network")))
+            failed.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(changes);
+                model.sync("test-token");
+              });
+      assertTrue(initial.await(20, TimeUnit.SECONDS));
+      SnapshotStore history = new SnapshotStore(context);
+      JSONObject before = history.load("test-token");
+      assertEquals(1, before.getJSONArray("activities").length());
+      remote.offline = true;
+      InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync(""));
+      assertTrue(failed.await(15, TimeUnit.SECONDS));
+      assertEquals(before.toString(), history.load("test-token").toString());
+      assertEquals("older", state.get().model.recent.get(0).id);
+
+      remote.offline = false;
+      remote.revision = 1; // Another client completed a task while this device was offline.
+      int requestsBeforeRetry = remote.userRequests.get();
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.sync("");
+                model.sync("");
+                model.sync("");
+              });
+      assertTrue(refreshed.await(20, TimeUnit.SECONDS));
+      assertEquals(requestsBeforeRetry + 1, remote.userRequests.get());
+      assertEquals(2, history.load("test-token").getJSONArray("activities").length());
+      assertEquals("newer", state.get().model.recent.get(0).id);
+      assertEquals("older", state.get().model.recent.get(1).id);
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(changes));
+    }
+    detach();
+    remote.offline = true;
+    attach(token -> remote);
+    assertNotNull(state.get().model);
+    assertEquals(2, state.get().model.recent.size());
+    assertEquals(
+        2, new SnapshotStore(context).load("test-token").getJSONArray("activities").length());
+  }
+
+  @Test
   public void incompatibleResponseIsNotReportedAsEmptySuccess() throws Exception {
     Fake broken =
         new Fake() {

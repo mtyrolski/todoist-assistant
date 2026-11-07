@@ -117,6 +117,82 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void clockMovingBackwardsPreservesSavedHistoryAndRequiresClockCorrection()
+      throws Exception {
+    JSONObject old = baseline().put("activitySyncedAt", "2026-11-04T12:00:00Z");
+    String unchanged = old.toString();
+    Fake fake = new Fake();
+    HttpTransport.Failure failure =
+        assertThrows(
+            HttpTransport.Failure.class,
+            () -> new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(old, false));
+    assertTrue(failure.getMessage().contains("device clock"));
+    assertTrue(fake.paths.stream().noneMatch(path -> path.startsWith("activities")));
+    assertEquals(unchanged, old.toString());
+    Clock corrected = Clock.fixed(Instant.parse("2026-11-05T12:00:00Z"), CLOCK.getZone());
+    JSONObject recovered = new TodoistClient(fake, corrected, ignored -> {}).snapshot(old, false);
+    assertEquals(corrected.instant().toString(), recovered.getString("activitySyncedAt"));
+    assertEquals(2, recovered.getJSONArray("activities").length());
+  }
+
+  @Test
+  public void futureArchivedNamesTimestampDoesNotSuppressMetadataRefresh() throws Exception {
+    JSONObject old = baseline().put("projectNamesSyncedAt", "2026-11-04T12:00:00Z");
+    Fake fake = new Fake();
+    JSONObject refreshed = new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(old, false);
+    assertTrue(fake.paths.stream().anyMatch(path -> path.startsWith("projects/archived?")));
+    assertEquals(CLOCK.instant().toString(), refreshed.getString("projectNamesSyncedAt"));
+  }
+
+  @Test
+  public void invalidSavedActivityWatermarkDoesNotBecomeSuccessfulEmptyHistory() throws Exception {
+    JSONObject old = baseline().put("activitySyncedAt", "not-an-instant");
+    String unchanged = old.toString();
+    Fake fake = new Fake();
+    HttpTransport.Failure failure =
+        assertThrows(
+            HttpTransport.Failure.class,
+            () -> new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(old, false));
+    assertTrue(failure.getMessage().contains("saved activity sync time is invalid"));
+    assertTrue(fake.paths.stream().noneMatch(path -> path.startsWith("activities")));
+    assertEquals(unchanged, old.toString());
+  }
+
+  @Test
+  public void offlineRefreshPreservesHistoryAndLaterSyncMergesAnotherClientsEventsOnce()
+      throws Exception {
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws IOException, org.json.JSONException, InterruptedException {
+            if (path.startsWith("activities")) {
+              if (failActivity) throw new IOException("offline");
+              JSONObject newEvent = event("other-client", "2026-11-01T10:00:00Z");
+              return page(new JSONArray().put(newEvent).put(newEvent), JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    JSONObject old = baseline();
+    String unchanged = old.toString();
+    fake.failActivity = true;
+    assertThrows(
+        IOException.class,
+        () -> new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(old, false));
+    assertEquals(unchanged, old.toString());
+    fake.failActivity = false;
+    TodoistClient client = new TodoistClient(fake, CLOCK, ignored -> {});
+    JSONObject recovered = client.snapshot(old, false);
+    JSONObject repeated = client.snapshot(recovered, false);
+    assertEquals(2, recovered.getJSONArray("activities").length());
+    assertEquals(2, repeated.getJSONArray("activities").length());
+    assertEquals(
+        "other-client", repeated.getJSONArray("activities").getJSONObject(1).getString("id"));
+    assertEquals(CLOCK.instant().toString(), repeated.getString("activitySyncedAt"));
+  }
+
+  @Test
   public void switchingAccountsRequiresExplicitRemovalOfSavedHistory() throws Exception {
     Fake fake = new Fake();
     fake.user = "someone-else";
@@ -393,7 +469,8 @@ public class TodoistClientTest {
         new JSONObject[] {
           new JSONObject().put("results", new JSONArray()),
           page(new JSONArray(), new JSONObject()),
-          page(new JSONArray().put(new JSONObject().put("id", JSONObject.NULL)), JSONObject.NULL)
+          page(new JSONArray().put(new JSONObject().put("id", JSONObject.NULL)), JSONObject.NULL),
+          page(new JSONArray().put(new JSONObject().put("id", 1.5)), JSONObject.NULL)
         }) {
       Fake fake =
           new Fake() {
@@ -500,6 +577,28 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void duplicateServerPagesDoNotMakeAnUnambiguousLegacyIdRepairAmbiguous() throws Exception {
+    String exact = "1234567890123456789012345678901234567";
+    JSONObject event = event(exact, "2026-10-31T10:00:00Z").put("object_id", "task");
+    JSONObject rounded = new JSONObject(event.toString()).put("id", Double.parseDouble(exact));
+    JSONObject previous = baseline().put("activities", new JSONArray().put(rounded));
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws IOException, org.json.JSONException, InterruptedException {
+            if (path.startsWith("activities"))
+              return page(new JSONArray().put(event).put(event), JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    JSONObject refreshed = new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(previous, false);
+    assertEquals(1, refreshed.getJSONArray("activities").length());
+    assertEquals(exact, refreshed.getJSONArray("activities").getJSONObject(0).getString("id"));
+    assertFalse(refreshed.has("activityWarning"));
+  }
+
+  @Test
   public void ambiguousRoundedIdsAreKeptInsteadOfDiscardingAnEvent() throws Exception {
     String first = "1234567890123456789012345678901234567";
     String second = "1234567890123456789012345678901234568";
@@ -569,6 +668,31 @@ public class TodoistClientTest {
     assertEquals(
         previous.getString("activitySyncedAt"),
         MobilePayload.model(new DashboardModel(next, CLOCK)).getString("activitySyncedAt"));
+  }
+
+  @Test
+  public void deniedBackfillReportsRecentActivityAsRefreshedButHistoryIncomplete()
+      throws Exception {
+    JSONObject previous =
+        baseline().put("historyComplete", false).put("historyStart", "2026-10-01T00:00:00Z");
+    Fake fake =
+        new Fake() {
+          int activityRequests;
+
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.startsWith("activities") && ++activityRequests == 2)
+              throw new DataAccessException("forbidden");
+            return super.get(path);
+          }
+        };
+    JSONObject next = new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(previous, true);
+    assertEquals(CLOCK.instant().toString(), next.getString("activitySyncedAt"));
+    assertFalse(next.getBoolean("historyComplete"));
+    assertFalse(next.getBoolean("activityUnavailable"));
+    assertTrue(next.getString("activityWarning").contains("Some activity was refreshed"));
+    assertEquals(2, next.getJSONArray("activities").length());
   }
 
   @Test
