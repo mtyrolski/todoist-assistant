@@ -259,9 +259,11 @@ final class PlotData {
       if (date != null && !date.isAfter(today)) added.put(id, date);
     }
     hints.putAll(active);
+    int[] totals = new int[4];
+    for (int value : active.values()) totals[4 - value]++;
     LocalDate boundary = historyStart == null || historyStart.isAfter(today) ? today : historyStart;
     events.removeIf(item -> item.day.isAfter(today) || item.day.isBefore(boundary));
-    if (events.isEmpty()) return new JSONArray().put(counts(today, active));
+    if (events.isEmpty()) return new JSONArray().put(counts(today, active.size(), totals));
     events.sort(Comparator.comparing((Item item) -> item.time).reversed());
     for (Item item : events) {
       String id = item.data.optString("object_id"), kind = item.data.optString("event_type");
@@ -293,7 +295,7 @@ final class PlotData {
     for (var entry : byDay.entrySet()) {
       LocalDate day = entry.getKey();
       while (!cursor.isBefore(day)) {
-        rows.put(cursor, counts(cursor, active));
+        rows.put(cursor, counts(cursor, active.size(), totals));
         cursor = cursor.minusDays(1);
       }
       for (Item event : entry.getValue()) {
@@ -304,23 +306,33 @@ final class PlotData {
         if ((kind.equals("completed") || kind.equals("deleted"))
             && !active.containsKey(id)
             && added.containsKey(id))
-          active.put(id, priority(extra.opt("priority"), hints.getOrDefault(id, 1)));
-        else if (kind.equals("added") || kind.equals("uncompleted")) active.remove(id);
+          setPriority(
+              active, totals, id, priority(extra.opt("priority"), hints.getOrDefault(id, 1)));
+        else if (kind.equals("added") || kind.equals("uncompleted")) removeTask(active, totals, id);
         else if (kind.equals("updated") && extra.has("last_priority") && active.containsKey(id))
-          active.put(id, priority(extra.opt("last_priority"), 1));
+          setPriority(active, totals, id, priority(extra.opt("last_priority"), 1));
       }
-      for (String id : addedByDay.getOrDefault(day, Set.of())) active.remove(id);
+      for (String id : addedByDay.getOrDefault(day, Set.of())) removeTask(active, totals, id);
     }
-    if (rows.isEmpty()) rows.put(today, counts(today, active));
+    if (rows.isEmpty()) rows.put(today, counts(today, active.size(), totals));
     return new JSONArray(rows.values());
   }
 
-  private static JSONObject counts(LocalDate day, Map<String, Integer> active) throws Exception {
-    int[] counts = new int[4];
-    for (int priority : active.values()) counts[4 - priority]++;
+  private static void setPriority(Map<String, Integer> active, int[] totals, String id, int value) {
+    Integer previous = active.put(id, value);
+    if (previous != null) totals[4 - previous]--;
+    totals[4 - value]++;
+  }
+
+  private static void removeTask(Map<String, Integer> active, int[] totals, String id) {
+    Integer previous = active.remove(id);
+    if (previous != null) totals[4 - previous]--;
+  }
+
+  private static JSONObject counts(LocalDate day, int size, int[] counts) throws Exception {
     return new JSONObject()
         .put("date", day.toString())
-        .put("total", active.size())
+        .put("total", size)
         .put("p1", counts[0])
         .put("p2", counts[1])
         .put("p3", counts[2])

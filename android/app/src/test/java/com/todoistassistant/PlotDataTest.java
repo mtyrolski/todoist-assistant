@@ -262,6 +262,83 @@ public class PlotDataTest {
   }
 
   @Test
+  public void taskCountsHandlePriorityChangesAndReopenedTasksAcrossDays() throws Exception {
+    JSONArray tasks = new JSONArray().put(new JSONObject().put("id", "active").put("priority", 4));
+    JSONArray events =
+        new JSONArray()
+            .put(event("add", "added", "2026-10-28T08:00:00Z").put("object_id", "active"))
+            .put(
+                event("priority", "updated", "2026-10-29T08:00:00Z")
+                    .put("object_id", "active")
+                    .put("extra_data", new JSONObject().put("last_priority", 2)))
+            .put(event("add-old", "added", "2026-10-28T09:00:00Z").put("object_id", "old"))
+            .put(
+                event("done-old", "completed", "2026-10-30T08:00:00Z")
+                    .put("object_id", "old")
+                    .put("extra_data", new JSONObject().put("priority", 3)));
+    JSONObject snapshot =
+        new JSONObject()
+            .put("projects", new JSONArray())
+            .put("tasks", tasks)
+            .put("activities", events)
+            .put("syncedAt", CLOCK.instant().toString())
+            .put("historyStart", "2026-10-27T00:00:00Z");
+    JSONArray counts = new DashboardModel(snapshot, CLOCK).plotData.getJSONArray("taskCounts");
+    assertEquals(1, row(counts, "2026-11-01").getInt("p1"));
+    assertEquals(2, row(counts, "2026-10-29").getInt("total"));
+    assertEquals(1, row(counts, "2026-10-29").getInt("p1"));
+    assertEquals(1, row(counts, "2026-10-29").getInt("p2"));
+    assertEquals(1, row(counts, "2026-10-28").getInt("p3"));
+  }
+
+  @Test
+  public void taskCountsPreserveSameDayAndMissingCreationBoundaries() throws Exception {
+    JSONArray events =
+        new JSONArray()
+            .put(event("add", "added", "2026-10-29T08:00:00Z").put("object_id", "same"))
+            .put(event("done", "completed", "2026-10-29T09:00:00Z").put("object_id", "same"))
+            .put(event("unknown", "completed", "2026-10-28T09:00:00Z").put("object_id", "unknown"));
+    JSONObject snapshot =
+        new JSONObject()
+            .put("projects", new JSONArray())
+            .put(
+                "tasks",
+                new JSONArray().put(new JSONObject().put("id", "undated").put("priority", 4)))
+            .put("activities", events)
+            .put("syncedAt", CLOCK.instant().toString())
+            .put("historyStart", "2026-10-01T00:00:00Z");
+    JSONArray counts = new DashboardModel(snapshot, CLOCK).plotData.getJSONArray("taskCounts");
+    for (String date : new String[] {"2026-10-28", "2026-10-29", "2026-11-01"}) {
+      JSONObject value = row(counts, date);
+      assertEquals(1, value.getInt("total"));
+      assertEquals(1, value.getInt("p1"));
+    }
+  }
+
+  @Test
+  public void taskCountHistoryRemainsCorrectForManyTasksAndYears() throws Exception {
+    JSONArray tasks = new JSONArray();
+    for (int i = 0; i < 6000; i++)
+      tasks.put(new JSONObject().put("id", "task-" + i).put("priority", (i % 4) + 1));
+    JSONObject snapshot =
+        new JSONObject()
+            .put("projects", new JSONArray())
+            .put("tasks", tasks)
+            .put("activities", new JSONArray().put(event("old", "updated", "2016-11-01T00:00:00Z")))
+            .put("syncedAt", CLOCK.instant().toString())
+            .put("historyStart", "2016-11-01T00:00:00Z")
+            .put("historyComplete", true);
+    JSONArray counts = new DashboardModel(snapshot, CLOCK).plotData.getJSONArray("taskCounts");
+    assertEquals(3653, counts.length());
+    for (String date : new String[] {"2016-11-01", "2026-11-01"}) {
+      JSONObject value = row(counts, date);
+      assertEquals(6000, value.getInt("total"));
+      for (String priority : new String[] {"p1", "p2", "p3", "p4"})
+        assertEquals(1500, value.getInt(priority));
+    }
+  }
+
+  @Test
   public void incompleteCoverageStartsAtTheFirstWholeLocalDayAcrossDst() throws Exception {
     Clock afterDst = Clock.fixed(Instant.parse("2026-10-27T12:00:00Z"), CLOCK.getZone());
     JSONObject snapshot =
