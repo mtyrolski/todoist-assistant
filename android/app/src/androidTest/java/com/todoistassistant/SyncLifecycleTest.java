@@ -104,7 +104,9 @@ public class SyncLifecycleTest {
     CountDownLatch failure = new CountDownLatch(1);
     Observer<DashboardViewModel.State> failed =
         value -> {
-          if (!value.syncing && value.message.contains("offline")) failure.countDown();
+          if (!value.syncing
+              && (value.message.contains("unreachable") || value.message.contains("No network")))
+            failure.countDown();
         };
     try {
       InstrumentationRegistry.getInstrumentation()
@@ -117,9 +119,125 @@ public class SyncLifecycleTest {
       assertFalse(state.get().connected);
       assertNull(state.get().model);
       assertEquals("", new TokenStore(context).load());
+      android.net.ConnectivityManager manager =
+          context.getSystemService(android.net.ConnectivityManager.class);
+      android.net.Network network = manager.getActiveNetwork();
+      android.net.NetworkCapabilities capabilities =
+          network == null ? null : manager.getNetworkCapabilities(network);
+      boolean online =
+          capabilities != null
+              && capabilities.hasCapability(
+                  android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+      assertTrue(state.get().message.contains(online ? "unreachable" : "No network"));
     } finally {
       InstrumentationRegistry.getInstrumentation()
           .runOnMainSync(() -> model.state().removeObserver(failed));
+    }
+  }
+
+  @Test
+  public void savedAccountSurvivesOfflineRestartAndRetry() throws Exception {
+    class Flaky extends Fake {
+      volatile boolean offline;
+
+      @Override
+      public JSONObject get(String path) throws Exception {
+        if (offline) throw new java.net.UnknownHostException("private-test-token");
+        return super.get(path);
+      }
+    }
+    Flaky fake = new Flaky();
+    start(fake);
+    CountDownLatch saved = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> savedObserver =
+        value -> {
+          if (!value.syncing && value.model != null && value.message.startsWith("Sync complete"))
+            saved.countDown();
+        };
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().observeForever(savedObserver);
+              model.sync("private-test-token");
+            });
+    assertTrue(saved.await(15, TimeUnit.SECONDS));
+    fake.offline = true;
+    CountDownLatch offline = new CountDownLatch(1);
+    InstrumentationRegistry.getInstrumentation()
+        .runOnMainSync(
+            () -> {
+              model.state().removeObserver(savedObserver);
+              model.state().removeObserver(observer);
+              model.onCleared();
+              model =
+                  new DashboardViewModel(
+                      (Application) context.getApplicationContext(), token -> fake);
+              observer =
+                  value -> {
+                    state.set(value);
+                    if (!value.syncing
+                        && (value.message.contains("unreachable")
+                            || value.message.contains("No network"))) offline.countDown();
+                  };
+              model.state().observeForever(observer);
+            });
+    assertTrue(offline.await(15, TimeUnit.SECONDS));
+    assertNotNull(state.get().model);
+    assertTrue(state.get().connected);
+    assertFalse(state.get().message.contains("private-test-token"));
+    assertEquals("private-test-token", new TokenStore(context).load());
+
+    fake.offline = false;
+    CountDownLatch recovered = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> recoveredObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync complete")) recovered.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(recoveredObserver);
+                model.sync("");
+              });
+      assertTrue(recovered.await(15, TimeUnit.SECONDS));
+      assertEquals(
+          "test-owner", new SnapshotStore(context).load("private-test-token").getString("userId"));
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(recoveredObserver));
+    }
+  }
+
+  @Test
+  public void incompatibleResponseIsNotReportedAsEmptySuccess() throws Exception {
+    Fake broken =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            throw new org.json.JSONException("private-test-token");
+          }
+        };
+    start(broken);
+    CountDownLatch failed = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> failedObserver =
+        value -> {
+          if (!value.syncing && value.message.contains("incompatible response")) failed.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(failedObserver);
+                model.sync("private-test-token");
+              });
+      assertTrue(failed.await(10, TimeUnit.SECONDS));
+      assertNull(state.get().model);
+      assertFalse(state.get().message.contains("private-test-token"));
+      assertEquals("", new TokenStore(context).load());
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(failedObserver));
     }
   }
 

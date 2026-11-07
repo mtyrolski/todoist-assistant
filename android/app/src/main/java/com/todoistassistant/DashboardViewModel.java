@@ -407,18 +407,29 @@ public final class DashboardViewModel extends AndroidViewModel {
         });
   }
 
-  private static String errorMessage(Exception exception) {
-    if (exception instanceof java.net.UnknownHostException
-        || exception instanceof java.net.ConnectException)
-      return "You're offline or Todoist is unreachable. Saved data is still available; try Sync"
-          + " when connected.";
+  private String errorMessage(Exception exception) {
     if (exception instanceof java.net.SocketTimeoutException)
       return "The connection timed out. Saved data is unchanged; try again on a stable connection.";
+    if (exception instanceof java.net.UnknownHostException
+        || exception instanceof java.net.SocketException) {
+      android.net.ConnectivityManager manager =
+          getApplication().getSystemService(android.net.ConnectivityManager.class);
+      android.net.Network network = manager == null ? null : manager.getActiveNetwork();
+      android.net.NetworkCapabilities capabilities =
+          network == null ? null : manager.getNetworkCapabilities(network);
+      if (capabilities == null
+          || !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET))
+        return "No network connection. Saved data is unchanged; reconnect and retry sync.";
+      return "Todoist is unreachable. Saved data is unchanged; retry sync when it is available.";
+    }
     if (exception instanceof InterruptedException || exception instanceof SyncCancelledException)
       return "Sync cancelled. Saved data is unchanged.";
-    return exception.getMessage() == null
-        ? "Sync failed. Saved data is unchanged. Please retry."
-        : exception.getMessage();
+    if (exception instanceof HttpTransport.Failure || exception instanceof DataAccessException)
+      return exception.getMessage();
+    if (exception instanceof org.json.JSONException
+        || exception instanceof java.time.format.DateTimeParseException)
+      return "Todoist returned an incompatible response. Saved data is unchanged; please retry.";
+    return "Sync failed. Saved data is unchanged. Please retry.";
   }
 
   @Override

@@ -8,7 +8,16 @@ import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 /** HTTPS-only transport with bounded retries and immediate connection cancellation. */
-final class HttpTransport implements ApiTransport {
+class HttpTransport implements ApiTransport {
+  private static final URI BASE = URI.create("https://api.todoist.com/api/v1/");
+  private static final int ATTEMPTS = 3;
+
+  static final class Failure extends IOException {
+    Failure(String message) {
+      super(message);
+    }
+  }
+
   private final String token;
   private TodoistClient.Progress progress = ignored -> {};
   private volatile boolean cancelled;
@@ -25,39 +34,53 @@ final class HttpTransport implements ApiTransport {
 
   @Override
   public JSONObject get(String path) throws Exception {
-    for (int attempt = 0; attempt < 5; attempt++) {
+    URI endpoint;
+    try {
+      URI relative = URI.create(path);
+      if (relative.isAbsolute()
+          || relative.getRawAuthority() != null
+          || relative.getFragment() != null
+          || relative.getPath() == null
+          || relative.getPath().startsWith("/")
+          || java.util.Arrays.asList(relative.getPath().split("/", -1)).contains(".."))
+        throw new IllegalArgumentException();
+      endpoint = BASE.resolve(relative);
+    } catch (IllegalArgumentException invalid) {
+      throw new Failure("Invalid Todoist request. Please retry or update the app.");
+    }
+    for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
       checkCancelled();
-      HttpURLConnection current =
-          (HttpURLConnection)
-              URI.create("https://api.todoist.com/api/v1/" + path).toURL().openConnection();
+      HttpURLConnection current = openConnection(endpoint);
       connection = current;
-      current.setConnectTimeout(15000);
-      current.setReadTimeout(30000);
+      current.setConnectTimeout(10000);
+      current.setReadTimeout(15000);
       current.setInstanceFollowRedirects(false);
       current.setRequestProperty("Authorization", "Bearer " + token);
       current.setRequestProperty("Accept", "application/json");
       try {
         int status = current.getResponseCode();
         checkCancelled();
-        if ((status == 429 || status >= 500) && attempt < 4) {
+        if ((status == 429 || status >= 500) && attempt < ATTEMPTS - 1) {
           long delay = retryDelay(current.getHeaderField("Retry-After"), attempt);
-          current.disconnect();
-          progress.update(
-              "Todoist is temporarily unavailable · retrying in " + (delay / 1000) + "s");
-          Thread.sleep(delay);
-          continue;
+          if (delay <= 30000) {
+            current.disconnect();
+            progress.update(
+                "Todoist is temporarily unavailable · retrying in " + (delay / 1000) + "s");
+            Thread.sleep(delay);
+            continue;
+          }
         }
         if (status == 401)
-          throw new IOException(
+          throw new Failure(
               "Your Todoist token was rejected. Enter a valid token in Control Panel.");
         if (status == 403)
           throw new DataAccessException(
               "Todoist denied access to this data. Check your account permissions and plan.");
         if (status == 429)
-          throw new IOException(
+          throw new Failure(
               "Todoist is limiting requests. Wait a little and retry; saved data is available offline.");
         if (status != 200)
-          throw new IOException("Todoist is unavailable (HTTP " + status + "). Try again later.");
+          throw new Failure("Todoist is unavailable (HTTP " + status + "). Try again later.");
         try (var stream = current.getInputStream();
             var output = new ByteArrayOutputStream()) {
           byte[] buffer = new byte[8192];
@@ -65,14 +88,15 @@ final class HttpTransport implements ApiTransport {
           while ((read = stream.read(buffer)) != -1) {
             checkCancelled();
             if (output.size() + read > 16 * 1024 * 1024)
-              throw new IOException("Todoist returned an unexpectedly large page.");
+              throw new Failure("Todoist returned an unexpectedly large page.");
             output.write(buffer, 0, read);
           }
           return new JSONObject(protectIdentifiers(output.toString(StandardCharsets.UTF_8.name())));
         }
       } catch (IOException exception) {
         checkCancelled();
-        if (exception instanceof java.net.SocketTimeoutException && attempt < 4) continue;
+        if (exception instanceof java.net.SocketTimeoutException && attempt < ATTEMPTS - 1)
+          continue;
         throw exception;
       } finally {
         current.disconnect();
@@ -80,6 +104,10 @@ final class HttpTransport implements ApiTransport {
       }
     }
     throw new IOException("Todoist did not respond. Try again when your connection is stable.");
+  }
+
+  HttpURLConnection openConnection(URI endpoint) throws IOException {
+    return (HttpURLConnection) endpoint.toURL().openConnection();
   }
 
   static long retryDelay(String retryAfter, int attempt) {
