@@ -6,7 +6,7 @@ const expect = baseExpect.configure({ timeout: 20000 });
 const pkg = "com.todoistassistant.preview";
 let device;
 before(async () => {
-  const devices = await _android.devices();
+  const devices = await _android.devices({ port: Number(process.env.ANDROID_ADB_SERVER_PORT || 5037) });
   device = devices.find(
     (d) =>
       d.serial().startsWith("emulator-") &&

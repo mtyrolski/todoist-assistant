@@ -83,6 +83,47 @@ public class SyncLifecycleTest {
   }
 
   @Test
+  public void startsDisconnectedWhenNoCredentialsAreSaved() throws Exception {
+    start(new Fake());
+    assertFalse(state.get().loading);
+    assertFalse(state.get().syncing);
+    assertFalse(state.get().connected);
+    assertNull(state.get().model);
+  }
+
+  @Test
+  public void unreachableTodoistReturnsToDisconnectedState() throws Exception {
+    Fake offline =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            throw new java.net.UnknownHostException("offline");
+          }
+        };
+    start(offline);
+    CountDownLatch failure = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> failed =
+        value -> {
+          if (!value.syncing && value.message.contains("offline")) failure.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(failed);
+                model.sync("example-token");
+              });
+      assertTrue(failure.await(10, TimeUnit.SECONDS));
+      assertFalse(state.get().connected);
+      assertNull(state.get().model);
+      assertEquals("", new TokenStore(context).load());
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(failed));
+    }
+  }
+
+  @Test
   public void cancelStopsNetworkWorkWithoutSavingAPartialAccount() throws Exception {
     Fake fake = new Fake();
     fake.block = true;

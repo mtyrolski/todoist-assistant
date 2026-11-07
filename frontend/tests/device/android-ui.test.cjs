@@ -8,7 +8,7 @@ const pkg = "com.todoistassistant";
 const screenshots = `frontend/test-results/device/${process.env.ANDROID_SERIAL ?? "emulator"}`;
 let device, page;
 before(async () => {
-  const devices = await _android.devices();
+  const devices = await _android.devices({ port: Number(process.env.ANDROID_ADB_SERVER_PORT || 5037) });
   const emulators = devices.filter((candidate) =>
     candidate.serial().startsWith("emulator-"),
   );
