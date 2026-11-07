@@ -31,6 +31,11 @@ export function ProjectGrouping({ model, enabled, busy, message, draft, onDraftC
     ...Object.values(mappings),
     target,
   ].filter(Boolean))].sort((a, b) => a.localeCompare(b)), [hierarchy, mappings, archivedParents, target]);
+  const nameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const project of hierarchy) counts.set(project.name, (counts.get(project.name) ?? 0) + 1);
+    return counts;
+  }, [hierarchy]);
   const matchingProjects = hierarchy.filter((project) => project.name === source);
   const roots = [...new Set(matchingProjects.map((project) => project.rootName).filter(Boolean))];
   const existing = savedMapping(source);
@@ -88,7 +93,7 @@ export function ProjectGrouping({ model, enabled, busy, message, draft, onDraftC
             <select className="select" value={source} onChange={(event) => change({ source: event.target.value, target: savedMapping(event.target.value) ?? "" })} disabled={!editable || !sources.length}>
               <option value="">Select a project</option>
               {sources.filter((name) => name === source || name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map((name) => {
-                const matches = hierarchy.filter((project) => project.name === name).length;
+                const matches = nameCounts.get(name) ?? 0;
                 return <option key={name} value={name}>{name}{matches > 1 ? ` (${matches} projects)` : matches === 0 ? " (not in synced projects)" : ""}</option>;
               })}
             </select>

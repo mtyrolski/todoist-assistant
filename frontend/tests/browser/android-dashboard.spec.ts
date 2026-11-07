@@ -91,6 +91,20 @@ test.beforeEach(async ({ page }) => {
       model.activity = [];
       send();
     });
+    window.addEventListener("test-large-task-account", () => {
+      model.projects = Array.from({ length: 20 }, (_, project) => ({ id: `large-${project}`, path: `Large project ${project}` }));
+      model.tasks = Array.from({ length: 2000 }, (_, index) => ({
+        id: `task-${index}`, projectId: `large-${Math.floor(index / 100)}`, project: `Large project ${Math.floor(index / 100)}`,
+        content: `Task ${index}`, priority: 1, due: "", deadline: "", labels: [],
+      }));
+      send();
+    });
+    window.addEventListener("test-large-lifespans", () => {
+      const data = (model as typeof model & { plotData: { lifespans: { completedAt: string; seconds: number }[] } }).plotData;
+      data.lifespans = Array.from({ length: 2000 }, (_, index) => ({ completedAt: "2026-10-01", seconds: index + 1 }));
+      model.tasks.push({ id: "large-history-marker", projectId: "work", project: "Work", content: "Marker", priority: 1, due: "", deadline: "", labels: [] });
+      send();
+    });
     window.addEventListener("test-activity-freshness", () => {
       window.dispatchEvent(new Event("test-analysis"));
       const data = model as typeof model & { activitySyncedAt: string; activityTotal: number; plotData: { historyComplete: boolean } };
@@ -282,6 +296,41 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/android");
   await page.getByRole("button", { name: "Explore a demo", exact: true }).click();
   await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
+});
+
+test("large projects render task rows incrementally and search all tasks", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-large-task-account")));
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.getByText("2000 of 2000 active tasks")).toBeVisible();
+  await expect(page.locator(".mobileProject .mobileTask")).toHaveCount(0);
+  const project = page.locator(".mobileProject").filter({ hasText: "Large project 0" });
+  await project.locator("summary").click();
+  await expect(project.locator(".mobileTask")).toHaveCount(20);
+  await project.getByRole("button", { name: "Show more tasks" }).click();
+  await expect(project.locator(".mobileTask")).toHaveCount(40);
+  await page.getByRole("searchbox").fill("Task 1999");
+  await expect(page.getByText("1 of 2000 active tasks")).toBeVisible();
+  await expect(page.getByText("Task 1999", { exact: true })).toBeVisible();
+  await page.getByRole("searchbox").fill("");
+  await expect(page.getByText("2000 of 2000 active tasks")).toBeVisible();
+  await expect(project.locator(".mobileTask")).toHaveCount(40);
+});
+
+test("updating a large history outside Overview skips chart calculations", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await page.evaluate(() => {
+    const original = Math.log10;
+    Math.log10 = (value) => {
+      document.body.dataset.chartLogCalls = String(Number(document.body.dataset.chartLogCalls ?? 0) + 1);
+      return original(value);
+    };
+    window.dispatchEvent(new Event("test-large-lifespans"));
+  });
+  await expect(page.getByText("3 of 3 active tasks")).toBeVisible();
+  await expect(page.locator("body")).not.toHaveAttribute("data-chart-log-calls");
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect.poll(async () => Number(await page.locator("body").getAttribute("data-chart-log-calls"))).toBeGreaterThanOrEqual(2000);
 });
 
 test("first connection can be retried without retyping a token", async ({ page }) => {

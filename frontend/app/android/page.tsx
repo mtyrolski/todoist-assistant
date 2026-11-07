@@ -235,6 +235,7 @@ export default function AndroidDashboard() {
   const [persist, setPersist] = useState(false);
   const [controlVisited, setControlVisited] = useState(false);
   const [habitLimit, setHabitLimit] = useState(20);
+  const [projectLimits, setProjectLimits] = useState(() => new Map<string, number>());
   const [, refreshDate] = useState(0);
   useEffect(() => {
     try {
@@ -345,17 +346,17 @@ export default function AndroidDashboard() {
   const eventsKey = JSON.stringify(settings?.plotEvents ?? []);
   const figures = useMemo(
     () =>
-      model
+      model && ui.tab === "Overview"
         ? [false, true].map((cumulative) =>
             ui.granularity === "week"
               ? completionFigure(model, ui.range, JSON.parse(eventsKey), cumulative)
               : calendarCompletionFigure(model, ui.range, ui.granularity, cumulative),
           )
         : [],
-    [model, ui.range, ui.granularity, eventsKey],
+    [model, ui.tab, ui.range, ui.granularity, eventsKey],
   );
   const analysis = useMemo(() => {
-    if (!model?.plotData) return null;
+    if (ui.tab !== "Overview" || !model?.plotData) return null;
     return {
       pace: weeklyPaceFigure(model, ui.paceWindow),
       lifespan: lifespanFigure(model, ui.range, ui.lifespanAll),
@@ -364,21 +365,28 @@ export default function AndroidDashboard() {
       events: eventsFigure(model, ui.range),
       taskCounts: taskCountsFigure(model, ui.range),
     };
-  }, [model, ui.range, ui.paceWindow, ui.lifespanAll]);
+  }, [model, ui.tab, ui.range, ui.paceWindow, ui.lifespanAll]);
   const busy = state?.loading || state?.syncing;
-  const matches =
-    model?.tasks.filter(
-      (task) =>
-        (!ui.priority || task.priority === ui.priority) &&
-        `${task.content} ${task.project} ${task.labels.join(" ")}`
-          .toLowerCase()
-          .includes(ui.projectQuery.trim().toLowerCase()),
-    ) ?? [];
+  const { matches, tasksByProject } = useMemo(() => {
+    const matches: MobileModel["tasks"] = [];
+    const tasksByProject = new Map<string, MobileModel["tasks"]>();
+    if (ui.tab !== "Projects" || !model) return { matches, tasksByProject };
+    const query = ui.projectQuery.trim().toLowerCase();
+    for (const task of model.tasks) {
+      if (ui.priority && task.priority !== ui.priority) continue;
+      if (query && !`${task.content} ${task.project} ${task.labels.join(" ")}`.toLowerCase().includes(query)) continue;
+      matches.push(task);
+      const tasks = tasksByProject.get(task.projectId);
+      if (tasks) tasks.push(task);
+      else tasksByProject.set(task.projectId, [task]);
+    }
+    return { matches, tasksByProject };
+  }, [model, ui.tab, ui.priority, ui.projectQuery]);
   const activityQuery = ui.activityQuery.trim().toLowerCase();
-  const activityMatches = model?.activity.filter((event) =>
-    `${event.kind} ${event.kind === "uncompleted" ? "undone" : ""} ${event.content} ${event.project}`
+  const activityMatches = useMemo(() => ui.tab !== "Activity" ? [] : model?.activity.filter((event) =>
+    !activityQuery || `${event.kind} ${event.kind === "uncompleted" ? "undone" : ""} ${event.content} ${event.project}`
       .toLowerCase().includes(activityQuery),
-  ) ?? [];
+  ) ?? [], [model, ui.tab, activityQuery]);
   const activityTruncated = Boolean(model && Number.isSafeInteger(model.activityTotal) && model.activityTotal! > model.activity.length);
   const counts = model?.weeklyProjects[ui.week + model.weeks.length - 9] ?? {};
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
@@ -462,6 +470,7 @@ export default function AndroidDashboard() {
       setStorageInvalid(false);
       setPersist(true);
       setControlVisited(false);
+      setProjectLimits(new Map());
       hiddenPlotSeries.clear();
       currentUi.current = INITIAL_UI;
       setUi(INITIAL_UI);
@@ -859,15 +868,15 @@ export default function AndroidDashboard() {
           </p>
           {model.projects.length === 0 && <p className="muted">No projects are available on this device.</p>}
           {model.projects.map((project) => {
-            const tasks = matches.filter(
-              (task) => task.projectId === project.id,
-            );
+            const tasks = tasksByProject.get(project.id) ?? [];
+            const open = Boolean(ui.projectQuery || ui.priority) || ui.openProjects.includes(project.id);
+            const limit = projectLimits.get(project.id) ?? 20;
             if (!tasks.length && (ui.projectQuery || ui.priority)) return null;
             return (
               <details
                 key={project.id}
                 className="card mobileProject"
-                open={Boolean(ui.projectQuery || ui.priority) || ui.openProjects.includes(project.id)}
+                open={open}
                 onToggle={(event) => {
                   if (ui.projectQuery || ui.priority) return;
                   const opened = event.currentTarget.open;
@@ -880,8 +889,8 @@ export default function AndroidDashboard() {
                   <span>{project.path}</span>
                   <span className="pill pill-neutral">{tasks.length}</span>
                 </summary>
-                {tasks.length ? (
-                  tasks.map((task) => (
+                {open && (tasks.length ? (
+                  <>{tasks.slice(0, limit).map((task) => (
                     <article className="mobileTask" key={task.id}>
                       <div>
                         <strong>{task.content}</strong>
@@ -905,10 +914,12 @@ export default function AndroidDashboard() {
                         P{5 - task.priority}
                       </span>
                     </article>
-                  ))
+                  ))}
+                  {tasks.length > limit && <button type="button" className="button buttonSmall" onClick={() => setProjectLimits((previous) => new Map(previous).set(project.id, (previous.get(project.id) ?? 20) + 20))}>Show more tasks</button>}
+                  </>
                 ) : (
                   <p className="muted tiny">No active tasks.</p>
-                )}
+                ))}
               </details>
             );
           })}
