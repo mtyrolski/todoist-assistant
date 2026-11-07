@@ -99,8 +99,6 @@
 
   <Fragment>
     <util:CloseApplication Id="CloseTelemetryExe" Target="todometry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
-    <!-- Close the previous development build as well during an upgrade. -->
-    <util:CloseApplication Id="ClosePreviousTelemetryExe" Target="todoist-telemetry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
     <util:CloseApplication
       Id="CloseTodoistAssistantExe"
       Target="todoist-assistant.exe"

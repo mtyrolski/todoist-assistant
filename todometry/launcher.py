@@ -28,35 +28,16 @@ def _default_data_dir() -> Path:
         return Path(override).expanduser().resolve()
     if os.name == "nt":
         base = os.getenv("PROGRAMDATA") or os.getenv("LOCALAPPDATA") or str(Path.home())
-        parent, old_name, previous_name, new_name = (
-            Path(base),
-            "TodoistAssistant",
-            "TelemetryForTodoist",
-            "Todometry",
-        )
+        parent, old_name, new_name = Path(base), "TodoistAssistant", "Todometry"
     elif sys.platform == "darwin":
         parent = Path.home() / "Library" / "Application Support"
-        old_name, previous_name, new_name = (
-            "TodoistAssistant",
-            "TelemetryForTodoist",
-            "Todometry",
-        )
+        old_name, new_name = "TodoistAssistant", "Todometry"
     else:
         parent = Path.home() / ".local" / "share"
-        old_name, previous_name, new_name = (
-            "todoist-assistant",
-            "telemetry-for-todoist",
-            "todometry",
-        )
+        old_name, new_name = "todoist-assistant", "todometry"
     target = parent / new_name
     entries = (".env", "config", "personal", "logs") + tuple(
         f"cache/{name}" for name in RUNTIME_CACHE_FILENAMES
-    )
-    migrate_legacy_files(
-        parent / previous_name,
-        target,
-        entries,
-        marker_name=".telemetry-migration-complete",
     )
     migrate_legacy_files(parent / old_name, target, entries)
     return target

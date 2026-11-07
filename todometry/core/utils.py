@@ -158,14 +158,7 @@ def resolve_cache_dir(path: str | None = None) -> str:
         return str(Path(env_path).expanduser().resolve())
 
     target = (Path.cwd() / DEFAULT_CACHE_SUBDIR).resolve()
-    previous = (Path.cwd() / ".cache" / "telemetry-for-todoist").resolve()
     legacy = (Path.cwd() / ".cache" / "todoist-assistant").resolve()
-    migrate_legacy_files(
-        previous,
-        target,
-        RUNTIME_CACHE_FILENAMES,
-        marker_name=".telemetry-migration-complete",
-    )
     migrate_legacy_files(legacy, target, RUNTIME_CACHE_FILENAMES)
     return str(target)
 
@@ -310,18 +303,12 @@ def exclusive_file_lock(path: Path):
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-def migrate_legacy_files(
-    legacy: Path,
-    target: Path,
-    entries: tuple[str, ...],
-    *,
-    marker_name: str = ".v040-migration-complete",
-) -> None:
+def migrate_legacy_files(legacy: Path, target: Path, entries: tuple[str, ...]) -> None:
     """Copy retained state once, keeping existing destination files and the originals."""
     if not legacy.is_dir() or legacy.resolve() == target.resolve():
         return
     target.mkdir(parents=True, exist_ok=True)
-    marker = target / marker_name
+    marker = target / ".v040-migration-complete"
     with exclusive_file_lock(target / ".v040-migration.lock"):
         if marker.exists():
             return

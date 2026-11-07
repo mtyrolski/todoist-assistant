@@ -46,10 +46,9 @@ path. Project adjustment files live in `personal/`, with
 `TODOIST_PERSONAL_DIR` available as an override.
 
 The installed launcher sets data, config, cache and log directories. Its
-platform defaults are in `todometry/launcher.py`. When either the former
-`telemetry-for-todoist` or `todoist-assistant` default directory exists,
-retained files are copied into the new default directory once. Existing
-destination files win conflicts; the more recent former name is checked first.
+platform defaults are in `todometry/launcher.py`. When the former
+`todoist-assistant` default directory exists, retained files are copied into
+the new default directory once. Existing destination files win conflicts.
 Conflicts are logged, source files remain untouched, and an interrupted copy
 resumes on the next run.
 Explicit path overrides are never migrated. A small `todoist.core.types` shim
