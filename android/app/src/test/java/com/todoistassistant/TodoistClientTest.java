@@ -417,12 +417,12 @@ public class TodoistClientTest {
   }
 
   @Test
-  public void archivedMetadataFailureDoesNotDiscardFreshActivity() throws Exception {
+  public void archivedMetadataPermissionFailureDoesNotDiscardFreshActivity() throws Exception {
     Fake fake =
         new Fake() {
           @Override
           public JSONObject get(String path) throws Exception {
-            if (path.startsWith("projects/archived")) throw new IOException("metadata offline");
+            if (path.startsWith("projects/archived")) throw new DataAccessException("forbidden");
             return super.get(path);
           }
         };
@@ -431,6 +431,22 @@ public class TodoistClientTest {
     assertEquals(1, next.getJSONArray("activities").length());
     assertTrue(next.has("metadataWarning"));
     assertEquals(CLOCK.instant().toString(), next.getString("activitySyncedAt"));
+  }
+
+  @Test
+  public void archivedMetadataNetworkFailureDoesNotBecomeSuccessfulEmptyData() throws Exception {
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.startsWith("projects/archived"))
+              throw new java.net.SocketException("connection lost");
+            return super.get(path);
+          }
+        };
+    assertThrows(
+        java.net.SocketException.class,
+        () -> new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false));
   }
 
   @Test

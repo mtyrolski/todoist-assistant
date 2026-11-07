@@ -88,7 +88,7 @@ final class TodoistClient {
         namesSynced = started.toString();
       } catch (SyncCancelledException cancelled) {
         throw cancelled;
-      } catch (IOException unavailable) {
+      } catch (DataAccessException unavailable) {
         data.put(
             "metadataWarning",
             "Some archived project names are unavailable. Their completions remain included.");
