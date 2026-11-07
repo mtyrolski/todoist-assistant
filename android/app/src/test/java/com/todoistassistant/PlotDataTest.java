@@ -30,6 +30,105 @@ public class PlotDataTest {
     return null;
   }
 
+  private JSONObject project(JSONArray rows, String id) throws Exception {
+    for (int i = 0; i < rows.length(); i++)
+      if (rows.getJSONObject(i).getString("id").equals(id)) return rows.getJSONObject(i);
+    fail("Missing project " + id);
+    return null;
+  }
+
+  @Test
+  public void timelineKeepsProjectIdentityAndOnlyEffectiveDailyCompletions() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Parent");
+    JSONObject old = new JSONObject().put("id", "child").put("name", "Old name");
+    JSONObject renamed =
+        new JSONObject()
+            .put("id", "child")
+            .put("name", "New name")
+            .put("parent_id", "root")
+            .put("created_at", "2026-10-01T00:00:00Z");
+    JSONObject archived =
+        new JSONObject()
+            .put("id", "archived")
+            .put("name", "Archived")
+            .put("is_archived", true)
+            .put("updated_at", "2026-10-28T00:00:00Z");
+    JSONObject empty = new JSONObject().put("id", "empty").put("name", "New project");
+    JSONObject first = event("done1", "completed", "2026-10-20T08:00:00Z");
+    JSONArray events =
+        new JSONArray()
+            .put(first)
+            .put(new JSONObject(first.toString()))
+            .put(event("undo", "uncompleted", "2026-10-21T08:00:00Z"))
+            .put(event("done2", "completed", "2026-10-22T08:00:00Z"))
+            .put(
+                event("orphan", "updated", "2026-10-25T08:00:00Z").put("parent_project_id", "lost"))
+            .put(
+                event("archived-event", "updated", "2026-10-26T08:00:00Z")
+                    .put("parent_project_id", "archived"));
+    JSONArray tasks =
+        new JSONArray()
+            .put(new JSONObject().put("id", "parent-task").put("project_id", "child"))
+            .put(
+                new JSONObject()
+                    .put("id", "subtask")
+                    .put("project_id", "child")
+                    .put("parent_id", "parent-task"));
+    JSONObject snapshot =
+        new JSONObject()
+            .put("projects", new JSONArray().put(root).put(renamed).put(empty))
+            .put("knownProjects", new JSONArray().put(root).put(old).put(archived))
+            .put("tasks", tasks)
+            .put("activities", events)
+            .put("syncedAt", CLOCK.instant().toString())
+            .put("historyStart", "2026-10-15T00:00:00Z");
+    DashboardModel model = new DashboardModel(snapshot, CLOCK);
+    JSONArray hierarchy = model.plotData.getJSONArray("hierarchy");
+    JSONObject child = project(hierarchy, "child");
+    assertEquals("New name", child.getString("name"));
+    assertEquals("root", child.getString("parentId"));
+    assertEquals("metadata", child.getString("createdAtSource"));
+    assertEquals(2, child.getInt("openTasks"));
+    assertEquals(3, child.getJSONArray("dailyEvents").length());
+    assertEquals(1, child.getJSONArray("dailyCompletions").length());
+    assertEquals(1, row(child.getJSONArray("dailyCompletions"), "2026-10-22").getInt("count"));
+    assertEquals("activity", project(hierarchy, "lost").getString("createdAtSource"));
+    assertFalse(project(hierarchy, "lost").getBoolean("metadataKnown"));
+    assertTrue(child.getBoolean("metadataKnown"));
+    assertEquals(1, project(hierarchy, "lost").getJSONArray("dailyEvents").length());
+    assertEquals("unknown", project(hierarchy, "empty").getString("createdAtSource"));
+    assertEquals("2026-10-28", project(hierarchy, "archived").getString("updatedAt"));
+    assertEquals("", project(hierarchy, "archived").getString("archivedAt"));
+    JSONArray payloadTasks = MobilePayload.model(model).getJSONArray("tasks");
+    for (int i = 0; i < payloadTasks.length(); i++)
+      if (payloadTasks.getJSONObject(i).getString("id").equals("subtask")) {
+        assertEquals("parent-task", payloadTasks.getJSONObject(i).getString("parentId"));
+        return;
+      }
+    fail("Missing subtask");
+  }
+
+  @Test
+  public void timelinePreaggregatesDenseHistoryPerLocalDay() throws Exception {
+    JSONArray events = new JSONArray();
+    for (int i = 0; i < 10000; i++)
+      events.put(
+          event("event-" + i, "completed", "2026-10-22T08:00:00Z").put("object_id", "task-" + i));
+    JSONObject snapshot =
+        new JSONObject()
+            .put(
+                "projects",
+                new JSONArray().put(new JSONObject().put("id", "child").put("name", "Dense")))
+            .put("tasks", new JSONArray())
+            .put("activities", events)
+            .put("syncedAt", CLOCK.instant().toString());
+    JSONObject child =
+        project(new DashboardModel(snapshot, CLOCK).plotData.getJSONArray("hierarchy"), "child");
+    assertEquals(1, child.getJSONArray("dailyEvents").length());
+    assertEquals(10000, child.getJSONArray("dailyEvents").getJSONObject(0).getInt("count"));
+    assertEquals(10000, child.getJSONArray("dailyCompletions").getJSONObject(0).getInt("count"));
+  }
+
   @Test
   public void plotsUseEffectiveCompletionsAndObservedEvents() throws Exception {
     JSONArray projects =

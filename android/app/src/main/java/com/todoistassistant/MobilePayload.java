@@ -12,6 +12,7 @@ final class MobilePayload {
           new JSONObject()
               .put("id", task.id)
               .put("projectId", task.projectId)
+              .put("parentId", task.parentId)
               .put("content", task.content)
               .put("project", task.project)
               .put("priority", task.priority)

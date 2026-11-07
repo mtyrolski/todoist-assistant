@@ -20,13 +20,14 @@ import org.json.JSONObject;
 /** Immutable, precomputed screen data. Build on a worker, bind cheaply on the UI thread. */
 final class DashboardModel {
   static final class Task {
-    final String id, projectId, content, project, due, deadline;
+    final String id, projectId, parentId, content, project, due, deadline;
     final int priority;
     final List<String> labels;
 
     Task(JSONObject item, String project) {
       id = item.optString("id");
       projectId = item.optString("project_id");
+      parentId = item.isNull("parent_id") ? "" : item.optString("parent_id", "");
       content = item.optString("content", "Untitled task");
       this.project = project;
       priority = Math.min(4, Math.max(1, item.optInt("priority", 1)));
@@ -74,6 +75,7 @@ final class DashboardModel {
   final Map<String, String> projectColors;
   final JSONObject adjustments;
   final JSONObject plotData;
+  final String quotedMobilePayload;
   final int forecast;
   final boolean forecastAvailable, historyAvailable, activitySyncExclusive;
   final String historyWarning;
@@ -284,6 +286,7 @@ final class DashboardModel {
             firstWeek,
             completed,
             activities);
+    quotedMobilePayload = JSONObject.quote(MobilePayload.model(this).toString());
   }
 
   static String dateValue(Object value) {

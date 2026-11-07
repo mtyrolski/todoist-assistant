@@ -30,7 +30,6 @@ public class MainActivity extends ComponentActivity {
   private DashboardViewModel model;
   private volatile DashboardViewModel.State state;
   private DashboardModel renderedModel;
-  private JSONObject modelPayload;
   private boolean ready;
   private final androidx.activity.result.ActivityResultLauncher<String[]> adjustmentsPicker =
       registerForActivityResult(
@@ -131,10 +130,12 @@ public class MainActivity extends ComponentActivity {
               .put("savedHistory", model.hasSavedHistory())
               .put("demo", state.demo)
               .put("message", state.message);
+      String quotedModel = null;
       if (force || renderedModel != state.model) {
         renderedModel = state.model;
-        modelPayload = state.model == null ? null : MobilePayload.model(state.model);
-        payload.put("model", modelPayload == null ? JSONObject.NULL : modelPayload);
+        // Model projection and JSON quoting are prepared with the snapshot on the worker.
+        quotedModel =
+            state.model == null ? JSONObject.quote("null") : state.model.quotedMobilePayload;
       }
       JSONObject preferences = new JSONObject(new Bridge().getSettings());
       AlertRules rules = AlertRules.read(preferences.getJSONObject("rules").toString());
@@ -152,7 +153,7 @@ public class MainActivity extends ComponentActivity {
                 .put("deadline", alert.deadline));
       }
       payload.put("preferences", preferences);
-      web.evaluateJavascript(stateEvent(payload), null);
+      web.evaluateJavascript(stateEvent(payload, quotedModel), null);
     } catch (Exception exception) {
       web.evaluateJavascript(
           "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not open dashboard"
@@ -167,10 +168,11 @@ public class MainActivity extends ComponentActivity {
     if (model != null) model.refreshClock();
   }
 
-  static String stateEvent(JSONObject payload) {
-    return "window.dispatchEvent(new CustomEvent('todoist-state',{detail:JSON.parse("
-        + JSONObject.quote(payload.toString())
-        + ")}))";
+  static String stateEvent(JSONObject payload, String quotedModel) {
+    String detail = "JSON.parse(" + JSONObject.quote(payload.toString()) + ")";
+    if (quotedModel != null)
+      detail = "Object.assign(" + detail + ",{model:JSON.parse(" + quotedModel + ")})";
+    return "window.dispatchEvent(new CustomEvent('todoist-state',{detail:" + detail + "}))";
   }
 
   static JSONObject readSettings(android.content.SharedPreferences prefs)

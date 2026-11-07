@@ -22,6 +22,8 @@ public class BridgeSerializationTest {
             .put("counts", new JSONObject().put("__proto__", 17).put("constructor", 2))
             .put("mappings", new JSONObject().put("__proto__", "a \"quoted\" name\n </script>"))
             .put("padding", new String(padding));
+    JSONObject status = new JSONObject().put("message", "cached data");
+    String quotedModel = JSONObject.quote(payload.toString());
     CountDownLatch ready = new CountDownLatch(1), resultReady = new CountDownLatch(1);
     AtomicReference<WebView> view = new AtomicReference<>();
     AtomicReference<String> result = new AtomicReference<>();
@@ -52,13 +54,13 @@ public class BridgeSerializationTest {
           () ->
               view.get()
                   .evaluateJavascript(
-                      MainActivity.stateEvent(payload),
+                      MainActivity.stateEvent(status, quotedModel),
                       ignored ->
                           view.get()
                               .evaluateJavascript(
-                                  "(() => { const d=JSON.parse(window.captured);"
+                                  "(() => { const event=JSON.parse(window.captured), d=event.model;"
                                       + " return JSON.stringify({counts:d.counts,mappings:d.mappings,"
-                                      + "length:d.padding.length}); })()",
+                                      + "length:d.padding.length,message:event.message}); })()",
                                   value -> {
                                     result.set(value);
                                     resultReady.countDown();
@@ -69,6 +71,7 @@ public class BridgeSerializationTest {
       assertEquals(17, decoded.getJSONObject("counts").getInt("__proto__"));
       assertEquals(2, decoded.getJSONObject("counts").getInt("constructor"));
       assertEquals(padding.length, decoded.getInt("length"));
+      assertEquals("cached data", decoded.getString("message"));
       assertEquals(
           payload.getJSONObject("mappings").getString("__proto__"),
           decoded.getJSONObject("mappings").getString("__proto__"));

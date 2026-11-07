@@ -60,6 +60,8 @@ final class PlotData {
     Map<String, String> completionProject = new HashMap<>();
     Map<String, Instant> firstProjectEvent = new HashMap<>(), lastProjectEvent = new HashMap<>();
     Map<String, Instant> archivedAt = new HashMap<>(), unarchivedAt = new HashMap<>();
+    Map<String, TreeMap<LocalDate, Integer>> projectDailyEvents = new HashMap<>();
+    Map<String, TreeMap<LocalDate, Integer>> projectDailyCompletions = new HashMap<>();
     List<Item> itemEvents = new ArrayList<>();
     for (JSONObject event : activities) {
       Instant time = Instant.parse(event.getString("event_date"));
@@ -84,9 +86,13 @@ final class PlotData {
         if (kind.equals("unarchived") && !projectId.isEmpty())
           unarchivedAt.merge(projectId, time, PlotData::later);
       }
+      if (objectType.equals("item") && projectId.isEmpty()) projectId = UNKNOWN_PROJECT_ID;
       if (!projectId.isEmpty()) {
         firstProjectEvent.merge(projectId, time, PlotData::earlier);
         lastProjectEvent.merge(projectId, time, PlotData::later);
+        projectDailyEvents
+            .computeIfAbsent(projectId, ignored -> new TreeMap<>())
+            .merge(time.atZone(zone).toLocalDate(), 1, Integer::sum);
       }
       if (!objectType.equals("item")) continue;
       String taskId = event.optString("object_id");
@@ -104,6 +110,9 @@ final class PlotData {
       lastCompleted.merge(event.taskId, event.date, PlotData::later);
       String projectId = completionProject.getOrDefault(event.id, "");
       if (projectId.isEmpty()) projectId = UNKNOWN_PROJECT_ID;
+      projectDailyCompletions
+          .computeIfAbsent(projectId, ignored -> new TreeMap<>())
+          .merge(date, 1, Integer::sum);
       daily
           .get(date)
           .projects
@@ -147,36 +156,53 @@ final class PlotData {
       if (!project.optBoolean("is_archived")
           || (reopen != null && (archive == null || !archive.isAfter(reopen)))) archive = null;
       String createdAt = date(project.optString("created_at"), zone);
-      if (createdAt.isEmpty()) createdAt = date(firstProjectEvent.get(id), zone);
+      String createdAtSource = "metadata";
+      if (createdAt.isEmpty()) {
+        createdAt = date(firstProjectEvent.get(id), zone);
+        createdAtSource = createdAt.isEmpty() ? "unknown" : "activity";
+      }
       hierarchy.put(
           new JSONObject()
               .put("id", id)
+              .put("metadataKnown", true)
               .put("name", project.optString("name", "Unknown project"))
               .put("parentId", TodoistClient.parentId(project))
               .put("rootName", DashboardModel.rootName(id, projects, mappings, promoted))
               .put("color", project.optString("color", "grey"))
               .put("archived", project.optBoolean("is_archived"))
               .put("createdAt", createdAt)
+              .put("createdAtSource", createdAtSource)
+              .put("updatedAt", date(project.optString("updated_at"), zone))
               .put("lastEventAt", date(lastProjectEvent.get(id), zone))
               .put("archivedAt", date(archive, zone))
               .put("openTasks", openByProject.getOrDefault(id, 0))
+              .put("dailyEvents", dailyCounts(projectDailyEvents.get(id)))
+              .put("dailyCompletions", dailyCounts(projectDailyCompletions.get(id)))
               .put("weeklyCounts", new JSONObject(projectWeeks.getOrDefault(id, Map.of()))));
     }
-    for (var entry : projectWeeks.entrySet())
-      if (!projects.containsKey(entry.getKey()))
+    Set<String> unknownProjects = new HashSet<>(projectDailyEvents.keySet());
+    unknownProjects.addAll(projectWeeks.keySet());
+    unknownProjects.addAll(openByProject.keySet());
+    for (String id : unknownProjects)
+      if (!id.isEmpty() && !projects.containsKey(id))
         hierarchy.put(
             new JSONObject()
-                .put("id", entry.getKey())
+                .put("id", id)
+                .put("metadataKnown", false)
                 .put("name", "Unknown project")
                 .put("parentId", "")
                 .put("rootName", "Unknown project")
                 .put("color", "grey")
                 .put("archived", false)
-                .put("createdAt", date(firstProjectEvent.get(entry.getKey()), zone))
-                .put("lastEventAt", date(lastProjectEvent.get(entry.getKey()), zone))
+                .put("createdAt", date(firstProjectEvent.get(id), zone))
+                .put("createdAtSource", firstProjectEvent.containsKey(id) ? "activity" : "unknown")
+                .put("updatedAt", "")
+                .put("lastEventAt", date(lastProjectEvent.get(id), zone))
                 .put("archivedAt", "")
-                .put("openTasks", 0)
-                .put("weeklyCounts", new JSONObject(entry.getValue())));
+                .put("openTasks", openByProject.getOrDefault(id, 0))
+                .put("dailyEvents", dailyCounts(projectDailyEvents.get(id)))
+                .put("dailyCompletions", dailyCounts(projectDailyCompletions.get(id)))
+                .put("weeklyCounts", new JSONObject(projectWeeks.getOrDefault(id, Map.of()))));
     String rawHistoryStart = snapshot.optString("historyStart");
     LocalDate historyStart = DashboardModel.localDate(rawHistoryStart, zone);
     if (!snapshot.optBoolean("historyComplete") && historyStart != null) {
@@ -206,6 +232,15 @@ final class PlotData {
                 taskDate,
                 historyStart,
                 zone));
+  }
+
+  private static JSONArray dailyCounts(Map<LocalDate, Integer> counts) throws Exception {
+    JSONArray rows = new JSONArray();
+    if (counts != null)
+      for (var entry : counts.entrySet())
+        rows.put(
+            new JSONObject().put("date", entry.getKey().toString()).put("count", entry.getValue()));
+    return rows;
   }
 
   private static JSONArray taskCounts(
