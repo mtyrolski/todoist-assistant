@@ -236,6 +236,23 @@ test("empty activity is described separately from unavailable history", async ({
   await expect(page.getByText("No activity in the available history.")).toBeVisible();
 });
 
+test("a sync update keeps the current navigation and task filters", async ({ page }) => {
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "Search tasks, projects or activity" });
+  const priority = page.getByLabel("Filter task priority");
+  await search.fill("release");
+  await priority.selectOption("3");
+  await expect(page.getByText("Review the release checklist")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", {
+    detail: { syncing: true, message: "Refreshing" },
+  })));
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  await expect(page.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(search).toHaveValue("release");
+  await expect(priority).toHaveValue("3");
+  await expect(page.getByText("Review the release checklist")).toBeVisible();
+});
+
 test("the dashboard remains usable when UI preferences cannot be saved", async ({ page }) => {
   await page.getByRole("button", { name: "Back to my data", exact: true }).click();
   await page.addInitScript(() => {
