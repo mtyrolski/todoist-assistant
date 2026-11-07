@@ -6,8 +6,17 @@ case "$mode" in
     debug|preview|bundle) [ "$#" -eq 0 ] || shift ;;
     *) echo 'Usage: build_android.sh [debug|preview|bundle] [Gradle options]' >&2; exit 1 ;;
 esac
-if ! command -v java >/dev/null 2>&1 && [ -z "${JAVA_HOME:-}" ]; then
-    echo 'JDK 17 is required. Set JAVA_HOME before building.' >&2
+java_cmd="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+if ! command -v "$java_cmd" >/dev/null 2>&1; then
+    echo 'JDK 17 or newer is required. Set JAVA_HOME before building.' >&2
+    exit 1
+fi
+java_version="$("$java_cmd" -version 2>&1)" || {
+    echo 'Could not run Java. Set JAVA_HOME to a working JDK 17 or newer.' >&2
+    exit 1
+}
+if [[ ! $java_version =~ version[[:space:]]+\"(1\.)?([0-9]+) ]] || (( BASH_REMATCH[2] < 17 )); then
+    echo 'JDK 17 or newer is required. Set JAVA_HOME before building.' >&2
     exit 1
 fi
 android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
