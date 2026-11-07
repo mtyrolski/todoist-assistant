@@ -19,13 +19,10 @@ def test_v040_local_state_is_readable_and_ignored_state_is_untouched(
 ):
     cache_dir = tmp_path / ".cache" / "todoist-assistant"
     cache_dir.mkdir(parents=True)
-    for filename in (
-        "activity.joblib",
-        "dashboard_state.joblib",
-        "observer_state.joblib",
-        "multiplication_label_usage.joblib",
-    ):
+    for filename in ("activity.joblib", "dashboard_state.joblib"):
         shutil.copyfile(FIXTURE / filename, cache_dir / filename)
+    for filename in ("observer_state.joblib", "multiplication_label_usage.joblib"):
+        (cache_dir / filename).write_bytes(b"unused legacy state")
     monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
     monkeypatch.setenv(str(EnvVar.CONFIG_DIR), str(FIXTURE))
     monkeypatch.setenv(str(EnvVar.PERSONAL_DIR), str(FIXTURE))

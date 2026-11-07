@@ -7,7 +7,7 @@ These files contain no user data. The joblib files were generated with
 using the current test environment's joblib and pandas versions. The dashboard
 snapshot uses the version 3 schema and contains a representative archived
 project and activity frame. `dashboard.yaml` comes directly from that tag;
-project mappings and the observer and removed-feature cache are synthetic.
+the project mappings are synthetic.
 
 The fixture exercises legacy serialized class names through the small
 `todoist.core.types` compatibility shim, including a copy to the new default
