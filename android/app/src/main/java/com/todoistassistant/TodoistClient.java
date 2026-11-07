@@ -112,7 +112,9 @@ final class TodoistClient {
         merged.put(key, item);
         if (imprecise) rounded.put(eventIdentity(item, ((Number) id).doubleValue()), key);
       }
-    Instant joined = parseInstant(user.optString("joined_at"), Instant.EPOCH);
+    Instant joined = parseInstant(user.optString("joined_at"), null);
+    boolean joinDateKnown = joined != null;
+    if (!joinDateKnown) joined = started.minus(Duration.ofDays(84));
     if (joined.isAfter(started)) joined = started;
     Instant historyStart = parseInstant(baseline.optString("historyStart"), started);
     if (historyStart.isAfter(started)) historyStart = started;
@@ -148,7 +150,7 @@ final class TodoistClient {
             "Loading history from " + from.toString().substring(0, 10));
         fetchedActivity = true;
         historyStart = from;
-        complete = !historyStart.isAfter(joined);
+        complete = joinDateKnown && !historyStart.isAfter(joined);
         historyWindows++;
         if (historyWindows == 1 || historyWindows % 3 == 0 || complete) {
           data.put("historyStart", historyStart.toString());
@@ -158,7 +160,7 @@ final class TodoistClient {
           checkpoint.save(data);
         }
       }
-      if (!complete) complete = true;
+      if (!complete && joinDateKnown) complete = true;
     } catch (DataAccessException unavailable) {
       data.put("activitySyncedAt", activitySyncedAt.toString());
       data.put(
@@ -173,6 +175,10 @@ final class TodoistClient {
     discardReopenedParents(known, archived, baseline, merged.values());
     data.put("historyStart", historyStart.toString());
     data.put("historyComplete", complete);
+    if (!joinDateKnown && !complete && !data.has("activityWarning"))
+      data.put(
+          "activityWarning",
+          "Todoist did not provide your account join date. Older activity may be missing.");
     if (complete && !rounded.isEmpty() && !data.has("activityWarning"))
       data.put(
           "activityWarning", "Some older saved events could not be matched to Todoist's history.");

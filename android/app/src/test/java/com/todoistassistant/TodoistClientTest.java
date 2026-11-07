@@ -61,6 +61,50 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void missingJoinDateDoesNotBackfillTo1970OrClaimCompleteHistory() throws Exception {
+    Fake fake =
+        new Fake() {
+          int activityRequests;
+
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.equals("user")) return new JSONObject().put("id", user);
+            if (path.startsWith("activities") && ++activityRequests > 3)
+              throw new IOException("Unexpected unbounded history request");
+            return super.get(path);
+          }
+        };
+    JSONObject result =
+        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+    assertEquals("2026-08-09T12:00:00Z", result.getString("historyStart"));
+    assertFalse(result.getBoolean("historyComplete"));
+    assertTrue(result.getString("activityWarning").contains("join date"));
+  }
+
+  @Test
+  public void historyResumesWhenJoinDateBecomesAvailable() throws Exception {
+    Fake fake =
+        new Fake() {
+          boolean missingJoinDate = true;
+
+          @Override
+          public JSONObject get(String path) throws Exception {
+            if (path.equals("user") && missingJoinDate) {
+              missingJoinDate = false;
+              return new JSONObject().put("id", user);
+            }
+            return super.get(path);
+          }
+        };
+    TodoistClient client = new TodoistClient(fake, CLOCK, message -> {});
+    JSONObject partial = client.snapshot(new JSONObject(), false);
+    JSONObject resumed = client.snapshot(partial, true);
+    assertTrue(resumed.getBoolean("historyComplete"));
+    assertEquals("2026-08-01T00:00:00Z", resumed.getString("historyStart"));
+    assertFalse(resumed.has("activityWarning"));
+  }
+
+  @Test
   public void sameAccountKeepsHistoryEvenWhenItsTokenChanges() throws Exception {
     Fake fake = new Fake();
     JSONObject next = new TodoistClient(fake, CLOCK, message -> {}).snapshot(baseline(), false);
