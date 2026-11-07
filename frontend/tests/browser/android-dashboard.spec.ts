@@ -87,6 +87,10 @@ test.beforeEach(async ({ page }) => {
     if (state.demo) state.model = model;
     const send = () =>
       window.dispatchEvent(new CustomEvent("todoist-state", { detail: structuredClone(state) }));
+    window.addEventListener("test-empty-activity", () => {
+      model.activity = [];
+      send();
+    });
     window.addEventListener("test-many-projects", () => {
       for (let i = 0; i < 12; i++) {
         const name = `Long project name ${i} with research and planning`;
@@ -197,6 +201,39 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/android");
   await page.getByRole("button", { name: "Explore a demo", exact: true }).click();
   await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
+});
+
+test("first connection can be retried without retyping a token", async ({ page }) => {
+  await page.getByRole("button", { name: "Back to my data", exact: true }).click();
+  await page.evaluate(() => {
+    const bridge = window.Todoist;
+    if (!bridge) throw new Error("Missing Android bridge");
+    const original = bridge.command;
+    bridge.command = (name, argument) => {
+      if (name !== "sync") return original(name, argument);
+      sessionStorage.setItem("attempts", String(Number(sessionStorage.getItem("attempts")) + 1));
+      window.dispatchEvent(new CustomEvent("todoist-state", { detail: { syncing: false, message: "No network connection." } }));
+    };
+  });
+  const token = page.getByLabel("API token");
+  await token.fill("private-test-token");
+  await page.getByRole("button", { name: "Connect and sync" }).click();
+  await expect(page.getByText("No network connection.")).toBeVisible();
+  await expect(token).toHaveValue("private-test-token");
+  await page.getByRole("button", { name: "Connect and sync" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("attempts"))).toBe("2");
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", {
+    detail: { connected: true, syncing: false, message: "Sync complete. Your history is available offline." },
+  })));
+  await expect(token).toHaveValue("");
+  await expect(page.getByText("Account saved")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry sync" })).toBeVisible();
+});
+
+test("empty activity is described separately from unavailable history", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-empty-activity")));
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText("No activity in the available history.")).toBeVisible();
 });
 
 test("the dashboard remains usable when UI preferences cannot be saved", async ({ page }) => {

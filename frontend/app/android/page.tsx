@@ -86,6 +86,11 @@ export default function AndroidDashboard() {
     }
   }, [ui, persist]);
   useEffect(() => {
+    if (state?.message.startsWith("Sync complete.") || state?.message.startsWith("Saved on device.")) {
+      setToken("");
+    }
+  }, [state?.message]);
+  useEffect(() => {
     const back = () =>
       ui.tab === "Overview"
         ? command("close")
@@ -159,7 +164,6 @@ export default function AndroidDashboard() {
     }
     setError("");
     command("sync", token.trim());
-    setToken("");
   };
   const disconnect = () => {
     if (
@@ -213,7 +217,7 @@ export default function AndroidDashboard() {
               onClick={() => command("sync")}
               disabled={busy}
             >
-              Refresh
+              {model ? "Refresh" : "Retry sync"}
             </button>
           )}
           {state?.syncing && (
@@ -271,9 +275,10 @@ export default function AndroidDashboard() {
           <header className="cardHeader">
             <h2>Todoist account</h2>
             {state.connected && (
-              <span className="pill pill-good">Connected</span>
+              <span className="pill pill-neutral">Account saved</span>
             )}
           </header>
+          <p className="muted tiny">Connect directly to Todoist. Your token is encrypted on this device.</p>
           <form
             className="stack"
             onSubmit={(event) => {
@@ -593,6 +598,9 @@ export default function AndroidDashboard() {
           <header className="cardHeader">
             <h2>Recent activity</h2>
           </header>
+          {model.activity.length === 0 && (
+            <p className="muted">{model.historyAvailable ? "No activity in the available history." : "Activity history is unavailable."}</p>
+          )}
           {model.activity
             .filter((event) =>
               `${event.kind === "uncompleted" ? "undone" : event.kind} ${event.content} ${event.project}`
