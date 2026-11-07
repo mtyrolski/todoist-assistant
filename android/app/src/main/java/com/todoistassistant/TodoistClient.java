@@ -49,10 +49,16 @@ final class TodoistClient {
                   + (path.startsWith("activities?") ? "limit=200" : "limit=100")
                   + (cursor.isEmpty() ? "" : "&cursor=" + encode(cursor)));
       JSONArray items = page.getJSONArray("results");
-      for (int i = 0; i < items.length(); i++) all.put(items.getJSONObject(i));
+      for (int i = 0; i < items.length(); i++) {
+        JSONObject item = items.getJSONObject(i);
+        requiredId(item, "id");
+        all.put(item);
+      }
       progress.update(label + " · " + all.length() + " loaded");
-      Object next = page.opt("next_cursor");
-      cursor = next == null || next == JSONObject.NULL ? "" : String.valueOf(next);
+      Object next = page.get("next_cursor");
+      if (next != JSONObject.NULL && !(next instanceof String))
+        throw new org.json.JSONException("Invalid pagination cursor");
+      cursor = next == JSONObject.NULL ? "" : (String) next;
       if (!cursor.isEmpty() && !cursors.add(cursor))
         throw new IOException("Todoist repeated a page. Retry sync to recover safely.");
     } while (!cursor.isEmpty());
@@ -68,9 +74,7 @@ final class TodoistClient {
     Instant started = clock.instant();
     progress.update("Checking your account…");
     JSONObject user = transport.get("user");
-    String userId = String.valueOf(user.get("id"));
-    if (userId.trim().isEmpty() || userId.equals("null"))
-      throw new IOException("Todoist returned an invalid account identity.");
+    String userId = requiredId(user, "id");
     boolean sameAccount =
         userId.equals(previous.optString("userId"))
             || (!previous.has("userId") && trustLegacyOwner);
@@ -212,16 +216,36 @@ final class TodoistClient {
         }
       for (int i = 0; i < fetched.length(); i++) {
         JSONObject item = fetched.getJSONObject(i);
+        String id = requiredId(item, "id");
+        String type = requiredText(item, "object_type");
+        requiredText(item, "event_type");
+        if (type.equals("item")) requiredId(item, "object_id");
         Instant.parse(item.getString("event_date"));
         String identity = rounded.isEmpty() ? null : roundedIdentity(item);
         if (identity != null && candidates.getOrDefault(identity, 0) == 1) {
           String old = rounded.remove(identity);
           if (old != null) merged.remove(old);
         }
-        merged.put(String.valueOf(item.get("id")), item);
+        merged.put(id, item);
       }
       to = start;
     }
+  }
+
+  private static String requiredId(JSONObject item, String key) throws org.json.JSONException {
+    Object value = item.get(key);
+    if (!(value instanceof String) && !(value instanceof Number))
+      throw new org.json.JSONException("Invalid identifier: " + key);
+    String id = String.valueOf(value);
+    if (id.trim().isEmpty()) throw new org.json.JSONException("Missing identifier: " + key);
+    return id;
+  }
+
+  private static String requiredText(JSONObject item, String key) throws org.json.JSONException {
+    Object value = item.get(key);
+    if (!(value instanceof String) || ((String) value).trim().isEmpty())
+      throw new org.json.JSONException("Invalid field: " + key);
+    return (String) value;
   }
 
   private static String roundedIdentity(JSONObject event) {

@@ -16,11 +16,11 @@ public class TodoistClientTest {
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-11-01T12:00:00Z"), ZoneId.of("Europe/Warsaw"));
 
-  private static JSONObject page(JSONArray items, Object cursor) throws Exception {
+  private static JSONObject page(JSONArray items, Object cursor) throws org.json.JSONException {
     return new JSONObject().put("results", items).put("next_cursor", cursor);
   }
 
-  private static JSONObject event(String id, String when) throws Exception {
+  private static JSONObject event(String id, String when) throws org.json.JSONException {
     return new JSONObject()
         .put("id", id)
         .put("event_date", when)
@@ -35,7 +35,8 @@ public class TodoistClientTest {
     boolean failActivity;
 
     @Override
-    public JSONObject get(String path) throws Exception {
+    public JSONObject get(String path)
+        throws java.io.IOException, org.json.JSONException, InterruptedException {
       paths.add(path);
       if (path.equals("user"))
         return new JSONObject().put("id", user).put("joined_at", "2026-08-01T00:00:00Z");
@@ -67,7 +68,8 @@ public class TodoistClientTest {
           int activityRequests;
 
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.equals("user")) return new JSONObject().put("id", user);
             if (path.startsWith("activities") && ++activityRequests > 3)
               throw new IOException("Unexpected unbounded history request");
@@ -88,7 +90,8 @@ public class TodoistClientTest {
           boolean missingJoinDate = true;
 
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.equals("user") && missingJoinDate) {
               missingJoinDate = false;
               return new JSONObject().put("id", user);
@@ -185,7 +188,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             return page(new JSONArray(), "same");
           }
         };
@@ -203,7 +207,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             paths.add(path);
             return page(
                 new JSONArray().put(new JSONObject().put("id", paths.size())),
@@ -223,7 +228,8 @@ public class TodoistClientTest {
           boolean interrupted;
 
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.equals("user"))
               return new JSONObject().put("id", user).put("joined_at", "2026-08-03T12:00:00Z");
             if (path.startsWith("activities")) {
@@ -282,7 +288,8 @@ public class TodoistClientTest {
           int windows;
 
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.equals("user"))
               return new JSONObject().put("id", user).put("joined_at", "2024-01-01T00:00:00Z");
             if (path.startsWith("activities")) {
@@ -312,12 +319,74 @@ public class TodoistClientTest {
 
   @Test
   public void extremeRetryAfterCannotOverflowIntoAnImmediateRetry() {
-    assertEquals(300000, HttpTransport.retryDelay(String.valueOf(Long.MAX_VALUE), 0));
+    assertEquals(Long.MAX_VALUE, HttpTransport.retryDelay(String.valueOf(Long.MAX_VALUE), 0));
+    assertEquals(Long.MAX_VALUE, HttpTransport.retryDelay("9999999999999999999999", 0));
     assertEquals(300000, HttpTransport.retryDelay("300", 0));
     assertEquals(500, HttpTransport.retryDelay("-100", 0));
     assertEquals(2000, HttpTransport.retryDelay(null, 1));
     assertEquals(16000, HttpTransport.retryDelay(null, 4));
     assertEquals(30000, HttpTransport.retryDelay(null, 8));
+  }
+
+  @Test
+  public void invalidPaginationAndMissingIdentifiersDoNotBecomePartialHistory() throws Exception {
+    for (JSONObject invalid :
+        new JSONObject[] {
+          new JSONObject().put("results", new JSONArray()),
+          page(new JSONArray(), new JSONObject()),
+          page(new JSONArray().put(new JSONObject().put("id", JSONObject.NULL)), JSONObject.NULL)
+        }) {
+      Fake fake =
+          new Fake() {
+            @Override
+            public JSONObject get(String path)
+                throws java.io.IOException, org.json.JSONException, InterruptedException {
+              if (path.startsWith("projects?")) return invalid;
+              return super.get(path);
+            }
+          };
+      assertThrows(
+          org.json.JSONException.class,
+          () -> new TodoistClient(fake, CLOCK, ignored -> {}).snapshot(new JSONObject(), false));
+    }
+    Fake invalidAccount =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user")) return new JSONObject().put("id", JSONObject.NULL);
+            return super.get(path);
+          }
+        };
+    assertThrows(
+        org.json.JSONException.class,
+        () ->
+            new TodoistClient(invalidAccount, CLOCK, ignored -> {})
+                .snapshot(new JSONObject(), false));
+  }
+
+  @Test
+  public void malformedActivityCannotBeCheckpointed() throws Exception {
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.startsWith("activities")) {
+              JSONObject invalid = event("event", "2026-10-01T00:00:00Z");
+              invalid.remove("object_id");
+              return page(new JSONArray().put(invalid), JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    List<JSONObject> checkpoints = new ArrayList<>();
+    assertThrows(
+        org.json.JSONException.class,
+        () ->
+            new TodoistClient(fake, CLOCK, ignored -> {})
+                .snapshot(new JSONObject(), false, checkpoints::add));
+    assertTrue(checkpoints.isEmpty());
   }
 
   @Test
@@ -353,7 +422,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("activities"))
               return page(new JSONArray().put(original), JSONObject.NULL);
             return super.get(path);
@@ -385,7 +455,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("activities"))
               return page(new JSONArray().put(a).put(b), JSONObject.NULL);
             return super.get(path);
@@ -402,7 +473,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("activities")) throw new DataAccessException("forbidden");
             return super.get(path);
           }
@@ -421,7 +493,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("projects/archived")) throw new DataAccessException("forbidden");
             return super.get(path);
           }
@@ -438,7 +511,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("projects/archived"))
               throw new java.net.SocketException("connection lost");
             return super.get(path);
@@ -459,7 +533,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("projects/archived"))
               return page(
                   new JSONArray()
@@ -501,7 +576,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("projects/archived"))
               return page(new JSONArray().put(child), JSONObject.NULL);
             if (path.startsWith("projects?"))
@@ -547,7 +623,8 @@ public class TodoistClientTest {
     Fake fake =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("projects/archived"))
               return page(new JSONArray().put(archived), JSONObject.NULL);
             if (path.startsWith("projects?"))

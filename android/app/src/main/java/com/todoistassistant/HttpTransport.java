@@ -13,8 +13,15 @@ class HttpTransport implements ApiTransport {
   private static final int ATTEMPTS = 3;
 
   static final class Failure extends IOException {
+    final long retryAfterMillis;
+
     Failure(String message) {
+      this(message, 0);
+    }
+
+    Failure(String message, long retryAfterMillis) {
       super(message);
+      this.retryAfterMillis = retryAfterMillis;
     }
   }
 
@@ -33,7 +40,8 @@ class HttpTransport implements ApiTransport {
   }
 
   @Override
-  public JSONObject get(String path) throws Exception {
+  public JSONObject get(String path)
+      throws IOException, org.json.JSONException, InterruptedException {
     URI endpoint;
     try {
       URI relative = URI.create(path);
@@ -52,15 +60,18 @@ class HttpTransport implements ApiTransport {
       checkCancelled();
       HttpURLConnection current = openConnection(endpoint);
       connection = current;
-      current.setConnectTimeout(10000);
-      current.setReadTimeout(15000);
-      current.setInstanceFollowRedirects(false);
-      current.setRequestProperty("Authorization", "Bearer " + token);
-      current.setRequestProperty("Accept", "application/json");
       try {
+        checkCancelled();
+        current.setConnectTimeout(10000);
+        current.setReadTimeout(15000);
+        current.setInstanceFollowRedirects(false);
+        current.setRequestProperty("Authorization", "Bearer " + token);
+        current.setRequestProperty("Accept", "application/json");
+        checkCancelled();
         int status = current.getResponseCode();
         checkCancelled();
-        if ((status == 429 || status >= 500) && attempt < ATTEMPTS - 1) {
+        if ((status == 429 || status == 500 || status == 502 || status == 503 || status == 504)
+            && attempt < ATTEMPTS - 1) {
           long delay = retryDelay(current.getHeaderField("Retry-After"), attempt);
           if (delay <= 30000) {
             current.disconnect();
@@ -78,9 +89,16 @@ class HttpTransport implements ApiTransport {
               "Todoist denied access to this data. Check your account permissions and plan.");
         if (status == 429)
           throw new Failure(
-              "Todoist is limiting requests. Wait a little and retry; saved data is available offline.");
-        if (status != 200)
-          throw new Failure("Todoist is unavailable (HTTP " + status + "). Try again later.");
+              "Todoist is limiting requests. Wait a little and retry; saved data is available offline.",
+              retryDelay(current.getHeaderField("Retry-After"), attempt));
+        if (status != 200) {
+          String retryAfter = current.getHeaderField("Retry-After");
+          boolean transientFailure =
+              status == 500 || status == 502 || status == 503 || status == 504;
+          throw new Failure(
+              "Todoist is unavailable (HTTP " + status + "). Try again later.",
+              transientFailure && retryAfter != null ? retryDelay(retryAfter, attempt) : 0);
+        }
         try (var stream = current.getInputStream();
             var output = new ByteArrayOutputStream()) {
           byte[] buffer = new byte[8192];
@@ -111,9 +129,30 @@ class HttpTransport implements ApiTransport {
   }
 
   static long retryDelay(String retryAfter, int attempt) {
+    return retryDelay(retryAfter, attempt, java.time.Instant.now());
+  }
+
+  static long retryDelay(String retryAfter, int attempt, java.time.Instant now) {
     try {
-      return Math.max(500, Math.min(300, Long.parseLong(retryAfter)) * 1000);
+      long seconds = Long.parseLong(retryAfter);
+      if (seconds > Long.MAX_VALUE / 1000) return Long.MAX_VALUE;
+      return seconds <= 0 ? 500 : Math.max(500, seconds * 1000);
     } catch (NumberFormatException ignored) {
+      if (retryAfter != null) {
+        if (retryAfter.matches("[0-9]+")) return Long.MAX_VALUE;
+        try {
+          long millis =
+              java.time.Duration.between(
+                      now,
+                      java.time.ZonedDateTime.parse(
+                              retryAfter, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                          .toInstant())
+                  .toMillis();
+          return Math.max(500, millis);
+        } catch (java.time.DateTimeException | ArithmeticException invalid) {
+          // Fall back to bounded exponential backoff for an invalid header.
+        }
+      }
       return Math.min(30000, 1000L << Math.min(attempt, 5));
     }
   }

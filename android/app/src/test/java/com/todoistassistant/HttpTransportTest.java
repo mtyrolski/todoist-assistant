@@ -13,6 +13,10 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 
 public class HttpTransportTest {
@@ -166,5 +170,89 @@ public class HttpTransportTest {
           }
         });
     assertThrows(SocketException.class, () -> transport.get("user"));
+  }
+
+  @Test
+  public void cancellationWhileOpeningConnectionNeverStartsTheRequest() throws Exception {
+    CountDownLatch opening = new CountDownLatch(1), release = new CountDownLatch(1);
+    AtomicBoolean started = new AtomicBoolean(), disconnected = new AtomicBoolean();
+    Response response =
+        new Response(200, "{}") {
+          @Override
+          public int getResponseCode() {
+            started.set(true);
+            return 200;
+          }
+
+          @Override
+          public void disconnect() {
+            disconnected.set(true);
+          }
+        };
+    HttpTransport transport =
+        new HttpTransport("private-test-token") {
+          @Override
+          HttpURLConnection openConnection(URI endpoint) throws IOException {
+            opening.countDown();
+            try {
+              if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("test timed out");
+            } catch (InterruptedException error) {
+              throw new IOException(error);
+            }
+            return response;
+          }
+        };
+    AtomicReference<Exception> failure = new AtomicReference<>();
+    Thread thread =
+        new Thread(
+            () -> {
+              try {
+                transport.get("user");
+              } catch (Exception error) {
+                failure.set(error);
+              }
+            });
+    thread.start();
+    assertTrue(opening.await(5, TimeUnit.SECONDS));
+    transport.cancel();
+    release.countDown();
+    thread.join(5000);
+    assertFalse(thread.isAlive());
+    assertTrue(failure.get() instanceof SyncCancelledException);
+    assertFalse(started.get());
+    assertTrue(disconnected.get());
+  }
+
+  @Test
+  public void retriesOnlyTransientServerFailuresAndHonorsHttpDate() throws Exception {
+    Transport noRetry = new Transport();
+    noRetry.responses.add(new Response(501, ""));
+    assertThrows(HttpTransport.Failure.class, () -> noRetry.get("user"));
+    assertEquals(1, noRetry.requests);
+    Transport transientFailure = new Transport();
+    transientFailure.responses.add(new Response(503, ""));
+    transientFailure.responses.add(new Response(200, "{\"id\":\"ok\"}"));
+    assertEquals("ok", transientFailure.get("user").getString("id"));
+    assertEquals(2, transientFailure.requests);
+    assertEquals(
+        120000,
+        HttpTransport.retryDelay(
+            "Wed, 21 Oct 2015 07:30:00 GMT", 0, java.time.Instant.parse("2015-10-21T07:28:00Z")));
+    assertEquals(
+        500,
+        HttpTransport.retryDelay(
+            "Wed, 21 Oct 2015 07:30:00 GMT", 0, java.time.Instant.parse("2015-10-21T07:31:00Z")));
+    Transport delayed = new Transport();
+    delayed.responses.add(
+        new Response(503, "") {
+          @Override
+          public String getHeaderField(String name) {
+            return "Retry-After".equals(name) ? "120" : null;
+          }
+        });
+    HttpTransport.Failure unavailable =
+        assertThrows(HttpTransport.Failure.class, () -> delayed.get("user"));
+    assertEquals(120000, unavailable.retryAfterMillis);
+    assertEquals(1, delayed.requests);
   }
 }

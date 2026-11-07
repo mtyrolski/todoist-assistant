@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -37,6 +38,11 @@ public class SyncLifecycleTest {
   }
 
   private void start(ApiTransport transport) throws Exception {
+    start(token -> transport);
+  }
+
+  private void start(java.util.function.Function<String, ApiTransport> transports)
+      throws Exception {
     new SnapshotStore(context).clear();
     new TokenStore(context).clear();
     CountDownLatch loaded = new CountDownLatch(1);
@@ -44,8 +50,7 @@ public class SyncLifecycleTest {
         .runOnMainSync(
             () -> {
               model =
-                  new DashboardViewModel(
-                      (Application) context.getApplicationContext(), token -> transport);
+                  new DashboardViewModel((Application) context.getApplicationContext(), transports);
               observer =
                   value -> {
                     state.set(value);
@@ -62,7 +67,8 @@ public class SyncLifecycleTest {
     volatile boolean block;
 
     @Override
-    public JSONObject get(String path) throws Exception {
+    public JSONObject get(String path)
+        throws java.io.IOException, org.json.JSONException, InterruptedException {
       if (path.equals("user"))
         return new JSONObject()
             .put("id", "test-owner")
@@ -92,11 +98,226 @@ public class SyncLifecycleTest {
   }
 
   @Test
+  public void transportCreationFailureFinishesLoadingWithoutLeakingDetails() throws Exception {
+    start(
+        token -> {
+          throw new IllegalStateException("private-test-token");
+        });
+    CountDownLatch failed = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> failedObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync failed")) failed.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(failedObserver);
+                model.sync("private-test-token");
+              });
+      assertTrue(failed.await(10, TimeUnit.SECONDS));
+      assertFalse(state.get().message.contains("private-test-token"));
+      assertNull(state.get().model);
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(failedObserver));
+    }
+  }
+
+  @Test
+  public void newerSyncCompletesBeforeCancelledSlowResponseAndCannotBeOverwritten()
+      throws Exception {
+    CountDownLatch slowStarted = new CountDownLatch(1),
+        releaseSlow = new CountDownLatch(1),
+        slowReturned = new CountDownLatch(1);
+    AtomicInteger created = new AtomicInteger();
+    Fake slow =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user")) {
+              slowStarted.countDown();
+              while (true) {
+                try {
+                  if (releaseSlow.await(10, TimeUnit.SECONDS)) break;
+                } catch (InterruptedException ignored) {
+                  /* Simulate an uncooperative network call. */
+                }
+              }
+              slowReturned.countDown();
+              return new JSONObject()
+                  .put("id", "old-owner")
+                  .put("joined_at", java.time.Instant.now().toString());
+            }
+            return super.get(path);
+          }
+
+          @Override
+          public void cancel() {
+            /* The response can arrive after cancellation. */
+          }
+        };
+    Fake fast =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user"))
+              return new JSONObject()
+                  .put("id", "new-owner")
+                  .put("joined_at", java.time.Instant.now().toString());
+            return super.get(path);
+          }
+        };
+    start(
+        token -> {
+          created.incrementAndGet();
+          return token.equals("old-token") ? slow : fast;
+        });
+    CountDownLatch saved = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> savedObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync complete")) saved.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(savedObserver);
+                model.sync("old-token");
+              });
+      assertTrue(slowStarted.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.sync("duplicate-token");
+                model.cancelSync();
+                model.sync("new-token");
+              });
+      assertTrue(
+          "new request must not wait for the obsolete one", saved.await(15, TimeUnit.SECONDS));
+      assertEquals(2, created.get());
+      assertEquals("new-owner", new SnapshotStore(context).load("new-token").getString("userId"));
+      releaseSlow.countDown();
+      assertTrue(slowReturned.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      assertEquals("new-owner", new SnapshotStore(context).load("new-token").getString("userId"));
+      assertEquals("new-token", new TokenStore(context).load());
+    } finally {
+      releaseSlow.countDown();
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(savedObserver));
+    }
+  }
+
+  @Test
+  public void manualRetryCannotBypassRateLimit() throws Exception {
+    AtomicInteger attempts = new AtomicInteger();
+    Fake limited =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            attempts.incrementAndGet();
+            throw new HttpTransport.Failure("Rate limited", 10000);
+          }
+        };
+    start(limited);
+    CountDownLatch failed = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> failedObserver =
+        value -> {
+          if (!value.syncing && value.message.equals("Rate limited")) failed.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(failedObserver);
+                model.sync("private-test-token");
+              });
+      assertTrue(failed.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.sync("private-test-token"));
+      assertEquals(1, attempts.get());
+      assertTrue(state.get().message.contains("wait before retrying"));
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(failedObserver));
+    }
+  }
+
+  @Test
+  public void syncFinishesWhileScreenIsStoppedAndPublishesOnReturn() throws Exception {
+    Fake fake = new Fake();
+    fake.block = true;
+    start(fake);
+    class Owner implements androidx.lifecycle.LifecycleOwner {
+      final androidx.lifecycle.LifecycleRegistry lifecycle =
+          new androidx.lifecycle.LifecycleRegistry(this);
+
+      @Override
+      public androidx.lifecycle.Lifecycle getLifecycle() {
+        return lifecycle;
+      }
+    }
+    AtomicReference<Owner> owner = new AtomicReference<>();
+    AtomicReference<DashboardViewModel.State> shown = new AtomicReference<>();
+    CountDownLatch complete = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> completedObserver =
+        value -> {
+          if (!value.syncing && value.message.startsWith("Sync complete")) complete.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                Owner value = new Owner();
+                owner.set(value);
+                value.lifecycle.setCurrentState(androidx.lifecycle.Lifecycle.State.STARTED);
+                model.state().observe(value, shown::set);
+                model.state().observeForever(completedObserver);
+                model.sync("fake-test-token");
+              });
+      assertTrue(fake.fetching.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () ->
+                  owner
+                      .get()
+                      .lifecycle
+                      .setCurrentState(androidx.lifecycle.Lifecycle.State.CREATED));
+      fake.release.countDown();
+      assertTrue(complete.await(15, TimeUnit.SECONDS));
+      assertTrue(shown.get().syncing);
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () ->
+                  owner
+                      .get()
+                      .lifecycle
+                      .setCurrentState(androidx.lifecycle.Lifecycle.State.STARTED));
+      assertFalse(shown.get().syncing);
+      assertNotNull(shown.get().model);
+      assertTrue(shown.get().message.startsWith("Sync complete"));
+    } finally {
+      fake.release.countDown();
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                owner.get().lifecycle.setCurrentState(androidx.lifecycle.Lifecycle.State.DESTROYED);
+                model.state().removeObserver(completedObserver);
+              });
+    }
+  }
+
+  @Test
   public void unreachableTodoistReturnsToDisconnectedState() throws Exception {
     Fake offline =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             throw new java.net.UnknownHostException("offline");
           }
         };
@@ -141,7 +362,8 @@ public class SyncLifecycleTest {
       volatile boolean offline;
 
       @Override
-      public JSONObject get(String path) throws Exception {
+      public JSONObject get(String path)
+          throws java.io.IOException, org.json.JSONException, InterruptedException {
         if (offline) throw new java.net.UnknownHostException("private-test-token");
         return super.get(path);
       }
@@ -214,7 +436,8 @@ public class SyncLifecycleTest {
     Fake broken =
         new Fake() {
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             throw new org.json.JSONException("private-test-token");
           }
         };
@@ -262,7 +485,8 @@ public class SyncLifecycleTest {
           int activityRequests;
 
           @Override
-          public JSONObject get(String path) throws Exception {
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
             if (path.startsWith("activities") && ++activityRequests == 2) block = true;
             return super.get(path);
           }

@@ -41,6 +41,8 @@ public final class DashboardViewModel extends AndroidViewModel {
   private final MutableLiveData<State> state =
       new MutableLiveData<>(new State(null, true, false, false, false, "Opening saved history…"));
   private final ExecutorService worker = Executors.newSingleThreadExecutor();
+  private final ExecutorService requests = Executors.newFixedThreadPool(2);
+  private final Object requestLock = new Object();
   private final Handler main = new Handler(Looper.getMainLooper());
   private final TokenStore tokens;
   private final SnapshotStore store;
@@ -49,9 +51,10 @@ public final class DashboardViewModel extends AndroidViewModel {
   private final AtomicBoolean committing = new AtomicBoolean();
   private volatile ApiTransport transport;
   private Future<?> task;
-  private JSONObject snapshot = new JSONObject();
-  private String token = "";
-  private DashboardModel savedModel;
+  private volatile JSONObject snapshot = new JSONObject();
+  private volatile String token = "";
+  private volatile DashboardModel savedModel;
+  private volatile long retryAfter;
 
   public DashboardViewModel(Application application) {
     this(application, HttpTransport::new);
@@ -96,17 +99,36 @@ public final class DashboardViewModel extends AndroidViewModel {
     if (current == null || current.syncing || current.loading) return;
     String requestedToken = candidate.trim().isEmpty() ? token : candidate.trim();
     if (requestedToken.isEmpty()) return;
+    if (android.os.SystemClock.elapsedRealtime() < retryAfter) {
+      state.setValue(
+          new State(
+              current.demo ? savedModel : current.model,
+              false,
+              false,
+              false,
+              !token.isEmpty(),
+              "Todoist asked the app to wait before retrying. Saved data is unchanged."));
+      return;
+    }
     int request = generation.incrementAndGet();
     boolean trustLegacy = requestedToken.equals(token);
+    JSONObject baseline = snapshot;
     DashboardModel visible = current.demo ? savedModel : current.model;
     state.setValue(
         new State(visible, false, true, false, !token.isEmpty(), "Connecting to Todoist…"));
     task =
-        worker.submit(
+        requests.submit(
             () -> {
-              ApiTransport active = transports.apply(requestedToken);
-              transport = active;
+              ApiTransport active = null;
               try {
+                active = transports.apply(requestedToken);
+                synchronized (requestLock) {
+                  if (generation.get() != request || Thread.currentThread().isInterrupted()) {
+                    active.cancel();
+                    return;
+                  }
+                  transport = active;
+                }
                 TodoistClient client =
                     new TodoistClient(
                         active,
@@ -123,31 +145,15 @@ public final class DashboardViewModel extends AndroidViewModel {
                                     message)));
                 JSONObject next =
                     client.snapshot(
-                        snapshot,
+                        baseline,
                         trustLegacy,
                         partial -> {
-                          String owner = snapshot.optString("userId");
-                          if (snapshot.has("syncedAt")
+                          String owner = baseline.optString("userId");
+                          if (baseline.has("syncedAt")
                               && !(owner.equals(partial.optString("userId"))
                                   || (owner.isEmpty() && trustLegacy))) return;
-                          if (generation.get() != request || Thread.currentThread().isInterrupted())
-                            throw new SyncCancelledException();
-                          committing.set(true);
-                          try {
-                            if (generation.get() != request) throw new SyncCancelledException();
-                            JSONObject saved = new JSONObject(partial.toString());
-                            store.save(
-                                saved,
-                                requestedToken,
-                                () -> {
-                                  if (!requestedToken.equals(token)) tokens.save(requestedToken);
-                                });
-                            token = requestedToken;
-                            snapshot = saved;
-                            savedModel = new DashboardModel(saved, Clock.systemDefaultZone());
-                          } finally {
-                            committing.set(false);
-                          }
+                          commitSnapshot(
+                              new JSONObject(partial.toString()), requestedToken, request);
                         });
                 post(
                     request,
@@ -158,40 +164,34 @@ public final class DashboardViewModel extends AndroidViewModel {
                         false,
                         !token.isEmpty(),
                         "Preparing your dashboard…"));
-                DashboardModel model = new DashboardModel(next, Clock.systemDefaultZone());
-                if (generation.get() != request || Thread.currentThread().isInterrupted()) return;
-                committing.set(true);
-                try {
-                  if (generation.get() != request) return;
-                  post(
-                      request,
-                      new State(
-                          visible, false, true, false, !token.isEmpty(), "Saving on this device…"));
-                  store.save(
-                      next,
-                      requestedToken,
-                      () -> {
-                        if (!requestedToken.equals(token)) tokens.save(requestedToken);
-                      });
-                  token = requestedToken;
-                  snapshot = next;
-                  savedModel = model;
-                  post(
-                      request,
-                      new State(
-                          model,
-                          false,
-                          false,
-                          false,
-                          true,
-                          model.historyWarning.isEmpty()
-                              ? "Sync complete. Your history is available offline."
-                              : "Saved on device. Some history details could not be refreshed."));
-                } finally {
-                  committing.set(false);
-                }
+                post(
+                    request,
+                    new State(
+                        visible, false, true, false, !token.isEmpty(), "Saving on this device…"));
+                DashboardModel model = commitSnapshot(next, requestedToken, request);
+                post(
+                    request,
+                    new State(
+                        model,
+                        false,
+                        false,
+                        false,
+                        true,
+                        model.historyWarning.isEmpty()
+                            ? "Sync complete. Your history is available offline."
+                            : "Saved on device. Some history details could not be refreshed."));
               } catch (Exception exception) {
-                if (generation.get() == request)
+                if (exception instanceof HttpTransport.Failure) {
+                  synchronized (requestLock) {
+                    long delay = ((HttpTransport.Failure) exception).retryAfterMillis;
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (delay > 0 && generation.get() == request)
+                      retryAfter = delay > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + delay;
+                  }
+                }
+                if (generation.get() == request) {
+                  android.util.Log.w(
+                      "Todometry", "Sync failed: " + exception.getClass().getSimpleName());
                   post(
                       request,
                       new State(
@@ -201,17 +201,58 @@ public final class DashboardViewModel extends AndroidViewModel {
                           false,
                           !token.isEmpty(),
                           errorMessage(exception)));
+                }
               } finally {
-                if (transport == active) transport = null;
+                synchronized (requestLock) {
+                  if (transport == active) transport = null;
+                }
               }
             });
   }
 
+  private DashboardModel commitSnapshot(JSONObject next, String requestedToken, int request)
+      throws Exception {
+    try {
+      return worker
+          .submit(
+              () -> {
+                synchronized (requestLock) {
+                  if (generation.get() != request || Thread.currentThread().isInterrupted())
+                    throw new SyncCancelledException();
+                  committing.set(true);
+                }
+                try {
+                  DashboardModel model = new DashboardModel(next, Clock.systemDefaultZone());
+                  store.save(
+                      next,
+                      requestedToken,
+                      () -> {
+                        if (!requestedToken.equals(token)) tokens.save(requestedToken);
+                      });
+                  token = requestedToken;
+                  snapshot = next;
+                  savedModel = model;
+                  return model;
+                } finally {
+                  committing.set(false);
+                }
+              })
+          .get();
+    } catch (java.util.concurrent.ExecutionException failure) {
+      if (failure.getCause() instanceof Exception) throw (Exception) failure.getCause();
+      throw new IllegalStateException("Could not save the dashboard", failure.getCause());
+    }
+  }
+
   void cancelSync() {
     State current = state.getValue();
-    if (current == null || !current.syncing || committing.get()) return;
-    generation.incrementAndGet();
-    ApiTransport active = transport;
+    if (current == null || !current.syncing) return;
+    ApiTransport active;
+    synchronized (requestLock) {
+      if (committing.get()) return;
+      generation.incrementAndGet();
+      active = transport;
+    }
     if (active != null) active.cancel();
     if (task != null) task.cancel(true);
     state.setValue(
@@ -437,6 +478,7 @@ public final class DashboardViewModel extends AndroidViewModel {
     generation.incrementAndGet();
     ApiTransport active = transport;
     if (active != null) active.cancel();
+    requests.shutdownNow();
     worker.shutdownNow();
   }
 }
