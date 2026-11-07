@@ -41,7 +41,13 @@ public final class DashboardViewModel extends AndroidViewModel {
   private final MutableLiveData<State> state =
       new MutableLiveData<>(new State(null, true, false, false, false, "Opening saved history…"));
   private final ExecutorService worker = Executors.newSingleThreadExecutor();
-  private final ExecutorService requests = Executors.newFixedThreadPool(2);
+  private final ExecutorService requests =
+      new java.util.concurrent.ThreadPoolExecutor(
+          0,
+          2,
+          30,
+          java.util.concurrent.TimeUnit.SECONDS,
+          new java.util.concurrent.SynchronousQueue<>());
   private final Object requestLock = new Object();
   private final Handler main = new Handler(Looper.getMainLooper());
   private final TokenStore tokens;
@@ -116,98 +122,110 @@ public final class DashboardViewModel extends AndroidViewModel {
     DashboardModel visible = current.demo ? savedModel : current.model;
     state.setValue(
         new State(visible, false, true, false, !token.isEmpty(), "Connecting to Todoist…"));
-    task =
-        requests.submit(
-            () -> {
-              ApiTransport active = null;
-              try {
-                active = transports.apply(requestedToken);
-                synchronized (requestLock) {
-                  if (generation.get() != request || Thread.currentThread().isInterrupted()) {
-                    active.cancel();
-                    return;
-                  }
-                  transport = active;
-                }
-                TodoistClient client =
-                    new TodoistClient(
-                        active,
-                        Clock.systemDefaultZone(),
-                        message ->
-                            post(
-                                request,
-                                new State(
-                                    savedModel == null ? visible : savedModel,
-                                    false,
-                                    true,
-                                    false,
-                                    !token.isEmpty(),
-                                    message)));
-                JSONObject next =
-                    client.snapshot(
-                        baseline,
-                        trustLegacy,
-                        partial -> {
-                          String owner = baseline.optString("userId");
-                          if (baseline.has("syncedAt")
-                              && !(owner.equals(partial.optString("userId"))
-                                  || (owner.isEmpty() && trustLegacy))) return;
-                          commitSnapshot(
-                              new JSONObject(partial.toString()), requestedToken, request);
-                        });
-                post(
-                    request,
-                    new State(
-                        visible,
-                        false,
-                        true,
-                        false,
-                        !token.isEmpty(),
-                        "Preparing your dashboard…"));
-                post(
-                    request,
-                    new State(
-                        visible, false, true, false, !token.isEmpty(), "Saving on this device…"));
-                DashboardModel model = commitSnapshot(next, requestedToken, request);
-                post(
-                    request,
-                    new State(
-                        model,
-                        false,
-                        false,
-                        false,
-                        true,
-                        model.historyWarning.isEmpty()
-                            ? "Sync complete. Your history is available offline."
-                            : "Saved on device. Some history details could not be refreshed."));
-              } catch (Exception exception) {
-                if (exception instanceof HttpTransport.Failure) {
+    try {
+      task =
+          requests.submit(
+              () -> {
+                ApiTransport active = null;
+                try {
+                  active = transports.apply(requestedToken);
                   synchronized (requestLock) {
-                    long delay = ((HttpTransport.Failure) exception).retryAfterMillis;
-                    long now = android.os.SystemClock.elapsedRealtime();
-                    if (delay > 0 && generation.get() == request)
-                      retryAfter = delay > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + delay;
+                    if (generation.get() != request || Thread.currentThread().isInterrupted()) {
+                      active.cancel();
+                      return;
+                    }
+                    transport = active;
                   }
-                }
-                if (generation.get() == request) {
-                  android.util.Log.w(
-                      "Todometry", "Sync failed: " + exception.getClass().getSimpleName());
+                  TodoistClient client =
+                      new TodoistClient(
+                          active,
+                          Clock.systemDefaultZone(),
+                          message ->
+                              post(
+                                  request,
+                                  new State(
+                                      savedModel == null ? visible : savedModel,
+                                      false,
+                                      true,
+                                      false,
+                                      !token.isEmpty(),
+                                      message)));
+                  JSONObject next =
+                      client.snapshot(
+                          baseline,
+                          trustLegacy,
+                          partial -> {
+                            String owner = baseline.optString("userId");
+                            if (baseline.has("syncedAt")
+                                && !(owner.equals(partial.optString("userId"))
+                                    || (owner.isEmpty() && trustLegacy))) return;
+                            commitSnapshot(
+                                new JSONObject(partial.toString()), requestedToken, request);
+                          });
                   post(
                       request,
                       new State(
-                          savedModel == null ? visible : savedModel,
+                          visible,
                           false,
-                          false,
+                          true,
                           false,
                           !token.isEmpty(),
-                          errorMessage(exception)));
+                          "Preparing your dashboard…"));
+                  post(
+                      request,
+                      new State(
+                          visible, false, true, false, !token.isEmpty(), "Saving on this device…"));
+                  DashboardModel model = commitSnapshot(next, requestedToken, request);
+                  post(
+                      request,
+                      new State(
+                          model,
+                          false,
+                          false,
+                          false,
+                          true,
+                          model.historyWarning.isEmpty()
+                              ? "Sync complete. Your history is available offline."
+                              : "Saved on device. Some history details could not be refreshed."));
+                } catch (Exception exception) {
+                  if (exception instanceof HttpTransport.Failure) {
+                    synchronized (requestLock) {
+                      long delay = ((HttpTransport.Failure) exception).retryAfterMillis;
+                      long now = android.os.SystemClock.elapsedRealtime();
+                      if (delay > 0 && generation.get() == request)
+                        retryAfter = delay > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + delay;
+                    }
+                  }
+                  if (generation.get() == request) {
+                    android.util.Log.w(
+                        "Todometry", "Sync failed: " + exception.getClass().getSimpleName());
+                    post(
+                        request,
+                        new State(
+                            savedModel == null ? visible : savedModel,
+                            false,
+                            false,
+                            false,
+                            !token.isEmpty(),
+                            errorMessage(exception)));
+                  }
+                } finally {
+                  synchronized (requestLock) {
+                    if (transport == active) transport = null;
+                  }
                 }
-              } finally {
-                synchronized (requestLock) {
-                  if (transport == active) transport = null;
-                }
-              }
-            });
+              });
+    } catch (java.util.concurrent.RejectedExecutionException busy) {
+      if (generation.get() == request)
+        state.setValue(
+            new State(
+                savedModel == null ? visible : savedModel,
+                false,
+                false,
+                false,
+                !token.isEmpty(),
+                "Previous syncs are still stopping. Please retry in a moment."));
+    }
   }
 
   private DashboardModel commitSnapshot(JSONObject next, String requestedToken, int request)

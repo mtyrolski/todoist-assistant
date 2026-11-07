@@ -248,6 +248,61 @@ public class SyncLifecycleTest {
   }
 
   @Test
+  public void saturatedCancelledRequestsReturnAnErrorInsteadOfQueueingForever() throws Exception {
+    CountDownLatch first = new CountDownLatch(1),
+        both = new CountDownLatch(2),
+        release = new CountDownLatch(1);
+    AtomicInteger started = new AtomicInteger();
+    Fake slow =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user")) {
+              started.incrementAndGet();
+              first.countDown();
+              both.countDown();
+              while (true) {
+                try {
+                  if (release.await(15, TimeUnit.SECONDS)) break;
+                  throw new java.io.IOException("test timed out");
+                } catch (InterruptedException ignored) {
+                  /* Simulate an uncooperative call. */
+                }
+              }
+            }
+            return super.get(path);
+          }
+
+          @Override
+          public void cancel() {}
+        };
+    start(slow);
+    try {
+      InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> model.sync("first"));
+      assertTrue(first.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.cancelSync();
+                model.sync("second");
+              });
+      assertTrue(both.await(10, TimeUnit.SECONDS));
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.cancelSync();
+                model.sync("third");
+              });
+      assertFalse(state.get().syncing);
+      assertTrue(state.get().message.contains("still stopping"));
+      assertEquals(2, started.get());
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
   public void syncFinishesWhileScreenIsStoppedAndPublishesOnReturn() throws Exception {
     Fake fake = new Fake();
     fake.block = true;
