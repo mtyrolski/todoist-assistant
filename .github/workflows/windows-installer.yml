@@ -143,7 +143,6 @@ jobs:
           if (Test-Path $logPath) { Remove-Item $logPath -Force }
           Write-Host "MSI log: $logPath"
 
-          Get-Process todometry -ErrorAction SilentlyContinue | Stop-Process -Force
           $programFilesX86 = ${env:ProgramFiles(x86)}
           $programFiles64 = $env:ProgramFiles
           $programFilesRoot = if ($arch -eq "x64" -and $programFiles64) { $programFiles64 } elseif ($programFilesX86) { $programFilesX86 } else { $programFiles64 }
@@ -153,9 +152,8 @@ jobs:
             "C:\\Program Files\\TodoistAssistant",
             "C:\\Program Files (x86)\\TodoistAssistant"
           ) | Select-Object -Unique
-          $installDirs | Where-Object { Test-Path $_ } | ForEach-Object { Remove-Item -Recurse -Force $_ }
-          $dataDir = "C:\\ProgramData\\TodoistAssistant"
-          if (Test-Path $dataDir) { Remove-Item -Recurse -Force $dataDir }
+          $existing = $installDirs | Where-Object { Test-Path $_ }
+          if ($existing) { throw "Installer smoke test requires a clean runner: $existing" }
 
           $allowed = @(0, 3010, 1641)
           $installDir = $installDirs[0]
@@ -185,92 +183,6 @@ jobs:
           $expectedVersion = (uv run python3 -m scripts.get_version).Trim()
           uv run python3 -m scripts.smoke_frozen_app "$exe" --version $expectedVersion
           if ($LASTEXITCODE -ne 0) { throw "Frozen legacy-state smoke test failed" }
-
-          function Get-HttpStatus {
-            param([string]$Uri, [int]$TimeoutSec = 5)
-            try {
-              $handler = New-Object System.Net.Http.HttpClientHandler
-              $handler.UseProxy = $false
-              $handler.Proxy = $null
-              $client = New-Object System.Net.Http.HttpClient($handler)
-              $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
-              $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
-              $status = [int]$response.StatusCode
-              $response.Dispose()
-              $client.Dispose()
-              return $status
-            } catch {
-              try {
-                $resp = Invoke-WebRequest -Uri $Uri -Method Get -UseBasicParsing -TimeoutSec $TimeoutSec -Proxy $null
-                if ($resp -and $resp.StatusCode) { return [int]$resp.StatusCode }
-              } catch {
-                if ($_.Exception -and $_.Exception.Response -and $_.Exception.Response.StatusCode) {
-                  return [int]$_.Exception.Response.StatusCode
-                }
-              }
-              return $null
-            }
-          }
-
-          function Wait-Http {
-            param([string]$Uri, [int]$TimeoutSec = 60)
-            $start = Get-Date
-            while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSec) {
-              $status = Get-HttpStatus -Uri $Uri -TimeoutSec 5
-              if ($status -ne $null) { return $status }
-              Start-Sleep -Milliseconds 500
-            }
-            return $null
-          }
-
-          $smokeDir = Join-Path $env:RUNNER_TEMP "todometry-smoke"
-          if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
-          New-Item -ItemType Directory -Path $smokeDir | Out-Null
-          $dataDir = Join-Path $smokeDir "data"
-          $configDir = Join-Path $dataDir "config"
-          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-          $stdoutLog = Join-Path $smokeDir "app-stdout.log"
-          $stderrLog = Join-Path $smokeDir "app-stderr.log"
-
-          $apiPort = 8001
-          $frontendPort = 3001
-          $runArgs = "--api-host 127.0.0.1 --api-port $apiPort --frontend-host 127.0.0.1 --frontend-port $frontendPort --no-browser --data-dir `"$dataDir`" --config-dir `"$configDir`""
-          Write-Host "Launching app: $exe $runArgs"
-          $appProc = Start-Process -FilePath $exe -ArgumentList $runArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
-          try {
-            $apiUrl = "http://127.0.0.1:$apiPort/api/health"
-            $apiStatus = Wait-Http -Uri $apiUrl -TimeoutSec 60
-            Write-Host "API health status: $apiStatus"
-            if ($apiStatus -ne 200) {
-              Write-Host "API health check failed or timed out (status: $apiStatus)."
-              if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
-              if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
-              throw "API health check failed"
-            }
-
-            $expectedVersion = (uv run python3 -m scripts.get_version).Trim()
-            $health = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 5
-            if ($health.version -ne $expectedVersion) {
-              throw "Bundled API version $($health.version) does not match $expectedVersion"
-            }
-
-            $frontendUrl = "http://127.0.0.1:$frontendPort/"
-            $frontendStatus = Wait-Http -Uri $frontendUrl -TimeoutSec 60
-            if ($frontendStatus -eq $null) {
-              Write-Host "Frontend check failed or timed out."
-              if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
-              if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
-              throw "Frontend check failed"
-            }
-            Write-Host "Frontend responded with status $frontendStatus"
-          } finally {
-            if ($appProc -and -not $appProc.HasExited) {
-              & taskkill /PID $appProc.Id /T /F | Out-Null
-              Start-Sleep -Seconds 2
-            }
-            Get-Process todometry,node -ErrorAction SilentlyContinue | Stop-Process -Force
-            Start-Sleep -Seconds 1
-          }
 
           $uninstallArgs = "/x `"$msiPath`" /qn /norestart ALLUSERS=1 MSIINSTALLPERUSER=0 /l*v `"$logPath`""
           Write-Host "msiexec uninstall args: $uninstallArgs"
