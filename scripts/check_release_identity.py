@@ -5,7 +5,7 @@ import re
 import tomllib
 from pathlib import Path
 
-from scripts.check_architecture import inspect_python
+from scripts.check_architecture import check_tree
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,13 +23,10 @@ def identity_errors(root: Path) -> list[str]:
     entry = project.get("scripts", {}).get("todometry", "")
     if not entry.startswith("todometry."):
         errors.append("todometry entry point must use todometry")
+    errors.extend(check_tree(root, strict=True))
     for namespace in ("todoist", "todometry"):
         web = root / namespace / "web"
         for path in sorted(web.rglob("*.py")):
-            if any(inspect_python(path).values()):
-                errors.append(
-                    f"runtime namespace injection remains in {path.relative_to(root)}"
-                )
             for line in path.read_text(encoding="utf-8").splitlines():
                 if line.lstrip().startswith("#") and (
                     re.search(
@@ -53,23 +50,6 @@ def identity_errors(root: Path) -> list[str]:
             for node in ast.walk(ast.parse(stub.read_text(encoding="utf-8")))
         ):
             errors.append(f"catch-all API stub remains in {stub.relative_to(root)}")
-    with (root / "pyproject.toml").open("rb") as stream:
-        config = tomllib.load(stream)
-    ruff = config.get("tool", {}).get("ruff", {})
-    for section in (ruff, ruff.get("lint", {})):
-        for key in ("ignore", "extend-ignore"):
-            if {"F", "F821", "ALL"}.intersection(section.get(key, [])):
-                errors.append("global Ruff undefined-name exemption remains")
-        for key in ("per-file-ignores", "extend-per-file-ignores"):
-            for pattern, rules in section.get(key, {}).items():
-                if ("web" in pattern or pattern in ("*", "**/*.py")) and {
-                    "F",
-                    "F821",
-                    "ALL",
-                }.intersection(rules):
-                    errors.append(
-                        f"web Ruff undefined-name exemption remains: {pattern}"
-                    )
     return errors
 
 

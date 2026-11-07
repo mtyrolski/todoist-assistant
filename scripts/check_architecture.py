@@ -95,7 +95,7 @@ def inspect_python(path: Path) -> Counter[str]:
     return counts
 
 
-def check_ruff(config: dict) -> list[str]:
+def check_ruff(config: dict, *, strict: bool = False) -> list[str]:
     ruff = config.get("tool", {}).get("ruff", {})
     errors = []
     forbidden = {"F", "F821", "ALL"}
@@ -108,7 +108,8 @@ def check_ruff(config: dict) -> list[str]:
             for pattern, rules in section.get(key, {}).items():
                 for rule in forbidden.intersection(rules):
                     if (
-                        section_name != "ruff.lint"
+                        strict
+                        or section_name != "ruff.lint"
                         or key != "per-file-ignores"
                         or pattern not in LEGACY_F821_PATHS
                         or rule != "F821"
@@ -119,7 +120,7 @@ def check_ruff(config: dict) -> list[str]:
     return errors
 
 
-def check_tree(root: Path) -> list[str]:
+def check_tree(root: Path, *, strict: bool = False) -> list[str]:
     errors = []
     paths = [
         path
@@ -129,13 +130,13 @@ def check_tree(root: Path) -> list[str]:
     for path in sorted(paths):
         relative = path.relative_to(root).as_posix()
         for kind, count in inspect_python(path).items():
-            allowed = LEGACY.get(relative, {}).get(kind, 0)
+            allowed = 0 if strict else LEGACY.get(relative, {}).get(kind, 0)
             if count > allowed:
                 errors.append(
-                    f"{relative}: {kind}: {count} occurrences, allowed {allowed}"
+                    f"runtime namespace injection in {relative}: {kind}: {count} occurrences, allowed {allowed}"
                 )
     with (root / "pyproject.toml").open("rb") as stream:
-        errors.extend(check_ruff(tomllib.load(stream)))
+        errors.extend(check_ruff(tomllib.load(stream), strict=strict))
     return errors
 
 

@@ -19,15 +19,11 @@ scripts/*
 !scripts/get_version.py
 !scripts/check_versions.py
 !scripts/check_architecture.py
-!scripts/check_types.py
 !scripts/check_release_identity.py
 !scripts/smoke_package.py
 !scripts/smoke_frozen_app.py
-!scripts/check_explicit_any.py
 !scripts/clear_local_env.py
-!scripts/download_models.py
 !scripts/dashboard_stack.sh
-!scripts/run_make_checks.py
 !scripts/status.py
 !scripts/macos/
 !scripts/macos/**

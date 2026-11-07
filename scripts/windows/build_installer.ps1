@@ -69,7 +69,7 @@ try {
     New-Item -ItemType Directory -Path $buildRoot | Out-Null
     New-Item -ItemType Directory -Path $wixObjRoot | Out-Null
 
-    $version = (& uv run $pythonCmd -m scripts.windows.get_version).Trim()
+    $version = (& uv run $pythonCmd -m scripts.get_version).Trim()
     if (-not $version) {
         throw "Unable to determine version from pyproject.toml"
     }

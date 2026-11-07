@@ -96,7 +96,7 @@ lint: ## Check Python imports and undefined names
 	PYTHONPATH=. uv run ruff check --select F todometry todoist tests scripts
 
 ci-python: lint test ## Run Python CI checks
-	uv run python3 -m scripts.check_types
+	uv run pyright --pythonpath "$$(uv run python3 -c 'import sys; print(sys.executable)')" todometry
 	uv run python3 -m scripts.check_architecture
 	uv run python3 -m scripts.check_versions
 	uv run python3 -m scripts.smoke_package
