@@ -1,8 +1,10 @@
 package com.todoistassistant;
 
 import android.annotation.SuppressLint;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -30,6 +32,7 @@ public class MainActivity extends ComponentActivity {
   private DashboardViewModel model;
   private volatile DashboardViewModel.State state;
   private DashboardModel renderedModel;
+  private AlertDialog confirmation;
   private boolean ready;
   private final androidx.activity.result.ActivityResultLauncher<String[]> adjustmentsPicker =
       registerForActivityResult(
@@ -54,7 +57,41 @@ public class MainActivity extends ComponentActivity {
     settings.setAllowContentAccess(false);
     settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     settings.setTextZoom(Math.round(getResources().getConfiguration().fontScale * 100));
-    web.setWebChromeClient(new WebChromeClient());
+    web.setWebChromeClient(
+        new WebChromeClient() {
+          @Override
+          public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+            if (isFinishing() || isDestroyed()) {
+              result.cancel();
+              return true;
+            }
+            var resolved = new java.util.concurrent.atomic.AtomicBoolean();
+            AlertDialog dialog =
+                new AlertDialog.Builder(MainActivity.this)
+                    .setMessage(message)
+                    .setPositiveButton(
+                        android.R.string.ok,
+                        (ignored, which) -> {
+                          resolved.set(true);
+                          result.confirm();
+                        })
+                    .setNegativeButton(
+                        android.R.string.cancel,
+                        (ignored, which) -> {
+                          resolved.set(true);
+                          result.cancel();
+                        })
+                    .create();
+            dialog.setOnDismissListener(
+                dismissed -> {
+                  if (confirmation == dialog) confirmation = null;
+                  if (resolved.compareAndSet(false, true)) result.cancel();
+                });
+            confirmation = dialog;
+            dialog.show();
+            return true;
+          }
+        });
     web.addJavascriptInterface(new Bridge(), "Todoist");
     WebViewAssetLoader assets =
         new WebViewAssetLoader.Builder()
@@ -111,14 +148,18 @@ public class MainActivity extends ComponentActivity {
             new androidx.activity.OnBackPressedCallback(true) {
               @Override
               public void handleOnBackPressed() {
-                web.evaluateJavascript("window.dispatchEvent(new Event('todoist-back'))", null);
+                if (!ready) {
+                  finish();
+                } else {
+                  web.evaluateJavascript("window.dispatchEvent(new Event('todoist-back'))", null);
+                }
               }
             });
     web.loadUrl(ORIGIN + "/android.html");
   }
 
   private void publish(boolean force) {
-    if (!ready || state == null) return;
+    if (!ready || state == null || isFinishing() || isDestroyed()) return;
     try {
       JSONObject payload =
           new JSONObject()
@@ -199,6 +240,7 @@ public class MainActivity extends ComponentActivity {
     public void ready() {
       runOnUiThread(
           () -> {
+            if (isFinishing() || isDestroyed()) return;
             ready = true;
             publish(true);
           });
@@ -279,7 +321,10 @@ public class MainActivity extends ComponentActivity {
   @Override
   protected void onDestroy() {
     ready = false;
+    if (confirmation != null) confirmation.dismiss();
     web.removeJavascriptInterface("Todoist");
+    if (web.getParent() instanceof android.view.ViewGroup)
+      ((android.view.ViewGroup) web.getParent()).removeView(web);
     web.destroy();
     super.onDestroy();
   }
