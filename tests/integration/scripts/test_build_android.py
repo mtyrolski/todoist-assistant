@@ -1,9 +1,10 @@
 """Check Android build prerequisites before any dependency installation."""
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 
@@ -45,3 +46,26 @@ def test_build_checks_java_before_running_npm(
     assert marker.exists() == npm_runs
     if not npm_runs:
         assert "JDK 17" in result.stderr
+
+
+def test_android_manifest_limits_network_and_backup_access() -> None:
+    root = Path(__file__).resolve().parents[3] / "android" / "app" / "src" / "main"
+    manifest = ET.parse(root / "AndroidManifest.xml").getroot()
+    android = "{http://schemas.android.com/apk/res/android}"
+    application = manifest.find("application")
+    assert application is not None
+    assert application.get(android + "allowBackup") == "false"
+    assert application.get(android + "fullBackupContent") == "false"
+    assert application.get(android + "usesCleartextTraffic") == "false"
+    assert application.get(android + "dataExtractionRules") == "@xml/data_extraction_rules"
+    assert {permission.get(android + "name") for permission in manifest.findall("uses-permission")} == {
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+    }
+    rules = ET.parse(root / "res" / "xml" / "data_extraction_rules.xml").getroot()
+    for mode in ("cloud-backup", "device-transfer"):
+        section = rules.find(mode)
+        assert section is not None
+        assert {item.get("domain") for item in section.findall("exclude") if item.get("path") == "."} >= {
+            "root", "sharedpref", "file", "database", "external"
+        }
