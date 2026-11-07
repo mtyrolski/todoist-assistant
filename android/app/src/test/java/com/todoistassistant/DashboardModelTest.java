@@ -382,6 +382,23 @@ public class DashboardModelTest {
   }
 
   @Test
+  public void undatedTasksDoNotTriggerDateAlertsInLargeAccounts() throws Exception {
+    var tasks = new java.util.ArrayList<DashboardModel.Task>();
+    for (int i = 0; i < 5000; i++)
+      tasks.add(new DashboardModel.Task(task("t" + i, "p", "Undated", 1), "Project"));
+    tasks.add(
+        new DashboardModel.Task(
+            task("dated", "p", "Due", 1).put("due", new JSONObject().put("date", "2026-11-01")),
+            "Project"));
+    AlertRules rules = new AlertRules();
+    rules.fire = rules.priority = false;
+    var status = rules.evaluate(tasks, LocalDate.now(CLOCK), CLOCK.getZone());
+    assertEquals(1, status.due);
+    assertEquals(0, status.deadline);
+    assertEquals(1, status.matches);
+  }
+
+  @Test
   public void upcomingWindowStillIncludesOverdueTasks() throws Exception {
     JSONObject data =
         empty()

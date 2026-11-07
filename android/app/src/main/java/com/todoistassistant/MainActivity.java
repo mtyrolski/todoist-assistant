@@ -23,6 +23,9 @@ import java.io.ByteArrayInputStream;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -32,6 +35,14 @@ public class MainActivity extends ComponentActivity {
   private DashboardViewModel model;
   private volatile DashboardViewModel.State state;
   private DashboardModel renderedModel;
+  private final ExecutorService detailsWorker = Executors.newSingleThreadExecutor();
+  private Future<?> detailsTask;
+  private DashboardModel detailsModel;
+  private String detailsRules;
+  private LocalDate detailsDate;
+  private ZoneId detailsZone;
+  private JSONObject details;
+  private int detailsGeneration;
   private AlertDialog confirmation;
   private boolean ready;
   private final androidx.activity.result.ActivityResultLauncher<String[]> adjustmentsPicker =
@@ -178,11 +189,83 @@ public class MainActivity extends ComponentActivity {
         quotedModel =
             state.model == null ? JSONObject.quote("null") : state.model.quotedMobilePayload;
       }
-      JSONObject preferences = new JSONObject(new Bridge().getSettings());
+      JSONObject preferences = readSettings(getSharedPreferences("rules", MODE_PRIVATE));
       AlertRules rules = AlertRules.read(preferences.getJSONObject("rules").toString());
-      if (state.model != null) {
-        var alert = rules.evaluate(state.model.tasks, LocalDate.now(), ZoneId.systemDefault());
-        payload.put(
+      updateDetails(state.model, rules, preferences.getJSONObject("rules").toString());
+      preferences.put("labels", details == null ? new JSONArray() : details.getJSONArray("labels"));
+      payload.put("alert", details == null ? JSONObject.NULL : details.getJSONObject("alert"));
+      payload.put("preferences", preferences);
+      web.evaluateJavascript(stateEvent(payload, quotedModel), null);
+    } catch (Exception exception) {
+      web.evaluateJavascript(
+          "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not open dashboard"
+              + " data. Retry sync.'}))",
+          null);
+    }
+  }
+
+  private void updateDetails(DashboardModel current, AlertRules rules, String rulesKey) {
+    ZoneId zone = ZoneId.systemDefault();
+    LocalDate date = LocalDate.now(zone);
+    if (current == detailsModel
+        && rulesKey.equals(detailsRules)
+        && date.equals(detailsDate)
+        && zone.equals(detailsZone)) return;
+    detailsModel = current;
+    detailsRules = rulesKey;
+    detailsDate = date;
+    detailsZone = zone;
+    details = null;
+    int generation = ++detailsGeneration;
+    if (detailsTask != null) detailsTask.cancel(true);
+    if (current == null) return;
+    var reference = new java.lang.ref.WeakReference<>(this);
+    detailsTask =
+        detailsWorker.submit(
+            () -> {
+              try {
+                JSONObject result = dashboardDetails(current, rules, date, zone);
+                MainActivity activity = reference.get();
+                if (activity == null || Thread.currentThread().isInterrupted()) return;
+                activity.runOnUiThread(
+                    () -> {
+                      if (activity.isDestroyed() || activity.detailsGeneration != generation)
+                        return;
+                      activity.details = result;
+                      activity.publish(false);
+                    });
+              } catch (java.util.concurrent.CancellationException cancelled) {
+                // A newer model or activity teardown made this calculation obsolete.
+              } catch (org.json.JSONException failure) {
+                android.util.Log.w("Todometry", "Could not calculate dashboard attention");
+                MainActivity activity = reference.get();
+                if (activity != null)
+                  activity.runOnUiThread(
+                      () -> {
+                        if (!activity.isDestroyed() && activity.detailsGeneration == generation)
+                          activity.web.evaluateJavascript(
+                              "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not"
+                                  + " calculate dashboard attention.'}))",
+                              null);
+                      });
+              }
+            });
+  }
+
+  static JSONObject dashboardDetails(
+      DashboardModel model, AlertRules rules, LocalDate date, ZoneId zone)
+      throws org.json.JSONException {
+    TreeSet<String> labels = new TreeSet<>();
+    int processed = 0;
+    for (var task : model.tasks) {
+      if ((processed++ & 255) == 0 && Thread.currentThread().isInterrupted())
+        throw new java.util.concurrent.CancellationException();
+      labels.addAll(task.labels);
+    }
+    var alert = rules.evaluate(model.tasks, date, zone);
+    return new JSONObject()
+        .put("labels", new JSONArray(labels))
+        .put(
             "alert",
             new JSONObject()
                 .put("enabled", rules.enabled)
@@ -192,15 +275,6 @@ public class MainActivity extends ComponentActivity {
                 .put("priority", alert.priority)
                 .put("due", alert.due)
                 .put("deadline", alert.deadline));
-      }
-      payload.put("preferences", preferences);
-      web.evaluateJavascript(stateEvent(payload, quotedModel), null);
-    } catch (Exception exception) {
-      web.evaluateJavascript(
-          "window.dispatchEvent(new CustomEvent('todoist-error',{detail:'Could not open dashboard"
-              + " data. Retry sync.'}))",
-          null);
-    }
   }
 
   @Override
@@ -321,6 +395,8 @@ public class MainActivity extends ComponentActivity {
   @Override
   protected void onDestroy() {
     ready = false;
+    detailsGeneration++;
+    detailsWorker.shutdownNow();
     if (confirmation != null) confirmation.dismiss();
     web.removeJavascriptInterface("Todoist");
     if (web.getParent() instanceof android.view.ViewGroup)

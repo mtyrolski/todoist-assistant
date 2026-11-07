@@ -15,6 +15,125 @@ import org.junit.Test;
 
 public class BridgeSerializationTest {
   @Test
+  public void newerDashboardReplacesSlowAttentionCalculation() throws Exception {
+    var clock = java.time.Clock.systemDefaultZone();
+    JSONObject large = DemoData.create(clock);
+    JSONArray tasks = new JSONArray();
+    for (int i = 0; i < 3000; i++)
+      tasks.put(
+          new JSONObject()
+              .put("id", "old-" + i)
+              .put("project_id", "missing")
+              .put("content", "Old task")
+              .put("labels", new JSONArray().put("old-only")));
+    large.put("tasks", tasks);
+    DashboardModel oldModel = new DashboardModel(large, clock);
+    JSONObject small = DemoData.create(clock);
+    small.put(
+        "tasks",
+        new JSONArray()
+            .put(
+                new JSONObject()
+                    .put("id", "new")
+                    .put("project_id", "missing")
+                    .put("content", "New task")
+                    .put("labels", new JSONArray().put("new-only"))));
+    DashboardModel newModel = new DashboardModel(small, clock);
+    AlertRules rules = new AlertRules();
+    rules.fireLabels = "new-only";
+    rules.priority = rules.due = rules.deadline = false;
+    assertEquals(
+        1,
+        MainActivity.dashboardDetails(
+                newModel, rules, java.time.LocalDate.now(clock), clock.getZone())
+            .getJSONObject("alert")
+            .getInt("matches"));
+    rules.enabled = false;
+    assertEquals(
+        0,
+        MainActivity.dashboardDetails(
+                newModel, rules, java.time.LocalDate.now(clock), clock.getZone())
+            .getJSONObject("alert")
+            .getInt("matches"));
+    var readyField = MainActivity.class.getDeclaredField("ready");
+    var stateField = MainActivity.class.getDeclaredField("state");
+    var webField = MainActivity.class.getDeclaredField("web");
+    var publish = MainActivity.class.getDeclaredMethod("publish", boolean.class);
+    readyField.setAccessible(true);
+    stateField.setAccessible(true);
+    webField.setAccessible(true);
+    publish.setAccessible(true);
+    try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+      AtomicReference<Boolean> ready = new AtomicReference<>(false);
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+      while (!ready.get() && System.nanoTime() < deadline) {
+        scenario.onActivity(
+            activity -> {
+              try {
+                ready.set(readyField.getBoolean(activity));
+              } catch (IllegalAccessException failure) {
+                throw new AssertionError(failure);
+              }
+            });
+        if (!ready.get()) Thread.sleep(200);
+      }
+      assertTrue("The WebView must be ready", ready.get());
+      CountDownLatch installed = new CountDownLatch(1);
+      scenario.onActivity(
+          activity -> {
+            try {
+              ((WebView) webField.get(activity))
+                  .evaluateJavascript(
+                      "window.__attentionEvents=[];window.addEventListener('todoist-state',"
+                          + "e=>window.__attentionEvents.push(e.detail.preferences.labels));",
+                      ignored -> installed.countDown());
+            } catch (IllegalAccessException failure) {
+              throw new AssertionError(failure);
+            }
+          });
+      assertTrue(installed.await(30, TimeUnit.SECONDS));
+      scenario.onActivity(
+          activity -> {
+            try {
+              stateField.set(
+                  activity,
+                  new DashboardViewModel.State(oldModel, false, true, false, true, "Old"));
+              publish.invoke(activity, false);
+              stateField.set(
+                  activity,
+                  new DashboardViewModel.State(newModel, false, false, false, true, "New"));
+              publish.invoke(activity, false);
+            } catch (ReflectiveOperationException failure) {
+              throw new AssertionError(failure);
+            }
+          });
+      AtomicReference<String> events = new AtomicReference<>("");
+      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+      while (!events.get().contains("new-only") && System.nanoTime() < deadline) {
+        CountDownLatch received = new CountDownLatch(1);
+        scenario.onActivity(
+            activity -> {
+              try {
+                ((WebView) webField.get(activity))
+                    .evaluateJavascript(
+                        "JSON.stringify(window.__attentionEvents)",
+                        value -> {
+                          events.set(value);
+                          received.countDown();
+                        });
+              } catch (IllegalAccessException failure) {
+                throw new AssertionError(failure);
+              }
+            });
+        assertTrue(received.await(30, TimeUnit.SECONDS));
+        if (!events.get().contains("new-only")) Thread.sleep(200);
+      }
+      assertTrue("The new account details must arrive", events.get().contains("new-only"));
+      assertFalse("Old account details must not overwrite them", events.get().contains("old-only"));
+    }
+  }
+
+  @Test
   public void javascriptConfirmationCanBeCancelledInTheNativeDialog() throws Exception {
     var instrumentation = InstrumentationRegistry.getInstrumentation();
     var automation = instrumentation.getUiAutomation();

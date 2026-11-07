@@ -85,7 +85,10 @@ final class AlertRules {
       if (!label.trim().isEmpty()) labels.add(label.trim().toLowerCase(Locale.ROOT));
     List<boolean[]> matches = new java.util.ArrayList<>();
     int[] counts = new int[4];
+    int processed = 0;
     for (var task : tasks) {
+      if ((processed++ & 255) == 0 && Thread.currentThread().isInterrupted())
+        throw new java.util.concurrent.CancellationException();
       boolean hasFire =
           fire
               && task.labels.stream()
@@ -103,7 +106,10 @@ final class AlertRules {
       counts[0] > 0, counts[1] >= priorityMin, counts[2] >= dueMin, counts[3] >= deadlineMin
     };
     int total = 0;
+    processed = 0;
     for (boolean[] found : matches) {
+      if ((processed++ & 255) == 0 && Thread.currentThread().isInterrupted())
+        throw new java.util.concurrent.CancellationException();
       for (int i = 0; i < found.length; i++)
         if (found[i] && triggered[i]) {
           total++;
@@ -115,6 +121,7 @@ final class AlertRules {
   }
 
   private static boolean within(String value, LocalDate today, int days) {
+    if (value.isEmpty()) return false;
     LocalDate date;
     try {
       // Todoist due dates are calendar dates, even when they contain a time and offset.
