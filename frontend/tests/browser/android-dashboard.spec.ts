@@ -223,6 +223,23 @@ test("the dashboard remains usable when UI preferences cannot be saved", async (
   expect(errors).toEqual([]);
 });
 
+test("an older WebView keeps navigation usable when charts are unsupported", async ({ page }) => {
+  await page.addInitScript(() => {
+    const supports = CSS.supports.bind(CSS);
+    CSS.supports = ((...args: [string, string?]) =>
+      args[0] === "selector(:focus-visible)" ? false :
+        args[1] === undefined ? supports(args[0]) : supports(args[0], args[1])) as typeof CSS.supports;
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.reload();
+  await expect(page.getByText("Charts require an updated Android System WebView or browser.").first()).toBeVisible();
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(page.getByText("Charts require an updated Android System WebView or browser.").first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("many project labels stay outside both plots in portrait and landscape", async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event("test-many-projects")));
   for (const size of [
