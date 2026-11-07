@@ -904,6 +904,43 @@ test("project groupings can be edited, promoted, imported, and kept when names a
   expect(await page.evaluate(() => sessionStorage.getItem("test-import-requested"))).toBe("yes");
 });
 
+test("grouping editor draft survives recreation without applying changes", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-account")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByLabel("Find an archived project").fill("Old");
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
+  await manager.getByLabel("Group under").selectOption("Personal");
+  await manager.getByText("Project not listed?").click();
+  await manager.getByLabel("Project name", { exact: true }).fill("Unlisted project");
+  await manager.getByText("Group not listed?").click();
+  await manager.getByLabel("Group name", { exact: true }).fill("Unlisted group");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").groupingDraft?.target)).toBe("Personal");
+  await page.reload();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-account")));
+  await expect(manager.getByLabel("Find an archived project")).toHaveValue("Old");
+  await expect(manager.getByRole("combobox", { name: /^Archived project/ })).toHaveValue("Old");
+  await expect(manager.getByLabel("Group under")).toHaveValue("Personal");
+  await manager.getByText("Project not listed?").click();
+  await expect(manager.getByLabel("Project name", { exact: true })).toHaveValue("Unlisted project");
+  await manager.getByText("Group not listed?").click();
+  await expect(manager.getByLabel("Group name", { exact: true })).toHaveValue("Unlisted group");
+  expect(await page.evaluate(() => sessionStorage.getItem("test-saved-adjustments"))).toBeNull();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").groupingDraft?.source)).toBe("");
+});
+
+test("invalid stored grouping draft is ignored without overwriting it", async ({ page }) => {
+  const raw = JSON.stringify({ tab: "Control Panel", groupingDraft: { source: ["bad"] } });
+  await page.evaluate((value) => localStorage.setItem("todoist-ui", value), raw);
+  await page.reload();
+  await expect(page.getByText(/Some saved view preferences are invalid/)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("todoist-ui"))).toBe(raw);
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-account")));
+  await expect(page.getByRole("region", { name: "Project grouping" }).getByRole("combobox", { name: /^Archived project/ })).toHaveValue("");
+});
+
 test("project names do not collide with JavaScript properties or the aggregate", async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event("test-special-names")));
   const section = page.locator("section.card").filter({ has: page.getByRole("heading", { name: "Completed tasks", exact: true }) });

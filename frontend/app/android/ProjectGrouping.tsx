@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { command, type MobileModel } from "../lib/mobile";
 
 /** Saved rules are keyed by project name, like the desktop export. */
-export function ProjectGrouping({ model, enabled, busy, message }: {
+export function ProjectGrouping({ model, enabled, busy, message, draft, onDraftChange }: {
   model: MobileModel | null;
   enabled: boolean;
   busy: boolean;
   message: string;
+  draft: { search: string; source: string; target: string; customSource: string; customTarget: string };
+  onDraftChange: (draft: { search: string; source: string; target: string; customSource: string; customTarget: string }) => void;
 }) {
-  const [search, setSearch] = useState("");
-  const [source, setSource] = useState("");
-  const [target, setTarget] = useState("");
-  const [customSource, setCustomSource] = useState("");
-  const [customTarget, setCustomTarget] = useState("");
+  const { search, source, target, customSource, customTarget } = draft;
+  const change = (value: Partial<typeof draft>) => onDraftChange({ ...draft, ...value });
   const adjustments = model?.adjustments;
   const mappings = adjustments?.mappings ?? {};
   const archivedParents = adjustments?.archivedParents ?? [];
@@ -42,13 +41,15 @@ export function ProjectGrouping({ model, enabled, busy, message }: {
   const mixedStatus = matchingProjects.some((project) => project.archived) && matchingProjects.some((project) => !project.archived);
   const currentGrouping = roots.length > 1 ? "Multiple groups" : activeOnly && roots.length === 1 ? roots[0] : ownGroup ? "Own group" : existing ? existing : roots.length === 1 ? `${roots[0]} (automatic)` : "Automatic";
   const editable = enabled && !busy;
-  const savedKey = JSON.stringify(adjustments ?? {});
+  const previous = useRef({ source, mapping: existing });
 
   useEffect(() => {
-    setTarget(savedMapping(source) ?? "");
-  // Keep the selection in step with imports and saved changes, without resetting it on unrelated sync updates.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, savedKey]);
+    const old = previous.current;
+    previous.current = { source, mapping: existing };
+    // Keep a distinct unsaved target when a refresh or import changes the saved mapping.
+    if (old.source === source && old.mapping !== existing && target === (old.mapping ?? ""))
+      onDraftChange({ ...draft, target: existing ?? "" });
+  }, [source, existing, target, draft, onDraftChange]);
 
   const save = (nextMappings: Record<string, string>, nextParents: string[]) => {
     command("save-adjustments", JSON.stringify({
@@ -81,10 +82,10 @@ export function ProjectGrouping({ model, enabled, busy, message }: {
       {!enabled ? <p className="muted tiny">Connect your account to edit or import groupings.</p> : (
         <>
           <label className="control">Find an archived project
-            <input className="textInput" type="search" placeholder="Search project names" value={search} onChange={(event) => setSearch(event.target.value)} disabled={!editable} />
+            <input className="textInput" type="search" placeholder="Search project names" value={search} onChange={(event) => change({ search: event.target.value })} disabled={!editable} />
           </label>
           <label className="control">Archived project
-            <select className="select" value={source} onChange={(event) => { setSource(event.target.value); setTarget(savedMapping(event.target.value) ?? ""); }} disabled={!editable || !sources.length}>
+            <select className="select" value={source} onChange={(event) => change({ source: event.target.value, target: savedMapping(event.target.value) ?? "" })} disabled={!editable || !sources.length}>
               <option value="">Select a project</option>
               {sources.filter((name) => name === source || name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map((name) => {
                 const matches = hierarchy.filter((project) => project.name === name).length;
@@ -96,8 +97,8 @@ export function ProjectGrouping({ model, enabled, busy, message }: {
           <details>
             <summary>Project not listed?</summary>
             <p className="muted tiny">Enter its exact name. Rules apply to every project with that name.</p>
-            <label className="control">Project name<input className="textInput" value={customSource} onChange={(event) => setCustomSource(event.target.value)} disabled={!editable} /></label>
-            <button type="button" className="button buttonSmall buttonGhost" disabled={!editable || !customSource.trim()} onClick={() => { setSource(customSource.trim()); setSearch(""); setTarget(savedMapping(customSource.trim()) ?? ""); }}>Use project name</button>
+            <label className="control">Project name<input className="textInput" value={customSource} onChange={(event) => change({ customSource: event.target.value })} disabled={!editable} /></label>
+            <button type="button" className="button buttonSmall buttonGhost" disabled={!editable || !customSource.trim()} onClick={() => change({ source: customSource.trim(), search: "", target: savedMapping(customSource.trim()) ?? "" })}>Use project name</button>
           </details>
           {source && (
             <>
@@ -110,15 +111,15 @@ export function ProjectGrouping({ model, enabled, busy, message }: {
               {ownGroup && activeOnly && <p className="muted tiny">“Own group” is saved for this name and takes effect after the project is archived.</p>}
               {ownGroup && existing && !activeOnly && <p className="muted tiny">A saved assignment to {existing} is also present. “Own group” takes priority for archived projects until you assign it again.</p>}
               <label className="control">Group under
-                <select className="select" value={target} onChange={(event) => setTarget(event.target.value)} disabled={!editable}>
+                <select className="select" value={target} onChange={(event) => change({ target: event.target.value })} disabled={!editable}>
                   <option value="">Select a group</option>
                   {targets.filter((name) => name !== source || name === existing).map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
               </label>
               <details>
                 <summary>Group not listed?</summary>
-                <label className="control">Group name<input className="textInput" value={customTarget} onChange={(event) => setCustomTarget(event.target.value)} disabled={!editable} /></label>
-                <button type="button" className="button buttonSmall buttonGhost" disabled={!editable || !customTarget.trim() || customTarget.trim() === source} onClick={() => setTarget(customTarget.trim())}>Use group name</button>
+                <label className="control">Group name<input className="textInput" value={customTarget} onChange={(event) => change({ customTarget: event.target.value })} disabled={!editable} /></label>
+                <button type="button" className="button buttonSmall buttonGhost" disabled={!editable || !customTarget.trim() || customTarget.trim() === source} onClick={() => change({ target: customTarget.trim() })}>Use group name</button>
               </details>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 <button type="button" className="button buttonSmall" disabled={!editable || activeChildOnly || !target || target === source || (target === existing && !ownGroup)} onClick={assign}>Assign to group</button>
@@ -135,7 +136,7 @@ export function ProjectGrouping({ model, enabled, busy, message }: {
           {Object.entries(mappings).sort(([a], [b]) => a.localeCompare(b)).map(([name, group]) => (
             <div key={`mapping:${name}`} style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
               <span>{name} → {group}{archivedParents.includes(name) ? " (own group takes priority when archived)" : ""}</span>
-              <button type="button" className="button buttonSmall buttonGhost" disabled={!editable} onClick={() => { setSource(name); setSearch(""); }}>Edit {name}</button>
+              <button type="button" className="button buttonSmall buttonGhost" disabled={!editable} onClick={() => change({ source: name, search: "", target: savedMapping(name) ?? "" })}>Edit {name}</button>
             </div>
           ))}
           {archivedParents.map((name) => (

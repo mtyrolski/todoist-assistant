@@ -52,6 +52,7 @@ const INITIAL_UI = {
   timelineStart: "",
   timelineEnd: "",
   timelineProject: "",
+  groupingDraft: { search: "", source: "", target: "", customSource: "", customTarget: "" },
 };
 
 function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
@@ -97,6 +98,14 @@ function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
       if (typeof saved[key] === "boolean") ui[key] = saved[key];
       else valid = false;
     }
+  }
+  if ("groupingDraft" in saved) {
+    const value = saved.groupingDraft;
+    if (value && typeof value === "object" && !Array.isArray(value) &&
+        Object.keys(ui.groupingDraft).every((key) => typeof (value as Record<string, unknown>)[key] === "string")) {
+      const draft = value as typeof ui.groupingDraft;
+      ui.groupingDraft = { search: draft.search, source: draft.source, target: draft.target, customSource: draft.customSource, customTarget: draft.customTarget };
+    } else valid = false;
   }
   if ("priority" in saved) {
     if (typeof saved.priority === "number" && Number.isInteger(saved.priority) && saved.priority >= 0 && saved.priority <= 4) ui.priority = saved.priority;
@@ -616,7 +625,7 @@ export default function AndroidDashboard() {
       )}
       {state && (controlVisited || ui.tab === "Control Panel") && (
         <div hidden={ui.tab !== "Control Panel"}>
-          <ProjectGrouping model={model ?? null} enabled={Boolean(state.connected && model && !state.demo)} busy={Boolean(busy)} message={state.message} />
+          <ProjectGrouping model={model ?? null} enabled={Boolean(state.connected && model && !state.demo)} busy={Boolean(busy)} message={state.message} draft={ui.groupingDraft} onDraftChange={(draft) => patch({ groupingDraft: draft })} />
           <DashboardSettings
             request={mobileSettingsRequest}
             draftStorageKey={SETTINGS_DRAFT_KEY}
