@@ -68,15 +68,17 @@ from the desktop Control Panel and import them on the phone.
 
 <img src="img/android.webp" width="340" alt="Android dashboard with sample data">
 
-Download the Preview APK from the [Android build workflow](https://github.com/mtyrolski/todoist-assistant/actions/workflows/android.yml),
-or build it with JDK 17 and Android SDK 36:
+Build the Preview APK with JDK 17 and Android SDK 36:
 
 ```bash
 make build_android_preview
 adb install -r dist/android/todometry-preview.apk
 ```
 
-See [Android build instructions](docs/ANDROID.md) for device tests and signing.
+Keep the generated Preview signing key to install later builds as updates.
+Artifacts from the [Android build workflow](https://github.com/mtyrolski/todoist-assistant/actions/workflows/android.yml)
+use temporary keys and are intended for testing, not upgrades. See the
+[Android build instructions](docs/ANDROID.md) for signing and device tests.
 
 ## Development
 

@@ -40,6 +40,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
       - run: bash scripts/build_android.sh preview
+      - name: Verify Preview APK identity and security
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=dist/android/todometry-preview.apk
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          version="$(node -p "require('./frontend/package.json').version")"
+          version_code="$(node -e 'const [a,b,c] = require("./frontend/package.json").version.split(".").map(Number); process.stdout.write(process.env.ANDROID_VERSION_CODE || String(a*1000000+b*1000+c));')"
+          badging="$("$tools/aapt" dump badging "$apk")"
+          [[ "$badging" == *"package: name='com.todoistassistant.preview' versionCode='$version_code' versionName='$version'"* ]]
+          [[ "$badging" == *"application-label:'Todometry Preview'"* ]]
+          [[ "$badging" != *"application-debuggable"* ]]
+          manifest="$("$tools/aapt" dump xmltree "$apk" AndroidManifest.xml)"
+          grep -Eq 'android:allowBackup\(.*\)=\(type 0x12\)0x0' <<< "$manifest"
+          grep -Eq 'android:usesCleartextTraffic\(.*\)=\(type 0x12\)0x0' <<< "$manifest"
+          ! grep -q 'android:networkSecurityConfig' <<< "$manifest"
+          assets="$(unzip -Z1 "$apk")"
+          grep -qx 'assets/android.html' <<< "$assets"
+          "$tools/apksigner" verify "$apk"
       - run: bash scripts/build_android.sh bundle
       - uses: actions/upload-artifact@v4
         with:

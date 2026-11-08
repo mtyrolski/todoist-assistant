@@ -25,7 +25,7 @@ android {
         targetSdk 36
         versionCode appVersionCode
         versionName appVersion
-        resValue 'string', 'app_name', preview ? 'todometry Preview' : 'todometry'
+        resValue 'string', 'app_name', preview ? 'Todometry Preview' : 'Todometry'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
