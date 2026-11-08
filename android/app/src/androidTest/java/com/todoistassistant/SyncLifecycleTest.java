@@ -692,7 +692,7 @@ public class SyncLifecycleTest {
               slowReturned.countDown();
               return new JSONObject()
                   .put("id", "old-owner")
-                  .put("joined_at", java.time.Instant.now().toString());
+                  .put("joined_at", java.time.Instant.now().minusSeconds(86400).toString());
             }
             return super.get(path);
           }
@@ -710,7 +710,7 @@ public class SyncLifecycleTest {
             if (path.equals("user"))
               return new JSONObject()
                   .put("id", "new-owner")
-                  .put("joined_at", java.time.Instant.now().toString());
+                  .put("joined_at", java.time.Instant.now().minusSeconds(86400).toString());
             return super.get(path);
           }
         };

@@ -2,18 +2,199 @@ package com.todoistassistant;
 
 import static org.junit.Assert.*;
 
+import android.content.Context;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
 public class BridgeSerializationTest {
+  @Test
+  public void accountCanSyncAndRecoverFromOfflineRefreshThroughTheWebView() throws Exception {
+    Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+    new SnapshotStore(context).clear();
+    new TokenStore(context).clear();
+    AtomicBoolean offline = new AtomicBoolean();
+    AtomicInteger requests = new AtomicInteger();
+    String secret = "fixture-token-never-in-state";
+    java.time.Instant now = java.time.Instant.now();
+    ApiTransport transport =
+        new ApiTransport() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException, org.json.JSONException {
+            requests.incrementAndGet();
+            if (offline.get()) throw new java.net.UnknownHostException("fixture offline");
+            if (path.equals("user"))
+              return new JSONObject()
+                  .put("id", "fixture-user")
+                  .put("joined_at", now.minusSeconds(60).toString());
+            JSONArray results = new JSONArray();
+            if (path.startsWith("projects?"))
+              results.put(
+                  new JSONObject().put("id", "fixture-project").put("name", "Fixture project"));
+            if (path.startsWith("tasks?"))
+              results.put(
+                  new JSONObject()
+                      .put("id", "fixture-task")
+                      .put("project_id", "fixture-project")
+                      .put("content", "Fixture active task"));
+            if (path.startsWith("activities?"))
+              results.put(
+                  new JSONObject()
+                      .put("id", "fixture-event")
+                      .put("object_id", "finished-task")
+                      .put("object_type", "item")
+                      .put("event_type", "completed")
+                      .put("event_date", now.minusSeconds(10).toString())
+                      .put("parent_project_id", "fixture-project")
+                      .put(
+                          "extra_data", new JSONObject().put("content", "Fixture completed task")));
+            return new JSONObject().put("results", results).put("next_cursor", JSONObject.NULL);
+          }
+
+          @Override
+          public void cancel() {}
+        };
+    var field = MainActivity.class.getDeclaredField("model");
+    var stateField = MainActivity.class.getDeclaredField("state");
+    var publish = MainActivity.class.getDeclaredMethod("publish", boolean.class);
+    field.setAccessible(true);
+    stateField.setAccessible(true);
+    publish.setAccessible(true);
+    AtomicReference<DashboardViewModel> testModel = new AtomicReference<>();
+    try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+      awaitJavascript(scenario, "!!document.querySelector('input[type=password]')");
+      awaitJavascript(scenario, "!document.querySelector('input[type=password]').disabled");
+      scenario.onActivity(
+          activity -> {
+            try {
+              DashboardViewModel injected =
+                  new DashboardViewModel(
+                      activity.getApplication(),
+                      token -> {
+                        if (!secret.equals(token))
+                          throw new AssertionError("Unexpected fixture credential");
+                        return transport;
+                      });
+              testModel.set(injected);
+              field.set(activity, injected);
+              injected
+                  .state()
+                  .observe(
+                      activity,
+                      state -> {
+                        try {
+                          stateField.set(activity, state);
+                          publish.invoke(activity, false);
+                        } catch (ReflectiveOperationException error) {
+                          throw new AssertionError(error);
+                        }
+                      });
+            } catch (ReflectiveOperationException error) {
+              throw new AssertionError(error);
+            }
+          });
+      awaitJavascript(scenario, "!document.querySelector('input[type=password]').disabled");
+      evaluateJavascript(
+          scenario,
+          "window.__capturedStates=[];window.addEventListener('todoist-state',e=>window.__capturedStates.push(e.detail));"
+              + "let input=document.querySelector('input[type=password]');"
+              + "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,"
+              + JSONObject.quote(secret)
+              + ");input.dispatchEvent(new Event('input',{bubbles:true}));");
+      awaitJavascript(
+          scenario,
+          "document.querySelector('input[type=password]').value===" + JSONObject.quote(secret));
+      evaluateJavascript(scenario, "document.querySelector('form button[type=submit]').click()");
+      awaitJavascript(scenario, "document.body.innerText.includes('Sync complete.')");
+      assertTrue("The account journey must make requests", requests.get() > 0);
+      assertEquals(
+          "true",
+          evaluateJavascript(
+              scenario,
+              "!JSON.stringify(window.__capturedStates).includes("
+                  + JSONObject.quote(secret)
+                  + ")"));
+      assertFalse(
+          new String(
+                  new android.util.AtomicFile(
+                          new java.io.File(context.getFilesDir(), "dashboard-v1.json"))
+                      .readFully(),
+                  java.nio.charset.StandardCharsets.UTF_8)
+              .contains(secret));
+      evaluateJavascript(
+          scenario,
+          "[...document.querySelectorAll('nav button')].find(b=>b.innerText.trim()==='Activity').click()");
+      awaitJavascript(scenario, "document.body.innerText.includes('Fixture completed task')");
+      offline.set(true);
+      evaluateJavascript(
+          scenario,
+          "[...document.querySelectorAll('button')].find(b=>b.innerText.trim()==='Refresh').click()");
+      awaitJavascript(scenario, "document.body.innerText.includes('Saved data is unchanged')");
+      assertEquals(
+          "true",
+          evaluateJavascript(
+              scenario, "document.body.innerText.includes('Fixture completed task')"));
+      offline.set(false);
+      evaluateJavascript(
+          scenario,
+          "[...document.querySelectorAll('button')].find(b=>b.innerText.trim()==='Refresh').click()");
+      awaitJavascript(scenario, "document.body.innerText.includes('Sync complete.')");
+      assertEquals(
+          "true",
+          evaluateJavascript(
+              scenario, "document.body.innerText.split('Fixture completed task').length===2"));
+    } finally {
+      if (testModel.get() != null)
+        InstrumentationRegistry.getInstrumentation()
+            .runOnMainSync(() -> testModel.get().onCleared());
+      new SnapshotStore(context).clear();
+      new TokenStore(context).clear();
+    }
+  }
+
+  private static String evaluateJavascript(ActivityScenario<MainActivity> scenario, String script)
+      throws Exception {
+    var webField = MainActivity.class.getDeclaredField("web");
+    webField.setAccessible(true);
+    CountDownLatch received = new CountDownLatch(1);
+    AtomicReference<String> value = new AtomicReference<>();
+    scenario.onActivity(
+        activity -> {
+          try {
+            ((WebView) webField.get(activity))
+                .evaluateJavascript(
+                    script,
+                    result -> {
+                      value.set(result);
+                      received.countDown();
+                    });
+          } catch (IllegalAccessException error) {
+            throw new AssertionError(error);
+          }
+        });
+    assertTrue("WebView evaluation timed out", received.await(30, TimeUnit.SECONDS));
+    return value.get();
+  }
+
+  private static void awaitJavascript(ActivityScenario<MainActivity> scenario, String condition)
+      throws Exception {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90);
+    while (System.nanoTime() < deadline) {
+      if ("true".equals(evaluateJavascript(scenario, "Boolean(" + condition + ")"))) return;
+      Thread.sleep(200);
+    }
+    fail("WebView condition timed out: " + condition);
+  }
+
   @Test
   public void newerDashboardReplacesSlowAttentionCalculation() throws Exception {
     var clock = java.time.Clock.systemDefaultZone();
