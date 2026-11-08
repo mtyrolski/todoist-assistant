@@ -572,6 +572,29 @@ test("invalid saved view preferences are isolated until the user changes the vie
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").tab)).toBe("Activity");
 });
 
+test("an out-of-range saved week cannot crash dashboard restoration", async ({ page }) => {
+  const raw = JSON.stringify({ week: -Number.MAX_SAFE_INTEGER });
+  await page.evaluate((value) => localStorage.setItem("todoist-ui", value), raw);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Back to my data", exact: true })).toBeVisible();
+  await expect(page.getByText(/Some saved view preferences are invalid/)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("todoist-ui"))).toBe(raw);
+  expect(errors).toEqual([]);
+});
+
+test("restores an older selected week when history becomes available", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-long-history")));
+  const week = page.getByLabel("Contribution week");
+  await week.selectOption("-11");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").week)).toBe(-11);
+  await page.reload();
+  await expect(page.getByText("History is unavailable for this week.")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-long-history")));
+  await expect(week).toHaveValue("-11");
+});
+
 test("unavailable view storage does not prevent startup", async ({ page }) => {
   await page.addInitScript(() => {
     const getItem = Storage.prototype.getItem;

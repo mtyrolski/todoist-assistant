@@ -116,7 +116,10 @@ function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
     else valid = false;
   }
   if ("week" in saved) {
-    if (typeof saved.week === "number" && Number.isSafeInteger(saved.week) && saved.week <= 8) ui.week = saved.week;
+    const value = saved.week;
+    const date = new Date();
+    if (typeof value === "number" && Number.isSafeInteger(value) && value <= 8 &&
+        Number.isFinite(date.setUTCDate(date.getUTCDate() + (value - 8) * 7))) ui.week = value;
     else valid = false;
   }
   if ("granularity" in saved) {
@@ -428,9 +431,11 @@ export default function AndroidDashboard() {
     (historyAsOf && historyAsOf >= weekStart && historyAsOf < today) ||
     activityBehindSnapshot
   ));
-  const selectedWeek = model ? weekDate(model.weekStart, ui.week - 8) : "";
-  const selectedWeekEnd = model ? weekDate(model.weekStart, ui.week - 8, 6) : "";
+  const selectedWeekPresent = Boolean(model && ui.week >= 9 - model.weeks.length && ui.week <= 8);
+  const selectedWeek = model && selectedWeekPresent ? weekDate(model.weekStart, ui.week - 8) : "";
+  const selectedWeekEnd = model && selectedWeekPresent ? weekDate(model.weekStart, ui.week - 8, 6) : "";
   const selectedUnavailable = Boolean(
+    (model && !selectedWeekPresent) ||
     (historyAsOf && selectedWeek > historyAsOf) ||
     (historyStart && selectedWeekEnd < historyStart)
   );
