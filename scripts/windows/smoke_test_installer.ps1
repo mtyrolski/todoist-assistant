@@ -12,7 +12,7 @@ $DataDir = Join-Path $env:ProgramData "Todometry"
 # - setup.exe exits 0/3010/1641 for install and uninstall
 # - todometry.exe launches headlessly and API health returns 200
 # - frontend responds (any HTTP status)
-# - uninstall removes InstallDir and preserves ProgramData by default
+# - uninstall removes InstallDir and preserves existing ProgramData files by default
 
 function Get-HttpStatus {
   param([string]$Uri, [int]$TimeoutSec = 5)
@@ -119,24 +119,42 @@ try {
   }
 }
 
-Write-Host "Uninstalling..."
-$uninstallArgs = @(
-  "/uninstall",
-  "/quiet",
-  "/norestart",
-  "/log",
-  "`"$uninstallLog`""
-)
-$uninstall = Start-Process -FilePath $SetupExe -ArgumentList $uninstallArgs -Wait -PassThru
-if ($allowed -notcontains $uninstall.ExitCode) {
-  throw "setup.exe uninstall failed with code $($uninstall.ExitCode)"
-}
+$sentinel = Join-Path $DataDir ("uninstall-smoke-" + [guid]::NewGuid().ToString("N") + ".txt")
+$sentinelValue = "todometry user data must survive uninstall"
+try {
+  if (-not (Test-Path -LiteralPath $DataDir -PathType Container)) {
+    throw "Installer did not create the expected data directory: $DataDir"
+  }
+  # Windows Installer may remove an empty CreateFolder on uninstall. A user file
+  # must survive, which is the behaviour the application actually relies on.
+  Set-Content -LiteralPath $sentinel -Value $sentinelValue -NoNewline -Encoding UTF8
 
-if (Test-Path $InstallDir) {
-  throw "Install dir still exists after uninstall: $InstallDir"
-}
-if (-not (Test-Path $DataDir)) {
-  throw "Expected ProgramData to be preserved by default, but $DataDir is missing"
+  Write-Host "Uninstalling..."
+  $uninstallArgs = @(
+    "/uninstall",
+    "/quiet",
+    "/norestart",
+    "/log",
+    "`"$uninstallLog`""
+  )
+  $uninstall = Start-Process -FilePath $SetupExe -ArgumentList $uninstallArgs -Wait -PassThru
+  if ($allowed -notcontains $uninstall.ExitCode) {
+    throw "setup.exe uninstall failed with code $($uninstall.ExitCode)"
+  }
+
+  if (Test-Path $InstallDir) {
+    throw "Install dir still exists after uninstall: $InstallDir"
+  }
+  if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) {
+    throw "Existing user data was removed on uninstall: $sentinel"
+  }
+  if ((Get-Content -LiteralPath $sentinel -Raw) -ne $sentinelValue) {
+    throw "Existing user data changed on uninstall: $sentinel"
+  }
+} finally {
+  if (Test-Path -LiteralPath $sentinel -PathType Leaf) {
+    Remove-Item -LiteralPath $sentinel -Force
+  }
 }
 
 Write-Host "Smoke test completed successfully."
