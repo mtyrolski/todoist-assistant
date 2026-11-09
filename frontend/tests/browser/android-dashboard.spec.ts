@@ -747,7 +747,9 @@ test("many projects start with a readable total and an accessible line selector"
   await page.mouse.move(0, 0);
   await card.getByRole("button", { name: "About Completed tasks" }).focus();
   await expect(card.locator(".infoTipPanel")).toHaveCSS("opacity", "1");
-  await card.locator(".cardBody").click({ position: { x: 5, y: 5 }, force: true });
+  // The help panel can overlap the start of cardBody, especially in landscape.
+  // Click the visible heading instead of forcing a click through the panel.
+  await card.getByRole("heading", { name: "Completed tasks", exact: true }).click();
   await expect(card.locator(".infoTipPanel")).toHaveCSS("opacity", "0");
   await card.locator(".mobilePlotLegendDisclosure summary").click();
   const project = card.getByRole("button", { name: "Long project name 0 with research and planning" });
