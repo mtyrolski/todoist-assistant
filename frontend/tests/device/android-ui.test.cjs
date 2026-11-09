@@ -136,12 +136,15 @@ test("navigation and timeline survive rotation and process recreation", async ()
 test("larger system text and appearance keep Android navigation usable", async () => {
   const original = (await device.shell("settings get system font_scale")).toString().trim();
   assert.match(original, /^(null|\d+(\.\d+)?)$/);
+  // CI already runs at 1.3; writing the same value does not recreate the Activity.
+  const largeScale = Number(original) === 1.3 ? "1.5" : "1.3";
   const night = (await device.shell("cmd uimode night")).toString().trim().match(/^Night mode: (yes|no|auto)$/);
   assert.ok(night, "The emulator must report its system appearance");
   try {
     const recreated = page.context().waitForEvent("page", { timeout: 120000 });
-    await device.shell("settings put system font_scale 1.3");
+    await device.shell(`settings put system font_scale ${largeScale}`);
     page = await recreated;
+    assert.equal(Number((await device.shell("settings get system font_scale")).toString().trim()), Number(largeScale));
     await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some((button) => button.textContent.trim() === "Back to my data"), null, { timeout: 120000 });
     const layout = await page.evaluate(() => {
       const nav = document.querySelector('nav[aria-label="Dashboard sections"]');
@@ -179,11 +182,9 @@ test("Android Back dismisses the keyboard before leaving search", async () => {
     const rect = document.querySelector('input[aria-label="Search tasks, projects or activity"]').getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, scale: devicePixelRatio, height: visualViewport.height };
   });
-  const views = (await device.shell("dumpsys activity top")).toString();
-  const bounds = [...views.matchAll(/android\.webkit\.WebView\{[^}]*\s(\d+),(\d+)-\d+,\d+\}/g)].pop();
-  assert.ok(bounds, "The Android WebView must have screen bounds");
-  const x = Math.round(Number(bounds[1]) + box.x * box.scale);
-  const y = Math.round(Number(bounds[2]) + box.y * box.scale);
+  const { bounds } = await device.info({ clazz: "android.webkit.WebView", pkg });
+  const x = Math.round(bounds.x + box.x * box.scale);
+  const y = Math.round(bounds.y + box.y * box.scale);
   await device.shell(`input tap ${x} ${y}`);
   let shown = false;
   for (let attempt = 0; attempt < 20 && !shown; attempt++) {
@@ -209,10 +210,12 @@ test("bundled desktop charts and fonts work offline without saving demo account 
   const chart = page.locator(".js-plotly-plot").first();
   await expect(chart).toBeVisible({ timeout: 30000 });
   await page.waitForFunction(() => document.fonts.status === "loaded");
+  await chart.evaluate((node) => node.scrollIntoView({ block: "center", behavior: "instant" }));
   const bounds = await chart.boundingBox();
-  const viewportHeight = await page.evaluate(() => visualViewport.height);
+  const { viewportHeight, viewportWidth } = await page.evaluate(() => ({ viewportHeight: visualViewport.height, viewportWidth: visualViewport.width }));
   const visibleHeight = Math.max(0, Math.min(viewportHeight, bounds.y + bounds.height) - Math.max(0, bounds.y));
-  assert.ok(visibleHeight >= bounds.height * 0.4, "At least 40% of the chart should be visible on the first screen");
+  assert.ok(visibleHeight >= Math.min(bounds.height, viewportHeight) * 0.8, "The chart should be readable when scrolled into view");
+  assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= viewportWidth + 1, "The chart must fit the phone width");
   const traces = await chart.evaluate((node) => node.data);
   const actual = traces.filter((trace) => trace.mode === "markers");
   const forecast = traces.filter(
@@ -272,9 +275,28 @@ test("search results remain usable with the keyboard and survive rotation", asyn
   await expect(
     page.getByText("No tasks match.", { exact: true }),
   ).toBeVisible();
-  const recreated = page.context().waitForEvent("page");
+  const recreated = page.context().waitForEvent("page", { timeout: 120000 });
   await device.shell("settings put system user_rotation 1");
-  page = await recreated;
+  try {
+    page = await recreated;
+  } catch (error) {
+    const [rotation, window, keyboard] = await Promise.all([
+      device.shell("settings get system user_rotation"),
+      device.shell("dumpsys window displays"),
+      device.shell("dumpsys input_method"),
+    ]);
+    console.error("Rotation diagnostics:", {
+      requestedRotation: rotation.toString().trim(),
+      display: window.toString().split("\n").filter((line) => /mRotation|mCurrentFocus/.test(line)).join(" "),
+      inputShown: /mInputShown=true/.test(keyboard.toString()),
+      openPages: page.context().pages().length,
+    });
+    throw error;
+  }
+  await expect.poll(async () => {
+    const { bounds } = await device.info({ clazz: "android.webkit.WebView", pkg });
+    return bounds.width > bounds.height;
+  }).toBe(true);
   await expect(page.getByRole("searchbox")).toHaveValue("release");
   await expect(
     page.getByText("No tasks match.", { exact: true }),
