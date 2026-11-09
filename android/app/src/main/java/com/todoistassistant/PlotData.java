@@ -48,8 +48,7 @@ final class PlotData {
       Clock clock,
       Instant historyAsOf,
       Map<String, JSONObject> projects,
-      JSONObject mappings,
-      Set<String> promoted,
+      java.util.function.Function<String, String> rootFor,
       LocalDate firstWeek,
       List<CompletionLedger.Event> completed,
       List<JSONObject> activities)
@@ -78,7 +77,7 @@ final class PlotData {
         day.counts.merge(plotKind, 1, Integer::sum);
         day.hours[local.getHour()]++;
       }
-      String projectId = event.optString("parent_project_id");
+      String projectId = DashboardModel.activityProjectId(event, projects);
       if (objectType.equals("project")) {
         projectId = event.optString("object_id");
         if (kind.equals("archived") && !projectId.isEmpty())
@@ -98,8 +97,7 @@ final class PlotData {
       String taskId = event.optString("object_id");
       if (kind.equals("added") && !taskId.isEmpty()) added.merge(taskId, time, PlotData::earlier);
       if (kind.equals("completed"))
-        completionProject.put(
-            String.valueOf(event.get("id")), event.optString("parent_project_id"));
+        completionProject.put(String.valueOf(event.get("id")), projectId);
       itemEvents.add(new Item(event, time, zone));
     }
 
@@ -113,10 +111,7 @@ final class PlotData {
       projectDailyCompletions
           .computeIfAbsent(projectId, ignored -> new TreeMap<>())
           .merge(date, 1, Integer::sum);
-      daily
-          .get(date)
-          .projects
-          .merge(DashboardModel.rootName(projectId, projects, mappings, promoted), 1, Integer::sum);
+      daily.get(date).projects.merge(rootFor.apply(projectId), 1, Integer::sum);
       long days = ChronoUnit.DAYS.between(firstWeek, date);
       if (!projectId.isEmpty() && days >= 0)
         projectWeeks
@@ -167,7 +162,7 @@ final class PlotData {
               .put("metadataKnown", true)
               .put("name", project.optString("name", "Unknown project"))
               .put("parentId", TodoistClient.parentId(project))
-              .put("rootName", DashboardModel.rootName(id, projects, mappings, promoted))
+              .put("rootName", rootFor.apply(id))
               .put("color", project.optString("color", "grey"))
               .put("archived", project.optBoolean("is_archived"))
               .put("createdAt", createdAt)

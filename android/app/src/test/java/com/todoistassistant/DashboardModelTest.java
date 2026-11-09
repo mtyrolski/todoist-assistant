@@ -367,6 +367,68 @@ public class DashboardModelTest {
   }
 
   @Test
+  public void largeHistoryKeepsArchivedAssignmentsAndTotalsConsistent() throws Exception {
+    JSONArray active = new JSONArray(), known = new JSONArray(), tasks = new JSONArray();
+    JSONArray events = new JSONArray(), promoted = new JSONArray();
+    JSONObject mappings = new JSONObject();
+    Map<String, Integer> expected = new java.util.HashMap<>();
+    for (int i = 0; i < 5; i++) {
+      JSONObject project = new JSONObject().put("id", "root-" + i).put("name", "Group " + i);
+      active.put(project);
+      known.put(project);
+    }
+    for (int i = 0; i < 106; i++) {
+      String name = "Archived " + i;
+      known.put(
+          new JSONObject().put("id", "archive-" + i).put("name", name).put("is_archived", true));
+      if (i < 104) mappings.put(name, "Group " + (i % 5));
+      if (i < 3) promoted.put(name);
+    }
+    for (int i = 0; i < 2154; i++) tasks.put(task("open-" + i, "root-" + (i % 5), "Open " + i, 1));
+    for (int i = 0; i < 65221; i++) {
+      int project = i % 106;
+      boolean completed = i % 5 == (i / 106) % 5;
+      events.put(
+          new JSONObject()
+              .put("id", "event-" + i)
+              .put("object_id", "task-" + i)
+              .put("object_type", "item")
+              .put("event_type", completed ? "completed" : "updated")
+              .put("parent_project_id", "archive-" + project)
+              .put("event_date", "2026-11-01T10:00:00Z"));
+      if (completed) {
+        String group =
+            project < 3 || project >= 104 ? "Archived " + project : "Group " + (project % 5);
+        expected.merge(group, 1, Integer::sum);
+      }
+    }
+    DashboardModel model =
+        new DashboardModel(
+            empty()
+                .put("projects", active)
+                .put("knownProjects", known)
+                .put("tasks", tasks)
+                .put("activities", events)
+                .put(
+                    "adjustments",
+                    new JSONObject().put("mappings", mappings).put("archivedParents", promoted)),
+            CLOCK);
+    int total = expected.values().stream().mapToInt(Integer::intValue).sum();
+    assertEquals(2154, model.tasks.size());
+    assertEquals(65221, model.activityTotal);
+    assertEquals(200, model.recent.size());
+    assertEquals(total, model.weeks[model.weeks.length - 1]);
+    assertEquals(expected, model.weeklyProjects.get(model.weeklyProjects.size() - 1));
+    assertEquals(
+        total,
+        model
+            .plotData
+            .getJSONArray("dailyActivity")
+            .getJSONObject(0)
+            .getInt("effectiveCompletions"));
+  }
+
+  @Test
   public void fireMatchesWholeLabelsInsteadOfFireworks() throws Exception {
     JSONObject data =
         empty()
@@ -535,6 +597,133 @@ public class DashboardModelTest {
     assertEquals("blue", grouped.projectColors.get("Work"));
     data.getJSONObject("adjustments").put("archivedParents", new JSONArray().put("Old"));
     assertEquals(1, new DashboardModel(data, CLOCK).weeklyProjects.get(8).get("Old").intValue());
+  }
+
+  @Test
+  public void archivedMappingToSubprojectUsesItsActualRoot() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Work");
+    JSONObject team =
+        new JSONObject().put("id", "team").put("name", "Team").put("parent_id", "root");
+    JSONObject archived =
+        new JSONObject().put("id", "old").put("name", "Old").put("is_archived", true);
+    JSONObject event =
+        new JSONObject()
+            .put("id", "event")
+            .put("object_id", "task")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("event_date", "2026-11-01T10:00:00Z")
+            .put("parent_project_id", "old");
+    JSONObject data =
+        empty()
+            .put("projects", new JSONArray().put(root).put(team))
+            .put("knownProjects", new JSONArray().put(root).put(team).put(archived))
+            .put("activities", new JSONArray().put(event))
+            .put(
+                "adjustments",
+                new JSONObject().put("mappings", new JSONObject().put("Old", "Team")));
+    DashboardModel model = new DashboardModel(data, CLOCK);
+    assertEquals(1, model.weeklyProjects.get(8).get("Work").intValue());
+    assertFalse(model.weeklyProjects.get(8).containsKey("Team"));
+    JSONArray hierarchy = model.plotData.getJSONArray("hierarchy");
+    for (int i = 0; i < hierarchy.length(); i++) {
+      JSONObject row = hierarchy.getJSONObject(i);
+      if (row.getString("id").equals("old")) {
+        assertEquals("Work", row.getString("rootName"));
+        return;
+      }
+    }
+    fail("Archived project is missing from the timeline");
+  }
+
+  @Test
+  public void historicalActivityCanUseKnownModernProjectId() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Work");
+    JSONObject child =
+        new JSONObject()
+            .put("id", "modern")
+            .put("name", "Old")
+            .put("parent_id", "root")
+            .put("is_archived", true);
+    JSONObject event =
+        new JSONObject()
+            .put("id", "event")
+            .put("object_id", "task")
+            .put("object_type", "item")
+            .put("event_type", "completed")
+            .put("event_date", "2026-11-01T10:00:00Z")
+            .put("parent_project_id", "legacy")
+            .put("v2_parent_project_id", "modern");
+    DashboardModel model =
+        new DashboardModel(
+            empty()
+                .put("projects", new JSONArray().put(root))
+                .put("knownProjects", new JSONArray().put(root).put(child))
+                .put("activities", new JSONArray().put(event)),
+            CLOCK);
+    assertEquals(1, model.weeklyProjects.get(8).get("Work").intValue());
+    assertEquals("Work / Old", model.recent.get(0).project);
+    JSONArray hierarchy = model.plotData.getJSONArray("hierarchy");
+    for (int i = 0; i < hierarchy.length(); i++) {
+      JSONObject row = hierarchy.getJSONObject(i);
+      if (row.getString("id").equals("modern")) {
+        assertEquals(1, row.getJSONArray("dailyCompletions").getJSONObject(0).getInt("count"));
+        return;
+      }
+    }
+    fail("Historical project is missing from the timeline");
+  }
+
+  @Test
+  public void importedMappingsRespectPromotedParentsAmbiguityAndCycles() throws Exception {
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Work");
+    JSONObject team =
+        new JSONObject().put("id", "team").put("name", "Team").put("parent_id", "root");
+    JSONObject promoted =
+        new JSONObject()
+            .put("id", "p")
+            .put("name", "Promoted")
+            .put("is_archived", true)
+            .put("parent_id", "root");
+    JSONObject child =
+        new JSONObject()
+            .put("id", "child")
+            .put("name", "Old")
+            .put("parent_id", "p")
+            .put("is_archived", true);
+    Map<String, JSONObject> projects =
+        new java.util.LinkedHashMap<>(
+            Map.of("root", root, "team", team, "p", promoted, "child", child));
+    JSONObject mappings = new JSONObject().put("Old", "Team").put("Promoted", "Work");
+    assertEquals(
+        "Promoted",
+        DashboardModel.rootName("child", projects, mappings, java.util.Set.of("Promoted")));
+    assertEquals("Work", DashboardModel.rootName("child", projects, mappings, java.util.Set.of()));
+    JSONObject another =
+        new JSONObject().put("id", "other").put("name", "Team").put("parent_id", "another-root");
+    projects.put("other", another);
+    assertEquals("Team", DashboardModel.rootName("child", projects, mappings, java.util.Set.of()));
+    JSONObject one = new JSONObject().put("id", "one").put("name", "One").put("is_archived", true);
+    JSONObject two = new JSONObject().put("id", "two").put("name", "Two").put("is_archived", true);
+    assertEquals(
+        "One",
+        DashboardModel.rootName(
+            "one",
+            Map.of("one", one, "two", two),
+            new JSONObject().put("One", "Two").put("Two", "One"),
+            java.util.Set.of()));
+    assertEquals(
+        "One",
+        DashboardModel.rootName(
+            "one", Map.of("one", one), new JSONObject().put("One", "One"), java.util.Set.of()));
+    one.put("parent_id", "root");
+    assertEquals(
+        "Work",
+        DashboardModel.rootName(
+            "one",
+            Map.of("one", one, "root", root),
+            new JSONObject().put("One", "One"),
+            java.util.Set.of()));
   }
 
   @Test

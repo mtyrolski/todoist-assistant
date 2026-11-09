@@ -59,7 +59,7 @@ final class DashboardModel {
       kind = item.optString("event_type");
       JSONObject extra = item.optJSONObject("extra_data");
       content = extra == null ? "" : extra.optString("content", extra.optString("name"));
-      project = projectPath(item.optString("parent_project_id"), projects);
+      project = projectPath(activityProjectId(item, projects), projects);
       date = Instant.parse(item.optString("event_date"));
     }
   }
@@ -118,13 +118,18 @@ final class DashboardModel {
     java.util.Set<String> promotedNames = new java.util.HashSet<>();
     if (promoted != null)
       for (int i = 0; i < promoted.length(); i++) promotedNames.add(promoted.optString(i));
+    JSONObject savedMappings = mappings;
+    Map<String, String> rootNames = new HashMap<>();
+    java.util.function.Function<String, String> rootFor =
+        id ->
+            rootNames.computeIfAbsent(
+                id, key -> rootName(key, known, savedMappings, promotedNames));
     java.util.Set<String> archivedRoots = new java.util.HashSet<>();
     for (var project : known.values())
       if (project.optBoolean("is_archived"))
-        archivedRoots.add(rootName(project.optString("id"), known, mappings, promotedNames));
+        archivedRoots.add(rootFor.apply(project.optString("id")));
     for (int i = 0; i < active.length(); i++)
-      archivedRoots.remove(
-          rootName(active.getJSONObject(i).optString("id"), known, mappings, promotedNames));
+      archivedRoots.remove(rootFor.apply(active.getJSONObject(i).optString("id")));
     Map<String, String> colors = new LinkedHashMap<>();
     for (var project : known.values()) {
       String parent = TodoistClient.parentId(project);
@@ -133,8 +138,7 @@ final class DashboardModel {
     }
     for (var project : known.values())
       colors.putIfAbsent(
-          rootName(project.optString("id"), known, mappings, promotedNames),
-          project.optString("color", "grey"));
+          rootFor.apply(project.optString("id")), project.optString("color", "grey"));
     projectColors = Collections.unmodifiableMap(colors);
     priorities = new int[4];
     List<Task> taskList = new ArrayList<>();
@@ -197,8 +201,7 @@ final class DashboardModel {
       String kind = item.optString("event_type"), id = String.valueOf(item.get("id"));
       events.add(
           new CompletionLedger.Event(id, item.getString("object_id"), kind, time, recurring));
-      completionProjects.put(
-          id, rootName(item.optString("parent_project_id"), known, mappings, promotedNames));
+      completionProjects.put(id, rootFor.apply(activityProjectId(item, known)));
     }
     activityList.sort(
         Comparator.comparing((Activity event) -> event.date)
@@ -281,15 +284,7 @@ final class DashboardModel {
     weeklyProjects = Collections.unmodifiableList(breakdowns);
     plotData =
         PlotData.build(
-            snapshot,
-            clock,
-            historyAsOf,
-            known,
-            mappings,
-            promotedNames,
-            firstWeek,
-            completed,
-            activities);
+            snapshot, clock, historyAsOf, known, rootFor, firstWeek, completed, activities);
     quotedMobilePayload = JSONObject.quote(MobilePayload.model(this).toString());
   }
 
@@ -435,11 +430,42 @@ final class DashboardModel {
     return parts.isEmpty() ? "Unknown project" : String.join(" / ", parts);
   }
 
+  static String activityProjectId(JSONObject event, Map<String, JSONObject> projects) {
+    String primary =
+        event.isNull("parent_project_id") ? "" : event.optString("parent_project_id", "");
+    String modern =
+        event.isNull("v2_parent_project_id") ? "" : event.optString("v2_parent_project_id", "");
+    if (!projects.containsKey(primary) && projects.containsKey(modern)) return modern;
+    return primary.isEmpty() ? modern : primary;
+  }
+
   static String rootName(
       String id,
       Map<String, JSONObject> projects,
       JSONObject mappings,
       java.util.Set<String> promoted) {
+    String resolved = resolveRoot(id, projects, mappings, promoted, new java.util.HashSet<>());
+    if (resolved != null) return resolved;
+    // Ignore a cyclic manual assignment rather than merging unrelated projects.
+    String name = "Unknown project";
+    java.util.Set<String> visited = new java.util.HashSet<>();
+    while (!id.isEmpty() && visited.add(id)) {
+      JSONObject project = projects.get(id);
+      if (project == null) break;
+      name = project.optString("name", name);
+      if (project.optBoolean("is_archived") && promoted.contains(name)) return name;
+      id = TodoistClient.parentId(project);
+    }
+    return name;
+  }
+
+  private static String resolveRoot(
+      String id,
+      Map<String, JSONObject> projects,
+      JSONObject mappings,
+      java.util.Set<String> promoted,
+      java.util.Set<String> assignments) {
+    if (!assignments.add(id)) return null;
     String name = "Unknown project";
     java.util.Set<String> visited = new java.util.HashSet<>();
     List<JSONObject> ancestors = new ArrayList<>();
@@ -455,9 +481,40 @@ final class DashboardModel {
         return project.optString("name");
     for (var project : ancestors) {
       String source = project.optString("name");
-      if (project.optBoolean("is_archived") && mappings.has(source))
-        return mappings.optString(source, name);
+      if (project.optBoolean("is_archived") && mappings.has(source)) {
+        String target = mappings.optString(source, name);
+        if (!target.equals(source))
+          return mappedRoot(target, projects, mappings, promoted, assignments);
+      }
     }
-    return mappings.optString(name, name);
+    return mappings.has(name) && !mappings.optString(name, name).equals(name)
+        ? mappedRoot(mappings.optString(name, name), projects, mappings, promoted, assignments)
+        : name;
+  }
+
+  private static String mappedRoot(
+      String target,
+      Map<String, JSONObject> projects,
+      JSONObject mappings,
+      java.util.Set<String> promoted,
+      java.util.Set<String> assignments) {
+    String active = null, archived = null;
+    int activeMatches = 0, archivedMatches = 0;
+    for (var entry : projects.entrySet()) {
+      JSONObject project = entry.getValue();
+      if (!target.equals(project.optString("name"))) continue;
+      if (project.optBoolean("is_archived")) {
+        archived = entry.getKey();
+        archivedMatches++;
+      } else {
+        active = entry.getKey();
+        activeMatches++;
+      }
+    }
+    // Match desktop's preference for a unique active project. Do not guess
+    // between duplicates; a missing target remains an explicit named bucket.
+    String id =
+        activeMatches == 1 ? active : activeMatches == 0 && archivedMatches == 1 ? archived : null;
+    return id == null ? target : resolveRoot(id, projects, mappings, promoted, assignments);
   }
 }
