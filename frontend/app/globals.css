@@ -2648,6 +2648,20 @@ textarea.textInput {
   justify-content: space-between;
 }
 .androidPage .cardWithLegend { gap: 6px; }
+.mobilePlotLegendDisclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+}
+.mobilePlotLegendDisclosure summary::-webkit-details-marker { display: none; }
+.mobilePlotLegendDisclosure summary::after { content: "+"; font-size: 20px; color: var(--muted); }
+.mobilePlotLegendDisclosure[open] summary::after { content: "−"; }
 .mobilePlotLegend {
   display: flex;
   flex-wrap: wrap;
@@ -2674,6 +2688,7 @@ textarea.textInput {
   cursor: pointer;
 }
 .mobilePlotLegend button[aria-pressed="false"] { opacity: .75; }
+.mobilePlotLegend button[aria-pressed="false"] i { opacity: .45; }
 .mobilePlotLegend span { overflow-wrap: anywhere; }
 .mobilePlotLegend i { width: 20px; height: 3px; border-radius: 3px; flex: none; }
 .mobilePlotControls .control {

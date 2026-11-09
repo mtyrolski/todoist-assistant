@@ -316,21 +316,20 @@ test("large projects render task rows incrementally and search all tasks", async
   await expect(project.locator(".mobileTask")).toHaveCount(40);
 });
 
-test("updating a large history outside Overview skips chart calculations", async ({ page }) => {
+test("a large history update appears in the chart after returning to Overview", async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await page.evaluate(() => {
-    const original = Math.log10;
-    Math.log10 = (value) => {
-      document.body.dataset.chartLogCalls = String(Number(document.body.dataset.chartLogCalls ?? 0) + 1);
-      return original(value);
-    };
-    window.dispatchEvent(new Event("test-large-lifespans"));
-  });
+  await page.evaluate(() => window.dispatchEvent(new Event("test-large-lifespans")));
   await expect(page.getByText("3 of 3 active tasks")).toBeVisible();
-  await expect(page.locator("body")).not.toHaveAttribute("data-chart-log-calls");
+  await expect(page.getByRole("region", { name: "Task Lifespans: Time to Completion" })).toHaveCount(0);
   await page.getByRole("button", { name: "Overview", exact: true }).click();
-  await expect.poll(async () => Number(await page.locator("body").getAttribute("data-chart-log-calls"))).toBeGreaterThanOrEqual(2000);
+  const lifespan = page.getByRole("region", { name: "Task Lifespans: Time to Completion" });
+  await lifespan.scrollIntoViewIfNeeded();
+  const plot = lifespan.locator(".js-plotly-plot");
+  await expect(plot).toBeVisible();
+  await expect.poll(() => plot.evaluate((node) =>
+    (node as HTMLElement & { data: { x: number[] }[] }).data[0].x.reduce((a, b) => a + b, 0),
+  )).toBe(2000);
 });
 
 test("first connection can be retried without retyping a token", async ({ page }) => {
@@ -703,7 +702,7 @@ test("an older WebView keeps navigation usable when charts are unsupported", asy
   expect(errors).toEqual([]);
 });
 
-test("many project labels stay outside both plots in portrait and landscape", async ({ page }) => {
+test("many projects start with a readable total and an accessible line selector", async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event("test-many-projects")));
   for (const size of [
     { width: 412, height: 915 },
@@ -715,11 +714,19 @@ test("many project labels stay outside both plots in portrait and landscape", as
         .locator("section.card")
         .filter({ has: page.getByRole("heading", { name: title, exact: true }) });
       const legend = card.locator(".mobilePlotLegend");
+      const selector = card.locator(".mobilePlotLegendDisclosure");
       const chart = card.locator(".js-plotly-plot");
+      await expect(selector.locator("summary")).toContainText("1 of 15 shown");
+      await expect(selector).not.toHaveAttribute("open");
+      await expect(chart).toBeVisible();
+      const [summaryBox, chartBox] = await Promise.all([selector.locator("summary").boundingBox(), chart.boundingBox()]);
+      expect(chartBox!.y - (summaryBox!.y + summaryBox!.height)).toBeLessThan(30);
+      await selector.locator("summary").click();
       await expect(legend.getByRole("button")).toHaveCount(15);
       await expect(chart).toBeVisible();
-      const [legendBox, chartBox] = await Promise.all([legend.boundingBox(), chart.boundingBox()]);
-      expect(legendBox!.y + legendBox!.height).toBeLessThanOrEqual(chartBox!.y);
+      const legendBox = await legend.boundingBox();
+      expect(legendBox!.height).toBeLessThanOrEqual(156);
+      await selector.locator("summary").click();
       const overflow = await page.evaluate(() =>
         [...document.querySelectorAll("body *")]
           .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
@@ -737,9 +744,17 @@ test("many project labels stay outside both plots in portrait and landscape", as
   const card = page
     .locator("section.card")
     .filter({ has: page.getByRole("heading", { name: "Completed tasks", exact: true }) });
+  await page.mouse.move(0, 0);
+  await card.getByRole("button", { name: "About Completed tasks" }).focus();
+  await expect(card.locator(".infoTipPanel")).toHaveCSS("opacity", "1");
+  await card.locator(".cardBody").click({ position: { x: 5, y: 5 }, force: true });
+  await expect(card.locator(".infoTipPanel")).toHaveCSS("opacity", "0");
+  await card.locator(".mobilePlotLegendDisclosure summary").click();
   const project = card.getByRole("button", { name: "Long project name 0 with research and planning" });
-  await project.click();
   await expect(project).toHaveAttribute("aria-pressed", "false");
+  await project.click();
+  await expect(project).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator(".mobilePlotLegendDisclosure summary")).toContainText("2 of 15 shown");
   await expect
     .poll(() =>
       card
@@ -750,20 +765,51 @@ test("many project labels stay outside both plots in portrait and landscape", as
             .map((trace) => trace.visible),
         ),
     )
-    .toEqual(["legendonly", "legendonly", "legendonly"]);
+    .toEqual([true, true, true]);
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("button", { name: "Overview", exact: true }).click();
-  await expect(project).toHaveAttribute("aria-pressed", "false");
+  await card.locator(".mobilePlotLegendDisclosure summary").click();
+  await expect(project).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => card.locator(".js-plotly-plot").evaluate((node) =>
     (node as HTMLElement & { data: { legendgroup: string; visible: string }[] }).data
       .filter((trace) => trace.legendgroup === "Long project name 0 with research and planning")
       .map((trace) => trace.visible),
-  )).toEqual(["legendonly", "legendonly", "legendonly"]);
+  )).toEqual([true, true, true]);
   const bounds = await card.locator(".js-plotly-plot").boundingBox();
   expect(bounds!.width).toBeGreaterThan(0);
   expect(bounds!.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
   await project.click();
-  await expect(project).toHaveAttribute("aria-pressed", "true");
+  await expect(project).toHaveAttribute("aria-pressed", "false");
+});
+
+test("mobile chart hover shows one value and duration labels fit a narrow phone", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-analysis")));
+  await page.setViewportSize({ width: 320, height: 900 });
+  const pace = page.getByRole("region", { name: "Weekly Completion Trend" });
+  await pace.evaluate((node) => node.scrollIntoView());
+  const chart = pace.locator(".js-plotly-plot");
+  await expect(chart).toBeVisible();
+  const point = chart.locator(".scatterlayer .trace .points path").first();
+  await expect(point).toBeAttached();
+  await point.hover({ force: true });
+  await expect(chart.locator(".hoverlayer .hovertext")).toHaveCount(1);
+  const lifespan = page.getByRole("region", { name: "Task Lifespans: Time to Completion" });
+  await lifespan.evaluate((node) => node.scrollIntoView());
+  const plot = lifespan.locator(".js-plotly-plot");
+  await expect(plot).toBeVisible();
+  const clipped = await plot.evaluate((node) => {
+    const bounds = node.closest(".cardBody")!.getBoundingClientRect();
+    return [...node.querySelectorAll<SVGTextElement>(".xaxislayer-above text, .yaxislayer-above text")]
+      .filter((text) => text.textContent?.trim())
+      .filter((text) => { const rect = text.getBoundingClientRect(); return rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1; })
+      .map((text) => text.textContent);
+  });
+  expect(clipped).toEqual([]);
+  await expect(plot.locator(".yaxislayer-above text").getByText("Under 1 min", { exact: true })).toBeVisible();
+  const ticks = await plot.locator(".xaxislayer-above text").allTextContents();
+  expect(ticks.length).toBeGreaterThan(1);
+  expect(new Set(ticks).size).toBe(ticks.length);
+  expect(ticks.every((tick) => Number.isInteger(Number(tick.replaceAll(",", ""))))).toBe(true);
 });
 
 test("Android uses desktop Plotly cards and keeps actual/forecast colors together", async ({ page }) => {
@@ -859,8 +905,12 @@ test("first sync explains the current stage and can be cancelled", async ({ page
   const status = page.getByRole("status");
   await expect(status).toContainText("Syncing with Todoist");
   await expect(status).toContainText("Loading active tasks · 200 loaded");
-  await expect(status).toContainText("first sync loads your available history");
+  await expect(status).toContainText("History is saved periodically");
   await expect(page.getByRole("button", { name: "Cancel sync" })).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("todoist-state", {
+    detail: { model: null, demo: false, syncing: true, message: "History 4/43 · 2024-02-01 to 2024-03-01 · ~5 min remaining" },
+  })));
+  await expect(status).toContainText("History 4/43 · 2024-02-01 to 2024-03-01 · ~5 min remaining");
 });
 
 test("all history is selectable without changing the current week", async ({ page }) => {

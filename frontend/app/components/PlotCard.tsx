@@ -88,6 +88,9 @@ export function PlotCard({
               return {
                 ...baseLayout,
                 autosize: true,
+                // On touch screens Plotly's default comparison hover can stack
+                // multiple labels over the axis and drag-to-zoom steals scrolling.
+                ...(compact ? { hovermode: "closest", dragmode: false } : {}),
                 ...(numericHeight ? { height: numericHeight } : {}),
                 paper_bgcolor: "rgba(0,0,0,0)",
                 plot_bgcolor: "rgba(0,0,0,0)",
@@ -99,7 +102,7 @@ export function PlotCard({
                   t: Math.max(compact ? (legendContent ? 12 : 48) : 76, toNumber(margin.t, compact ? (legendContent ? 12 : 48) : 76)),
                   b: Math.max(compact ? 36 : 58, toNumber(margin.b, compact ? 36 : 58))
                 },
-                xaxis: withTitleStandoff(compact ? { showgrid: false, ...xaxis } : xaxis, 18),
+                xaxis: withTitleStandoff(compact ? { showgrid: false, ...xaxis, ...(Array.isArray(xaxis.categoryarray) ? { tickangle: 0 } : {}) } : xaxis, 18),
                 yaxis: withTitleStandoff(compact ? { showgrid: false, ...yaxis } : yaxis, 16),
                 legend: {
                   ...legend,

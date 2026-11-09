@@ -119,8 +119,8 @@ export function weeklyPaceFigure(model: MobileModel, window: number): PlotlyFigu
   const baseline = paceStats(model, 3);
   if (!baseline) return empty("Not enough completed-week data for a baseline.");
   const data: unknown[] = [
-    line("3-week baseline", "#6CCFF6", weekdays, baseline.low, { showlegend: false, line: { width: 0 }, hoverinfo: "skip" }),
-    line("3-week baseline", "#6CCFF6", weekdays, baseline.high, { showlegend: false, line: { width: 0 }, fill: "tonexty", fillcolor: "rgba(108,207,246,0.15)", hoverinfo: "skip" }),
+    line("3-week baseline", "#6CCFF6", weekdays, baseline.low, { mode: "lines", showlegend: false, line: { width: 0 }, hoverinfo: "skip" }),
+    line("3-week baseline", "#6CCFF6", weekdays, baseline.high, { mode: "lines", showlegend: false, line: { width: 0 }, fill: "tonexty", fillcolor: "rgba(108,207,246,0.15)", hoverinfo: "skip" }),
     line("3-week baseline", "#6CCFF6", weekdays, baseline.avg, { hovertemplate: "%{x}: %{y:.1f}%<extra></extra>" }),
   ];
   if (window !== 3) {
@@ -144,20 +144,26 @@ export function weeklyPaceFigure(model: MobileModel, window: number): PlotlyFigu
 export function lifespanFigure(model: MobileModel, range: number, all: boolean): PlotlyFigure {
   const start = all ? "" : startDate(model, range);
   const end = historyDay(model);
-  const values = (model.plotData?.lifespans ?? []).filter((item) => inRange(item.completedAt, start, end) && item.seconds > 0).map((item) => item.seconds / 86400);
-  if (!values.length) return empty("No tasks with a recorded creation and completion in this range.");
-  const logs = values.map(Math.log10);
-  const minimum = logs.reduce((a, b) => Math.min(a, b), Infinity);
-  const maximum = logs.reduce((a, b) => Math.max(a, b), -Infinity);
-  const width = Math.max(0.05, (maximum - minimum) / 30);
-  const bins = Array(Math.min(30, Math.max(1, Math.ceil((maximum - minimum) / width)))).fill(0);
-  for (const value of logs) bins[Math.min(bins.length - 1, Math.floor((value - minimum) / width))]++;
-  const tickStart = Math.ceil(minimum), tickEnd = Math.floor(maximum);
-  const ticks = Array.from({ length: Math.max(0, tickEnd - tickStart + 1) }, (_, i) => tickStart + i);
-  if (!ticks.length) ticks.push((minimum + maximum) / 2);
+  // Explicit, non-overlapping durations keep a seconds-to-years distribution readable on a phone.
+  const buckets = [
+    { label: "Under 1 min", limit: 60 },
+    { label: "1–59 min", limit: 3600 },
+    { label: "1–23 hours", limit: 86400 },
+    { label: "1–6 days", limit: 7 * 86400 },
+    { label: "1–<4 weeks", limit: 28 * 86400 },
+    { label: "4 weeks–<1 year", limit: 365 * 86400 },
+    { label: "1+ year", limit: Infinity },
+  ];
+  const counts = buckets.map(() => 0);
+  for (const item of model.plotData?.lifespans ?? []) {
+    if (!inRange(item.completedAt, start, end) || !Number.isFinite(item.seconds) || item.seconds <= 0) continue;
+    counts[buckets.findIndex(({ limit }) => item.seconds < limit)]++;
+  }
+  if (!counts.some(Boolean)) return empty("No tasks with a recorded creation and completion in this range.");
+  const maxCount = Math.max(...counts);
   return {
-    data: [{ type: "bar", x: bins.map((_, index) => minimum + (index + 0.5) * width), y: bins, width, marker: { color: "#1ABC9C" }, customdata: bins.map((_, index) => [10 ** (minimum + index * width), 10 ** (minimum + (index + 1) * width)]), hovertemplate: "%{customdata[0]:.2g}–%{customdata[1]:.2g} days<br>%{y} tasks<extra></extra>" }],
-    layout: { showlegend: false, xaxis: { title: "Days to completion (log scale)", tickvals: ticks, ticktext: ticks.map((value) => (10 ** value).toPrecision(2)) }, yaxis: { title: "Tasks", rangemode: "tozero" } },
+    data: [{ type: "bar", orientation: "h", x: counts, y: buckets.map(({ label }) => label), marker: { color: "#1ABC9C" }, hovertemplate: "%{y}<br>%{x} tasks<extra></extra>" }],
+    layout: { showlegend: false, xaxis: { title: "Completed tasks", rangemode: "tozero", tickformat: ",d", ...(maxCount <= 5 ? { dtick: 1 } : {}) }, yaxis: { autorange: "reversed", automargin: true } },
   };
 }
 
@@ -273,7 +279,7 @@ export function hierarchyFigure(model: MobileModel, range: number): PlotlyFigure
     values.push(own.get(project.id) ?? 0);
     colors.push(projectColor(model, project.rootName));
   }
-  return { data: [{ type: "sunburst", ids, labels, parents, values, branchvalues: "remainder", marker: { colors }, hovertemplate: "%{label}<br>%{value} completions<extra></extra>" }], layout: { showlegend: false, margin: { l: 8, r: 8, t: 12, b: 12 } } };
+  return { data: [{ type: "sunburst", ids, labels, parents, values, branchvalues: "remainder", maxdepth: 2, textinfo: "label", insidetextorientation: "horizontal", marker: { colors }, hovertemplate: "%{label}<br>%{value} completions<extra></extra>" }], layout: { showlegend: false, uniformtext: { minsize: 10, mode: "hide" }, margin: { l: 8, r: 8, t: 12, b: 12 } } };
 }
 
 export function calendarCompletionFigure(

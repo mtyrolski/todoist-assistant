@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 process.env.TZ = 'Europe/Warsaw';
 const { weekDate, mobileHistoryEnd, completionFigure } = require('../.test-build/lib/mobile.js');
-const { calendarCompletionFigure, eventsFigure, hierarchyFigure, paceWindowAvailable } = require('../.test-build/lib/mobilePlots.js');
+const { calendarCompletionFigure, eventsFigure, hierarchyFigure, lifespanFigure, paceWindowAvailable, weeklyPaceFigure } = require('../.test-build/lib/mobilePlots.js');
 
 function model(overrides = {}) {
   return {
@@ -93,6 +93,64 @@ test('project hierarchy excludes a historical week that is only partially refres
   value.plotData.hierarchy = [{ id: 'work', name: 'Work', parentId: '', rootName: 'Work', color: 'blue', archived: false, createdAt: '2020-01-01', lastEventAt: '', archivedAt: '', weeklyCounts: { 6: 2, 7: 5 } }];
   const figure = hierarchyFigure(value, 0);
   assert.deepEqual(figure.data[0].values, [2]);
+});
+
+test('deep project hierarchy keeps all completions while initially limiting visible depth', () => {
+  const value = model();
+  value.plotData.hierarchy = [
+    { id: 'root', name: 'Work', parentId: '', rootName: 'Work', weeklyCounts: { 8: 3 } },
+    { id: 'child', name: 'Child', parentId: 'root', rootName: 'Work', weeklyCounts: { 8: 2 } },
+    { id: 'grandchild', name: 'Grandchild', parentId: 'child', rootName: 'Work', weeklyCounts: { 8: 1 } },
+  ];
+  const figure = hierarchyFigure(value, 0), trace = figure.data[0];
+  assert.equal(trace.maxdepth, 2);
+  assert.equal(trace.values.reduce((sum, count) => sum + count, 0), 6);
+  assert.ok(trace.ids.includes('project:grandchild'));
+  assert.equal(trace.parents[trace.ids.indexOf('project:grandchild')], 'project:child');
+  assert.equal(figure.layout.uniformtext.mode, 'hide');
+});
+
+test('lifespan duration buckets include each valid completion exactly once at boundaries', () => {
+  const value = model();
+  const durations = [0.5, 59, 60, 3599, 3600, 86399, 86400, 7 * 86400, 28 * 86400, 365 * 86400];
+  value.plotData.lifespans = durations.map((seconds) => ({ completedAt: '2020-11-03', seconds }));
+  value.plotData.lifespans.push(...[0, -1, NaN, Infinity].map((seconds) => ({ completedAt: '2020-11-03', seconds })));
+  const trace = lifespanFigure(value, 0, true).data[0];
+  assert.equal(trace.orientation, 'h');
+  assert.deepEqual(trace.x, [2, 2, 2, 1, 1, 1, 1]);
+  assert.equal(trace.x.reduce((sum, count) => sum + count, 0), durations.length);
+  assert.deepEqual(trace.y, ['Under 1 min', '1–59 min', '1–23 hours', '1–6 days', '1–<4 weeks', '4 weeks–<1 year', '1+ year']);
+});
+
+test('lifespan range uses completion dates and never includes future or invalid durations', () => {
+  const value = model();
+  value.plotData.lifespans = [
+    { completedAt: '2020-08-01', seconds: 5 },
+    { completedAt: '2020-10-31', seconds: 3600 },
+    { completedAt: '2020-11-03', seconds: 86400 },
+    { completedAt: '2020-11-05', seconds: 60 },
+  ];
+  assert.deepEqual(lifespanFigure(value, 1, false).data[0].x, [0, 0, 0, 1, 0, 0, 0]);
+  assert.deepEqual(lifespanFigure(value, 1, true).data[0].x, [1, 0, 1, 1, 0, 0, 0]);
+});
+
+test('lifespan count axis uses whole-number ticks for small samples', () => {
+  const value = model();
+  value.plotData.lifespans = [{ completedAt: '2020-11-03', seconds: 60 }];
+  assert.equal(lifespanFigure(value, 0, true).layout.xaxis.dtick, 1);
+  value.plotData.lifespans = Array.from({ length: 100 }, () => ({ completedAt: '2020-11-03', seconds: 60 }));
+  assert.equal(lifespanFigure(value, 0, true).layout.xaxis.dtick, undefined);
+});
+
+test('weekly pace renders the percentile band without duplicate markers', () => {
+  const value = model();
+  value.plotData.dailyActivity = [day('2020-10-20', 3, { Work: 3 }), day('2020-11-02', 1, { Work: 1 })];
+  const traces = weeklyPaceFigure(value, 3).data;
+  assert.equal(traces[0].mode, 'lines');
+  assert.equal(traces[1].mode, 'lines');
+  assert.equal(traces[2].mode, 'lines+markers');
+  assert.equal(traces.at(-1).customdata[0], 1);
+  assert.equal(traces.at(-1).customdata[3], null);
 });
 
 test('event smoothing orders data by local date, filling missing days with zero', () => {

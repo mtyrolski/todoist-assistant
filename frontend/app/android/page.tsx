@@ -570,7 +570,7 @@ export default function AndroidDashboard() {
           <span className="muted tiny">
             {model
               ? "You can browse your saved data while syncing."
-              : "The first sync loads your available history and may take a while."}
+              : "History is saved periodically, so you can resume after an interruption."}
           </span>
         </div>
       ) : state?.message && !state.demo ? (
