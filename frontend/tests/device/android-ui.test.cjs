@@ -7,6 +7,16 @@ const expect = playwrightExpect.configure({ timeout: 15000 });
 const pkg = "com.todoistassistant";
 const screenshots = `frontend/test-results/device/${process.env.ANDROID_SERIAL ?? "emulator"}`;
 let device, page;
+async function webViewBounds() {
+  // Query the Android accessibility hierarchy without starting Playwright's
+  // long-running instrumentation driver, which otherwise outlives this suite.
+  const xml = (await device.shell("uiautomator dump /sdcard/todometry-window.xml >/dev/null && cat /sdcard/todometry-window.xml")).toString();
+  const node = xml.match(/<node\b(?=[^>]*class="android\.webkit\.WebView")(?=[^>]*package="com\.todoistassistant")([^>]*)>/)?.[1];
+  const bounds = node?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+  if (!bounds) return null;
+  const [, left, top, right, bottom] = bounds.map(Number);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 before(async () => {
   const devices = await _android.devices({ port: Number(process.env.ANDROID_ADB_SERVER_PORT || 5037) });
   const emulators = devices.filter((candidate) =>
@@ -182,7 +192,8 @@ test("Android Back dismisses the keyboard before leaving search", async () => {
     const rect = document.querySelector('input[aria-label="Search tasks, projects or activity"]').getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, scale: devicePixelRatio, height: visualViewport.height };
   });
-  const { bounds } = await device.info({ clazz: "android.webkit.WebView", pkg });
+  const bounds = await webViewBounds();
+  assert.ok(bounds, "The Android accessibility hierarchy must include the WebView");
   const x = Math.round(bounds.x + box.x * box.scale);
   const y = Math.round(bounds.y + box.y * box.scale);
   await device.shell(`input tap ${x} ${y}`);
@@ -200,14 +211,19 @@ test("Android Back dismisses the keyboard before leaving search", async () => {
 });
 after(async () => {
   if (!device) return;
+  console.log("Restoring emulator network and rotation settings");
   await device.shell("svc wifi enable");
   await device.shell("svc data enable");
   await device.shell("settings put system user_rotation 0");
+  console.log("Stopping the Android test driver and closing the device");
+  await device.shell("am force-stop com.microsoft.playwright.androiddriver");
   await device.close();
-});
+  console.log("Android device cleanup complete");
+}, { timeout: 90000 });
 
 test("bundled desktop charts and fonts work offline without saving demo account data", async () => {
-  const chart = page.locator(".js-plotly-plot").first();
+  // Deferred overview cards can render ahead of this one depending on scroll.
+  const chart = page.locator(".card").filter({ has: page.getByRole("heading", { name: "Completed tasks", exact: true }) }).locator(".js-plotly-plot");
   await expect(chart).toBeVisible({ timeout: 30000 });
   await page.waitForFunction(() => document.fonts.status === "loaded");
   await chart.evaluate((node) => node.scrollIntoView({ block: "center", behavior: "instant" }));
@@ -221,6 +237,8 @@ test("bundled desktop charts and fonts work offline without saving demo account 
   const forecast = traces.filter(
     (trace) => trace.mode === "lines+markers" && trace.line.dash === "dash",
   );
+  assert.ok(actual.length > 0, "The completion chart must show actual data");
+  assert.ok(forecast.length > 0, "The completion chart must show the demo forecast");
   assert.equal(
     actual[0].y[0],
     actual.slice(1).reduce((sum, trace) => sum + trace.y[0], 0),
@@ -275,10 +293,34 @@ test("search results remain usable with the keyboard and survive rotation", asyn
   await expect(
     page.getByText("No tasks match.", { exact: true }),
   ).toBeVisible();
-  const recreated = page.context().waitForEvent("page", { timeout: 120000 });
-  await device.shell("settings put system user_rotation 1");
+  const context = page.context();
+  // Depending on the Android version and keyboard state, rotation may either
+  // keep the WebView or recreate it. Both paths must preserve the search.
+  const onPage = (created) => { page = created; };
+  context.on("page", onPage);
   try {
-    page = await recreated;
+    await device.shell("settings put system user_rotation 1");
+    await expect.poll(async () => {
+      const bounds = await webViewBounds();
+      return Boolean(bounds && bounds.width > bounds.height);
+    }, { timeout: 120000 }).toBe(true);
+    await expect.poll(async () => {
+      const candidate = page;
+      if (candidate.isClosed()) return null;
+      try {
+        const search = candidate.getByRole("searchbox");
+        const priority = candidate.getByLabel("Filter task priority", { exact: true });
+        if (await search.count() !== 1 || await priority.count() !== 1) return null;
+        return {
+          search: await search.inputValue(),
+          priority: await priority.inputValue(),
+          empty: await candidate.getByText("No tasks match.", { exact: true }).isVisible(),
+        };
+      } catch (error) {
+        if (candidate.isClosed() || /Execution context was destroyed|navigation/i.test(String(error))) return null;
+        throw error;
+      }
+    }, { timeout: 120000 }).toEqual({ search: "release", priority: "4", empty: true });
   } catch (error) {
     const [rotation, window, keyboard] = await Promise.all([
       device.shell("settings get system user_rotation"),
@@ -289,18 +331,12 @@ test("search results remain usable with the keyboard and survive rotation", asyn
       requestedRotation: rotation.toString().trim(),
       display: window.toString().split("\n").filter((line) => /mRotation|mCurrentFocus/.test(line)).join(" "),
       inputShown: /mInputShown=true/.test(keyboard.toString()),
-      openPages: page.context().pages().length,
+      openPages: context.pages().length,
     });
     throw error;
+  } finally {
+    context.off("page", onPage);
   }
-  await expect.poll(async () => {
-    const { bounds } = await device.info({ clazz: "android.webkit.WebView", pkg });
-    return bounds.width > bounds.height;
-  }).toBe(true);
-  await expect(page.getByRole("searchbox")).toHaveValue("release");
-  await expect(
-    page.getByText("No tasks match.", { exact: true }),
-  ).toBeVisible();
 });
 
 test("shared control panel persists alert rules and rejects an empty token", async () => {

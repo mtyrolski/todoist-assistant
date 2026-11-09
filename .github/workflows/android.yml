@@ -143,10 +143,12 @@ jobs:
             adb shell settings put system font_scale 1.3
             ./android/gradlew -p android --no-daemon connectedDebugAndroidTest
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            node --test frontend/tests/device/android-ui.test.cjs
+            # Bound the device suite separately so a stuck ADB/Playwright teardown
+            # fails with time left to upload diagnostics instead of timing out the job.
+            timeout --signal=TERM --kill-after=30s 10m node --test frontend/tests/device/android-ui.test.cjs
             bash scripts/build_android.sh preview
             adb install -r dist/android/todometry-preview.apk
-            node --test frontend/tests/device/android-release.test.cjs
+            timeout --signal=TERM --kill-after=30s 8m node --test frontend/tests/device/android-release.test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
