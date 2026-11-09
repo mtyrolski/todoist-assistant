@@ -89,6 +89,24 @@ test("primary controls have accessible names, touch targets and keyboard focus",
   await expect(page.getByRole("searchbox", { name: "Search tasks, projects or activity" })).toBeVisible();
 });
 
+test("bundled font supports Polish text without a Google Fonts connection", async ({ page }) => {
+  await page.route("https://fonts.googleapis.com/**", (route) => route.abort());
+  await page.route("https://fonts.gstatic.com/**", (route) => route.abort());
+  await page.reload();
+  const fonts = await page.evaluate(async () => {
+    const latin = await document.fonts.load('400 16px "Space Grotesk"', "Todometry");
+    const polish = await document.fonts.load('700 16px "Space Grotesk"', "ąćęłńóśźż");
+    return {
+      family: getComputedStyle(document.documentElement).fontFamily,
+      latin: latin.map((font) => font.status),
+      polish: polish.map((font) => font.status),
+    };
+  });
+  expect(fonts.family).toContain("Space Grotesk");
+  expect(fonts.latin).toContain("loaded");
+  expect(fonts.polish).toContain("loaded");
+});
+
 test("compact completion chart keeps axis labels within its card", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   const chart = page.locator(".js-plotly-plot").first();
