@@ -7,7 +7,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
@@ -76,11 +78,14 @@ public class TodoistClientTest {
             return super.get(path);
           }
         };
+    List<String> messages = new ArrayList<>();
     JSONObject result =
-        new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
+        new TodoistClient(fake, CLOCK, messages::add).snapshot(new JSONObject(), false);
     assertEquals("2026-08-09T12:00:00Z", result.getString("historyStart"));
     assertFalse(result.getBoolean("historyComplete"));
     assertTrue(result.getString("activityWarning").contains("join date"));
+    assertTrue(messages.stream().anyMatch(message -> message.startsWith("Recent history · ")));
+    assertFalse(messages.stream().anyMatch(message -> message.contains("min remaining")));
   }
 
   @Test
@@ -382,6 +387,88 @@ public class TodoistClientTest {
   }
 
   @Test
+  public void densePaginatedHistoryResumesFromCheckpointWithoutDuplicates() throws Exception {
+    final int eventsPerWindow = 32_500;
+    List<JSONObject> checkpoints = new ArrayList<>();
+    List<String> messages = new ArrayList<>();
+    Fake fake =
+        new Fake() {
+          boolean interrupted;
+
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", "2026-09-02T12:00:00Z");
+            if (!path.startsWith("activities?")) return super.get(path);
+            paths.add(path);
+            String from = "", cursor = "";
+            for (String parameter : path.substring(path.indexOf('?') + 1).split("&")) {
+              String[] parts = parameter.split("=", 2);
+              if (parts.length != 2) continue;
+              String value = java.net.URLDecoder.decode(parts[1], "UTF-8");
+              if (parts[0].equals("date_from")) from = value;
+              if (parts[0].equals("cursor")) cursor = value;
+            }
+            // The recent incremental refresh after restarting has no new events.
+            if (from.equals("2026-10-31T12:00:00Z")) return page(new JSONArray(), JSONObject.NULL);
+            boolean recent = from.equals("2026-10-02T12:00:00Z");
+            assertTrue(recent || from.equals("2026-09-02T12:00:00Z"));
+            int offset = cursor.isEmpty() ? 0 : Integer.parseInt(cursor);
+            if (!recent && offset >= 10_000 && !interrupted) {
+              interrupted = true;
+              throw new IOException("offline during older page");
+            }
+            JSONArray items = new JSONArray();
+            String prefix = recent ? "recent-" : "older-";
+            String date = recent ? "2026-10-15T00:00:00Z" : "2026-09-15T00:00:00Z";
+            // An API page can repeat a boundary event. Count each activity once.
+            if (offset > 0) items.put(event(prefix + (offset - 1), date));
+            int end = Math.min(eventsPerWindow, offset + 200 - items.length());
+            for (int i = offset; i < end; i++) items.put(event(prefix + i, date));
+            return page(items, end < eventsPerWindow ? String.valueOf(end) : JSONObject.NULL);
+          }
+        };
+    TodoistClient client = new TodoistClient(fake, CLOCK, messages::add);
+    IOException failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.snapshot(
+                    new JSONObject(),
+                    false,
+                    data -> checkpoints.add(new JSONObject(data.toString()))));
+    assertEquals("offline during older page", failure.getMessage());
+    assertEquals(1, checkpoints.size());
+    JSONObject saved = checkpoints.get(0);
+    assertEquals("2026-10-02T12:00:00Z", saved.getString("historyStart"));
+    assertFalse(saved.getBoolean("historyComplete"));
+    assertEquals(eventsPerWindow, saved.getJSONArray("activities").length());
+    assertTrue(
+        messages.stream()
+            .anyMatch(
+                message -> message.startsWith("History 1/2") && message.endsWith("32663 loaded")));
+
+    int requestsBeforeResume = fake.paths.size();
+    JSONObject resumed = client.snapshot(saved, false);
+    assertTrue(
+        fake.paths.subList(requestsBeforeResume, fake.paths.size()).stream()
+            .noneMatch(path -> path.contains("date_from=2026-10-02T12%3A00%3A00Z")));
+    assertTrue(messages.stream().anyMatch(message -> message.startsWith("History 1/1")));
+    assertTrue(resumed.getBoolean("historyComplete"));
+    assertEquals("2026-09-02T12:00:00Z", resumed.getString("historyStart"));
+    JSONArray activities = resumed.getJSONArray("activities");
+    assertEquals(eventsPerWindow * 2, activities.length());
+    Set<String> ids = new HashSet<>();
+    for (int i = 0; i < activities.length(); i++)
+      assertTrue("duplicate activity", ids.add(activities.getJSONObject(i).getString("id")));
+    for (int i = 0; i < eventsPerWindow; i++) {
+      assertTrue(ids.contains("recent-" + i));
+      assertTrue(ids.contains("older-" + i));
+    }
+  }
+
+  @Test
   public void existingTwelveWeekSnapshotBackfillsOlderHistory() throws Exception {
     JSONObject old = baseline().put("historyStart", "2026-08-10T00:00:00Z");
     old.remove("historyComplete");
@@ -416,6 +503,107 @@ public class TodoistClientTest {
         new TodoistClient(fake, CLOCK, message -> {}).snapshot(new JSONObject(), false);
     assertTrue(next.getBoolean("historyComplete"));
     assertEquals("old", next.getJSONArray("activities").getJSONObject(0).getString("id"));
+  }
+
+  @Test
+  public void longHistoryUsesFewerWindowsWithoutGapsAndReportsProgress() throws Exception {
+    Instant joined = Instant.parse("2016-11-01T12:00:00Z");
+    List<Instant> fromDates = new ArrayList<>(), toDates = new ArrayList<>();
+    List<String> messages = new ArrayList<>();
+    Fake fake =
+        new Fake() {
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", joined.toString());
+            if (path.startsWith("activities?")) {
+              for (String parameter : path.substring(path.indexOf('?') + 1).split("&")) {
+                String[] parts = parameter.split("=", 2);
+                if (parts.length != 2) continue;
+                String value = java.net.URLDecoder.decode(parts[1], "UTF-8");
+                if (parts[0].equals("date_from")) fromDates.add(Instant.parse(value));
+                if (parts[0].equals("date_to")) toDates.add(Instant.parse(value));
+              }
+              return page(new JSONArray(), JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    List<JSONObject> checkpoints = new ArrayList<>();
+    JSONObject result =
+        new TodoistClient(fake, CLOCK, messages::add)
+            .snapshot(
+                new JSONObject(), false, data -> checkpoints.add(new JSONObject(data.toString())));
+    assertTrue(result.getBoolean("historyComplete"));
+    assertEquals(joined.toString(), result.getString("historyStart"));
+    assertEquals(43, fromDates.size()); // 3 recent months, then 90-day windows, over ten years.
+    assertEquals(CLOCK.instant(), toDates.get(0));
+    assertEquals(joined, fromDates.get(fromDates.size() - 1));
+    for (int i = 1; i < fromDates.size(); i++) assertEquals(fromDates.get(i - 1), toDates.get(i));
+    assertEquals(fromDates.size() - 1, checkpoints.size());
+    assertTrue(messages.get(0).contains("Checking"));
+    assertTrue(messages.stream().anyMatch(message -> message.startsWith("History 1/43 · ")));
+    assertTrue(messages.stream().anyMatch(message -> message.startsWith("History 43/43 · ")));
+  }
+
+  @Test
+  public void historyEstimateIsExplicitlyApproximateAndRequiresSeveralWindows() {
+    Instant from = Instant.parse("2026-07-01T00:00:00Z");
+    Instant to = Instant.parse("2026-10-01T00:00:00Z");
+    Instant newest = to.plus(java.time.Duration.ofDays(90));
+    Instant oldest = to.minus(java.time.Duration.ofDays(210));
+    assertFalse(
+        TodoistClient.historyProgress(from, to, 2, 6, 60_000_000_000L, newest, oldest)
+            .contains("remaining"));
+    // Three 30-day windows took 3 minutes; the next windows cover 90 days each.
+    assertTrue(
+        TodoistClient.historyProgress(from, to, 3, 6, 180_000_000_000L, newest, oldest)
+            .contains("~7 min remaining"));
+    assertFalse(
+        TodoistClient.historyProgress(from, to, 4, 0, 180_000_000_000L, newest, oldest)
+            .contains("remaining"));
+  }
+
+  @Test
+  public void invalidOlderWindowKeepsCheckpointAndCanResumeWithoutLosingEvents() throws Exception {
+    List<JSONObject> checkpoints = new ArrayList<>();
+    Fake fake =
+        new Fake() {
+          int windows;
+          boolean broken = true;
+
+          @Override
+          public JSONObject get(String path)
+              throws java.io.IOException, org.json.JSONException, InterruptedException {
+            if (path.equals("user"))
+              return new JSONObject().put("id", user).put("joined_at", "2026-01-01T00:00:00Z");
+            if (path.startsWith("activities?")) {
+              windows++;
+              if (windows == 4 && broken) {
+                broken = false;
+                return page(new JSONArray().put(event("bad", "not-a-date")), JSONObject.NULL);
+              }
+              return page(
+                  new JSONArray().put(event("saved", "2026-10-15T00:00:00Z")), JSONObject.NULL);
+            }
+            return super.get(path);
+          }
+        };
+    TodoistClient client = new TodoistClient(fake, CLOCK, ignored -> {});
+    assertThrows(
+        java.time.format.DateTimeParseException.class,
+        () ->
+            client.snapshot(
+                new JSONObject(), false, data -> checkpoints.add(new JSONObject(data.toString()))));
+    JSONObject saved = checkpoints.get(checkpoints.size() - 1);
+    assertEquals("2026-08-03T12:00:00Z", saved.getString("historyStart"));
+    assertFalse(saved.getBoolean("historyComplete"));
+    assertEquals("saved", saved.getJSONArray("activities").getJSONObject(0).getString("id"));
+    JSONObject recovered = client.snapshot(saved, false);
+    assertTrue(recovered.getBoolean("historyComplete"));
+    assertEquals(1, recovered.getJSONArray("activities").length());
+    assertEquals("saved", recovered.getJSONArray("activities").getJSONObject(0).getString("id"));
   }
 
   @Test

@@ -160,6 +160,26 @@ public class HttpTransportTest {
   @Test
   public void connectionLostDuringResponseIsNotSuccessfulEmptyData() throws Exception {
     Transport transport = new Transport();
+    for (int i = 0; i < 3; i++)
+      transport.responses.add(
+          new Response(200, "") {
+            @Override
+            public InputStream getInputStream() {
+              return new InputStream() {
+                @Override
+                public int read() throws IOException {
+                  throw new SocketException("connection reset");
+                }
+              };
+            }
+          });
+    assertThrows(SocketException.class, () -> transport.get("user"));
+    assertEquals(3, transport.requests);
+  }
+
+  @Test
+  public void interruptedPageCanBeRetriedWithoutAcceptingPartialJson() throws Exception {
+    Transport transport = new Transport();
     transport.responses.add(
         new Response(200, "") {
           @Override
@@ -167,12 +187,14 @@ public class HttpTransportTest {
             return new InputStream() {
               @Override
               public int read() throws IOException {
-                throw new SocketException("connection reset");
+                throw new java.io.EOFException("connection ended");
               }
             };
           }
         });
-    assertThrows(SocketException.class, () -> transport.get("user"));
+    transport.responses.add(new Response(200, "{\"id\":\"recovered\"}"));
+    assertEquals("recovered", transport.get("user").getString("id"));
+    assertEquals(2, transport.requests);
   }
 
   @Test

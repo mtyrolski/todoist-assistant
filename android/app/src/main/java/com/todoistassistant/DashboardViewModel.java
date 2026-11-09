@@ -658,6 +658,8 @@ public final class DashboardViewModel extends AndroidViewModel {
   private String errorMessage(Exception exception) {
     if (exception instanceof java.net.SocketTimeoutException)
       return "The connection timed out. Saved data is unchanged; try again on a stable connection.";
+    if (exception instanceof java.io.EOFException)
+      return "The connection to Todoist was interrupted. Saved data is unchanged; retry sync.";
     if (exception instanceof java.net.UnknownHostException
         || exception instanceof java.net.SocketException) {
       android.net.ConnectivityManager manager =

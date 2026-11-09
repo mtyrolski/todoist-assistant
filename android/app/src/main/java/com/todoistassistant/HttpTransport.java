@@ -117,8 +117,14 @@ class HttpTransport implements ApiTransport {
         }
       } catch (IOException exception) {
         checkCancelled();
-        if (exception instanceof java.net.SocketTimeoutException && attempt < ATTEMPTS - 1)
+        if ((exception instanceof java.net.SocketTimeoutException
+                || exception instanceof java.net.SocketException
+                || exception instanceof java.io.EOFException)
+            && attempt < ATTEMPTS - 1) {
+          progress.update("Connection interrupted · retrying…");
+          Thread.sleep(500L << attempt);
           continue;
+        }
         throw exception;
       } finally {
         current.disconnect();

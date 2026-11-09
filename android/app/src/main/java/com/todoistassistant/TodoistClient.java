@@ -16,6 +16,10 @@ import org.json.JSONObject;
 
 /** Assemble an account-scoped snapshot; callers commit only a fully fetched result. */
 final class TodoistClient {
+  private static final long RECENT_WINDOW_DAYS = 30;
+  private static final long OLDER_WINDOW_DAYS = 90;
+  private static final int RECENT_WINDOWS = 3;
+
   interface Progress {
     void update(String message);
   }
@@ -149,6 +153,10 @@ final class TodoistClient {
     data.put("historyIdRepair", repairing);
     boolean fetchedActivity = false;
     int historyWindows = 0;
+    long historyStarted = System.nanoTime();
+    Instant historyNewest = historyStart;
+    long totalWindows =
+        joinDateKnown ? historyWindowCount(Duration.between(joined, historyStart)) : 0;
     try {
       if (baseline.has("syncedAt")) {
         Instant recentStart = activitySyncedAt.minus(Duration.ofDays(1));
@@ -158,19 +166,27 @@ final class TodoistClient {
       activitySyncedAt = started;
       data.put("activitySyncedAt", started.toString());
       while (!complete && historyStart.isAfter(joined)) {
-        Instant from = historyStart.minus(Duration.ofDays(30));
+        long days = historyWindows < RECENT_WINDOWS ? RECENT_WINDOW_DAYS : OLDER_WINDOW_DAYS;
+        Instant from = historyStart.minus(Duration.ofDays(days));
         if (from.isBefore(joined)) from = joined;
         fetchActivity(
             merged,
             rounded,
             from,
             historyStart,
-            "Loading history from " + from.toString().substring(0, 10));
+            historyProgress(
+                from,
+                historyStart,
+                historyWindows,
+                totalWindows,
+                System.nanoTime() - historyStarted,
+                historyNewest,
+                joined));
         fetchedActivity = true;
         historyStart = from;
         complete = joinDateKnown && !historyStart.isAfter(joined);
         historyWindows++;
-        if (historyWindows == 1 || historyWindows % 3 == 0 || complete) {
+        if (historyWindows == 1 || historyWindows >= RECENT_WINDOWS || complete) {
           data.put("historyStart", historyStart.toString());
           data.put("historyComplete", complete);
           data.put("activities", new JSONArray(merged.values()));
@@ -203,6 +219,39 @@ final class TodoistClient {
       data.put(
           "activityWarning", "Some older saved events could not be matched to Todoist's history.");
     return data;
+  }
+
+  private static long historyWindowCount(Duration span) {
+    if (span.isNegative() || span.isZero()) return 0;
+    long seconds = span.getSeconds() + (span.getNano() == 0 ? 0 : 1);
+    long recentSeconds = RECENT_WINDOWS * RECENT_WINDOW_DAYS * 86400;
+    long recent = Math.min(seconds, recentSeconds);
+    long older = seconds - recent;
+    long recentWindow = RECENT_WINDOW_DAYS * 86400;
+    long olderWindow = OLDER_WINDOW_DAYS * 86400;
+    return (recent + recentWindow - 1) / recentWindow + (older + olderWindow - 1) / olderWindow;
+  }
+
+  static String historyProgress(
+      Instant from,
+      Instant to,
+      int completed,
+      long total,
+      long elapsedNanos,
+      Instant newest,
+      Instant oldest) {
+    String label = total > 0 ? "History " + (completed + 1) + "/" + total : "Recent history";
+    label += " · " + from.toString().substring(0, 10) + " to " + to.toString().substring(0, 10);
+    if (total > completed + 1 && completed >= 3 && elapsedNanos > 0) {
+      long covered = Duration.between(to, newest).getSeconds();
+      long remaining = Duration.between(oldest, to).getSeconds();
+      if (covered > 0 && remaining > 0) {
+        double minutes = elapsedNanos / 60_000_000_000.0 * remaining / covered;
+        long rounded = Math.max(1, (long) Math.ceil(minutes));
+        label += " · ~" + rounded + " min remaining";
+      }
+    }
+    return label;
   }
 
   private void fetchActivity(

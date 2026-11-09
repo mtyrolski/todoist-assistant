@@ -956,6 +956,38 @@ public class SyncLifecycleTest {
   }
 
   @Test
+  public void interruptedResponseExplainsConnectionFailureWithoutLeakingData() throws Exception {
+    Fake interrupted =
+        new Fake() {
+          @Override
+          public JSONObject get(String path) throws java.io.IOException {
+            throw new java.io.EOFException("private-test-token");
+          }
+        };
+    start(interrupted);
+    CountDownLatch failed = new CountDownLatch(1);
+    Observer<DashboardViewModel.State> failure =
+        value -> {
+          if (!value.syncing && value.message.contains("connection to Todoist was interrupted"))
+            failed.countDown();
+        };
+    try {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(
+              () -> {
+                model.state().observeForever(failure);
+                model.sync("private-test-token");
+              });
+      assertTrue(failed.await(10, TimeUnit.SECONDS));
+      assertFalse(state.get().message.contains("private-test-token"));
+      assertNull(state.get().model);
+    } finally {
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> model.state().removeObserver(failure));
+    }
+  }
+
+  @Test
   public void savedAccountSurvivesOfflineRestartAndRetry() throws Exception {
     class Flaky extends Fake {
       volatile boolean offline;
