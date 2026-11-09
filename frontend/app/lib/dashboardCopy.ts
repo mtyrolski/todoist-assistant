@@ -86,11 +86,4 @@ Top projects by completed tasks in the most recent finished week.
 - Subprojects includes nested projects.
 - Root projects are top-level only.`;
 
-export const HABIT_TRACKER_LAB_HELP = `Habit Tracker Lab
-A focused view for the weekly habit payload.
-
-- About sits first so the page reads like an overview instead of a chart dump.
-- The plots section shows the overall completion rate and recent N-week slices.
-- The notes section stays focused on how the tracker works instead of repeating the roster.`;
-
 export const SURFACE_STATUS_SUMMARY = `Dashboard, project adjustments, and local data sync.`;
