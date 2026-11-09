@@ -8,6 +8,7 @@ def versionParts = appVersion.tokenize('.').collect { it as int }
 def appVersionCode = (System.getenv('ANDROID_VERSION_CODE') ?: (versionParts[0] * 1000000 + versionParts[1] * 1000 + versionParts[2])) as int
 if (appVersionCode < 1) throw new GradleException('ANDROID_VERSION_CODE must be positive')
 def preview = providers.gradleProperty('preview').orElse('false').get().toBoolean()
+def previewSuffix = providers.gradleProperty('previewIdSuffix').orElse('.preview').get()
 def signing = ['STORE_FILE', 'STORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD'].collectEntries {
     [(it): System.getenv('ANDROID_SIGNING_' + it)]
 }
@@ -25,7 +26,8 @@ android {
         targetSdk 36
         versionCode appVersionCode
         versionName appVersion
-        resValue 'string', 'app_name', preview ? 'Todometry Preview' : 'Todometry'
+        buildConfigField 'boolean', 'IS_PREVIEW', preview.toString()
+        resValue 'string', 'app_name', preview ? (previewSuffix == '.preview' ? 'Todometry Preview' : 'Todometry Preview 2') : 'Todometry'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -49,7 +51,7 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (preview) applicationIdSuffix '.preview'
+            if (preview) applicationIdSuffix previewSuffix
             if (hasSigning) signingConfig signingConfigs.upload
         }
     }

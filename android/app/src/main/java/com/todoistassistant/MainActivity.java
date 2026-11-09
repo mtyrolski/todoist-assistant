@@ -175,7 +175,7 @@ public class MainActivity extends ComponentActivity {
       JSONObject payload =
           new JSONObject()
               .put("version", BuildConfig.VERSION_NAME)
-              .put("preview", BuildConfig.APPLICATION_ID.endsWith(".preview"))
+              .put("preview", BuildConfig.IS_PREVIEW)
               .put("loading", state.loading)
               .put("syncing", state.syncing)
               .put("connected", state.connected)
