@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
           <div>
             <p className="brandTitle">todometry</p>
-            <p className="brandTag">Local-first activity analytics, project history, and automations.</p>
+            <p className="brandTag">Local-first Todoist dashboard for activity analytics and project history.</p>
           </div>
         </Link>
 

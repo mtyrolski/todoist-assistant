@@ -1,6 +1,6 @@
 # todometry
 
-**Local-first activity analytics, project history, and automations.**
+**Local-first Todoist dashboard for activity analytics and project history.**
 
 todometry is an independent third-party integration for exploring
 Todoist activity and project history. It is not affiliated with or endorsed by

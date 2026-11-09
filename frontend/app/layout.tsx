@@ -6,7 +6,7 @@ import { AppShell } from "./components/AppShell";
 
 export const metadata: Metadata = {
   title: "todometry",
-  description: "Local-first activity analytics, project history, and automations."
+  description: "Local-first Todoist dashboard for activity analytics and project history."
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
