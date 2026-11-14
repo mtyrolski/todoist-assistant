@@ -989,18 +989,20 @@ public class SyncLifecycleTest {
 
   @Test
   public void savedAccountSurvivesOfflineRestartAndRetry() throws Exception {
-    class Flaky extends Fake {
-      volatile boolean offline;
-
-      @Override
-      public JSONObject get(String path)
-          throws java.io.IOException, org.json.JSONException, InterruptedException {
-        if (offline) throw new java.net.UnknownHostException("private-test-token");
-        return super.get(path);
-      }
-    }
-    Flaky fake = new Flaky();
-    start(fake);
+    AtomicBoolean isOffline = new AtomicBoolean();
+    java.util.function.Function<String, ApiTransport> transports =
+        token ->
+            new Fake() {
+              @Override
+              public JSONObject get(String path)
+                  throws java.io.IOException, org.json.JSONException, InterruptedException {
+                if (isOffline.get()) throw new java.net.UnknownHostException("private-test-token");
+                return super.get(path);
+              }
+            };
+    // Production creates a fresh transport per request; cancelling a previous
+    // model must not leave the transport used by its replacement cancelled.
+    start(transports);
     CountDownLatch saved = new CountDownLatch(1);
     Observer<DashboardViewModel.State> savedObserver =
         value -> {
@@ -1014,7 +1016,7 @@ public class SyncLifecycleTest {
               model.sync("private-test-token");
             });
     assertTrue(saved.await(15, TimeUnit.SECONDS));
-    fake.offline = true;
+    isOffline.set(true);
     CountDownLatch offline = new CountDownLatch(1);
     InstrumentationRegistry.getInstrumentation()
         .runOnMainSync(
@@ -1023,8 +1025,7 @@ public class SyncLifecycleTest {
               model.state().removeObserver(observer);
               model.onCleared();
               model =
-                  new DashboardViewModel(
-                      (Application) context.getApplicationContext(), token -> fake);
+                  new DashboardViewModel((Application) context.getApplicationContext(), transports);
               observer =
                   value -> {
                     state.set(value);
@@ -1040,7 +1041,7 @@ public class SyncLifecycleTest {
     assertFalse(state.get().message.contains("private-test-token"));
     assertEquals("private-test-token", new TokenStore(context).load());
 
-    fake.offline = false;
+    isOffline.set(false);
     CountDownLatch recovered = new CountDownLatch(1);
     Observer<DashboardViewModel.State> recoveredObserver =
         value -> {

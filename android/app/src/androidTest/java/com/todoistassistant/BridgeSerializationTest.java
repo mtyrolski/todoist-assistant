@@ -70,12 +70,15 @@ public class BridgeSerializationTest {
     stateField.setAccessible(true);
     publish.setAccessible(true);
     AtomicReference<DashboardViewModel> testModel = new AtomicReference<>();
+    CountDownLatch testModelReady = new CountDownLatch(1);
     try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
       awaitJavascript(scenario, "!!document.querySelector('input[type=password]')");
       awaitJavascript(scenario, "!document.querySelector('input[type=password]').disabled");
       scenario.onActivity(
           activity -> {
             try {
+              // The original model must not publish state after the fixture takes over.
+              ((DashboardViewModel) field.get(activity)).state().removeObservers(activity);
               DashboardViewModel injected =
                   new DashboardViewModel(
                       activity.getApplication(),
@@ -94,6 +97,7 @@ public class BridgeSerializationTest {
                         try {
                           stateField.set(activity, state);
                           publish.invoke(activity, false);
+                          if (!state.loading) testModelReady.countDown();
                         } catch (ReflectiveOperationException error) {
                           throw new AssertionError(error);
                         }
@@ -102,6 +106,9 @@ public class BridgeSerializationTest {
               throw new AssertionError(error);
             }
           });
+      // The old WebView can still show an enabled form while the injected model
+      // loads; submitting then is ignored by sync() and the test never recovers.
+      assertTrue("Fixture model did not initialize", testModelReady.await(30, TimeUnit.SECONDS));
       awaitJavascript(scenario, "!document.querySelector('input[type=password]').disabled");
       evaluateJavascript(
           scenario,
