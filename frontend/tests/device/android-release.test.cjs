@@ -58,10 +58,10 @@ async function swipePage(direction) {
     80,
   );
 }
-async function scrollTo(label) {
+async function scrollTo(label, direction = "down") {
   for (let attempt = 0; attempt < 8; attempt++) {
     if ((await info(text(label)))?.enabled) return;
-    await swipePage("down");
+    await swipePage(direction);
   }
   await wait(text(label));
 }
@@ -78,8 +78,10 @@ test("optimized release works offline with search, keyboard, rotation and produc
   await scrollTo("Task Lifespans: Time to Completion");
   await scrollTo("Project Hierarchy");
   await scrollTo("Completed tasks");
-  await wait(text("All projects"));
-  for (let i = 0; i < 5; i++) await swipePage("up");
+  // A heading can appear at the bottom of a smaller screen before its
+  // legend enters the accessibility tree. Bring the legend into view too.
+  await scrollTo("All projects");
+  await scrollTo("Projects", "up");
   await tap(text("Projects"));
   await tap({ clazz: "android.widget.EditText", pkg });
   await device.fill({ clazz: "android.widget.EditText", pkg }, "release");
