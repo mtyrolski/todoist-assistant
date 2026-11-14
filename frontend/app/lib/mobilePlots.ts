@@ -20,6 +20,7 @@ export type MobilePlotData = {
     rootName: string;
     color: string;
     archived: boolean;
+    previousNames?: string[];
     metadataKnown?: boolean;
     createdAt: string;
     lastEventAt: string;

@@ -21,6 +21,11 @@ test.beforeEach(async ({ page }) => {
     };
     const state = { connected: true, demo: false, loading: false, syncing: false,
       message: "", model, preferences, alert: { enabled: true, level: 0, matches: 0 } };
+    window.addEventListener("test-many-chart-lines", () => {
+      for (let i = 0; i < 12; i++)
+        for (const counts of model.weeklyProjects) (counts as Record<string, number>)[i === 10 ? "Łódź Research 10" : `Research ${i}`] = i + 1;
+      window.dispatchEvent(new CustomEvent("todoist-state", { detail: structuredClone(state) }));
+    });
     window.Todoist = {
       ready: () => window.dispatchEvent(new CustomEvent("todoist-state", { detail: state })),
       command: () => {},
@@ -120,6 +125,37 @@ test("compact completion chart keeps axis labels within its card", async ({ page
       .map(({ text }) => text);
   });
   expect(clipped).toEqual([]);
+});
+
+test("a long chart legend can be searched without losing selected lines", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.evaluate(() => window.dispatchEvent(new Event("test-many-chart-lines")));
+  const chart = page.getByRole("region", { name: "Completed tasks", exact: true });
+  await chart.locator("summary").click();
+  const search = chart.getByRole("searchbox", { name: "Search Completed tasks lines" });
+  await search.fill("lodz research 10");
+  const line = chart.getByRole("button", { name: "Łódź Research 10", exact: true });
+  await expect(line).toBeVisible();
+  await expect(chart.getByRole("button", { name: "Research 11", exact: true })).toHaveCount(0);
+  await line.click();
+  await expect(line).toHaveAttribute("aria-pressed", "true");
+  await search.fill("nothing matches");
+  await expect(chart.getByText("No matching lines.")).toBeVisible();
+  await search.fill("lodz research 10");
+  await expect(line).toHaveAttribute("aria-pressed", "true");
+  await search.press("Tab");
+  await expect(line).toBeFocused();
+
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  const cumulative = page.getByRole("region", { name: "Cumulative completions", exact: true });
+  await cumulative.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(scrollBefore);
+  await cumulative.locator("summary").click();
+  const otherSearch = cumulative.getByRole("searchbox", { name: "Search Cumulative completions lines" });
+  await expect(otherSearch).toHaveValue("");
+  await otherSearch.fill("lodz research 10");
+  await expect(cumulative.getByRole("button", { name: "Łódź Research 10", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(search).toHaveValue("lodz research 10");
 });
 
 test("both system appearances retain readable colours and reduced motion", async ({ page }) => {

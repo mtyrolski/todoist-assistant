@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { normalizeSearch } from "../lib/mobile";
 import { PlotCard, type PlotlyFigure } from "./PlotCard";
 
 type Trace = { name: string; legendgroup: string; showlegend?: boolean; marker: { color: string }; mode?: string; x?: unknown[] };
@@ -30,7 +31,10 @@ export function MobilePlotCard({
   }, [entries]);
   const [customized, setCustomized] = useState(() => hiddenByTitle.has(title));
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(hiddenByTitle.get(title)));
+  const [query, setQuery] = useState("");
   const selectedHidden = customized ? hidden : defaultHidden;
+  const normalizedQuery = normalizeSearch(query);
+  const filteredEntries = entries.filter((trace) => normalizeSearch(trace.name).includes(normalizedQuery));
   const currentHidden = useRef(selectedHidden);
   currentHidden.current = selectedHidden;
   const displayed = useMemo(
@@ -47,8 +51,10 @@ export function MobilePlotCard({
     [figure, traces, selectedHidden],
   );
   const legendItems = (
-    <div className="mobilePlotLegend" aria-label={`${title} projects`}>
-      {entries.map((trace) => (
+    <>
+      {entries.length > 8 && <input className="select" type="search" aria-label={`Search ${title} lines`} placeholder="Search lines" value={query} onChange={(event) => setQuery(event.target.value)} />}
+      <div className="mobilePlotLegend" aria-label={`${title} projects`}>
+      {filteredEntries.map((trace) => (
           <button
             type="button"
             key={trace.legendgroup}
@@ -67,7 +73,9 @@ export function MobilePlotCard({
             <span>{trace.name}</span>
           </button>
         ))}
-    </div>
+      </div>
+      {query.trim() && !filteredEntries.length && <p className="muted tiny">No matching lines.</p>}
+    </>
   );
   const legend = entries.length > 5 ? (
     <details className="mobilePlotLegendDisclosure">

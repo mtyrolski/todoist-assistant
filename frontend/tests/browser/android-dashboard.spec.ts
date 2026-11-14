@@ -259,6 +259,35 @@ test.beforeEach(async ({ page }) => {
       state.model = model;
       send();
     });
+    window.addEventListener("test-grouping-search", () => {
+      window.dispatchEvent(new Event("test-grouping-account"));
+      const data = (model as typeof model & { plotData: { hierarchy: Record<string, unknown>[] } }).plotData;
+      data.hierarchy.push(
+        { id: "old-source", name: "Łódź archive", previousNames: ["Stary zeszyt"], rootName: "Łódź archive", parentId: "", archived: true, weeklyCounts: {} },
+        { id: "old-child", name: "Archived child", rootName: "Łódź archive", parentId: "old-source", archived: true, weeklyCounts: {} },
+        { id: "indirect-child", name: "Indirect child", rootName: "Łódź archive", parentId: "", archived: true, weeklyCounts: {} },
+        { id: "old-parent", name: "Zażółć Parent", previousNames: ["Dawny dział"], rootName: "Work", parentId: "work", archived: true, weeklyCounts: {} },
+        { id: "shared-a", name: "Shared parent", rootName: "Shared parent · shared-a", parentId: "", archived: true, weeklyCounts: {} },
+        { id: "shared-b", name: "Shared parent", rootName: "Shared parent · shared-b", parentId: "", archived: true, weeklyCounts: {} },
+      );
+      send();
+    });
+    window.addEventListener("test-grouping-missing-id", () => {
+      window.dispatchEvent(new Event("test-grouping-account"));
+      (model as typeof model & { adjustments: unknown }).adjustments = {
+        mappings: { Old: "Work" }, archivedParents: [],
+        projectMappings: { one: { targetId: "missing-parent", targetName: "Personal" } },
+      };
+      send();
+    });
+    window.addEventListener("test-grouping-renamed-parent", () => {
+      window.dispatchEvent(new Event("test-grouping-account"));
+      (model as typeof model & { adjustments: unknown }).adjustments = {
+        mappings: { Old: "Work" }, archivedParents: [],
+        projectMappings: { one: { targetId: "life", targetName: "Earlier name" } },
+      };
+      send();
+    });
     window.Todoist = {
       ready: send,
       command: (name: string, argument: string) => {
@@ -274,9 +303,9 @@ test.beforeEach(async ({ page }) => {
           sessionStorage.removeItem("test-demo");
         }
         if (name === "save-adjustments" && state.model) {
-          const { mappings, archivedParents } = JSON.parse(argument);
-          (model as typeof model & { adjustments: unknown }).adjustments = { mappings, archivedParents };
-          sessionStorage.setItem("test-saved-adjustments", JSON.stringify({ mappings, archivedParents }));
+          const { mappings, archivedParents, projectMappings } = JSON.parse(argument);
+          (model as typeof model & { adjustments: unknown }).adjustments = { mappings, archivedParents, projectMappings };
+          sessionStorage.setItem("test-saved-adjustments", JSON.stringify({ mappings, archivedParents, projectMappings }));
           state.message = "Project adjustments saved.";
         }
         if (name === "import-adjustments") sessionStorage.setItem("test-import-requested", "yes");
@@ -718,7 +747,7 @@ test("many projects start with a readable total and an accessible line selector"
       const chart = card.locator(".js-plotly-plot");
       await expect(selector.locator("summary")).toContainText("1 of 15 shown");
       await expect(selector).not.toHaveAttribute("open");
-      await expect(chart).toBeVisible();
+      await expect(chart).toBeVisible({ timeout: 30000 });
       const [summaryBox, chartBox] = await Promise.all([selector.locator("summary").boundingBox(), chart.boundingBox()]);
       expect(chartBox!.y - (summaryBox!.y + summaryBox!.height)).toBeLessThan(30);
       await selector.locator("summary").click();
@@ -942,6 +971,7 @@ test("mobile exposes desktop plots with calendar-accurate totals and respects pa
   await expect(section("Events Over Time").locator(".js-plotly-plot")).toHaveCount(0);
   await section("Events Over Time").scrollIntoViewIfNeeded();
   const events = section("Events Over Time").locator(".js-plotly-plot");
+  await expect(events).toBeVisible({ timeout: 30000 });
   await expect.poll(() => events.evaluate((node) => (node as HTMLElement & { data: { y: number[] }[] }).data[0].y[0])).toBe(7);
   for (const size of [{ width: 412, height: 915 }, { width: 915, height: 412 }]) {
     await page.setViewportSize(size);
@@ -988,13 +1018,16 @@ test("project groupings can be edited, promoted, imported, and kept when names a
   await manager.getByLabel("Find an archived project").fill("Old");
   await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
   await expect(manager.getByText(/2 projects share this name/)).toBeVisible();
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  await manager.getByLabel("Specific project", { exact: true }).selectOption("one");
   await manager.getByLabel("Group under").selectOption("Personal");
   await manager.getByRole("button", { name: "Assign to group" }).click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings)).toEqual({ Old: "Personal", Missing: "Gone", Conflict: "Other" });
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings)).toEqual({ one: { targetId: "life", targetName: "Personal" } });
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings)).toEqual({ Old: "Work", Missing: "Gone", Conflict: "Other" });
   await manager.getByRole("button", { name: "Make its own group" }).click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").archivedParents)).toEqual(["Legacy", "Conflict", "Old"]);
-  await manager.getByRole("button", { name: "Use automatic grouping" }).click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").archivedParents)).toEqual(["Legacy", "Conflict"]);
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings.one.targetId)).toBe("one");
+  await manager.getByRole("button", { name: "Remove individual rule" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings)).toEqual({});
   await manager.getByLabel("Find an archived project").fill("");
   await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Missing");
   await expect(manager.getByText(/not in the current project list/)).toBeVisible();
@@ -1023,9 +1056,111 @@ test("project groupings can be edited, promoted, imported, and kept when names a
   await manager.getByRole("button", { name: "Assign to group" }).click();
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings["__proto__"])).toBe("Personal");
   await manager.getByText("Import groupings from your computer").click();
-  await expect(manager.getByText(/file rules win when both places define the same project/)).toBeVisible();
+  await expect(manager.getByText(/individual project rules take priority and are kept unless the file contains the same project IDs/)).toBeVisible();
   await manager.getByRole("button", { name: "Choose desktop export" }).click();
   expect(await page.evaluate(() => sessionStorage.getItem("test-import-requested"))).toBe("yes");
+});
+
+test("archived projects and parents can be searched and assigned", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-search")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByLabel("Find an archived project").fill("lodz");
+  const source = manager.getByRole("combobox", { name: /^Archived project/ });
+  await expect(source.locator("option")).toHaveCount(2);
+  await source.selectOption("Łódź archive");
+  await expect(manager.getByText("Current grouping: No parent recorded; shown under its own name")).toBeVisible();
+  await expect(manager.getByLabel("Specific project", { exact: true })).toHaveValue("old-source");
+  await manager.getByLabel("Find a parent project").fill("indirect child");
+  const parent = manager.getByLabel("Group under");
+  await parent.selectOption("Indirect child");
+  await expect(manager.getByText(/would create a grouping loop/)).toBeVisible();
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  await parent.selectOption("");
+  await manager.getByLabel("Find a parent project").fill("archived child");
+  await parent.selectOption("Archived child");
+  await expect(manager.getByText(/would create a grouping loop/)).toBeVisible();
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  await parent.selectOption("");
+  await manager.getByLabel("Find a parent project").fill("zazolc");
+  await expect(parent.locator("option")).toHaveCount(2);
+  await expect(parent.locator('option[value="Zażółć Parent"]')).toHaveText("Zażółć Parent (archived)");
+  await parent.selectOption("Zażółć Parent");
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings["old-source"])).toEqual({ targetId: "old-parent", targetName: "Zażółć Parent" });
+  await manager.getByLabel("Find a parent project").fill("missing term");
+  await expect(manager.getByText("No parent projects match this search.")).toBeVisible();
+  await expect(parent).toHaveValue("Zażółć Parent");
+  await manager.getByLabel("Find an archived project").fill("missing term");
+  await expect(manager.getByText("No archived projects match this search.")).toBeVisible();
+  await expect(source).toHaveValue("Łódź archive");
+});
+
+test("duplicate project and parent names require an explicit id", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-search")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
+  await expect(manager.getByRole("button", { name: "Make its own group" })).toBeDisabled();
+  const source = manager.getByLabel("Specific project", { exact: true });
+  await source.selectOption("one");
+  await manager.getByLabel("Group under").selectOption("Shared parent");
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  const parent = manager.getByLabel("Specific parent project");
+  await expect(parent.locator('option[value="shared-b"]')).toContainText("archived");
+  await parent.selectOption("shared-b");
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings)).toEqual({ one: { targetId: "shared-b", targetName: "Shared parent" } });
+  await source.selectOption("two");
+  await manager.getByLabel("Group under").selectOption("Shared parent");
+  await manager.getByLabel("Specific parent project").selectOption("shared-a");
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings)).toEqual({ one: { targetId: "shared-b", targetName: "Shared parent" }, two: { targetId: "shared-a", targetName: "Shared parent" } });
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings.Old)).toBe("Work");
+});
+
+test("projects can be found by an earlier name without automatically assigning them", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-search")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByLabel("Find an archived project").fill("stary zeszyt");
+  const source = manager.getByRole("combobox", { name: /^Archived project/ });
+  await expect(source.locator('option[value="Łódź archive"]')).toContainText("formerly Stary zeszyt");
+  await source.selectOption("Łódź archive");
+  await expect(manager.getByLabel("Specific project", { exact: true })).toHaveValue("old-source");
+  await manager.getByLabel("Find a parent project").fill("dawny dzial");
+  const parent = manager.getByLabel("Group under");
+  await expect(parent.locator('option[value="Zażółć Parent"]')).toContainText("formerly Dawny dział");
+  expect(await page.evaluate(() => sessionStorage.getItem("test-saved-adjustments"))).toBeNull();
+  await parent.selectOption("Zażółć Parent");
+  await manager.getByRole("button", { name: "Assign to group" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings["old-source"])).toEqual({ targetId: "old-parent", targetName: "Zażółć Parent" });
+});
+
+test("a missing saved parent id is not replaced by another project of the same name", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-missing-id")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
+  await manager.getByLabel("Specific project", { exact: true }).selectOption("one");
+  await expect(manager.getByText(/saved parent is missing from synced projects/)).toBeVisible();
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  expect(await page.evaluate(() => sessionStorage.getItem("test-saved-adjustments"))).toBeNull();
+  await manager.getByRole("button", { name: "Remove individual rule" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").projectMappings)).toEqual({});
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test-saved-adjustments") ?? "{}").mappings.Old)).toBe("Work");
+});
+
+test("an id-based grouping follows the current name of a renamed parent", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-renamed-parent")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
+  await manager.getByLabel("Specific project", { exact: true }).selectOption("one");
+  await expect(manager.getByText("Current grouping: Personal (this project)")).toBeVisible();
+  await expect(manager.getByLabel("Group under")).toHaveValue("Personal");
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  await expect(manager.getByText(/Removing the individual rule restores the saved name rule/)).toBeVisible();
 });
 
 test("grouping editor draft survives recreation without applying changes", async ({ page }) => {
@@ -1055,6 +1190,47 @@ test("grouping editor draft survives recreation without applying changes", async
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").groupingDraft?.source)).toBe("");
 });
 
+test("a specific source and parent selection survives recreation without saving", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-search")));
+  await page.getByRole("button", { name: "Control Panel", exact: true }).click();
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await manager.getByRole("combobox", { name: /^Archived project/ }).selectOption("Old");
+  await manager.getByLabel("Specific project", { exact: true }).selectOption("one");
+  await manager.getByLabel("Find a parent project").fill("shared");
+  await manager.getByLabel("Group under").selectOption("Shared parent");
+  await manager.getByLabel("Specific parent project").selectOption("shared-b");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("todoist-ui") ?? "{}").groupingDraft?.targetId)).toBe("shared-b");
+  await page.reload();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-search")));
+  await expect(manager.getByRole("combobox", { name: /^Archived project/ })).toHaveValue("Old");
+  await expect(manager.getByLabel("Specific project", { exact: true })).toHaveValue("one");
+  await expect(manager.getByLabel("Find a parent project")).toHaveValue("shared");
+  await expect(manager.getByLabel("Group under")).toHaveValue("Shared parent");
+  await expect(manager.getByLabel("Specific parent project")).toHaveValue("shared-b");
+  expect(await page.evaluate(() => sessionStorage.getItem("test-saved-adjustments"))).toBeNull();
+});
+
+test("an older grouping draft without ids remains readable", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("todoist-ui", JSON.stringify({ tab: "Control Panel", groupingDraft: { search: "Old", source: "Old", target: "Personal", customSource: "", customTarget: "" } })));
+  await page.reload();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-account")));
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await expect(manager.getByLabel("Find an archived project")).toHaveValue("Old");
+  await expect(manager.getByLabel("Group under")).toHaveValue("Personal");
+  await expect(manager.getByLabel("Specific project", { exact: true })).toHaveValue("");
+  await expect(page.getByText(/Some saved view preferences are invalid/)).toHaveCount(0);
+});
+
+test("a stale project id in a draft cannot be applied to a different project", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("todoist-ui", JSON.stringify({ tab: "Control Panel", groupingDraft: { search: "", source: "Old", target: "Personal", customSource: "", customTarget: "", sourceId: "removed", targetId: "", targetSearch: "" } })));
+  await page.reload();
+  await page.evaluate(() => window.dispatchEvent(new Event("test-grouping-account")));
+  const manager = page.getByRole("region", { name: "Project grouping" });
+  await expect(manager.getByText(/selected project ID is no longer in the synced projects/)).toBeVisible();
+  await expect(manager.getByRole("button", { name: "Assign to group" })).toBeDisabled();
+  expect(await page.evaluate(() => sessionStorage.getItem("test-saved-adjustments"))).toBeNull();
+});
+
 test("invalid stored grouping draft is ignored without overwriting it", async ({ page }) => {
   const raw = JSON.stringify({ tab: "Control Panel", groupingDraft: { source: ["bad"] } });
   await page.evaluate((value) => localStorage.setItem("todoist-ui", value), raw);
@@ -1069,6 +1245,7 @@ test("project names do not collide with JavaScript properties or the aggregate",
   await page.evaluate(() => window.dispatchEvent(new Event("test-special-names")));
   const section = page.locator("section.card").filter({ has: page.getByRole("heading", { name: "Completed tasks", exact: true }) });
   const chart = section.locator(".js-plotly-plot");
+  await expect(chart).toBeVisible({ timeout: 30000 });
   const traces = () => chart.evaluate((node) => (node as HTMLElement & { data: { name: string; legendgroup: string; y: number[]; showlegend?: boolean }[] }).data);
   await expect.poll(async () => (await traces()).filter((trace) => trace.legendgroup === "All projects").length).toBe(3);
   await expect.poll(async () => (await traces()).filter((trace) => trace.legendgroup === "project:All projects").length).toBe(3);

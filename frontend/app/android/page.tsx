@@ -52,7 +52,7 @@ const INITIAL_UI = {
   timelineStart: "",
   timelineEnd: "",
   timelineProject: "",
-  groupingDraft: { search: "", source: "", target: "", customSource: "", customTarget: "" },
+  groupingDraft: { search: "", source: "", target: "", customSource: "", customTarget: "", sourceId: "", targetId: "", targetSearch: "" },
 };
 
 function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
@@ -102,9 +102,10 @@ function restoredUi(value: unknown): { ui: typeof INITIAL_UI; valid: boolean } {
   if ("groupingDraft" in saved) {
     const value = saved.groupingDraft;
     if (value && typeof value === "object" && !Array.isArray(value) &&
-        Object.keys(ui.groupingDraft).every((key) => typeof (value as Record<string, unknown>)[key] === "string")) {
+        ["search", "source", "target", "customSource", "customTarget"].every((key) => typeof (value as Record<string, unknown>)[key] === "string") &&
+        ["sourceId", "targetId", "targetSearch"].every((key) => !(key in value) || typeof (value as Record<string, unknown>)[key] === "string")) {
       const draft = value as typeof ui.groupingDraft;
-      ui.groupingDraft = { search: draft.search, source: draft.source, target: draft.target, customSource: draft.customSource, customTarget: draft.customTarget };
+      ui.groupingDraft = { search: draft.search, source: draft.source, target: draft.target, customSource: draft.customSource, customTarget: draft.customTarget, sourceId: draft.sourceId ?? "", targetId: draft.targetId ?? "", targetSearch: draft.targetSearch ?? "" };
     } else valid = false;
   }
   if ("priority" in saved) {

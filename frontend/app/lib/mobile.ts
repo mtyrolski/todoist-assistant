@@ -3,6 +3,10 @@ import type { PlotlyFigure } from "../components/PlotCard";
 import type { requestJson } from "./adminApi";
 import type { MobilePlotData } from "./mobilePlots";
 
+export function normalizeSearch(value: string): string {
+  return value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").trim();
+}
+
 export type MobileTask = {
   id: string;
   projectId: string;
@@ -48,7 +52,7 @@ export type MobileModel = {
   historyAvailable: boolean;
   historyWarning: string;
   plotData?: MobilePlotData;
-  adjustments?: { mappings: Record<string, string>; archivedParents: string[] };
+  adjustments?: { mappings: Record<string, string>; archivedParents: string[]; projectMappings?: Record<string, { targetId: string; targetName: string }> };
   weeklyProjects: Record<string, number>[];
   projectForecasts: Record<string, number>;
   projectColors: Record<string, string>;
@@ -252,6 +256,8 @@ export function completionFigure(
   const current = model.weeks.length - 1;
   const dates = model.weeks.map((_, i) => weekDate(model.weekStart, i - current, 6));
   const from = range > 0 ? Math.max(0, model.weeks.length - range) : 0;
+  const spansYears = dates[from]?.slice(0, 4) !== dates[current]?.slice(0, 4);
+  const dateTickFormat = !spansYears ? "%b %-d" : dates.length - from <= 12 ? "%d %b\n%Y" : "%b %Y";
   const coverage = mobileHistoryStart(model);
   const historyAsOf = mobileHistoryEnd(model);
   const covered = (index: number) => {
@@ -286,7 +292,7 @@ export function completionFigure(
       legendgroup: !total && name === "All projects" ? aggregateProject.group : name,
       line: { color, width: total ? 3 : 2 },
       marker: { color },
-      hovertemplate: `${label}<br>%{x}: %{y} tasks<extra></extra>`,
+      hovertemplate: `${label}<br>Week ending %{x|%d %b %Y}: %{y} tasks<extra></extra>`,
     };
     data.push({
       ...group,
@@ -304,7 +310,7 @@ export function completionFigure(
         mode: "lines+markers",
         type: "scatter",
         line: { color, width: total ? 3 : 2, dash: "dash" },
-        hovertemplate: `${label}<br>Forecast: %{y} tasks<extra></extra>`,
+        hovertemplate: `${label}<br>Week ending %{x|%d %b %Y}<br>Forecast: %{y} tasks<extra></extra>`,
       });
     data.push({
       ...group,
@@ -319,7 +325,7 @@ export function completionFigure(
         symbol: "circle-open",
         line: { color, width: 2 },
       },
-      hovertemplate: `${label}<br>So far: %{y} tasks<extra></extra>`,
+      hovertemplate: `${label}<br>Week ending %{x|%d %b %Y}<br>So far: %{y} tasks<extra></extra>`,
     });
   }
   return {
@@ -329,7 +335,7 @@ export function completionFigure(
       showlegend: false,
       hovermode: "closest",
       dragmode: false,
-      xaxis: { type: "date", tickformat: "%b %-d", showgrid: false },
+      xaxis: { type: "date", tickformat: dateTickFormat, showgrid: false },
       yaxis: { rangemode: "tozero", showgrid: false },
       shapes: events.map((event) => ({
         type: "line",

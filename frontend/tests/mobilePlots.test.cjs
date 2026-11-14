@@ -29,6 +29,26 @@ test('date-only week arithmetic survives daylight-saving and skipped local dates
   finally { process.env.TZ = 'Europe/Warsaw'; }
 });
 
+test('weekly charts distinguish years and label each point with its full week-ending date', () => {
+  const shortHistory = model();
+  assert.equal(completionFigure(shortHistory, 8, []).layout.xaxis.tickformat, '%b %-d');
+  const longHistory = model({
+    weekStart: '2021-01-04',
+    syncedAt: '2021-01-05T12:00:00Z',
+    weeks: Array(60).fill(1),
+    weeklyProjects: Array.from({ length: 60 }, () => ({ Work: 1 })),
+    plotData: { ...shortHistory.plotData, historyStart: '2019-11-01', historyAsOf: '2021-01-05' },
+  });
+  assert.equal(completionFigure(longHistory, 4, []).layout.xaxis.tickformat, '%d %b\n%Y');
+  for (const cumulative of [false, true]) {
+    const figure = completionFigure(longHistory, 0, [], cumulative);
+    assert.equal(figure.layout.xaxis.tickformat, '%b %Y');
+    assert.ok(figure.data.every((trace) => trace.hovertemplate.includes('Week ending %{x|%d %b %Y}')));
+    assert.equal(figure.data[0].x[0], '2019-11-24');
+    assert.equal(figure.data[0].x.at(-1), '2021-01-03');
+  }
+});
+
 test('history end respects exclusive local midnights and excludes past partial days across DST', () => {
   assert.equal(mobileHistoryEnd(model({ activitySyncedAt: '2020-03-29T22:00:00Z' })), '2020-03-29');
   assert.equal(mobileHistoryEnd(model({ activitySyncedAt: '2020-03-29T10:00:00Z' })), '2020-03-28');

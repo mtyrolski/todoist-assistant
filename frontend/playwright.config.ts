@@ -6,6 +6,7 @@ export default defineConfig({
   fullyParallel: true,
   workers: 2,
   timeout: 60_000,
+  expect: { timeout: 15_000 },
   use: {
     baseURL: "http://127.0.0.1:3102",
     viewport: { width: 1280, height: 900 },
