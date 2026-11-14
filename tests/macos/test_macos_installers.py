@@ -1,4 +1,5 @@
 import os
+import plistlib
 import socket
 import subprocess
 import sys
@@ -9,7 +10,8 @@ from pathlib import Path
 import pytest
 import requests
 
-from todoist.core.env import EnvVar
+from todometry.core.env import EnvVar
+from todometry.core.version import get_version
 
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -51,20 +53,26 @@ def test_pkg_install_smoke() -> None:
     if not pkg.exists():
         raise AssertionError(f"pkg not found at {pkg}")
 
+    binary = Path("/usr/local/todoist-assistant/todometry")
+    shim = Path("/usr/local/bin/todometry")
+    config_dir = Path("/usr/local/etc/todoist-assistant")
+    for existing in (binary.parent, shim, config_dir):
+        if existing.exists():
+            pytest.fail(
+                f"Package smoke test requires a clean runner; already exists: {existing}"
+            )
+    config_template = config_dir / ".env.template"
     _run(["sudo", "-n", "installer", "-pkg", str(pkg), "-target", "/"])
-
-    binary = Path("/usr/local/todoist-assistant/todoist-assistant")
-    shim = Path("/usr/local/bin/todoist-assistant")
-    config_template = Path("/usr/local/etc/todoist-assistant/.env.template")
 
     assert binary.exists(), f"Missing CLI binary at {binary}"
     assert shim.exists(), f"Missing shim at {shim}"
     assert config_template.exists(), f"Missing config template at {config_template}"
 
     _run([str(shim), "--help"])
+    assert _run([str(shim), "--version"]).stdout.strip() == get_version()
 
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/todoist-assistant"])
-    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todoist-assistant"])
+    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todometry"])
     _run(["sudo", "-n", "rm", "-rf", "/usr/local/etc/todoist-assistant"])
 
     assert not binary.exists(), "CLI bundle still present after removal"
@@ -72,20 +80,19 @@ def test_pkg_install_smoke() -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only test")
-def test_pkg_frontend_host(tmp_path: Path) -> None:
-    pkg_path = os.environ.get(EnvVar.PKG_PATH)
-    if not pkg_path:
-        pytest.skip(f"{EnvVar.PKG_PATH} not set")
-
-    pkg = Path(pkg_path)
-    if not pkg.exists():
-        raise AssertionError(f"pkg not found at {pkg}")
-
-    _run(["sudo", "-n", "installer", "-pkg", str(pkg), "-target", "/"])
-
-    shim = Path("/usr/local/bin/todoist-assistant")
-    if not shim.exists():
-        raise AssertionError(f"shim not found at {shim}")
+def test_app_frontend_host(tmp_path: Path) -> None:
+    app_value = os.environ.get("TODOIST_APP_PATH")
+    if not app_value:
+        pytest.skip("TODOIST_APP_PATH not set")
+    app = Path(app_value)
+    executable = app / "Contents" / "MacOS" / "todometry"
+    assert executable.is_file(), f"Missing app executable: {executable}"
+    with (app / "Contents" / "Info.plist").open("rb") as stream:
+        info = plistlib.load(stream)
+    assert info["CFBundleDisplayName"] == "todometry"
+    assert info["CFBundleIdentifier"] == "com.todoist.assistant"
+    assert info["CFBundleShortVersionString"] == get_version()
+    assert info["CFBundleVersion"] == get_version()
 
     data_dir = tmp_path / "todoist-data"
     config_dir = tmp_path / "todoist-config"
@@ -95,7 +102,7 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
     frontend_port = _reserve_port()
     api_port = _reserve_port()
     cmd = [
-        str(shim),
+        str(executable),
         "--no-browser",
         "--frontend-port",
         str(frontend_port),
@@ -122,6 +129,11 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
             _wait_for_frontend(frontend_url, timeout=60.0)
             resp = requests.get(frontend_url, timeout=5)
             assert resp.status_code == 200, f"Unexpected HTTP {resp.status_code}"
+            health_url = f"http://127.0.0.1:{api_port}/api/health"
+            _wait_for_frontend(health_url, timeout=60.0)
+            assert (
+                requests.get(health_url, timeout=5).json()["version"] == get_version()
+            )
         except Exception:
             # Dump logs on failure
             if stdout_path.exists():
@@ -136,19 +148,21 @@ def test_pkg_frontend_host(tmp_path: Path) -> None:
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-    _run(["sudo", "-n", "rm", "-rf", "/usr/local/todoist-assistant"])
-    _run(["sudo", "-n", "rm", "-f", "/usr/local/bin/todoist-assistant"])
-    _run(["sudo", "-n", "rm", "-rf", "/usr/local/etc/todoist-assistant"])
-
-    assert not Path("/usr/local/bin/todoist-assistant").exists()
-
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only test")
 def test_brew_install_smoke() -> None:
     if shutil.which("brew") is None:
         pytest.skip("Homebrew not available on this runner")
 
-    formula = os.environ.get(EnvVar.BREW_FORMULA, "Formula/todoist-assistant.rb")
+    formula = os.environ.get(EnvVar.BREW_FORMULA)
+    if not formula:
+        pytest.skip(f"{EnvVar.BREW_FORMULA} not set")
+    if _run(
+        ["brew", "list", "--versions", "todometry"], check=False
+    ).stdout.strip():
+        pytest.fail(
+            "Homebrew smoke test requires a runner without the existing formula"
+        )
     if not Path(formula).exists():
         pytest.skip("Homebrew formula not available in this checkout")
 
@@ -159,5 +173,6 @@ def test_brew_install_smoke() -> None:
     os.environ.setdefault("HOMEBREW_NO_AUTO_UPDATE", "1")
 
     _run(["brew", "install", "--build-from-source", formula])
-    _run(["todoist-assistant", "--help"])
-    _run(["brew", "uninstall", "--force", "todoist-assistant"])
+    _run(["todometry", "--help"])
+    assert _run(["todometry", "--version"]).stdout.strip() == get_version()
+    _run(["brew", "uninstall", "--force", "todometry"])

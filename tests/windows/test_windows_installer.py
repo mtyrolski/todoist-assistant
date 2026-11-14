@@ -7,9 +7,20 @@ import zipfile
 
 import pytest
 
-from todoist.core.env import EnvVar
+from todometry.core.env import EnvVar
 
 _ALLOWED_MSIEXEC_CODES = {0, 3010, 1641}
+
+
+def test_windows_installer_data_directory_matches_launcher():
+    import xml.etree.ElementTree as etree
+
+    root = Path(__file__).resolve().parents[2]
+    directories = etree.parse(root / "windows/installer/components.wxs").findall(
+        ".//{*}Directory[@Id='APPDATADIR']"
+    )
+    assert len(directories) == 1
+    assert directories[0].get("Name") == "Todometry"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only installer test")
@@ -34,11 +45,11 @@ def test_windows_msi_contents() -> None:
         )
 
         extracted_root = Path(temp_dir)
-        exe_path = _find_required(extracted_root, "todoist-assistant.exe")
+        exe_path = _find_required(extracted_root, "todometry.exe")
         app_root = exe_path.parent
 
         _find_required(extracted_root, ".env.template")
-        _find_required(extracted_root, "automations.yaml")
+        _find_required(extracted_root, "dashboard.yaml")
 
         has_python = _has_python_runtime(app_root)
         assert has_python, (
@@ -93,7 +104,7 @@ def _resolve_msi_path(repo_root: Path) -> Path:
         raise AssertionError(f"MSI not found at {EnvVar.MSI_PATH}={env_path}")
 
     candidates = sorted(
-        (repo_root / "dist" / "windows").glob("todoist-assistant-*.msi")
+        (repo_root / "dist" / "windows").glob("todometry-*.msi")
     )
     if not candidates:
         pytest.skip(

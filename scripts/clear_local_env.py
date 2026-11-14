@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Remove local runtime state created by the Todoist Assistant."""
+"""Remove local runtime state created by the todometry."""
 
 import os
 import shutil
@@ -8,8 +8,8 @@ import argparse
 from pathlib import Path
 from collections.abc import Sequence
 
-from todoist.core.env import EnvVar
-from todoist.core.utils import RUNTIME_MIGRATABLE_FILENAMES, resolve_cache_dir
+from todometry.core.env import EnvVar
+from todometry.core.utils import RUNTIME_MIGRATABLE_FILENAMES, resolve_cache_dir
 
 
 def _resolve_data_dir() -> Path:
@@ -60,7 +60,7 @@ def clear_local_env() -> list[Path]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Remove local Todoist Assistant runtime state."
+        description="Remove local todometry runtime state."
     )
     parser.add_argument(
         "-v",

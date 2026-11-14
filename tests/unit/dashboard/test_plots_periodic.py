@@ -6,13 +6,13 @@ from typing import Any, cast
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
-from todoist.dashboard._plot_periodic import _prepare_completed_periodic_frame
+from todometry.dashboard._plot_periodic import _prepare_completed_periodic_frame
 
-from todoist.dashboard.plots import (
+from todometry.dashboard._plot_periodic import (
     cumsum_completed_tasks_periodically,
     plot_completed_tasks_periodically,
-    plot_weekly_completion_trend,
 )
+from todometry.dashboard._plot_weekly_trend import plot_weekly_completion_trend
 
 
 def _weekly_completion_df() -> pd.DataFrame:
@@ -197,7 +197,7 @@ def _archived_current_period_sparse_df() -> pd.DataFrame:
 
 
 def _freeze_periodic_now(monkeypatch: Any, now: datetime) -> None:
-    import todoist.dashboard._plot_periodic as periodic_module
+    import todometry.dashboard._plot_periodic as periodic_module
 
     class FixedDateTime(datetime):
         @classmethod
@@ -685,3 +685,150 @@ def test_plot_weekly_completion_trend_skips_unavailable_long_window():
     assert any("6w baseline" in label for label in legend_labels)
     assert any("12w baseline" in label for label in legend_labels)
     assert not any("24w baseline" in label for label in legend_labels)
+
+
+@pytest.mark.parametrize(("plot_func", "_total_name"), PLOT_FUNCTIONS)
+def test_sunday_so_far_uses_cached_completions_and_matching_colors(
+    monkeypatch, plot_func, _total_name
+):
+    _freeze_periodic_now(monkeypatch, datetime(2026, 11, 1, 12))
+    df = _completed_df(
+        [
+            ("2026-10-24", "Project A", "old", "Old task"),
+            ("2026-10-31", "Project A", "repeat", "Repeated completion"),
+            ("2026-10-31", "Project A", "repeat", "Repeated completion"),
+        ]
+    )
+    fig = plot_func(
+        df,
+        datetime(2026, 10, 1),
+        datetime(2026, 11, 1, 12),
+        granularity="W",
+        project_colors={"Project A": "#123456"},
+    )
+    actual = _trace_by_name(fig, "Project A (so far)")
+    forecast = _trace_by_name(fig, "Project A (forecast)")
+    expected = 3 if plot_func is cumsum_completed_tasks_periodically else 2
+    assert list(actual.y) == [expected]
+    assert _trace_marker_color(actual) == _trace_marker_color(forecast) == "#123456"
+    assert list(_trace_by_name(fig, "All Projects (so far)").y) == [expected]
+
+
+def test_periodic_baseline_includes_wholly_empty_weeks():
+    _, counts = _prepare_completed_periodic_frame(
+        _completed_df(
+            [
+                ("2024-05-06", "Project A", "a", "A"),
+                ("2024-05-27", "Project A", "b", "B"),
+            ]
+        ),
+        beg_date=datetime(2024, 5, 1),
+        end_date=datetime(2024, 6, 1),
+        granularity="W",
+    )
+    assert counts["Project A"].tolist() == [1, 0, 0, 1]
+
+
+def test_quarterly_counts_use_calendar_quarter_boundaries():
+    _, counts = _prepare_completed_periodic_frame(
+        _completed_df(
+            [
+                ("2026-02-01", "Project A", "a", "A"),
+                ("2026-04-01", "Project A", "b", "B"),
+            ]
+        ),
+        beg_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 5, 1),
+        granularity="3ME",
+    )
+    assert counts.index.tolist() == [
+        pd.Timestamp("2026-03-31"),
+        pd.Timestamp("2026-06-30"),
+    ]
+    assert counts["Project A"].tolist() == [1, 1]
+
+
+def test_project_forecast_history_includes_recent_idle_weeks():
+    from todometry.dashboard._plot_periodic import (
+        _history_totals_for_project,
+        _PeriodicForecastContext,
+        _PERIODIC_CONFIG,
+    )
+
+    values = pd.Series(
+        [8, 0, 0, 0], index=pd.date_range("2026-10-11", periods=4, freq="W")
+    )
+    context = _PeriodicForecastContext(
+        datetime(2026, 11, 1),
+        datetime(2026, 10, 26),
+        datetime(2026, 11, 1, 23, 59),
+        datetime(2026, 10, 31),
+        True,
+    )
+    assert _history_totals_for_project(
+        values=values, series=values.iloc[:1], context=context, config=_PERIODIC_CONFIG
+    ) == [8, 0, 0]
+
+
+@pytest.mark.parametrize(("plot_func", "total_name"), PLOT_FUNCTIONS)
+def test_total_history_keeps_projects_hidden_by_the_initial_viewport(
+    monkeypatch, plot_func, total_name
+):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 6, 5, 12))
+    df = _completed_df(
+        [
+            ("2024-05-24", "Old project", "a", "Old task"),
+            ("2024-06-03", "Active project", "b", "Current task"),
+        ]
+    )
+    fig = plot_func(
+        df,
+        datetime(2024, 5, 1),
+        datetime(2024, 6, 5),
+        granularity="W",
+        project_colors={},
+        visibility_beg_date=datetime(2024, 6, 1),
+        visibility_end_date=datetime(2024, 6, 5),
+    )
+    assert not any(name.startswith("Old project") for name in _trace_names(fig))
+    total = _trace_by_lower_name(fig, total_name)
+    points = dict(zip(pd.to_datetime(total.x), total.y))
+    assert points[pd.Timestamp("2024-05-26")] == 1
+    expected = 2 if plot_func is cumsum_completed_tasks_periodically else 1
+    assert list(_trace_by_name(fig, "All Projects (so far)").y) == [expected]
+
+
+def test_future_dated_cache_events_do_not_inflate_so_far(monkeypatch):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 6, 5, 12))
+    df = _completed_df(
+        [
+            ("2024-06-03", "A", "a", "Real completion"),
+            ("2024-06-06", "A", "b", "Future event"),
+        ]
+    )
+    fig = plot_completed_tasks_periodically(
+        df, datetime(2024, 5, 1), datetime(2024, 6, 20), "W", {}
+    )
+    assert list(_trace_by_name(fig, "All Projects (so far)").y) == [1]
+
+
+def test_archive_status_is_separate_from_always_visible_projects(monkeypatch):
+    _freeze_periodic_now(monkeypatch, datetime(2024, 6, 5, 12))
+    df = _completed_df(
+        [
+            ("2024-06-03", "Archived", "a", "Archived task"),
+            ("2024-06-03", "Active", "b", "Active task"),
+        ]
+    )
+    fig = plot_completed_tasks_periodically(
+        df,
+        datetime(2024, 5, 1),
+        datetime(2024, 6, 5),
+        "W",
+        {},
+        always_visible_projects={"Active"},
+        archived_project_names={"Archived"},
+    )
+    names = _trace_names(fig)
+    assert "Active (forecast)" in names
+    assert not any(name.startswith("Archived (forecast") for name in names)

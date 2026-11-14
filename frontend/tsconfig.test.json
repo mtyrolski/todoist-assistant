@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "incremental": false,
+    "outDir": ".test-build",
+    "rootDir": "app",
+    "isolatedModules": false
+  },
+  "include": ["react-plotly.d.ts", "app/lib/dashboardSettings.ts", "app/lib/mobile.ts", "app/lib/mobilePlots.ts"],
+  "exclude": ["node_modules", ".test-build"]
+}

@@ -6,10 +6,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import todoist
-import todoist.web.api_components.runtime as runtime_component
-import todoist.web.api as web_api
-import todoist.web.api_components.dashboard_runtime as dashboard_runtime_component
+import todometry
+import todometry.web.api_components.runtime as runtime_component
+import todometry.web.api as web_api
+import todometry.web.routes.runtime_admin as runtime_admin
+import todometry.web.api_components.dashboard_runtime as dashboard_runtime_component
 from tests.unit.database.helpers import make_event
 
 # pylint: disable=protected-access
@@ -50,19 +51,14 @@ def test_runtime_logs_only_return_explicit_allowlist(
     (dashboard_dir / "rogue.log").write_text("rogue line\n", encoding="utf-8")
 
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path / "data")
 
     res = api_client.get("/api/runtime/logs")
     assert res.status_code == 200
     payload = res.json()
 
     ids = [item["id"] for item in payload["sources"]]
-    assert ids == [
-        "api",
-        "frontend",
-        "observer",
-        "automation",
-    ]
+    assert ids == ["api", "frontend"]
     assert "rogue" not in ids
     assert all(item["inspectOnly"] is True for item in payload["sources"])
 
@@ -72,18 +68,18 @@ def test_runtime_log_read_accepts_allowlisted_source_only(
 ) -> None:
     cache_dir = tmp_path / "cache"
     dashboard_dir = _dashboard_log_dir(cache_dir)
-    (dashboard_dir / "observer.log").write_text(
+    (dashboard_dir / "api.log").write_text(
         "line-1\nline-2\nline-3\n", encoding="utf-8"
     )
 
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(cache_dir))
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path / "data")
 
     client = api_client
-    ok = client.get("/api/runtime/logs/read?source=observer&tail_lines=2&page=1")
+    ok = client.get("/api/runtime/logs/read?source=api&tail_lines=2&page=1")
     assert ok.status_code == 200
     payload = ok.json()
-    assert payload["source"] == "observer"
+    assert payload["source"] == "api"
     assert payload["inspectOnly"] is True
     assert payload["content"] == "line-2\nline-3\n"
 
@@ -99,7 +95,6 @@ def test_admin_logs_lists_explicit_runtime_sources(
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "api.log").write_text("api ready\n", encoding="utf-8")
-    (tmp_path / "automation.log").write_text("automation ready\n", encoding="utf-8")
     (tmp_path / "dashboard" / "unexpected.log").write_text(
         "should not be listed\n", encoding="utf-8"
     )
@@ -108,16 +103,9 @@ def test_admin_logs_lists_explicit_runtime_sources(
     assert res.status_code == 200
     payload = res.json()
 
-    assert [item["source"] for item in payload["logs"]] == [
-        "api",
-        "frontend",
-        "observer",
-        "automation",
-    ]
+    assert [item["source"] for item in payload["logs"]] == ["api", "frontend"]
     assert payload["logs"][0]["available"] is True
     assert payload["logs"][0]["path"] == "dashboard/api.log"
-    assert payload["logs"][-1]["available"] is True
-    assert payload["logs"][-1]["path"] == "automation.log"
     assert all(item["path"] != "dashboard/unexpected.log" for item in payload["logs"])
 
 
@@ -128,19 +116,19 @@ def test_admin_read_log_uses_named_runtime_source(
     monkeypatch.chdir(tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
-    (dashboard_dir / "observer.log").write_text("line-a\nline-b\n", encoding="utf-8")
+    (dashboard_dir / "api.log").write_text("line-a\nline-b\n", encoding="utf-8")
 
     client = api_client
     res = client.get(
         "/api/admin/logs/read",
-        params={"source": "observer", "tail_lines": 20, "page": 1},
+        params={"source": "api", "tail_lines": 20, "page": 1},
     )
     assert res.status_code == 200
     payload = res.json()
 
-    assert payload["source"] == "observer"
-    assert payload["label"] == "Observer"
-    assert payload["path"] == "dashboard/observer.log"
+    assert payload["source"] == "api"
+    assert payload["label"] == "Backend API"
+    assert payload["path"] == "dashboard/api.log"
     assert "line-a" in payload["content"]
     assert payload["totalLines"] == 2
 
@@ -154,11 +142,10 @@ def test_runtime_logs_lists_curated_sources(
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "api.log").write_text("api line\n", encoding="utf-8")
-    (tmp_path / "automation.log").write_text("automation line\n", encoding="utf-8")
 
     res = api_client.get("/api/runtime/logs")
     assert res.status_code == 200
@@ -169,7 +156,7 @@ def test_runtime_logs_lists_curated_sources(
     assert by_id["api"]["available"] is True
     assert by_id["api"]["inspectOnly"] is True
     assert by_id["frontend"]["available"] is False
-    assert by_id["automation"]["available"] is True
+    assert set(by_id) == {"api", "frontend"}
 
 
 def test_runtime_read_log_rejects_removed_triton_source(
@@ -177,7 +164,7 @@ def test_runtime_read_log_rejects_removed_triton_source(
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_DATA_DIR", tmp_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_data_dir", lambda: tmp_path)
 
     dashboard_dir = _dashboard_log_dir(tmp_path)
     (dashboard_dir / "triton.log").write_text(
@@ -197,7 +184,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(str(web_api.EnvVar.TIMEZONE), raising=False)
-    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+    monkeypatch.setattr(runtime_admin, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
     res = api_client.get("/api/admin/timezone")
@@ -214,7 +201,7 @@ def test_admin_timezone_status_uses_system_timezone_when_not_configured(
 def test_admin_timezone_set_and_clear(monkeypatch, tmp_path, api_client) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+    monkeypatch.setattr(runtime_admin, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
     client = api_client
@@ -257,7 +244,7 @@ def test_admin_timezone_rejects_invalid_timezone(
 ) -> None:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_api, "_detect_system_timezone", lambda: "UTC")
+    monkeypatch.setattr(runtime_admin, "_detect_system_timezone", lambda: "UTC")
     monkeypatch.setattr(runtime_component, "detect_system_timezone", lambda: "UTC")
 
     response = api_client.post(
@@ -273,7 +260,7 @@ def test_admin_api_token_status_uses_safe_env_label(
     monkeypatch, tmp_path, api_client
 ) -> None:
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_env_path", lambda: env_path)
     monkeypatch.setenv("API_KEY", "test_api_key_12345")
 
     res = api_client.get("/api/admin/api_token")
@@ -290,9 +277,9 @@ def test_admin_api_token_save_clear_and_status_cycle(
 ) -> None:
     env_path = tmp_path / ".env"
     token = "a" * 32
-    monkeypatch.setattr(web_api, "_resolve_env_path", lambda: env_path)
+    monkeypatch.setattr(runtime_admin, "_resolve_env_path", lambda: env_path)
     monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.setattr(web_api, "_validate_api_token", lambda _token: (True, None, 3))
+    monkeypatch.setattr(runtime_admin, "_validate_api_token", lambda _token: (True, None, 3))
 
     client = api_client
 
@@ -325,7 +312,7 @@ def test_openapi_includes_app_version(api_client) -> None:
     res = api_client.get("/openapi.json")
     assert res.status_code == 200
     payload = res.json()
-    assert payload["info"]["version"] == web_api.app.version == todoist.__version__
+    assert payload["info"]["version"] == web_api.app.version == todometry.__version__
 
 
 @pytest.mark.parametrize(

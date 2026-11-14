@@ -4,10 +4,10 @@ from typing import NamedTuple, cast
 
 import pytest
 
-import todoist.database.dataframe as dataframe_module
+import todometry.database.dataframe as dataframe_module
 from tests.factories import make_project
-from todoist.core.types import Event, EventEntry, Project
-from todoist.database.base import Database
+from todometry.core.types import Event, EventEntry, Project
+from todometry.database.base import Database
 
 
 class ProjectSpec(NamedTuple):

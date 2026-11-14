@@ -1,0 +1,99 @@
+plugins {
+    id 'com.android.application'
+    id 'com.diffplug.spotless'
+}
+
+def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../frontend/package.json')).version
+def versionParts = appVersion.tokenize('.').collect { it as int }
+def appVersionCode = (System.getenv('ANDROID_VERSION_CODE') ?: (versionParts[0] * 1000000 + versionParts[1] * 1000 + versionParts[2])) as int
+if (appVersionCode < 1) throw new GradleException('ANDROID_VERSION_CODE must be positive')
+def preview = providers.gradleProperty('preview').orElse('false').get().toBoolean()
+def previewSuffix = providers.gradleProperty('previewIdSuffix').orElse('.preview').get()
+def signing = ['STORE_FILE', 'STORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD'].collectEntries {
+    [(it): System.getenv('ANDROID_SIGNING_' + it)]
+}
+def hasSigning = signing.values().every { it }
+if (signing.values().any { it } && !hasSigning) throw new GradleException('Set all four ANDROID_SIGNING_* variables')
+if (preview && !hasSigning) throw new GradleException('Preview requires a signing key; use scripts/build_android.sh preview')
+
+android {
+    namespace 'com.todoistassistant'
+    compileSdk 36
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'com.todoistassistant'
+        minSdk 26
+        targetSdk 36
+        versionCode appVersionCode
+        versionName appVersion
+        buildConfigField 'boolean', 'IS_PREVIEW', preview.toString()
+        resValue 'string', 'app_name', preview ? (previewSuffix == '.preview' ? 'Todometry Preview' : 'Todometry Preview 2') : 'Todometry'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures { buildConfig true }
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/web-assets'))
+    androidResources.ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+    signingConfigs {
+        if (hasSigning) {
+            upload {
+                storeFile file(signing.STORE_FILE)
+                storePassword signing.STORE_PASSWORD
+                keyAlias signing.KEY_ALIAS
+                keyPassword signing.KEY_PASSWORD
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (preview) applicationIdSuffix previewSuffix
+            if (hasSigning) signingConfig signingConfigs.upload
+        }
+    }
+    testOptions { unitTests.returnDefaultValues = true
+        unitTests.all { systemProperty 'completionFixtures', rootProject.file('../tests/fixtures/completion_scenarios.json').absolutePath } }
+    defaultConfig { testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+}
+dependencies {
+    implementation 'androidx.activity:activity:1.10.1'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-livedata-core:2.8.7'
+    implementation 'androidx.webkit:webkit:1.14.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:core:1.6.1'
+}
+
+def frontendDir = rootProject.file('../frontend')
+def webAssets = tasks.register('buildWebAssets', Exec) {
+    workingDir frontendDir
+    environment 'TODOIST_ANDROID_EXPORT', '1'
+    environment 'TODOIST_NEXT_DIST_DIR', '.next-android'
+    commandLine(System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm', 'run', 'build')
+    inputs.dir(new File(frontendDir, 'app'))
+    inputs.dir(new File(frontendDir, 'public'))
+    inputs.files(new File(frontendDir, 'package-lock.json'), new File(frontendDir, 'next.config.js'), new File(frontendDir, 'tsconfig.json'))
+    outputs.dir(layout.buildDirectory.dir('generated/web-assets'))
+    doLast {
+        if (!new File(frontendDir, '.next-android/android.html').isFile()) throw new GradleException('Android dashboard export is missing')
+        project.sync {
+            from new File(frontendDir, '.next-android')
+            into layout.buildDirectory.dir('generated/web-assets')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn(webAssets) }
+
+spotless {
+    java {
+        target 'src/**/*.java'
+        googleJavaFormat('1.24.0')
+        removeUnusedImports()
+    }
+}

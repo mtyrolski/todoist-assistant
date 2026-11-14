@@ -1,0 +1,283 @@
+package com.todoistassistant;
+
+import static org.junit.Assert.*;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.Test;
+
+public class HttpTransportTest {
+  private static class Response extends HttpURLConnection {
+    final int status;
+    final String body;
+    IOException failure;
+
+    Response(int status, String body) throws Exception {
+      super(new URL("https://api.todoist.com/api/v1/user"));
+      this.status = status;
+      this.body = body;
+    }
+
+    @Override
+    public int getResponseCode() throws IOException {
+      if (failure != null) throw failure;
+      return status;
+    }
+
+    @Override
+    public String getHeaderField(String name) {
+      return "Retry-After".equals(name) ? "-1" : null;
+    }
+
+    @Override
+    public InputStream getInputStream() {
+      return new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public void disconnect() {}
+
+    @Override
+    public boolean usingProxy() {
+      return false;
+    }
+
+    @Override
+    public void connect() {}
+  }
+
+  private static final class Transport extends HttpTransport {
+    final Queue<Response> responses = new ArrayDeque<>();
+    int requests;
+    URI endpoint;
+
+    Transport() {
+      super("private-test-token");
+    }
+
+    @Override
+    HttpURLConnection openConnection(URI value) {
+      requests++;
+      endpoint = value;
+      return responses.remove();
+    }
+  }
+
+  @Test
+  public void successfulRequestUsesFixedHttpsOriginAndBoundedTimeouts() throws Exception {
+    Transport transport = new Transport();
+    Response response = new Response(200, "{\"id\":123}");
+    transport.responses.add(response);
+    assertEquals("123", transport.get("user").getString("id"));
+    assertEquals("https://api.todoist.com/api/v1/user", transport.endpoint.toString());
+    assertEquals("Bearer private-test-token", response.getRequestProperty("Authorization"));
+    assertFalse(response.getInstanceFollowRedirects());
+    assertEquals(10000, response.getConnectTimeout());
+    assertEquals(15000, response.getReadTimeout());
+  }
+
+  @Test
+  public void malformedOrExternalPathsAreRejectedBeforeConnecting() throws Exception {
+    for (String path :
+        new String[] {
+          "http://evil.test", "//evil.test", "../user", "%2e%2e/user", "bad path", "user#fragment"
+        }) {
+      Transport transport = new Transport();
+      HttpTransport.Failure error =
+          assertThrows(HttpTransport.Failure.class, () -> transport.get(path));
+      assertTrue(error.getMessage().contains("Invalid"));
+      assertEquals(0, transport.requests);
+    }
+  }
+
+  @Test
+  public void authenticationRedirectAndServerFailuresStayDistinct() throws Exception {
+    for (int status : new int[] {401, 403, 302, 500}) {
+      Transport transport = new Transport();
+      for (int i = 0; i < 3; i++) transport.responses.add(new Response(status, ""));
+      IOException error = assertThrows(IOException.class, () -> transport.get("user"));
+      if (status == 401) {
+        assertTrue(error instanceof HttpTransport.AuthenticationFailure);
+        assertTrue(error.getMessage().contains("token was rejected"));
+      }
+      if (status == 403) assertTrue(error instanceof DataAccessException);
+      if (status == 302 || status == 500) assertTrue(error.getMessage().contains("HTTP " + status));
+      assertFalse(error.getMessage().contains("private-test-token"));
+      assertEquals(status == 500 ? 3 : 1, transport.requests);
+    }
+  }
+
+  @Test
+  public void timeoutIsBoundedAndRecoveryUsesANewRequest() throws Exception {
+    Transport transport = new Transport();
+    for (int i = 0; i < 3; i++) {
+      Response response = new Response(200, "");
+      response.failure = new SocketTimeoutException("sensitive details");
+      transport.responses.add(response);
+    }
+    assertThrows(SocketTimeoutException.class, () -> transport.get("user"));
+    assertEquals(3, transport.requests);
+    transport.responses.add(new Response(200, "{\"id\":\"restored\"}"));
+    assertEquals("restored", transport.get("user").getString("id"));
+  }
+
+  @Test
+  public void longRetryAfterDoesNotLeaveSyncWaitingForMinutes() throws Exception {
+    Transport transport = new Transport();
+    transport.responses.add(
+        new Response(429, "") {
+          @Override
+          public String getHeaderField(String name) {
+            return "Retry-After".equals(name) ? "120" : null;
+          }
+        });
+    HttpTransport.Failure error =
+        assertThrows(HttpTransport.Failure.class, () -> transport.get("user"));
+    assertTrue(error.getMessage().contains("limiting requests"));
+    assertEquals(1, transport.requests);
+  }
+
+  @Test
+  public void invalidJsonIsNotAcceptedAsAnEmptyResponse() throws Exception {
+    Transport transport = new Transport();
+    transport.responses.add(new Response(200, "not json"));
+    assertThrows(org.json.JSONException.class, () -> transport.get("user"));
+  }
+
+  @Test
+  public void connectionLostDuringResponseIsNotSuccessfulEmptyData() throws Exception {
+    Transport transport = new Transport();
+    for (int i = 0; i < 3; i++)
+      transport.responses.add(
+          new Response(200, "") {
+            @Override
+            public InputStream getInputStream() {
+              return new InputStream() {
+                @Override
+                public int read() throws IOException {
+                  throw new SocketException("connection reset");
+                }
+              };
+            }
+          });
+    assertThrows(SocketException.class, () -> transport.get("user"));
+    assertEquals(3, transport.requests);
+  }
+
+  @Test
+  public void interruptedPageCanBeRetriedWithoutAcceptingPartialJson() throws Exception {
+    Transport transport = new Transport();
+    transport.responses.add(
+        new Response(200, "") {
+          @Override
+          public InputStream getInputStream() {
+            return new InputStream() {
+              @Override
+              public int read() throws IOException {
+                throw new java.io.EOFException("connection ended");
+              }
+            };
+          }
+        });
+    transport.responses.add(new Response(200, "{\"id\":\"recovered\"}"));
+    assertEquals("recovered", transport.get("user").getString("id"));
+    assertEquals(2, transport.requests);
+  }
+
+  @Test
+  public void cancellationWhileOpeningConnectionNeverStartsTheRequest() throws Exception {
+    CountDownLatch opening = new CountDownLatch(1), release = new CountDownLatch(1);
+    AtomicBoolean started = new AtomicBoolean(), disconnected = new AtomicBoolean();
+    Response response =
+        new Response(200, "{}") {
+          @Override
+          public int getResponseCode() {
+            started.set(true);
+            return 200;
+          }
+
+          @Override
+          public void disconnect() {
+            disconnected.set(true);
+          }
+        };
+    HttpTransport transport =
+        new HttpTransport("private-test-token") {
+          @Override
+          HttpURLConnection openConnection(URI endpoint) throws IOException {
+            opening.countDown();
+            try {
+              if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("test timed out");
+            } catch (InterruptedException error) {
+              throw new IOException(error);
+            }
+            return response;
+          }
+        };
+    AtomicReference<Exception> failure = new AtomicReference<>();
+    Thread thread =
+        new Thread(
+            () -> {
+              try {
+                transport.get("user");
+              } catch (Exception error) {
+                failure.set(error);
+              }
+            });
+    thread.start();
+    assertTrue(opening.await(5, TimeUnit.SECONDS));
+    transport.cancel();
+    release.countDown();
+    thread.join(5000);
+    assertFalse(thread.isAlive());
+    assertTrue(failure.get() instanceof SyncCancelledException);
+    assertFalse(started.get());
+    assertTrue(disconnected.get());
+  }
+
+  @Test
+  public void retriesOnlyTransientServerFailuresAndHonorsHttpDate() throws Exception {
+    Transport noRetry = new Transport();
+    noRetry.responses.add(new Response(501, ""));
+    assertThrows(HttpTransport.Failure.class, () -> noRetry.get("user"));
+    assertEquals(1, noRetry.requests);
+    Transport transientFailure = new Transport();
+    transientFailure.responses.add(new Response(503, ""));
+    transientFailure.responses.add(new Response(200, "{\"id\":\"ok\"}"));
+    assertEquals("ok", transientFailure.get("user").getString("id"));
+    assertEquals(2, transientFailure.requests);
+    assertEquals(
+        120000,
+        HttpTransport.retryDelay(
+            "Wed, 21 Oct 2015 07:30:00 GMT", 0, java.time.Instant.parse("2015-10-21T07:28:00Z")));
+    assertEquals(
+        500,
+        HttpTransport.retryDelay(
+            "Wed, 21 Oct 2015 07:30:00 GMT", 0, java.time.Instant.parse("2015-10-21T07:31:00Z")));
+    Transport delayed = new Transport();
+    delayed.responses.add(
+        new Response(503, "") {
+          @Override
+          public String getHeaderField(String name) {
+            return "Retry-After".equals(name) ? "120" : null;
+          }
+        });
+    HttpTransport.Failure unavailable =
+        assertThrows(HttpTransport.Failure.class, () -> delayed.get("user"));
+    assertEquals(120000, unavailable.retryAfterMillis);
+    assertEquals(1, delayed.requests);
+  }
+}

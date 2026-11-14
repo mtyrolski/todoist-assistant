@@ -1,5 +1,6 @@
 "use client";
 
+import { readJson } from "./adminApi";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardHome, DashboardStatus, Granularity, Health } from "./dashboardData";
 import type { DashboardProgress } from "../components/ProgressSteps";
@@ -7,18 +8,6 @@ import type { ProjectTimelineData } from "./projectTimeline";
 
 const DASHBOARD_RETRY_LIMIT = 300;
 const DASHBOARD_RETRY_DELAY_MS = 2500;
-
-async function readJson<T>(res: Response): Promise<T> {
-  const text = await res.text();
-  if (!text) return {} as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    const snippet = text.trim();
-    const summary = snippet.length > 200 ? `${snippet.slice(0, 200)}...` : snippet;
-    throw new Error(summary ? `Invalid JSON response: ${summary}` : "Invalid JSON response");
-  }
-}
 
 function isRetryableFetchError(message: string): boolean {
   return /invalid json response|failed to fetch|networkerror|socket hang up|econnrefused|econnreset|timed out|timeout/i.test(
@@ -75,6 +64,7 @@ export function useDashboardHome({
   const retryAttempts = useRef<number>(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dashboard, setDashboard] = useState<DashboardHome | null>(null);
+  const lastDashboard = useRef<DashboardHome | null>(null);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
@@ -111,6 +101,7 @@ export function useDashboardHome({
           const detail = payload.error ?? (payload as unknown as { detail?: string })?.detail;
           throw new Error(detail ?? `Failed to load dashboard (${res.status})`);
         }
+        lastDashboard.current = payload;
         setDashboard(payload);
         setRetrying(false);
         retryAttempts.current = 0;
@@ -122,7 +113,6 @@ export function useDashboardHome({
         if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
           return;
         }
-        setDashboard(null);
         const message = e instanceof Error ? e.message : "Failed to load dashboard";
         if (isRetryableFetchError(message) && retryAttempts.current < DASHBOARD_RETRY_LIMIT) {
           retryAttempts.current += 1;
@@ -137,7 +127,7 @@ export function useDashboardHome({
           return;
         }
         setRetrying(false);
-        setDashboardError(message);
+        setDashboardError(lastDashboard.current ? `${message}. Showing the last loaded view.` : message);
       } finally {
         setLoadingDashboard(false);
       }
@@ -155,7 +145,28 @@ export function useDashboardHome({
     };
   }, []);
 
-  const shouldPollProgress = enabled && (loadingDashboard || retrying || (!dashboard && !dashboardError));
+  useEffect(() => {
+    if (!enabled) return;
+    const refreshVisible = () => {
+      if (!document.hidden) setRetryNonce((value) => value + 1);
+    };
+    const interval = setInterval(refreshVisible, 60_000);
+    window.addEventListener("focus", refreshVisible);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+    };
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !dashboard?.refreshing || loadingDashboard) return;
+    const timer = setTimeout(() => setRetryNonce((value) => value + 1), 2000);
+    return () => clearTimeout(timer);
+  }, [enabled, dashboard?.refreshing, loadingDashboard]);
+
+  const shouldPollProgress = enabled && (
+    loadingDashboard || retrying || Boolean(dashboard?.refreshing) || (!dashboard && !dashboardError)
+  );
 
   useEffect(() => {
     if (!shouldPollProgress) {

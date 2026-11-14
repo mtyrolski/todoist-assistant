@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.request import urlopen
 from xml.etree import ElementTree
 
-from todoist.core.version import get_version
+from todometry.core.version import get_version
 
 SIGNING_CERT_ENV = "WINDOWS_SIGNING_CERTIFICATE"
 SIGNING_PASSWORD_ENV = "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
@@ -32,7 +32,7 @@ def _run(
 
 def _read_version(repo_root: Path) -> tuple[str, str]:
     _ = repo_root
-    return get_version(), "todoist.core.version"
+    return get_version(), "todometry.core.version"
 
 
 def _normalize_msi_version(version: str) -> str:
@@ -495,8 +495,7 @@ def _build_msi(
         installer_dir / name for name in ("product.wxs", "components.wxs", "ui.wxs")
     )
     _require_existing([product_wxs, components_wxs, ui_wxs], "WiX installer files")
-    legacy_wxs = repo_root / "scripts" / "windows" / "wix" / "todoist-assistant.wxs"
-    _assert_no_localized_accounts([product_wxs, components_wxs, legacy_wxs])
+    _assert_no_localized_accounts([product_wxs, components_wxs])
 
     wix_out_dir = str(wixobj_dir) + os.sep
     _run(
@@ -528,7 +527,7 @@ def _build_msi(
             "No WiX object files generated; candle.exe did not produce outputs"
         )
 
-    msi_path = dist_root / f"todoist-assistant-{msi_version}.msi"
+    msi_path = dist_root / f"todometry-{msi_version}.msi"
     _run(
         [
             wix_tools["light"],
@@ -556,11 +555,10 @@ def _build_bundle(
 ) -> Path:
     bootstrapper_dir = repo_root / "windows" / "bootstrapper"
     bundle_wxs = bootstrapper_dir / "bundle.wxs"
-    icon_path = bootstrapper_dir / "todoist-assistant.ico"
     license_path = bootstrapper_dir / "license.rtf"
 
     _require_existing(
-        [bundle_wxs, icon_path, license_path, vc_redist_path], "Bootstrapper files"
+        [bundle_wxs, license_path, vc_redist_path], "Bootstrapper files"
     )
 
     wixobj_dir = dist_root / "wixobj" / "bundle"
@@ -577,7 +575,6 @@ def _build_bundle(
             "WixUtilExtension",
             f"-dBundleVersion={bundle_version}",
             f"-dMsiPath={msi_path}",
-            f"-dBootstrapperIcon={icon_path}",
             f"-dLicenseFile={license_path}",
             f"-dVCRedistPath={vc_redist_path}",
             "-out",
@@ -592,7 +589,7 @@ def _build_bundle(
             "No WiX bundle object files generated; candle.exe did not produce outputs"
         )
 
-    setup_path = dist_root / "TodoistAssistantSetup.exe"
+    setup_path = dist_root / "TodometrySetup.exe"
     _run(
         [
             wix_tools["light"],
@@ -630,7 +627,7 @@ def _download_vc_redist(dist_root: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build the Todoist Assistant Windows MSI installer."
+        description="Build the todometry Windows MSI installer."
     )
     parser.add_argument(
         "--no-dashboard",
@@ -681,7 +678,7 @@ def main() -> int:
     elif not args.no_dashboard:
         print("Dashboard directory not found; skipping frontend packaging.")
 
-    spec_path = repo_root / "packaging" / "pyinstaller" / "todoist_assistant.spec"
+    spec_path = repo_root / "packaging" / "pyinstaller" / "todometry.spec"
     if not spec_path.exists():
         raise RuntimeError(f"PyInstaller spec file not found: {spec_path}")
 
@@ -708,14 +705,14 @@ def main() -> int:
         cwd=repo_root,
     )
 
-    app_root = pyinstaller_dist / "todoist-assistant"
+    app_root = pyinstaller_dist / "todometry"
     if not app_root.exists():
         raise RuntimeError(
             "PyInstaller output not found; expected onedir build under dist/windows/pyinstaller"
         )
 
     if signtool_path:
-        payload_exe = app_root / "todoist-assistant.exe"
+        payload_exe = app_root / "todometry.exe"
         _require_existing([payload_exe], "Expected PyInstaller executable for signing")
         _sign_if_configured(signtool_path, signing_config, payload_exe)
 

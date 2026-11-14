@@ -17,15 +17,13 @@ scripts/*
 !scripts/build_macos_pkg.sh
 !scripts/build_macos_dmg.sh
 !scripts/get_version.py
-!scripts/check_llm_activity_prompt.py
 !scripts/check_versions.py
-!scripts/check_explicit_any.py
+!scripts/check_architecture.py
+!scripts/check_release_identity.py
+!scripts/smoke_package.py
+!scripts/smoke_frozen_app.py
 !scripts/clear_local_env.py
-!scripts/create_task_tree.py
-!scripts/download_models.py
 !scripts/dashboard_stack.sh
-!scripts/resolve_llm_backend.py
-!scripts/run_make_checks.py
 !scripts/status.py
 !scripts/macos/
 !scripts/macos/**
@@ -82,3 +80,19 @@ img/icon.ico
 packaging/macos/TodoistAssistant.icns
 .github/copilot-instructions.md
 .codex
+
+# TypeScript incremental builds
+*.tsbuildinfo
+
+# Android build entrypoint
+!scripts/build_android.sh
+
+frontend/.test-build/
+
+frontend/test-results/
+frontend/playwright-report/
+
+frontend/.next-e2e/
+frontend/next-env.d.ts
+frontend/.next-android/
+frontend/out/

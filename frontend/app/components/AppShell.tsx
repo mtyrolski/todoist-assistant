@@ -14,14 +14,11 @@ const NAV_GROUPS = [
     ]
   },
   {
-    title: "Automation",
-    items: [{ href: "/multiplication-labels", label: "Task Multiplication", hint: "Expand labelled work safely" }]
-  },
-  {
     title: "Operations",
     items: [
+      { href: "/project-adjustments", label: "Project Adjustments", hint: "Edit project hierarchy" },
       { href: "/live-logs", label: "Live Logs", hint: "Read-only runtime inspection" },
-      { href: "/control-panel", label: "Control Panel", hint: "Runs, settings, and status" }
+      { href: "/control-panel", label: "Control Panel", hint: "Settings and status" }
     ]
   }
 ];
@@ -33,6 +30,7 @@ function isActive(pathname: string, href: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
+  if (pathname.startsWith("/android")) return <main className="page androidPage">{children}</main>;
 
   return (
     <div className="appShell">
@@ -42,8 +40,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             *
           </span>
           <div>
-            <p className="brandTitle">Todoist Assistant</p>
-            <p className="brandTag">Local insights, automations, and AI workflows</p>
+            <p className="brandTitle">todometry</p>
+            <p className="brandTag">Local-first Todoist dashboard for activity analytics and project history.</p>
           </div>
         </Link>
 
@@ -73,6 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="sidebarFooter">
           <p className="muted tiny">{SURFACE_STATUS_SUMMARY}</p>
+          <p className="muted tiny">An independent integration, not affiliated with or endorsed by Doist. Todoist and Doist are trademarks of their owners.</p>
         </div>
       </aside>
 

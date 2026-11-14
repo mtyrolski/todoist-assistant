@@ -3,10 +3,8 @@
 import { AdminPanel } from "../components/AdminPanel";
 import { DashboardSettings } from "../components/DashboardSettings";
 import { LoadingBar } from "../components/LoadingBar";
-import { ObserverControl } from "../components/ObserverControl";
 import { PageHeader } from "../components/PageHeader";
 import { ServiceMonitor } from "../components/ServiceMonitor";
-import { StaleTaskSettings } from "../components/StaleTaskSettings";
 import { StatusPills } from "../components/StatusPills";
 import { useApiHealth, useDashboardStatus, useSyncLabel } from "../lib/dashboardHooks";
 
@@ -23,7 +21,7 @@ export default function ControlPanelPage() {
       <PageHeader
         eyebrow="Control Panel"
         title="Operations & Monitoring"
-        lede="Run automations, tune settings, and keep track of service health."
+        lede="Tune settings and keep track of data and service health."
       >
         <StatusPills
           items={[
@@ -45,16 +43,6 @@ export default function ControlPanelPage() {
         </div>
         <div className="stack">
           <DashboardSettings
-            onAfterMutation={() => {
-              refreshStatus();
-            }}
-          />
-          <StaleTaskSettings
-            onAfterMutation={() => {
-              refreshStatus();
-            }}
-          />
-          <ObserverControl
             onAfterMutation={() => {
               refreshStatus();
             }}

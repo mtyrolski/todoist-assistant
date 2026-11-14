@@ -1,13 +1,11 @@
-"""Tests for statistics and date helper functions in ``todoist.features.stats``."""
+"""Tests for statistics and date helper functions in ``todometry.features.stats``."""
 
 from datetime import datetime
 from functools import partial
 
 import pytest
 
-from todoist.features.stats import (
-    all_tasks,
-    any_labels,
+from todometry.features.stats import (
     extract_task_due_date,
     p1_tasks,
     p2_tasks,
@@ -31,13 +29,6 @@ def project_with_tasks(project_factory, task_factory):
         task_factory("task5", priority=1, labels=["someday"]),
     ]
     return project_factory(tasks=tasks)
-
-
-@pytest.mark.parametrize("task_count", [0, 1, 5])
-def test_all_tasks_counts(project_factory, task_factory, task_count: int):
-    tasks = [task_factory(f"task{i}") for i in range(task_count)]
-    project = project_factory(project_id=f"project_{task_count}", tasks=tasks)
-    assert all_tasks(project) == task_count
 
 
 @pytest.mark.parametrize(
@@ -75,26 +66,6 @@ def test_priority_partials_on_empty_project(project_factory):
     assert p2_tasks(empty) == 0
     assert p3_tasks(empty) == 0
     assert p4_tasks(empty) == 0
-
-
-@pytest.mark.parametrize(
-    ("task_labels", "expected_count"),
-    [
-        ([["a"], ["b", "c"], []], 2),
-        ([[], [], []], 0),
-        ([["x"], ["y"], ["z"]], 3),
-        ([["a", "b", "c"], [], ["d"]], 2),
-    ],
-)
-def test_any_labels_counts(
-    project_factory, task_factory, task_labels: list[list[str]], expected_count: int
-):
-    tasks = [
-        task_factory(f"task{i}", labels=labels)
-        for i, labels in enumerate(task_labels, start=1)
-    ]
-    project = project_factory(project_id="labels", tasks=tasks)
-    assert any_labels(project) == expected_count
 
 
 @pytest.mark.parametrize(
@@ -141,6 +112,16 @@ def test_extract_task_due_date_cases(due, expected: datetime | None):
     assert extract_task_due_date(due) == expected
 
 
-def test_extract_task_due_date_missing_date_key_raises():
-    with pytest.raises(KeyError):
-        extract_task_due_date({"is_recurring": False, "timezone": "UTC"})
+def test_extract_task_due_date_missing_date_key_is_unknown():
+    assert extract_task_due_date({"not_date": "2024-01-15"}) is None
+
+
+@pytest.mark.parametrize("due", [{}, {"date": None}, {"date": 123}, {"date": ""}])
+def test_incomplete_due_objects_do_not_break_dashboard_rules(due):
+    assert extract_task_due_date(due) is None
+
+
+def test_iso_dates_with_offsets_keep_the_tasks_calendar_date():
+    assert extract_task_due_date({"date": "2026-11-01T23:30:00-08:00"}) == datetime(
+        2026, 11, 1, 23, 30
+    )

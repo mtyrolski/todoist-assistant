@@ -5,10 +5,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${REPO_ROOT}/dist/macos"
 FRONTEND_DIR="${REPO_ROOT}/frontend"
 SPEC_FILE="${REPO_ROOT}/packaging/macos/pyinstaller.spec"
-APP_NAME="TodoistAssistant.app"
+APP_NAME="todometry.app"
 APP_PATH="${DIST_DIR}/${APP_NAME}"
-ICON_PNG="${REPO_ROOT}/img/logo.png"
-ICON_ICNS="${REPO_ROOT}/packaging/macos/TodoistAssistant.icns"
 NODE_VERSION="20.11.1"
 INCLUDE_DASHBOARD=1
 PREFER_SYSTEM_NODE=0
@@ -48,30 +46,6 @@ ensure_macos() {
     echo "This script must be run on macOS." >&2
     exit 1
   fi
-}
-
-ensure_icon() {
-  if [ -f "${ICON_ICNS}" ]; then
-    return
-  fi
-  if [ ! -f "${ICON_PNG}" ]; then
-    echo "Icon source not found at ${ICON_PNG}. Using default app icon." >&2
-    return
-  fi
-  if ! command -v sips >/dev/null 2>&1 || ! command -v iconutil >/dev/null 2>&1; then
-    echo "sips/iconutil not available; skipping icon generation." >&2
-    return
-  fi
-  tmp_dir="$(mktemp -d)"
-  iconset="${tmp_dir}/TodoistAssistant.iconset"
-  mkdir -p "${iconset}"
-  for size in 16 32 128 256 512; do
-    sips -z "${size}" "${size}" "${ICON_PNG}" --out "${iconset}/icon_${size}x${size}.png" >/dev/null
-    double=$((size * 2))
-    sips -z "${double}" "${double}" "${ICON_PNG}" --out "${iconset}/icon_${size}x${size}@2x.png" >/dev/null
-  done
-  iconutil -c icns "${iconset}" -o "${ICON_ICNS}"
-  rm -rf "${tmp_dir}"
 }
 
 host_arch() {
@@ -235,8 +209,6 @@ if [ -z "${version}" ] || [ "${version}" = "0.0.0" ]; then
   echo "Failed to resolve project version." >&2
   exit 1
 fi
-
-ensure_icon || true
 
 mkdir -p "${DIST_DIR}"
 

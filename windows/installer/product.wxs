@@ -2,10 +2,10 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product
     Id="*"
-    Name="Todoist Assistant"
+    Name="todometry"
     Language="1033"
     Version="$(var.ProductVersion)"
-    Manufacturer="Todoist Assistant"
+    Manufacturer="todometry"
     UpgradeCode="E7F91D5E-1B5F-4A6D-81C6-2AE4D8022C1A">
     <Package
       InstallerVersion="500"
@@ -14,25 +14,18 @@
       InstallScope="perMachine"
       InstallPrivileges="elevated"
     />
-    <Condition Message="Todoist Assistant requires a 64-bit version of Windows.">VersionNT64</Condition>
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Todoist Assistant is already installed." />
+    <Condition Message="todometry requires a 64-bit version of Windows.">VersionNT64</Condition>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of todometry is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Property Id="MSIINSTALLPERUSER" Value="0" />
-    <Property Id="SKIP_TELEMETRY_REGISTRY" Value="0" />
     <Property Id="REMOVE_APPDATA" Value="0" />
     <Property Id="MsiLogging" Value="voicewarmupx" />
     <PropertyRef Id="WIX_ACCOUNT_USERS" />
-    <Icon Id="TodoistAssistantIcon" SourceFile="windows/bootstrapper/todoist-assistant.ico" />
-    <Property Id="ARPPRODUCTICON" Value="TodoistAssistantIcon" />
 
-    <Feature Id="MainFeature" Title="Todoist Assistant" Level="1">
+    <Feature Id="MainFeature" Title="todometry" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentGroupRef Id="ConfigFiles" />
       <ComponentGroupRef Id="TodoistAssistantComponents" />
-    </Feature>
-    <Feature Id="TelemetryFeature" Title="Telemetry Opt-In" Level="1" Absent="allow">
-      <Condition Level="0">WIXUI_EXITDIALOGOPTIONALCHECKBOX &lt;&gt; 1 OR SKIP_TELEMETRY_REGISTRY=1</Condition>
-      <ComponentRef Id="TelemetryOptIn" />
     </Feature>
   </Product>
 </Wix>

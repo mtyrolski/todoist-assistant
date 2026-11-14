@@ -1,25 +1,23 @@
-"""Tests for utility functions in ``todoist.core.utils``."""
+"""Tests for utility functions in ``todometry.core.utils``."""
 
 # pylint: disable=protected-access
 
 import os
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, KeysView
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from todoist.core.env import EnvVar
-from todoist.core.utils import (
+from todometry.core.env import EnvVar
+from todometry.core.utils import (
     CACHE_STORAGE_REGISTRY,
     DEFAULT_CACHE_SUBDIR,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
-    MIGRATION_BACKUP_DIRNAME,
     RETRY_BACKOFF_MEAN,
     RETRY_BACKOFF_STD,
     RETRY_MAX_ATTEMPTS,
@@ -34,11 +32,6 @@ from todoist.core.utils import (
     get_log_level,
     get_max_concurrent_requests,
     get_max_requests_per_minute,
-    get_rate_pacing_base_delay_seconds,
-    get_rate_pacing_jitter_max_seconds,
-    get_rate_pacing_jitter_min_seconds,
-    last_n_years_in_weeks,
-    load_config,
     retry_with_backoff,
     safe_instantiate_entry,
     try_n_times,
@@ -204,7 +197,7 @@ def test_safe_instantiate_entry_collects_unexpected_fields(
 
 def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
     # pylint: disable=protected-access
-    import todoist.core.utils as utils
+    import todometry.core.utils as utils
 
     @dataclass
     class DataclassWithRequiredAndKwargs:
@@ -212,7 +205,7 @@ def test_safe_instantiate_entry_warns_once_for_missing_required_fields():
         new_api_kwargs: dict[str, Any] | None = None
 
     utils._STATE.missing_required_field_warnings.clear()
-    with patch("todoist.core.utils.logger.warning") as mock_warning:
+    with patch("todometry.core.utils.logger.warning") as mock_warning:
         first = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
         second = safe_instantiate_entry(DataclassWithRequiredAndKwargs)
 
@@ -233,7 +226,7 @@ def test_safe_instantiate_entry_requires_kwargs_field():
 
 
 def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
-    from todoist.core.types import EventEntry, ProjectEntry, TaskEntry
+    from todometry.core.types import EventEntry, ProjectEntry, TaskEntry
 
     project_entry = safe_instantiate_entry(
         ProjectEntry,
@@ -275,8 +268,8 @@ def test_safe_instantiate_entry_keeps_unknown_api_v1_fields_in_new_api_kwargs():
 
 def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_payloads():
     # pylint: disable=protected-access
-    import todoist.core.utils as utils
-    from todoist.core.types import ProjectEntry, TaskEntry
+    import todometry.core.utils as utils
+    from todometry.core.types import ProjectEntry, TaskEntry
 
     project_payload = _project_payload(
         is_shared=True,
@@ -286,7 +279,7 @@ def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_paylo
     task_payload = _task_payload(goal_ids=["goal-1"], is_collapsed=False)
 
     utils._STATE.missing_required_field_warnings.clear()
-    with patch("todoist.core.utils.logger.warning") as mock_warning:
+    with patch("todometry.core.utils.logger.warning") as mock_warning:
         project_entry = safe_instantiate_entry(ProjectEntry, **project_payload)
         task_entry = safe_instantiate_entry(TaskEntry, **task_payload)
 
@@ -295,20 +288,6 @@ def test_safe_instantiate_entry_does_not_warn_for_current_project_and_task_paylo
     assert task_entry.collapsed is None
     assert task_entry.goal_ids == ["goal-1"]
     assert mock_warning.call_count == 0
-
-
-@pytest.mark.parametrize(
-    ("years", "expected_weeks"),
-    [
-        (0, 0),
-        (1, 52),
-        (2, 104),
-        (5, 260),
-        (-1, -52),
-    ],
-)
-def test_last_n_years_in_weeks(years: int, expected_weeks: int):
-    assert last_n_years_in_weeks(years) == expected_weeks
 
 
 @pytest.mark.parametrize(
@@ -340,7 +319,7 @@ def test_get_log_level_parses_env_value(
 ):
     with (
         patch.dict(os.environ, _env_value(EnvVar.LOG_LEVEL, env_value), clear=True),
-        patch("todoist.core.utils.logger.warning") as mock_warning,
+        patch("todometry.core.utils.logger.warning") as mock_warning,
     ):
         assert get_log_level() == expected
     assert mock_warning.called is warns
@@ -385,60 +364,13 @@ def test_get_max_requests_per_minute_parses_env_value(
         assert get_max_requests_per_minute() == expected
 
 
-@pytest.mark.parametrize(
-    ("env_value", "expected"),
-    [
-        (None, 0.0),
-        ("5", 5.0),
-        ("2.5", 2.5),
-        ("-1", 0.0),
-        ("oops", 0.0),
-    ],
-)
-def test_get_rate_pacing_base_delay_seconds_parses_env_value(
-    env_value: str | None, expected: float
-):
-    with patch.dict(
-        os.environ,
-        _env_value(EnvVar.RATE_PACING_BASE_DELAY_SECONDS, env_value),
-        clear=True,
-    ):
-        assert get_rate_pacing_base_delay_seconds() == expected
-
-
-@pytest.mark.parametrize(
-    ("min_raw", "max_raw", "expected_min", "expected_max"),
-    [
-        (None, None, 0.0, 0.0),
-        ("1", "5", 1.0, 5.0),
-        ("0.5", "2.5", 0.5, 2.5),
-        ("-1", "3", 0.0, 3.0),
-        ("oops", "bad", 0.0, 0.0),
-    ],
-)
-def test_get_rate_pacing_jitter_range_parses_env_values(
-    min_raw: str | None,
-    max_raw: str | None,
-    expected_min: float,
-    expected_max: float,
-):
-    payload: dict[str, str] = {}
-    if min_raw is not None:
-        payload[EnvVar.RATE_PACING_JITTER_MIN_SECONDS] = min_raw
-    if max_raw is not None:
-        payload[EnvVar.RATE_PACING_JITTER_MAX_SECONDS] = max_raw
-    with patch.dict(os.environ, payload, clear=True):
-        assert get_rate_pacing_jitter_min_seconds() == expected_min
-        assert get_rate_pacing_jitter_max_seconds() == expected_max
-
-
 def test_try_n_times_success_first_attempt():
     assert try_n_times(lambda: "success", 3) == "success"
 
 
 def test_try_n_times_success_after_failures():
     fn, state = _eventually_successful(failures_before_success=2)
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = try_n_times(fn, 5)
     assert result == "success"
     assert state["count"] == 3
@@ -451,14 +383,14 @@ def test_try_n_times_all_failures_returns_none():
         call_count["count"] += 1
         raise RuntimeError("Always fails")
 
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = try_n_times(_always_fail, 3)
     assert result is None
     assert call_count["count"] == 3
 
 
 def test_try_n_times_exponential_backoff():
-    with patch("todoist.core.utils.time.sleep") as mock_sleep:
+    with patch("todometry.core.utils.time.sleep") as mock_sleep:
         try_n_times(lambda: (_ for _ in ()).throw(ValueError("Fail")), 4)
     assert [call.args[0] for call in mock_sleep.call_args_list] == [8, 16, 32]
 
@@ -539,13 +471,13 @@ def test_cache_uses_dot_cache_default_when_env_missing(monkeypatch, tmp_path):
 
 
 def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypatch):
-    import todoist.core.utils as utils
+    import todometry.core.utils as utils
 
     monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
-    log_path = tmp_path / "automation.log"
+    log_path = tmp_path / "runtime.log"
     with (
-        patch("todoist.core.utils.logger.remove") as mock_remove,
-        patch("todoist.core.utils.logger.add") as mock_add,
+        patch("todometry.core.utils.logger.remove") as mock_remove,
+        patch("todometry.core.utils.logger.add") as mock_add,
     ):
         configure_runtime_logging(str(log_path), level="debug")
 
@@ -557,12 +489,12 @@ def test_configure_runtime_logging_sets_stderr_and_file_sink(tmp_path, monkeypat
 
 
 def test_configure_runtime_logging_is_idempotent(monkeypatch):
-    import todoist.core.utils as utils
+    import todometry.core.utils as utils
 
     monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
     with (
-        patch("todoist.core.utils.logger.remove") as mock_remove,
-        patch("todoist.core.utils.logger.add") as mock_add,
+        patch("todometry.core.utils.logger.remove") as mock_remove,
+        patch("todometry.core.utils.logger.add") as mock_add,
     ):
         configure_runtime_logging(level="info")
         configure_runtime_logging(level="info")
@@ -571,61 +503,35 @@ def test_configure_runtime_logging_is_idempotent(monkeypatch):
     assert mock_add.call_count == 1
 
 
-def test_configure_runtime_logging_isolates_default_runtime_log_under_pytest(
-    tmp_path, monkeypatch
-):
-    import todoist.core.utils as utils
-
+@pytest.mark.parametrize("custom_cache", [False, True])
+def test_cache_reads_v040_state_without_moving_it(monkeypatch, tmp_path, custom_cache):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
-    monkeypatch.setattr(utils._STATE, "runtime_logging_signature", None)
-    default_log_path = str(
-        (tmp_path / DEFAULT_CACHE_SUBDIR / "automation.log").resolve()
-    )
+    cache_dir = tmp_path / ("custom-cache" if custom_cache else DEFAULT_CACHE_SUBDIR)
+    cache_dir.mkdir(parents=True)
+    saved = {
+        "activity": {"event1"},
+        "dashboard_state": {"version": 1},
+        "archived_activity_scans": {"project": "2026-01-01"},
+    }
+    for name, payload in saved.items():
+        filename, default = CACHE_STORAGE_REGISTRY[name]
+        LocalStorage(str(cache_dir / filename), default).save(payload)
+    if custom_cache:
+        monkeypatch.setenv(str(EnvVar.CACHE_DIR), str(cache_dir))
+    else:
+        monkeypatch.delenv(str(EnvVar.CACHE_DIR), raising=False)
 
-    with (
-        patch("todoist.core.utils.logger.remove") as mock_remove,
-        patch("todoist.core.utils.logger.add") as mock_add,
-    ):
-        configure_runtime_logging(default_log_path, level="info")
+    cache = Cache()
 
-    mock_remove.assert_called_once()
-    isolated_log_path = mock_add.call_args_list[1].args[0]
-    assert isolated_log_path != default_log_path
-    assert isolated_log_path.startswith(
-        str(Path(tempfile.gettempdir()) / "todoist-assistant-pytest")
-    )
-
-
-def test_cache_migrates_legacy_runtime_files(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    legacy_activity = tmp_path / "activity.joblib"
-    legacy_log = tmp_path / "automation.log"
-    LocalStorage(str(legacy_activity), set).save({"event1"})
-    legacy_log.write_text("legacy-log", encoding="utf-8")
-
-    with patch.dict(os.environ, {}, clear=True):
-        cache = Cache()
-
-    cache_root = Path(cache.path)
-    backup_root = tmp_path / MIGRATION_BACKUP_DIRNAME
-
-    assert cache.activity.load() == {"event1"}
-    assert (cache_root / "activity.joblib").exists()
-    assert (cache_root / "automation.log").exists()
-    assert (backup_root / "activity.joblib").exists()
-    assert (backup_root / "automation.log").exists()
-    assert not legacy_activity.exists()
-    assert not legacy_log.exists()
+    assert Path(cache.path) == cache_dir
+    for name, payload in saved.items():
+        assert getattr(cache, name).load() == payload
 
 
 @pytest.mark.parametrize(
     ("storage_attr", "payload"),
     [
         ("activity", {"event1", "event2"}),
-        ("integration_launches", {"integration1": 5}),
-        ("automation_launches", {"automation1": 2}),
-        ("automation_run_signals", {"automation1": {"lastStatus": "completed"}}),
     ],
 )
 def test_cache_storage_roundtrip(tmp_path, storage_attr: str, payload):
@@ -678,63 +584,20 @@ def test_anonymizable_calls_abstract_method_once():
     )
 
 
-def test_load_config_with_relative_path():
-    with (
-        patch("todoist.core.utils.GlobalHydra") as mock_global_hydra,
-        patch("todoist.core.utils.initialize") as mock_initialize,
-        patch("todoist.core.utils.initialize_config_dir") as mock_initialize_config_dir,
-        patch("todoist.core.utils.compose") as mock_compose,
-    ):
-        mock_instance = MagicMock()
-        mock_global_hydra.instance.return_value = mock_instance
-        expected_config = MagicMock()
-        mock_compose.return_value = expected_config
-
-        result = load_config("test_config", "../config")
-
-        mock_instance.clear.assert_called_once()
-        mock_initialize.assert_called_once_with(config_path="../config")
-        mock_initialize_config_dir.assert_not_called()
-        mock_compose.assert_called_once_with(config_name="test_config")
-        assert result == expected_config
-
-
-def test_load_config_with_absolute_path():
-    absolute_config_dir = str((Path.cwd() / "tmp" / "todoist-config").resolve())
-
-    with (
-        patch("todoist.core.utils.GlobalHydra") as mock_global_hydra,
-        patch("todoist.core.utils.initialize") as mock_initialize,
-        patch("todoist.core.utils.initialize_config_dir") as mock_initialize_config_dir,
-        patch("todoist.core.utils.compose") as mock_compose,
-    ):
-        mock_instance = MagicMock()
-        mock_global_hydra.instance.return_value = mock_instance
-        mock_compose.return_value = MagicMock()
-
-        load_config("config", absolute_config_dir)
-
-        mock_instance.clear.assert_called_once()
-        mock_initialize.assert_not_called()
-        mock_initialize_config_dir.assert_called_once_with(
-            config_dir=absolute_config_dir
-        )
-
-
 def test_retry_with_backoff_success_first_attempt():
     assert retry_with_backoff(lambda: "success", max_attempts=3) == "success"
 
 
 def test_retry_with_backoff_success_after_failures():
     fn, state = _eventually_successful(failures_before_success=2)
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = retry_with_backoff(fn, max_attempts=5)
     assert result == "success"
     assert state["count"] == 3
 
 
 def test_retry_with_backoff_all_failures_returns_none():
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = retry_with_backoff(
             lambda: (_ for _ in ()).throw(RuntimeError("Always fails")), max_attempts=3
         )
@@ -743,9 +606,9 @@ def test_retry_with_backoff_all_failures_returns_none():
 
 def test_retry_with_backoff_uses_gaussian_values_for_sleep():
     with (
-        patch("todoist.core.utils.time.sleep") as mock_sleep,
+        patch("todometry.core.utils.time.sleep") as mock_sleep,
         patch(
-            "todoist.core.utils.random.gauss", side_effect=[5.5, 12.3, 8.9]
+            "todometry.core.utils.random.gauss", side_effect=[5.5, 12.3, 8.9]
         ) as mock_gauss,
     ):
         retry_with_backoff(
@@ -763,8 +626,8 @@ def test_retry_with_backoff_uses_gaussian_values_for_sleep():
 
 def test_retry_with_backoff_enforces_minimum_wait_time():
     with (
-        patch("todoist.core.utils.time.sleep") as mock_sleep,
-        patch("todoist.core.utils.random.gauss", side_effect=[-5.0, -2.0, 0.05]),
+        patch("todometry.core.utils.time.sleep") as mock_sleep,
+        patch("todometry.core.utils.random.gauss", side_effect=[-5.0, -2.0, 0.05]),
     ):
         retry_with_backoff(
             lambda: (_ for _ in ()).throw(ValueError("Fail")), max_attempts=4
@@ -795,7 +658,7 @@ def test_with_retry_success():
 
 
 def test_with_retry_raises_on_failure():
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         with pytest.raises(
             MaxRetriesExceeded,
             match="Failed to execute test operation after 3 retry attempts",
@@ -816,7 +679,7 @@ def test_with_retry_uses_custom_parameters():
             raise ValueError("Not yet")
         return "success"
 
-    with patch("todoist.core.utils.time.sleep"):
+    with patch("todometry.core.utils.time.sleep"):
         result = with_retry(
             eventually_successful,
             operation_name="custom op",
@@ -832,3 +695,34 @@ def test_with_retry_uses_custom_parameters():
 def test_with_retry_zero_attempts_raises_immediately():
     with pytest.raises(MaxRetriesExceeded, match="after 0 retry attempts"):
         with_retry(lambda: "success", operation_name="zero attempts", max_attempts=0)
+
+
+@pytest.mark.parametrize("operation", ["load", "update"])
+@pytest.mark.parametrize("missing_module", [True, False])
+def test_incompatible_cache_is_not_replaced(
+    tmp_path, monkeypatch, operation, missing_module
+):
+    import types
+    from joblib import dump
+
+    module_name = "cache_migration_test_module"
+    module = types.ModuleType(module_name)
+    exec("class CachedRecord: pass", module.__dict__)
+    monkeypatch.setitem(sys.modules, module_name, module)
+    path = tmp_path / "activity.joblib"
+    dump({"record": module.CachedRecord()}, path)
+    original = path.read_bytes()
+    if missing_module:
+        monkeypatch.delitem(sys.modules, module_name)
+    else:
+        del module.CachedRecord
+
+    storage = LocalStorage(str(path), dict)
+    with pytest.raises(LocalStorageError, match="original file was preserved"):
+        if operation == "load":
+            storage.load()
+        else:
+            storage.update(lambda _old: {})
+
+    assert path.read_bytes() == original
+    assert not list(tmp_path.glob("*.corrupt.*"))

@@ -1,13 +1,12 @@
-/** @type {import('next').NextConfig} */
-const { PHASE_DEVELOPMENT_SERVER } = require("next/constants");
+process.env.NEXT_TELEMETRY_DISABLED = "1";
 
-module.exports = (phase) => ({
-  output: "standalone",
-  distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
-  experimental: {
-    // Codex/LangGraph turns can legitimately take several minutes.
-    proxyTimeout: 600000
-  },
+/** @type {import('next').NextConfig} */
+const androidExport = process.env.TODOIST_ANDROID_EXPORT === "1";
+module.exports = {
+  output: androidExport ? "export" : "standalone",
+  distDir: process.env.TODOIST_NEXT_DIST_DIR || ".next",
+  // TypeScript checking runs through npm run lint; no ESLint toolchain is used.
+  eslint: { ignoreDuringBuilds: true },
   async rewrites() {
     return [
       {
@@ -16,4 +15,5 @@ module.exports = (phase) => ({
       }
     ];
   }
-});
+};
+if (androidExport) delete module.exports.rewrites;

@@ -1,10 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlotParams } from "react-plotly.js";
+import { Plot } from "./Plot";
 import { PlotCard } from "./PlotCard";
 import type { PlotlyFigure } from "./PlotCard";
 import { StatCard } from "./StatCard";
@@ -14,7 +13,6 @@ import { LeaderboardCard } from "./LeaderboardCard";
 import { InsightCard } from "./InsightCard";
 import { InfoTip } from "./InfoTip";
 import { StatusPills } from "./StatusPills";
-import { ExecutiveReview } from "./ExecutiveReview";
 import {
   BADGES_HELP,
   DEFAULT_INSIGHT_HELP,
@@ -31,8 +29,6 @@ import {
   useDashboardStatus,
   useSyncLabel
 } from "../lib/dashboardHooks";
-
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
 type UrgencyChipKey = "fireTasks" | "p1Tasks" | "p2Tasks" | "p3Tasks" | "p4Tasks" | "dueTasks" | "deadlineTasks";
 
@@ -60,6 +56,8 @@ type UrgencyStatusPayload = {
 type DashboardHomeWithUrgency = DashboardHome & {
   urgencyStatus?: UrgencyStatusPayload;
 };
+
+type HierarchyFrame = { date: string; figure: PlotlyFigure };
 
 function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknown> {
   const { title: _title, height: _height, ...baseLayout } = figure.layout ?? {};
@@ -127,12 +125,10 @@ function toDateInputValue(date: Date): string {
 
 export function DashboardView({
   setupActive = false,
-  tokenReady = false,
-  setupComplete = false
+  tokenReady = false
 }: {
   setupActive?: boolean;
   tokenReady?: boolean;
-  setupComplete?: boolean;
 }) {
   const { health, loadingHealth, error } = useApiHealth();
   const {
@@ -156,9 +152,15 @@ export function DashboardView({
   const { status, loadingStatus } = useDashboardStatus();
   const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
   const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
+  const [lifespanRange, setLifespanRange] = useState<"all" | "period">("all");
+  const [hierarchyFrames, setHierarchyFrames] = useState<HierarchyFrame[]>([]);
+  const [hierarchyFrameIndex, setHierarchyFrameIndex] = useState(-1);
+  const [hierarchyPlaying, setHierarchyPlaying] = useState(false);
+  const [hierarchyLoading, setHierarchyLoading] = useState(false);
+  const [hierarchyError, setHierarchyError] = useState<string | null>(null);
+  const hierarchyRequest = useRef<AbortController | null>(null);
   const focusMetricsRef = useRef<HTMLDivElement | null>(null);
   const activityReady = Boolean(status?.activityCache);
-  const mappingReady = setupComplete;
   const setupSteps = useMemo(() => {
     return [
       {
@@ -171,13 +173,8 @@ export function DashboardView({
         hint: activityReady ? "Activity history ready" : "Fetching activity history",
         done: activityReady
       },
-      {
-        label: "Project mapping confirmed",
-        hint: mappingReady ? "Mappings saved" : "Confirm project adjustments",
-        done: mappingReady
-      }
     ];
-  }, [tokenReady, activityReady, mappingReady]);
+  }, [tokenReady, activityReady]);
   const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
   const setupChecklistActive = setupSteps.some((step) => !step.done);
 
@@ -223,7 +220,6 @@ export function DashboardView({
   const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
   const healthTone = health?.status === "ok" ? "good" : "warn";
   const jumpTargets = [
-    { id: "executive-review", label: "Review" },
     { id: "insights", label: "Insights" },
     { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
     { id: "stats", label: "Focus" },
@@ -245,6 +241,59 @@ export function DashboardView({
     (item) => item && !focusMetricItems.some((focus) => focus?.name === item.name) && item.name !== "Events" && item.name !== "Added Tasks"
   );
   const activeProjectHierarchyFigure = figures.activeProjectHierarchy ?? null;
+  const hierarchyRangeKey = `${dashboard?.range.beg ?? ""}:${dashboard?.range.end ?? ""}:${dashboard?.refreshedAt ?? ""}`;
+  useEffect(() => {
+    hierarchyRequest.current?.abort();
+    setHierarchyFrames([]);
+    setHierarchyFrameIndex(-1);
+    setHierarchyPlaying(false);
+    setHierarchyLoading(false);
+    setHierarchyError(null);
+  }, [hierarchyRangeKey]);
+
+  useEffect(() => {
+    if (!hierarchyPlaying || !hierarchyFrames.length) return;
+    if (hierarchyFrameIndex >= hierarchyFrames.length - 1) {
+      setHierarchyPlaying(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setHierarchyFrameIndex(hierarchyFrameIndex + 1), 700);
+    return () => window.clearTimeout(timer);
+  }, [hierarchyPlaying, hierarchyFrames, hierarchyFrameIndex]);
+
+  const startHierarchyPlayback = async () => {
+    if (!dashboard) return;
+    if (hierarchyFrames.length) {
+      if (hierarchyFrameIndex < 0 || hierarchyFrameIndex >= hierarchyFrames.length - 1) {
+        setHierarchyFrameIndex(0);
+      }
+      setHierarchyPlaying(true);
+      return;
+    }
+    const controller = new AbortController();
+    hierarchyRequest.current = controller;
+    setHierarchyLoading(true);
+    setHierarchyError(null);
+    try {
+      const params = new URLSearchParams({ beg: dashboard.range.beg, end: dashboard.range.end });
+      const response = await fetch(`/api/dashboard/hierarchy-playback?${params}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Playback request failed (${response.status})`);
+      const payload = await response.json() as { frames?: HierarchyFrame[]; error?: string };
+      if (payload.error) throw new Error(payload.error);
+      if (!payload.frames?.length) throw new Error("No hierarchy snapshots available");
+      setHierarchyFrames(payload.frames);
+      setHierarchyFrameIndex(0);
+      setHierarchyPlaying(true);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setHierarchyError(error instanceof Error ? error.message : "Playback unavailable");
+      }
+    } finally {
+      if (!controller.signal.aborted) setHierarchyLoading(false);
+    }
+  };
+  const hierarchyFrame = hierarchyFrameIndex >= 0 ? hierarchyFrames[hierarchyFrameIndex] : null;
+  const displayedHierarchyFigure = hierarchyFrame?.figure ?? activeProjectHierarchyFigure;
   useEffect(() => {
     const metricsNode = focusMetricsRef.current;
     if (!metricsNode) return;
@@ -324,9 +373,15 @@ export function DashboardView({
     },
     {
       title: "Task Lifespans: Time to Completion",
-      figure: figures.taskLifespans,
+      figure: lifespanRange === "period" ? figures.taskLifespansPeriod : figures.taskLifespans,
       height: 420,
-      help: PLOT_HELP.taskLifespans
+      help: PLOT_HELP.taskLifespans,
+      actions: (
+        <div className="plotRangeActions" role="group" aria-label="Task lifespan date range">
+          <button className={`button buttonSmall buttonGhost${lifespanRange === "period" ? " isSelected" : ""}`} type="button" aria-pressed={lifespanRange === "period"} onClick={() => setLifespanRange("period")}>Selected period</button>
+          <button className={`button buttonSmall buttonGhost${lifespanRange === "all" ? " isSelected" : ""}`} type="button" aria-pressed={lifespanRange === "all"} onClick={() => setLifespanRange("all")}>All time</button>
+        </div>
+      )
     }
   ];
   const completionPlots = [
@@ -413,9 +468,9 @@ export function DashboardView({
       ) : null}
       <header className="topbar">
         <div>
-          <p className="eyebrow">Todoist Assistant</p>
+          <p className="eyebrow">todometry</p>
           <h1>Dashboard</h1>
-          <p className="lede">A fast, local dashboard for your Todoist data and automations.</p>
+          <p className="lede">A fast, local dashboard for your Todoist data.</p>
           <StatusPills
             items={[
               { label: healthLabel, tone: healthTone },
@@ -423,6 +478,8 @@ export function DashboardView({
               { label: syncLabel, tone: "neutral", title: syncTitle },
               { label: periodLabel ?? "" },
               { label: dashboardError ?? "", tone: "warn" },
+              { label: dashboard?.refreshWarning ?? "", tone: "warn" },
+              { label: dashboard?.refreshing ? "Syncing in the background…" : "", tone: "neutral" },
               { label: error ?? "", tone: "warn" }
             ]}
           />
@@ -563,7 +620,7 @@ export function DashboardView({
             </div>
           </div>
           <p className="muted">
-            Once Todoist events start syncing, charts and insights will appear here. You can still manage automations and
+            Once Todoist events start syncing, charts and insights will appear here. You can still manage data and
             configuration in the Control Panel.
           </p>
           <div className="emptyStateActions">
@@ -572,10 +629,6 @@ export function DashboardView({
             </button>
           </div>
         </section>
-      ) : null}
-
-      {!noData ? (
-        <ExecutiveReview />
       ) : null}
 
       {!noData ? (
@@ -744,19 +797,44 @@ export function DashboardView({
                     <h2>Project Hierarchy</h2>
                     <InfoTip label="About project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
                   </div>
+                  <div className="hierarchyPlaybackControls">
+                    {hierarchyFrame ? <span className="muted tiny">Through {hierarchyFrame.date}</span> : null}
+                    {hierarchyPlaying ? (
+                      <button className="button buttonSmall" type="button" onClick={() => setHierarchyPlaying(false)}>Pause</button>
+                    ) : (
+                      <button className="button buttonSmall" type="button" onClick={startHierarchyPlayback} disabled={hierarchyLoading || !activeProjectHierarchyFigure}>
+                        {hierarchyLoading ? "Preparing…" : hierarchyFrameIndex >= 0 && hierarchyFrameIndex < hierarchyFrames.length - 1 ? "Resume" : hierarchyFrameIndex >= 0 ? "Replay" : "Play history"}
+                      </button>
+                    )}
+                    {hierarchyFrame ? (
+                      <button className="button buttonSmall buttonGhost" type="button" onClick={() => { setHierarchyPlaying(false); setHierarchyFrameIndex(-1); }}>Current</button>
+                    ) : null}
+                  </div>
                 </div>
+                {hierarchyFrames.length > 1 ? (
+                  <input
+                    className="hierarchyPlaybackSlider"
+                    type="range"
+                    min={0}
+                    max={hierarchyFrames.length - 1}
+                    value={Math.max(0, hierarchyFrameIndex)}
+                    aria-label="Hierarchy playback date"
+                    onChange={(event) => { setHierarchyPlaying(false); setHierarchyFrameIndex(Number(event.target.value)); }}
+                  />
+                ) : null}
+                {hierarchyError ? <p className="muted tiny" role="alert">{hierarchyError}</p> : null}
                 <p className="muted hierarchyCardLead">
-                  Sunburst view of active and archived projects, assigned to their effective parent.
+                  Sunburst view of completed tasks across active and archived projects, assigned to their effective parent.
                 </p>
               </header>
               <div className="cardBody cardBodyFill hierarchyCardBody">
                 <div className="hierarchyPlotStage">
-                  {!activeProjectHierarchyFigure ? (
+                  {!displayedHierarchyFigure ? (
                     <div className="skeleton hierarchyPlotSkeleton" />
                   ) : (
                     <Plot
-                      data={activeProjectHierarchyFigure.data as PlotParams["data"]}
-                      layout={buildHierarchyFigureLayout(activeProjectHierarchyFigure)}
+                      data={displayedHierarchyFigure.data as PlotParams["data"]}
+                      layout={{ ...buildHierarchyFigureLayout(displayedHierarchyFigure), transition: { duration: hierarchyPlaying ? 550 : 0, easing: "cubic-in-out" } }}
                       config={{
                         displayModeBar: true,
                         responsive: true,
@@ -817,6 +895,12 @@ export function DashboardView({
           {eventPlots.map((plot) => (
             <PlotCard key={plot.title} {...plot} />
           ))}
+          <PlotCard
+            title="Active Tasks by Priority"
+            figure={figures.taskCountTrend}
+            height={420}
+            help={PLOT_HELP.taskCountTrend}
+          />
         </section>
       ) : null}
 
@@ -875,7 +959,7 @@ export function DashboardView({
             </div>
           </header>
           <p className="muted" style={{ marginTop: 0 }}>
-            Run automations, monitor services, and update runtime settings from the dedicated operations page.
+            Refresh data, monitor services, and update settings from the dedicated operations page.
           </p>
           <a className="button buttonSmall buttonGhost" href="/control-panel">
             Open Control Panel

@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>TodoistAssistant</string>
+  <string>todometry</string>
   <key>CFBundleDisplayName</key>
-  <string>Todoist Assistant</string>
+  <string>todometry</string>
   <key>CFBundleIdentifier</key>
   <string>com.todoist.assistant</string>
   <key>CFBundleVersion</key>
