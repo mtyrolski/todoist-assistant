@@ -675,6 +675,55 @@ public class DashboardModelTest {
   }
 
   @Test
+  public void projectTimelineIncludesUniquePreviousNamesFromMatchingHistory() throws Exception {
+    JSONObject renamed =
+        new JSONObject().put("id", "modern").put("name", "Current").put("is_archived", true);
+    JSONObject other =
+        new JSONObject().put("id", "other").put("name", "Other").put("is_archived", true);
+    JSONArray events = new JSONArray();
+    for (int i = 0; i < 4; i++) {
+      Object oldName = i == 2 ? 42 : i == 3 ? "Current" : "Former name";
+      events.put(
+          new JSONObject()
+              .put("id", "rename-" + i)
+              .put("object_type", "project")
+              .put("object_id", "legacy")
+              .put("v2_object_id", "modern")
+              .put("event_type", "updated")
+              .put("event_date", "2026-11-01T10:00:00Z")
+              .put("extra_data", new JSONObject().put("last_name", oldName)));
+    }
+    events.put(
+        new JSONObject()
+            .put("id", "other-event")
+            .put("object_type", "project")
+            .put("object_id", "other")
+            .put("event_type", "updated")
+            .put("event_date", "2026-11-01T10:00:00Z")
+            .put("extra_data", new JSONObject().put("last_name", "Other history")));
+    DashboardModel model =
+        new DashboardModel(
+            empty()
+                .put("knownProjects", new JSONArray().put(renamed).put(other))
+                .put("activities", events),
+            CLOCK);
+    JSONArray rows = model.plotData.getJSONArray("hierarchy");
+    int checked = 0;
+    for (int i = 0; i < rows.length(); i++) {
+      JSONObject row = rows.getJSONObject(i);
+      if (row.getString("id").equals("modern")) {
+        assertEquals(1, row.getJSONArray("previousNames").length());
+        assertEquals("Former name", row.getJSONArray("previousNames").getString(0));
+        checked++;
+      } else if (row.getString("id").equals("other")) {
+        assertEquals("Other history", row.getJSONArray("previousNames").getString(0));
+        checked++;
+      }
+    }
+    assertEquals(2, checked);
+  }
+
+  @Test
   public void importedMappingsRespectPromotedParentsAmbiguityAndCycles() throws Exception {
     JSONObject root = new JSONObject().put("id", "root").put("name", "Work");
     JSONObject team =
@@ -697,12 +746,17 @@ public class DashboardModelTest {
     JSONObject mappings = new JSONObject().put("Old", "Team").put("Promoted", "Work");
     assertEquals(
         "Promoted",
-        DashboardModel.rootName("child", projects, mappings, java.util.Set.of("Promoted")));
-    assertEquals("Work", DashboardModel.rootName("child", projects, mappings, java.util.Set.of()));
+        DashboardModel.rootName(
+            "child", projects, mappings, new JSONObject(), java.util.Set.of("Promoted")));
+    assertEquals(
+        "Work",
+        DashboardModel.rootName("child", projects, mappings, new JSONObject(), java.util.Set.of()));
     JSONObject another =
         new JSONObject().put("id", "other").put("name", "Team").put("parent_id", "another-root");
     projects.put("other", another);
-    assertEquals("Team", DashboardModel.rootName("child", projects, mappings, java.util.Set.of()));
+    assertEquals(
+        "Team",
+        DashboardModel.rootName("child", projects, mappings, new JSONObject(), java.util.Set.of()));
     JSONObject one = new JSONObject().put("id", "one").put("name", "One").put("is_archived", true);
     JSONObject two = new JSONObject().put("id", "two").put("name", "Two").put("is_archived", true);
     assertEquals(
@@ -711,11 +765,16 @@ public class DashboardModelTest {
             "one",
             Map.of("one", one, "two", two),
             new JSONObject().put("One", "Two").put("Two", "One"),
+            new JSONObject(),
             java.util.Set.of()));
     assertEquals(
         "One",
         DashboardModel.rootName(
-            "one", Map.of("one", one), new JSONObject().put("One", "One"), java.util.Set.of()));
+            "one",
+            Map.of("one", one),
+            new JSONObject().put("One", "One"),
+            new JSONObject(),
+            java.util.Set.of()));
     one.put("parent_id", "root");
     assertEquals(
         "Work",
@@ -723,7 +782,150 @@ public class DashboardModelTest {
             "one",
             Map.of("one", one, "root", root),
             new JSONObject().put("One", "One"),
+            new JSONObject(),
             java.util.Set.of()));
+  }
+
+  @Test
+  public void explicitProjectIdsDisambiguateNamesAndFollowMappedAncestors() throws Exception {
+    JSONObject first =
+        new JSONObject().put("id", "first").put("name", "Duplicate").put("is_archived", true);
+    JSONObject second =
+        new JSONObject().put("id", "second").put("name", "Duplicate").put("is_archived", true);
+    JSONObject child =
+        new JSONObject()
+            .put("id", "child")
+            .put("name", "Nested")
+            .put("parent_id", "first")
+            .put("is_archived", true);
+    JSONObject target =
+        new JSONObject().put("id", "target").put("name", "Renamed target").put("is_archived", true);
+    JSONObject root = new JSONObject().put("id", "root").put("name", "Current root");
+    target.put("parent_id", "root");
+    Map<String, JSONObject> projects =
+        new java.util.LinkedHashMap<>(
+            Map.of(
+                "first", first, "second", second, "child", child, "target", target, "root", root));
+    JSONObject ids =
+        new JSONObject()
+            .put(
+                "first",
+                new JSONObject().put("targetId", "target").put("targetName", "Old target name"))
+            .put(
+                "second",
+                new JSONObject().put("targetId", "second").put("targetName", "Duplicate"));
+    JSONObject legacy = new JSONObject().put("Duplicate", "Wrong legacy root");
+    assertEquals(
+        "Current root",
+        DashboardModel.rootName("first", projects, legacy, ids, java.util.Set.of("Duplicate")));
+    assertEquals(
+        "Current root",
+        DashboardModel.rootName("child", projects, legacy, ids, java.util.Set.of("Duplicate")));
+    assertEquals(
+        "Duplicate · second",
+        DashboardModel.rootName("second", projects, legacy, ids, java.util.Set.of()));
+
+    ids.getJSONObject("first").put("targetId", "first");
+    assertEquals(
+        "Duplicate · first",
+        DashboardModel.rootName("first", projects, legacy, ids, java.util.Set.of()));
+    assertEquals(
+        "Duplicate · first",
+        DashboardModel.rootName("child", projects, legacy, ids, java.util.Set.of()));
+
+    ids.getJSONObject("first").put("targetId", "missing");
+    projects.put("other", new JSONObject().put("id", "other").put("name", "Old target name"));
+    assertEquals(
+        "Old target name · missing",
+        DashboardModel.rootName("first", projects, legacy, ids, java.util.Set.of()));
+    ids.getJSONObject("first").put("targetId", "second");
+    ids.getJSONObject("second").put("targetId", "first");
+    assertEquals(
+        "Duplicate · first",
+        DashboardModel.rootName("first", projects, legacy, ids, java.util.Set.of()));
+  }
+
+  @Test
+  public void closerLegacyChoiceOverridesInheritedIdMappingWithoutChangingOldRules()
+      throws Exception {
+    JSONObject child =
+        new JSONObject()
+            .put("id", "child")
+            .put("name", "Child")
+            .put("is_archived", true)
+            .put("parent_id", "parent");
+    JSONObject parent =
+        new JSONObject().put("id", "parent").put("name", "Parent").put("is_archived", true);
+    JSONObject mapped = new JSONObject().put("id", "mapped").put("name", "Mapped root");
+    JSONObject legacyRoot = new JSONObject().put("id", "legacy").put("name", "Legacy root");
+    Map<String, JSONObject> projects =
+        Map.of("child", child, "parent", parent, "mapped", mapped, "legacy", legacyRoot);
+    JSONObject names = new JSONObject().put("Child", "Legacy root");
+    JSONObject ids =
+        new JSONObject()
+            .put(
+                "parent",
+                new JSONObject().put("targetId", "mapped").put("targetName", "Mapped root"));
+    assertEquals(
+        "Legacy root", DashboardModel.rootName("child", projects, names, ids, java.util.Set.of()));
+    assertEquals(
+        "Child", DashboardModel.rootName("child", projects, names, ids, java.util.Set.of("Child")));
+    assertEquals(
+        "Parent",
+        DashboardModel.rootName(
+            "child", projects, names, new JSONObject(), java.util.Set.of("Parent")));
+    ids.put("child", new JSONObject().put("targetId", "mapped").put("targetName", "Mapped root"));
+    assertEquals(
+        "Mapped root",
+        DashboardModel.rootName("child", projects, names, ids, java.util.Set.of("Child")));
+  }
+
+  @Test
+  public void projectIdMappingsSurviveImportMergeAndPayload() throws Exception {
+    JSONObject ids =
+        new JSONObject()
+            .put("one", new JSONObject().put("targetId", "root").put("targetName", "Root"));
+    JSONObject existing =
+        new JSONObject()
+            .put("mappings", new JSONObject())
+            .put("archivedParents", new JSONArray())
+            .put("projectMappings", ids);
+    JSONObject legacy =
+        ProjectAdjustments.parse(
+            "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{},\"archivedParents\":[]}");
+    JSONObject merged = ProjectAdjustments.merge(existing, legacy);
+    ids.getJSONObject("one").put("targetName", "Changed");
+    assertEquals(
+        "Root",
+        merged.getJSONObject("projectMappings").getJSONObject("one").getString("targetName"));
+    DashboardModel model = new DashboardModel(empty().put("adjustments", merged), CLOCK);
+    assertEquals(
+        "Root",
+        MobilePayload.model(model)
+            .getJSONObject("adjustments")
+            .getJSONObject("projectMappings")
+            .getJSONObject("one")
+            .getString("targetName"));
+    JSONObject incoming =
+        ProjectAdjustments.parse(
+            "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{},\"archivedParents\":[],\"projectMappings\":{\"one\":{\"targetId\":\"new-root\",\"targetName\":\"New root\"},\"two\":{\"targetId\":\"two\",\"targetName\":\"Own group\"}}}");
+    JSONObject updated = ProjectAdjustments.merge(merged, incoming);
+    incoming.getJSONObject("projectMappings").getJSONObject("one").put("targetName", "Mutated");
+    assertEquals(
+        "New root",
+        updated.getJSONObject("projectMappings").getJSONObject("one").getString("targetName"));
+    assertEquals(
+        "two", updated.getJSONObject("projectMappings").getJSONObject("two").getString("targetId"));
+    assertEquals(
+        "Root",
+        merged.getJSONObject("projectMappings").getJSONObject("one").getString("targetName"));
+    try {
+      ProjectAdjustments.parse(
+          "{\"format\":\"todoist-assistant-project-adjustments-v1\",\"mappings\":{},\"archivedParents\":[],\"projectMappings\":{\"one\":{\"targetId\":\"root\"}}}");
+      fail("Expected invalid project ID mapping to be rejected");
+    } catch (IllegalArgumentException expected) {
+      assertEquals("Invalid project mapping", expected.getMessage());
+    }
   }
 
   @Test

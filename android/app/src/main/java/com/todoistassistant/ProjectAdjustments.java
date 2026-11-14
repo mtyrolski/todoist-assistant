@@ -11,6 +11,10 @@ final class ProjectAdjustments {
       throw new IllegalArgumentException("Unexpected file format");
     JSONObject mappings = data.getJSONObject("mappings");
     JSONArray parents = data.getJSONArray("archivedParents");
+    JSONObject projectMappings = data.optJSONObject("projectMappings");
+    if (data.has("projectMappings") && projectMappings == null)
+      throw new IllegalArgumentException("Invalid project mapping");
+    if (projectMappings == null) projectMappings = new JSONObject();
     for (var keys = mappings.keys(); keys.hasNext(); ) {
       String key = keys.next();
       if (key.trim().isEmpty()
@@ -21,7 +25,21 @@ final class ProjectAdjustments {
     for (int i = 0; i < parents.length(); i++)
       if (!(parents.opt(i) instanceof String) || parents.getString(i).trim().isEmpty())
         throw new IllegalArgumentException("Invalid archived parent");
-    return new JSONObject().put("mappings", mappings).put("archivedParents", parents);
+    for (var keys = projectMappings.keys(); keys.hasNext(); ) {
+      String key = keys.next();
+      JSONObject target = projectMappings.optJSONObject(key);
+      if (key.trim().isEmpty()
+          || target == null
+          || !(target.opt("targetId") instanceof String)
+          || target.getString("targetId").trim().isEmpty()
+          || !(target.opt("targetName") instanceof String)
+          || target.getString("targetName").trim().isEmpty())
+        throw new IllegalArgumentException("Invalid project mapping");
+    }
+    return new JSONObject()
+        .put("mappings", mappings)
+        .put("archivedParents", parents)
+        .put("projectMappings", projectMappings);
   }
 
   static JSONObject merge(JSONObject existing, JSONObject incoming) throws Exception {
@@ -33,6 +51,15 @@ final class ProjectAdjustments {
       String key = keys.next();
       mappings.put(key, importedMappings.getString(key));
     }
+    JSONObject previousIds = existing == null ? null : existing.optJSONObject("projectMappings");
+    JSONObject projectMappings =
+        previousIds == null ? new JSONObject() : new JSONObject(previousIds.toString());
+    JSONObject importedIds = incoming.optJSONObject("projectMappings");
+    if (importedIds != null)
+      for (var keys = importedIds.keys(); keys.hasNext(); ) {
+        String key = keys.next();
+        projectMappings.put(key, new JSONObject(importedIds.getJSONObject(key).toString()));
+      }
     java.util.Set<String> parents = new java.util.LinkedHashSet<>();
     JSONArray previousParents = existing == null ? null : existing.optJSONArray("archivedParents");
     JSONArray importedParents = incoming.getJSONArray("archivedParents");
@@ -48,6 +75,7 @@ final class ProjectAdjustments {
     parents.addAll(importedParentNames);
     return new JSONObject()
         .put("mappings", mappings)
-        .put("archivedParents", new JSONArray(parents));
+        .put("archivedParents", new JSONArray(parents))
+        .put("projectMappings", projectMappings);
   }
 }

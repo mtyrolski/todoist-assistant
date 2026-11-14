@@ -59,6 +59,7 @@ final class PlotData {
     Map<String, String> completionProject = new HashMap<>();
     Map<String, Instant> firstProjectEvent = new HashMap<>(), lastProjectEvent = new HashMap<>();
     Map<String, Instant> archivedAt = new HashMap<>(), unarchivedAt = new HashMap<>();
+    Map<String, Set<String>> previousNames = new HashMap<>();
     Map<String, TreeMap<LocalDate, Integer>> projectDailyEvents = new HashMap<>();
     Map<String, TreeMap<LocalDate, Integer>> projectDailyCompletions = new HashMap<>();
     List<Item> itemEvents = new ArrayList<>();
@@ -80,6 +81,17 @@ final class PlotData {
       String projectId = DashboardModel.activityProjectId(event, projects);
       if (objectType.equals("project")) {
         projectId = event.optString("object_id");
+        String modernId = event.optString("v2_object_id", "");
+        if (!projects.containsKey(projectId) && projects.containsKey(modernId))
+          projectId = modernId;
+        Object oldName = extra.opt("last_name");
+        if (kind.equals("updated") && !projectId.isEmpty() && oldName instanceof String) {
+          String name = ((String) oldName).trim();
+          if (!name.isEmpty())
+            previousNames
+                .computeIfAbsent(projectId, ignored -> new java.util.TreeSet<>())
+                .add(name);
+        }
         if (kind.equals("archived") && !projectId.isEmpty())
           archivedAt.merge(projectId, time, PlotData::later);
         if (kind.equals("unarchived") && !projectId.isEmpty())
@@ -147,6 +159,8 @@ final class PlotData {
     for (var entry : projects.entrySet()) {
       String id = entry.getKey();
       JSONObject project = entry.getValue();
+      Set<String> names = previousNames.getOrDefault(id, Set.of());
+      if (!names.isEmpty()) names.remove(project.optString("name"));
       Instant archive = archivedAt.get(id), reopen = unarchivedAt.get(id);
       if (!project.optBoolean("is_archived")
           || (reopen != null && (archive == null || !archive.isAfter(reopen)))) archive = null;
@@ -161,6 +175,7 @@ final class PlotData {
               .put("id", id)
               .put("metadataKnown", true)
               .put("name", project.optString("name", "Unknown project"))
+              .put("previousNames", new JSONArray(names))
               .put("parentId", TodoistClient.parentId(project))
               .put("rootName", rootFor.apply(id))
               .put("color", project.optString("color", "grey"))
@@ -185,6 +200,7 @@ final class PlotData {
                 .put("id", id)
                 .put("metadataKnown", false)
                 .put("name", "Unknown project")
+                .put("previousNames", new JSONArray(previousNames.getOrDefault(id, Set.of())))
                 .put("parentId", "")
                 .put("rootName", "Unknown project")
                 .put("color", "grey")
