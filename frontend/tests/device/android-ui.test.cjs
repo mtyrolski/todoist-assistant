@@ -2,21 +2,17 @@ const { test, before, beforeEach, after } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { _android, expect: playwrightExpect } = require("playwright/test");
-const { parseWebViewBounds, waitForWebViewBounds, waitForRotation } = require("./webview-bounds.cjs");
+const { displayRotation, waitForWebViewBounds } = require("./webview-bounds.cjs");
 const expect = playwrightExpect.configure({ timeout: 15000 });
 
 const pkg = "com.todoistassistant";
 const screenshots = `frontend/test-results/device/${process.env.ANDROID_SERIAL ?? "emulator"}`;
 let device, page;
-async function readHierarchy() {
-  // Never reuse a previous dump if uiautomator fails to produce a new one.
-  const output = (await device.shell("rm -f /sdcard/todometry-window.xml && uiautomator dump /sdcard/todometry-window.xml >/dev/null && { if [ -f /sdcard/todometry-window.xml ]; then cat /sdcard/todometry-window.xml; fi; }; printf '\\n__todometry_dump_status=%s' \"$?\"")).toString();
-  const status = output.match(/\n__todometry_dump_status=(\d+)$/);
-  if (!status || status[1] !== "0") throw new Error(`Could not capture Android accessibility hierarchy (status ${status?.[1] ?? "unknown"})`);
-  return output.slice(0, status.index);
-}
-async function webViewBounds() {
-  return parseWebViewBounds(await readHierarchy(), pkg);
+async function waitForRotation(rotation) {
+  await expect.poll(
+    async () => displayRotation((await device.shell("dumpsys window displays")).toString()),
+    { timeout: 120000, message: `The physical display must rotate to ${rotation}` },
+  ).toBe(rotation);
 }
 before(async () => {
   const devices = await _android.devices({ port: Number(process.env.ANDROID_ADB_SERVER_PORT || 5037) });
@@ -49,7 +45,7 @@ beforeEach(async () => {
   await device.shell("settings put system user_rotation 0");
   // user_rotation is asynchronous: the previous test may have left the screen
   // in landscape even after the setting is written.
-  await waitForRotation(readHierarchy, 0);
+  await waitForRotation(0);
   await device.shell("settings put secure show_ime_with_hard_keyboard 1");
   const created = device.waitForEvent("webview", {
     predicate: (view) => view.pkg() === pkg,
@@ -196,7 +192,7 @@ test("Android Back dismisses the keyboard before leaving search", async () => {
     const rect = document.querySelector('input[aria-label="Search tasks, projects or activity"]').getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, scale: devicePixelRatio, height: visualViewport.height };
   });
-  const bounds = await waitForWebViewBounds(readHierarchy, pkg);
+  const bounds = await waitForWebViewBounds(device, pkg);
   const x = Math.round(bounds.x + box.x * box.scale);
   const y = Math.round(bounds.y + box.y * box.scale);
   await device.shell(`input tap ${x} ${y}`);
@@ -264,7 +260,7 @@ test("bundled desktop charts and fonts work offline without saving demo account 
   await chart.evaluate((node) =>
     node.scrollIntoView({ block: "center", behavior: "instant" }),
   );
-  const screen = await waitForWebViewBounds(readHierarchy, pkg);
+  const screen = await waitForWebViewBounds(device, pkg);
   const gesture = await chart.evaluate((node) => {
     const rect = node.getBoundingClientRect();
     const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
@@ -321,10 +317,7 @@ test("search results remain usable with the keyboard and survive rotation", asyn
   context.on("page", onPage);
   try {
     await device.shell("settings put system user_rotation 1");
-    await expect.poll(async () => {
-      const bounds = await webViewBounds();
-      return Boolean(bounds && bounds.width > bounds.height);
-    }, { timeout: 120000 }).toBe(true);
+    await waitForRotation(1);
     await expect.poll(async () => {
       const candidate = page;
       if (candidate.isClosed()) return null;

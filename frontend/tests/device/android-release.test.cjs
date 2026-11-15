@@ -41,7 +41,9 @@ async function info(selector) {
   } // The accessibility tree may not exist just after an Activity is recreated.
 }
 async function wait(selector) {
-  await expect.poll(async () => Boolean((await info(selector))?.enabled)).toBe(true);
+  await expect.poll(async () => Boolean((await info(selector))?.enabled), {
+    message: `Expected accessible Preview element ${JSON.stringify(selector)}`,
+  }).toBe(true);
 }
 async function tap(selector) {
   await wait(selector);
@@ -105,7 +107,9 @@ test("optimized release works offline with search, keyboard, rotation and produc
       return Boolean(node && node.bounds.height > node.bounds.width);
     })
     .toBe(true);
-  for (let i = 0; i < 3; i++) await swipePage("up");
+  // After rotation the scroll offset can differ by viewport and font scale.
+  // Keep swiping until navigation is actually accessible, as above for Projects.
+  await scrollTo("Activity", "up");
   await tap(text("Activity"));
   await wait(text("Recent activity"));
   await device.input.press("Back");

@@ -889,6 +889,13 @@ test("project filters and search survive a page recreation", async ({ page }) =>
   await page.reload();
   await expect(query).toHaveValue("release");
   await expect(page.getByText("No tasks match.", { exact: true })).toBeVisible();
+  // Match the release journey: returning to portrait must leave navigation usable
+  // after searching in a narrow landscape viewport.
+  await page.setViewportSize({ width: 915, height: 412 });
+  await expect(query).toHaveValue("release");
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
 });
 
 test("Android reuses the validated control panel and saves disabled monitoring", async ({ page }) => {
