@@ -1111,6 +1111,9 @@ public class SyncLifecycleTest {
         failed = new CountDownLatch(1),
         refreshed = new CountDownLatch(1);
     AtomicInteger successful = new AtomicInteger();
+    AtomicBoolean waitingForRetry = new AtomicBoolean();
+    java.util.concurrent.BlockingQueue<DashboardViewModel.State> retryOutcomes =
+        new java.util.concurrent.LinkedBlockingQueue<>();
     Observer<DashboardViewModel.State> changes =
         value -> {
           if (!value.syncing && value.model != null && value.message.startsWith("Sync complete")) {
@@ -1120,6 +1123,7 @@ public class SyncLifecycleTest {
           if (!value.syncing
               && (value.message.contains("unreachable") || value.message.contains("No network")))
             failed.countDown();
+          if (waitingForRetry.get() && !value.loading && !value.syncing) retryOutcomes.add(value);
         };
     try {
       InstrumentationRegistry.getInstrumentation()
@@ -1144,11 +1148,46 @@ public class SyncLifecycleTest {
       InstrumentationRegistry.getInstrumentation()
           .runOnMainSync(
               () -> {
+                waitingForRetry.set(true);
                 model.sync("");
                 model.sync("");
                 model.sync("");
               });
-      assertTrue(refreshed.await(20, TimeUnit.SECONDS));
+      // An earlier request can still be exiting after publishing its failure. The
+      // bounded executor explicitly asks the user to retry in that case.
+      String busy = "Previous syncs are still stopping. Please retry in a moment.";
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+      int busyRetries = 0;
+      while (refreshed.getCount() != 0) {
+        DashboardViewModel.State outcome =
+            retryOutcomes.poll(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+        DashboardViewModel.State current = state.get();
+        String details =
+            "state="
+                + (current == null ? "null" : current.message)
+                + ", loading="
+                + (current != null && current.loading)
+                + ", syncing="
+                + (current != null && current.syncing)
+                + ", userRequests="
+                + remote.userRequests.get();
+        assertNotNull("Retry did not finish: " + details, outcome);
+        if (outcome.message.startsWith("Sync complete")) break;
+        assertEquals("Unexpected retry result: " + details, busy, outcome.message);
+        if (current != null && current.syncing) continue;
+        assertTrue("Retries stayed busy: " + details, busyRetries++ < 10);
+        Thread.sleep(100);
+        InstrumentationRegistry.getInstrumentation()
+            .runOnMainSync(
+                () -> {
+                  DashboardViewModel.State latest = model.state().getValue();
+                  if (latest != null
+                      && !latest.loading
+                      && !latest.syncing
+                      && busy.equals(latest.message)) model.sync("");
+                });
+      }
+      assertTrue("Recovery did not complete", refreshed.await(0, TimeUnit.SECONDS));
       assertEquals(requestsBeforeRetry + 1, remote.userRequests.get());
       assertEquals(2, history.load("test-token").getJSONArray("activities").length());
       assertEquals("newer", state.get().model.recent.get(0).id);
