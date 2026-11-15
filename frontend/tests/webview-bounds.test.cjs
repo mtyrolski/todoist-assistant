@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { displayRotation, waitForWebViewBounds } = require("./device/webview-bounds.cjs");
+const { displayRotation, isMissingAndroidSelector, waitForWebViewBounds } = require("./device/webview-bounds.cjs");
 
 test("uses the Android selector to obtain nonempty WebView bounds", async () => {
   const selector = { clazz: "android.webkit.WebView", pkg: "com.todoistassistant" };
@@ -27,4 +27,11 @@ test("reads only numeric physical display rotation from window diagnostics", () 
   assert.equal(displayRotation(dump), 1);
   assert.equal(displayRotation("    mRotation=0 mDeferredRotationPauseCount=0"), 0);
   assert.equal(displayRotation("overrideConfig={ mRotation=ROTATION_90 }"), null);
+});
+
+test("only treats the Android driver's missing selector error as absent", () => {
+  const missing = new Error("androidDevice.info: java.lang.NullPointerException: Attempt to invoke virtual method 'java.lang.String androidx.test.uiautomator.UiObject2.getClassName()' on a null object reference");
+  assert.equal(isMissingAndroidSelector(missing), true);
+  assert.equal(isMissingAndroidSelector(new Error("androidDevice.info: ADB device offline")), false);
+  assert.equal(isMissingAndroidSelector(new Error("java.lang.NullPointerException: driver crashed")), false);
 });

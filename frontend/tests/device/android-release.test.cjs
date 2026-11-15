@@ -1,6 +1,8 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const { _android, expect: baseExpect } = require("playwright/test");
+const { isMissingAndroidSelector } = require("./webview-bounds.cjs");
 const expect = baseExpect.configure({ timeout: 20000 });
 
 const pkg = "com.todoistassistant.preview";
@@ -36,9 +38,10 @@ const text = (value) => ({ text: value, pkg });
 async function info(selector) {
   try {
     return await device.info(selector);
-  } catch {
-    return null;
-  } // The accessibility tree may not exist just after an Activity is recreated.
+  } catch (error) {
+    if (isMissingAndroidSelector(error)) return null;
+    throw error;
+  }
 }
 async function wait(selector) {
   await expect.poll(async () => Boolean((await info(selector))?.enabled), {
@@ -99,6 +102,21 @@ test("optimized release works offline with search, keyboard, rotation and produc
       return Boolean(node && node.bounds.width > node.bounds.height);
     })
     .toBe(true);
+  // Capture the dedicated emulator's demo screen before interacting further,
+  // so an inaccessible result after rotation can be diagnosed from CI artifacts.
+  const screenshots = `frontend/test-results/device/${process.env.ANDROID_SERIAL ?? "emulator"}`;
+  try {
+    fs.mkdirSync(screenshots, { recursive: true });
+    await device.screenshot({ path: `${screenshots}/preview-search-landscape.png` });
+  } catch (error) {
+    t.diagnostic(`Could not capture demo screenshot: ${error instanceof Error ? error.name : "unknown error"}`);
+  }
+  // The resized viewport may hide the result below the search controls. Return
+  // to navigation and scroll down only when the exact result isn't accessible.
+  if (!(await info(text("10 of 40 active tasks")))?.enabled) {
+    await scrollTo("Projects", "up");
+    await scrollTo("10 of 40 active tasks");
+  }
   await wait(text("10 of 40 active tasks"));
   await device.shell("settings put system user_rotation 0");
   await expect

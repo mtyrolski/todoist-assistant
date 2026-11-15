@@ -28,4 +28,11 @@ function displayRotation(dump) {
   return match ? Number(match[1]) : null;
 }
 
-module.exports = { displayRotation, waitForWebViewBounds };
+function isMissingAndroidSelector(error) {
+  // Playwright's Android driver calls getClassName() on the result of findObject().
+  // A missing node produces this specific null-reference error; driver/ADB errors
+  // must remain visible instead of being treated as an absent element.
+  return error instanceof Error && /java\.lang\.NullPointerException:.*androidx\.test\.uiautomator\.UiObject2\.getClassName\(\).*null object reference/s.test(error.message);
+}
+
+module.exports = { displayRotation, isMissingAndroidSelector, waitForWebViewBounds };
