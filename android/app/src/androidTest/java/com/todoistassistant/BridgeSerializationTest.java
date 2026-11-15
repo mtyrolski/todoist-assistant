@@ -325,15 +325,12 @@ public class BridgeSerializationTest {
   public void javascriptConfirmationCanBeCancelledInTheNativeDialog() throws Exception {
     var instrumentation = InstrumentationRegistry.getInstrumentation();
     var automation = instrumentation.getUiAutomation();
-    var serviceInfo = automation.getServiceInfo();
-    serviceInfo.flags |=
-        android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
-    serviceInfo.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
-    automation.setServiceInfo(serviceInfo);
     java.lang.reflect.Field webField = MainActivity.class.getDeclaredField("web");
     webField.setAccessible(true);
     java.lang.reflect.Field readyField = MainActivity.class.getDeclaredField("ready");
     readyField.setAccessible(true);
+    java.lang.reflect.Field confirmationField = MainActivity.class.getDeclaredField("confirmation");
+    confirmationField.setAccessible(true);
     AtomicReference<String> answer = new AtomicReference<>();
     CountDownLatch answered = new CountDownLatch(1);
     try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
@@ -365,19 +362,7 @@ public class BridgeSerializationTest {
               throw new AssertionError(failure);
             }
           });
-      boolean visible = false;
-      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
-      while (!visible && System.nanoTime() < deadline) {
-        for (var window : automation.getWindows()) {
-          var root = window.getRoot();
-          if (root != null
-              && !root.findAccessibilityNodeInfosByText("Confirm test action?").isEmpty())
-            visible = true;
-        }
-        if (!visible && answered.getCount() != 0) Thread.sleep(500);
-        else if (!visible) break;
-      }
-      assertTrue("The confirmation must be visible to the user", visible);
+      waitForVisibleConfirmation(scenario, confirmationField, "Confirm test action?", answered);
       assertTrue(
           automation.performGlobalAction(
               android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));
@@ -399,28 +384,45 @@ public class BridgeSerializationTest {
               throw new AssertionError(failure);
             }
           });
-      android.view.accessibility.AccessibilityNodeInfo confirm = null;
-      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
-      while (confirm == null && System.nanoTime() < deadline) {
-        for (var window : automation.getWindows()) {
-          var root = window.getRoot();
-          if (root != null) {
-            var buttons = root.findAccessibilityNodeInfosByViewId("android:id/button1");
-            if (!buttons.isEmpty()) confirm = buttons.get(0);
-          }
+      android.graphics.Rect confirm =
+          waitForVisibleConfirmation(scenario, confirmationField, "Confirm test action?", accepted);
+      long now = android.os.SystemClock.uptimeMillis();
+      android.view.MotionEvent down =
+          android.view.MotionEvent.obtain(
+              now,
+              now,
+              android.view.MotionEvent.ACTION_DOWN,
+              confirm.exactCenterX(),
+              confirm.exactCenterY(),
+              0);
+      down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+      try {
+        assertTrue(
+            "The system must deliver the confirmation tap",
+            automation.injectInputEvent(down, true));
+        android.os.SystemClock.sleep(100);
+        android.view.MotionEvent up =
+            android.view.MotionEvent.obtain(
+                now,
+                android.os.SystemClock.uptimeMillis(),
+                android.view.MotionEvent.ACTION_UP,
+                confirm.exactCenterX(),
+                confirm.exactCenterY(),
+                0);
+        try {
+          up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+          assertTrue(
+              "The system must deliver the confirmation tap",
+              automation.injectInputEvent(up, true));
+        } finally {
+          up.recycle();
         }
-        if (confirm == null && accepted.getCount() != 0) Thread.sleep(500);
-        else if (confirm == null) break;
+      } finally {
+        down.recycle();
       }
-      assertNotNull("The confirmation must offer an OK action", confirm);
-      assertTrue(
-          confirm.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK));
       assertTrue(accepted.await(10, TimeUnit.SECONDS));
       assertEquals("true", answer.get());
 
-      java.lang.reflect.Field confirmationField =
-          MainActivity.class.getDeclaredField("confirmation");
-      confirmationField.setAccessible(true);
       scenario.onActivity(
           activity -> {
             try {
@@ -451,6 +453,102 @@ public class BridgeSerializationTest {
       while (open.get().isShowing() && System.nanoTime() < deadline) Thread.sleep(200);
       assertFalse("Closing the activity must dismiss its confirmation", open.get().isShowing());
     }
+  }
+
+  private static android.graphics.Rect waitForVisibleConfirmation(
+      ActivityScenario<MainActivity> scenario,
+      java.lang.reflect.Field field,
+      String expectedMessage,
+      CountDownLatch answered)
+      throws Exception {
+    AtomicReference<android.graphics.Rect> buttonBounds = new AtomicReference<>();
+    AtomicReference<String> diagnostic = new AtomicReference<>("dialog not created");
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+    while (buttonBounds.get() == null && answered.getCount() != 0 && System.nanoTime() < deadline) {
+      scenario.onActivity(
+          activity -> {
+            try {
+              android.app.AlertDialog dialog = (android.app.AlertDialog) field.get(activity);
+              if (dialog == null || !dialog.isShowing() || dialog.getWindow() == null) {
+                diagnostic.set(
+                    "dialog missing or not showing; finishing=" + activity.isFinishing());
+                return;
+              }
+              android.view.View decor = dialog.getWindow().getDecorView();
+              android.widget.TextView message = dialog.findViewById(android.R.id.message);
+              android.widget.Button button =
+                  dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+              android.graphics.Rect textBounds = new android.graphics.Rect();
+              android.graphics.Rect buttonRect = new android.graphics.Rect();
+              android.graphics.Rect buttonLocal = new android.graphics.Rect();
+              boolean messageVisible =
+                  message != null && message.isShown() && message.getGlobalVisibleRect(textBounds);
+              boolean buttonVisible =
+                  button != null
+                      && button.isShown()
+                      && button.isEnabled()
+                      && button.getGlobalVisibleRect(buttonRect)
+                      && button.getLocalVisibleRect(buttonLocal);
+              boolean messageAccessible = false;
+              boolean buttonAccessible = false;
+              if (messageVisible && buttonVisible) {
+                android.view.accessibility.AccessibilityNodeInfo messageNode =
+                    message.createAccessibilityNodeInfo();
+                android.view.accessibility.AccessibilityNodeInfo buttonNode =
+                    button.createAccessibilityNodeInfo();
+                try {
+                  messageAccessible =
+                      messageNode.isVisibleToUser()
+                          && android.text.TextUtils.equals(expectedMessage, messageNode.getText());
+                  buttonAccessible =
+                      buttonNode.isVisibleToUser()
+                          && buttonNode.isEnabled()
+                          && buttonNode.isClickable()
+                          && !android.text.TextUtils.isEmpty(buttonNode.getText())
+                          && android.text.TextUtils.equals(button.getText(), buttonNode.getText());
+                } finally {
+                  messageNode.recycle();
+                  buttonNode.recycle();
+                }
+              }
+              diagnostic.set(
+                  "decorShown="
+                      + decor.isShown()
+                      + ", focused="
+                      + decor.hasWindowFocus()
+                      + ", messageVisible="
+                      + messageVisible
+                      + ", buttonVisible="
+                      + buttonVisible
+                      + ", messageAccessible="
+                      + messageAccessible
+                      + ", buttonAccessible="
+                      + buttonAccessible);
+              if (decor.isShown()
+                  && decor.hasWindowFocus()
+                  && messageVisible
+                  && buttonVisible
+                  && messageAccessible
+                  && buttonAccessible
+                  && expectedMessage.contentEquals(message.getText())) {
+                int[] screenLocation = new int[2];
+                button.getLocationOnScreen(screenLocation);
+                buttonLocal.offset(screenLocation[0], screenLocation[1]);
+                buttonBounds.set(buttonLocal);
+              }
+            } catch (IllegalAccessException failure) {
+              throw new AssertionError(failure);
+            }
+          });
+      if (buttonBounds.get() == null) Thread.sleep(200);
+    }
+    assertNotNull(
+        "The confirmation must be visible to the user: "
+            + diagnostic.get()
+            + ", javascriptAnswered="
+            + (answered.getCount() == 0),
+        buttonBounds.get());
+    return buttonBounds.get();
   }
 
   @Test
