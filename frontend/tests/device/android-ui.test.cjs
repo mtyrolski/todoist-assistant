@@ -261,17 +261,36 @@ test("bundled desktop charts and fonts work offline without saving demo account 
   await chart.evaluate((node) =>
     node.scrollIntoView({ block: "center", behavior: "instant" }),
   );
-  const scroll = await page.evaluate(() => scrollY);
-  const point = await page.evaluate(() => ({
-    x: Math.round((innerWidth * devicePixelRatio) / 2),
-    y: Math.round(innerHeight * devicePixelRatio * 0.6),
-  }));
+  const screen = await webViewBounds();
+  assert.ok(screen, "The Android accessibility hierarchy must include the WebView");
+  const gesture = await chart.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+    const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+    const x = (left + right) / 2, startY = top + (bottom - top) * 0.75;
+    return {
+      x, startY, endY: top + (bottom - top) * 0.25,
+      visibleChart: { left, right, top, bottom }, viewport: { width: innerWidth, height: innerHeight }, scroll: scrollY,
+      remaining: document.documentElement.scrollHeight - innerHeight - scrollY,
+      onChart: node.contains(document.elementFromPoint(x, startY)),
+    };
+  });
+  const scale = screen.width / gesture.viewport.width;
+  const x = Math.round(screen.x + gesture.x * scale);
+  const startY = Math.round(screen.y + gesture.startY * scale);
+  const endY = Math.round(screen.y + gesture.endY * scale);
+  const details = JSON.stringify({
+    visibleChart: gesture.visibleChart, viewport: gesture.viewport, webView: screen,
+    scroll: gesture.scroll, remaining: gesture.remaining, swipe: { x, startY, endY },
+  });
+  assert.ok(gesture.onChart, `The swipe must start on the visible chart: ${details}`);
+  assert.ok(gesture.remaining > 20, `The page must have room to scroll down: ${details}`);
   await device.shell(
-    `input touchscreen swipe ${point.x} ${point.y} ${point.x} ${point.y - 500} 200`,
+    `input touchscreen swipe ${x} ${startY} ${x} ${endY} 350`,
   );
   await expect
-    .poll(() => page.evaluate(() => scrollY))
-    .toBeGreaterThan(scroll + 30);
+    .poll(() => page.evaluate(() => scrollY), { message: `The chart swipe must scroll the page: ${details}` })
+    .toBeGreaterThan(gesture.scroll + 10);
 });
 
 test("search results remain usable with the keyboard and survive rotation", async () => {

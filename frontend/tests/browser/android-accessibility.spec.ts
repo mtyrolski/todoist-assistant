@@ -127,6 +127,43 @@ test("compact completion chart keeps axis labels within its card", async ({ page
   expect(clipped).toEqual([]);
 });
 
+test.describe("mobile chart touch scrolling", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 }, deviceScaleFactor: 3.5 });
+
+  test("a vertical touch gesture over a chart scrolls the page", async ({ page }) => {
+    const chart = page.getByRole("region", { name: "Completed tasks", exact: true }).locator(".js-plotly-plot");
+    await chart.scrollIntoViewIfNeeded();
+    await expect(chart).toBeVisible();
+    const client = await page.context().newCDPSession(page);
+    try {
+      for (const size of [{ width: 320, height: 780 }, { width: 360, height: 780 }, { width: 411, height: 891 }]) {
+        await page.setViewportSize(size);
+        await chart.evaluate((node) => node.scrollIntoView({ block: "center", behavior: "instant" }));
+        const gesture = await chart.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+          const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+          const x = (left + right) / 2, startY = top + (bottom - top) * 0.75;
+          return { x, startY, endY: top + (bottom - top) * 0.25, scroll: scrollY,
+            remaining: document.documentElement.scrollHeight - innerHeight - scrollY,
+            onChart: node.contains(document.elementFromPoint(x, startY)) };
+        });
+        expect(gesture.onChart, `gesture starts on the chart at ${size.width}px`).toBe(true);
+        expect(gesture.remaining).toBeGreaterThan(20);
+        await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: gesture.x, y: gesture.startY }] });
+        for (let step = 1; step <= 10; step++) {
+          await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: gesture.x, y: gesture.startY + (gesture.endY - gesture.startY) * step / 10 }] });
+          await new Promise((resolve) => setTimeout(resolve, 35));
+        }
+        await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(gesture.scroll + 10);
+      }
+    } finally {
+      await client.detach();
+    }
+  });
+});
+
 test("a long chart legend can be searched without losing selected lines", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await page.evaluate(() => window.dispatchEvent(new Event("test-many-chart-lines")));
