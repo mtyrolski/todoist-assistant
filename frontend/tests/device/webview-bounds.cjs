@@ -35,4 +35,16 @@ function isMissingAndroidSelector(error) {
   return error instanceof Error && /java\.lang\.NullPointerException:.*androidx\.test\.uiautomator\.UiObject2\.getClassName\(\).*null object reference/s.test(error.message);
 }
 
-module.exports = { displayRotation, isMissingAndroidSelector, waitForWebViewBounds };
+async function readAndroidInfo(device, selector) {
+  try {
+    return await device.info(selector);
+  } catch (error) {
+    // A rotation can invalidate a UiAutomator node between lookup and reading
+    // its bounds. Let the caller's bounded polling try the lookup again.
+    if (isMissingAndroidSelector(error) || (error instanceof Error &&
+      /^androidDevice\.info: androidx\.test\.uiautomator\.StaleObjectException(?:\s|$)/.test(error.message))) return null;
+    throw error;
+  }
+}
+
+module.exports = { displayRotation, isMissingAndroidSelector, readAndroidInfo, waitForWebViewBounds };

@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { displayRotation, isMissingAndroidSelector, waitForWebViewBounds } = require("./device/webview-bounds.cjs");
+const { displayRotation, isMissingAndroidSelector, readAndroidInfo, waitForWebViewBounds } = require("./device/webview-bounds.cjs");
 
 test("uses the Android selector to obtain nonempty WebView bounds", async () => {
   const selector = { clazz: "android.webkit.WebView", pkg: "com.todoistassistant" };
@@ -34,4 +34,18 @@ test("only treats the Android driver's missing selector error as absent", () => 
   assert.equal(isMissingAndroidSelector(missing), true);
   assert.equal(isMissingAndroidSelector(new Error("androidDevice.info: ADB device offline")), false);
   assert.equal(isMissingAndroidSelector(new Error("java.lang.NullPointerException: driver crashed")), false);
+});
+
+test("retries a stale accessibility lookup after rotation without hiding driver failures", async () => {
+  const selector = { clazz: "android.webkit.WebView", pkg: "preview" };
+  let calls = 0;
+  const device = { info: async (actual) => {
+    assert.deepEqual(actual, selector);
+    if (++calls === 1) throw new Error("androidDevice.info: androidx.test.uiautomator.StaleObjectException");
+    return { bounds: { width: 800, height: 400 } };
+  } };
+  assert.equal(await readAndroidInfo(device, selector), null);
+  assert.deepEqual(await readAndroidInfo(device, selector), { bounds: { width: 800, height: 400 } });
+  await assert.rejects(readAndroidInfo({ info: async () => { throw new Error("androidDevice.info: ADB device offline"); } }, selector), /ADB device offline/);
+  await assert.rejects(readAndroidInfo({ info: async () => { throw new Error("androidDevice.tap: androidx.test.uiautomator.StaleObjectException"); } }, selector), /androidDevice.tap/);
 });

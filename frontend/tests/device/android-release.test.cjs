@@ -2,7 +2,7 @@ const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { _android, expect: baseExpect } = require("playwright/test");
-const { isMissingAndroidSelector } = require("./webview-bounds.cjs");
+const { readAndroidInfo } = require("./webview-bounds.cjs");
 const expect = baseExpect.configure({ timeout: 20000 });
 
 const pkg = "com.todoistassistant.preview";
@@ -35,14 +35,7 @@ after(async () => {
   await device.close();
 });
 const text = (value) => ({ text: value, pkg });
-async function info(selector) {
-  try {
-    return await device.info(selector);
-  } catch (error) {
-    if (isMissingAndroidSelector(error)) return null;
-    throw error;
-  }
-}
+const info = (selector) => readAndroidInfo(device, selector);
 async function wait(selector) {
   await expect.poll(async () => Boolean((await info(selector))?.enabled), {
     message: `Expected accessible Preview element ${JSON.stringify(selector)}`,
@@ -72,6 +65,17 @@ async function scrollTo(label, direction = "down") {
 }
 
 test("optimized release works offline with search, keyboard, rotation and production debugging disabled", async (t) => {
+  // Keep the final screen even if an earlier interaction fails, before the
+  // suite-level cleanup stops the app. Preview contains demo data only.
+  t.after(async () => {
+    const screenshots = `frontend/test-results/device/${process.env.ANDROID_SERIAL ?? "emulator"}`;
+    try {
+      fs.mkdirSync(screenshots, { recursive: true });
+      await device.screenshot({ path: `${screenshots}/preview-final.png` });
+    } catch (error) {
+      t.diagnostic(`Could not capture final demo screen: ${error instanceof Error ? error.name : "unknown error"}`);
+    }
+  });
   assert.match((await device.shell(`run-as ${pkg} id 2>&1`)).toString(), /not debuggable/);
   await tap(text("Explore a demo"));
   await wait(text("Back to my data"));
@@ -89,10 +93,14 @@ test("optimized release works offline with search, keyboard, rotation and produc
   await scrollTo("Projects", "up");
   await tap(text("Projects"));
   await tap({ clazz: "android.widget.EditText", pkg });
-  await device.fill({ clazz: "android.widget.EditText", pkg }, "release");
   await expect
     .poll(async () => (await device.shell("dumpsys input_method")).toString())
     .toMatch(/mInputShown=true/);
+  // Focus opens the keyboard and can move the input out of the accessibility
+  // viewport. Type into the focused field instead of resolving it a second time.
+  // Playwright's Android input.type dispatches key presses concurrently;
+  // send them in order so the search query cannot be scrambled.
+  for (const key of "release") await device.input.press(key.toUpperCase());
   await device.input.press("Back");
   await wait(text("10 of 40 active tasks"));
   await device.shell("settings put system user_rotation 1");
