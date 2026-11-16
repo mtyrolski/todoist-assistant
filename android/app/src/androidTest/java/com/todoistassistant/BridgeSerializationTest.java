@@ -366,7 +366,9 @@ public class BridgeSerializationTest {
       assertTrue(
           automation.performGlobalAction(
               android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));
-      assertTrue(answered.await(10, TimeUnit.SECONDS));
+      if (!answered.await(10, TimeUnit.SECONDS)) {
+        fail("Back must answer the confirmation; " + describeWindows());
+      }
       assertEquals("false", answer.get());
 
       CountDownLatch accepted = new CountDownLatch(1);
@@ -420,7 +422,9 @@ public class BridgeSerializationTest {
       } finally {
         down.recycle();
       }
-      assertTrue(accepted.await(10, TimeUnit.SECONDS));
+      if (!accepted.await(10, TimeUnit.SECONDS)) {
+        fail("Tapping confirm must answer the confirmation; " + describeWindows());
+      }
       assertEquals("true", answer.get());
 
       scenario.onActivity(
@@ -463,6 +467,8 @@ public class BridgeSerializationTest {
       throws Exception {
     AtomicReference<android.graphics.Rect> buttonBounds = new AtomicReference<>();
     AtomicReference<String> diagnostic = new AtomicReference<>("dialog not created");
+    AtomicBoolean focused = new AtomicBoolean();
+    long focusDeadline = Long.MAX_VALUE;
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
     while (buttonBounds.get() == null && answered.getCount() != 0 && System.nanoTime() < deadline) {
       scenario.onActivity(
@@ -475,6 +481,7 @@ public class BridgeSerializationTest {
                 return;
               }
               android.view.View decor = dialog.getWindow().getDecorView();
+              focused.set(decor.hasWindowFocus());
               android.widget.TextView message = dialog.findViewById(android.R.id.message);
               android.widget.Button button =
                   dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
@@ -524,8 +531,10 @@ public class BridgeSerializationTest {
                       + messageAccessible
                       + ", buttonAccessible="
                       + buttonAccessible);
+              // A visible, accessible dialog can temporarily lack keyboard
+              // focus. The actual Back and touchscreen interactions below are
+              // the checks that it can receive the user's input.
               if (decor.isShown()
-                  && decor.hasWindowFocus()
                   && messageVisible
                   && buttonVisible
                   && messageAccessible
@@ -540,15 +549,53 @@ public class BridgeSerializationTest {
               throw new AssertionError(failure);
             }
           });
+      // Give window focus time to settle after the dialog is first drawn, but
+      // do not assume it must own keyboard focus to be touch-accessible.
+      if (buttonBounds.get() != null && !focused.get()) {
+        long now = System.nanoTime();
+        if (focusDeadline == Long.MAX_VALUE) focusDeadline = now + TimeUnit.SECONDS.toNanos(3);
+        if (now < focusDeadline) buttonBounds.set(null);
+      }
       if (buttonBounds.get() == null) Thread.sleep(200);
     }
-    assertNotNull(
-        "The confirmation must be visible to the user: "
-            + diagnostic.get()
-            + ", javascriptAnswered="
-            + (answered.getCount() == 0),
-        buttonBounds.get());
+    if (buttonBounds.get() == null) {
+      fail(
+          "The confirmation must be visible to the user: "
+              + diagnostic.get()
+              + ", javascriptAnswered="
+              + (answered.getCount() == 0)
+              + ", "
+              + describeWindows());
+    }
     return buttonBounds.get();
+  }
+
+  private static String describeWindows() {
+    StringBuilder details = new StringBuilder("accessibility windows: ");
+    var windows = InstrumentationRegistry.getInstrumentation().getUiAutomation().getWindows();
+    if (windows.isEmpty()) return details.append("none reported").toString();
+    for (var window : windows) {
+      android.graphics.Rect bounds = new android.graphics.Rect();
+      window.getBoundsInScreen(bounds);
+      android.view.accessibility.AccessibilityNodeInfo root = window.getRoot();
+      CharSequence packageName = root == null ? null : root.getPackageName();
+      details
+          .append("[package=")
+          .append(packageName)
+          .append(", type=")
+          .append(window.getType())
+          .append(", layer=")
+          .append(window.getLayer())
+          .append(", active=")
+          .append(window.isActive())
+          .append(", focused=")
+          .append(window.isFocused())
+          .append(", bounds=")
+          .append(bounds)
+          .append("] ");
+      if (root != null) root.recycle();
+    }
+    return details.toString();
   }
 
   @Test
