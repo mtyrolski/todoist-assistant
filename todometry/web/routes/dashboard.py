@@ -245,8 +245,10 @@ async def dashboard_home(
     cache_key = (
         "home",
         f"g={granularity}",
-        f"beg={beg_label}",
-        f"end={end_label}",
+        f"beg={beg_range.isoformat()}",
+        f"end={end_range.isoformat()}",
+        f"mode={'custom' if beg is not None else 'rolling'}",
+        f"weeks={weeks}",
         f"no_data={int(no_data)}",
         f"today={today.isoformat()}",
         f"always_visible_projects={','.join(sorted(always_visible_projects))}",
@@ -398,6 +400,7 @@ async def dashboard_home(
         "range": {
             "beg": beg_label,
             "end": end_label,
+            "mode": "custom" if beg is not None and end is not None else "rolling",
             "granularity": granularity,
             "weeks": weeks,
         },

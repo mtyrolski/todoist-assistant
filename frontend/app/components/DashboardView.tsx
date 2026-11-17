@@ -241,7 +241,7 @@ export function DashboardView({
     (item) => item && !focusMetricItems.some((focus) => focus?.name === item.name) && item.name !== "Events" && item.name !== "Added Tasks"
   );
   const activeProjectHierarchyFigure = figures.activeProjectHierarchy ?? null;
-  const hierarchyRangeKey = `${dashboard?.range.beg ?? ""}:${dashboard?.range.end ?? ""}:${dashboard?.refreshedAt ?? ""}`;
+  const hierarchyRangeKey = `${dashboard?.range.mode ?? ""}:${dashboard?.range.weeks ?? ""}:${dashboard?.range.beg ?? ""}:${dashboard?.range.end ?? ""}:${dashboard?.refreshedAt ?? ""}`;
   useEffect(() => {
     hierarchyRequest.current?.abort();
     setHierarchyFrames([]);
@@ -275,7 +275,9 @@ export function DashboardView({
     setHierarchyLoading(true);
     setHierarchyError(null);
     try {
-      const params = new URLSearchParams({ beg: dashboard.range.beg, end: dashboard.range.end });
+      const params = dashboard.range.mode === "custom"
+        ? new URLSearchParams({ beg: dashboard.range.beg, end: dashboard.range.end })
+        : new URLSearchParams({ weeks: String(dashboard.range.weeks) });
       const response = await fetch(`/api/dashboard/hierarchy-playback?${params}`, { signal: controller.signal });
       if (!response.ok) throw new Error(`Playback request failed (${response.status})`);
       const payload = await response.json() as { frames?: HierarchyFrame[]; error?: string };

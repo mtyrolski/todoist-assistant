@@ -45,7 +45,7 @@ export type DashboardHome = {
   refreshing?: boolean;
   refreshWarning?: string | null;
   noData?: boolean;
-  range: { beg: string; end: string; granularity: Granularity; weeks: number };
+  range: { beg: string; end: string; mode: "rolling" | "custom"; granularity: Granularity; weeks: number };
   metrics: {
     items: {
       name: string;

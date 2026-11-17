@@ -153,6 +153,56 @@ def test_hierarchy_playback_builds_cumulative_frames_on_demand(
     assert len(windows) == 14
 
 
+def test_hierarchy_playback_matches_rolling_dashboard_boundaries(
+    monkeypatch, api_client
+) -> None:
+    from todometry.dashboard._plot_project_hierarchy import (
+        plot_active_project_hierarchy_sunburst,
+    )
+
+    activity = _event_df(
+        [
+            {
+                "date": timestamp,
+                "id": f"event-{index}",
+                "title": "done",
+                "type": "completed",
+                "parent_project_id": "root",
+                "parent_project_name": "Product",
+                "root_project_name": "Product",
+                "task_id": str(index),
+            }
+            for index, timestamp in enumerate(
+                ["2026-08-24T08:00:00", "2026-08-24T14:00:00", "2026-11-16T12:00:00"]
+            )
+        ]
+    )
+    _set_dashboard_df(monkeypatch, activity)
+    web_api._state.active_projects = [make_project(project_id="root")]
+    monkeypatch.setattr(dashboard_routes, "get_adjusting_mapping", dict)
+    monkeypatch.setattr(dashboard_routes, "get_adjusting_archived_parent_projects", set)
+    monkeypatch.setattr(
+        web_api, "plot_active_project_hierarchy", plot_active_project_hierarchy_sunburst
+    )
+    current = _home(api_client, "weeks=12&granularity=W").json()
+    assert current["range"]["mode"] == "rolling"
+    playback = api_client.get("/api/dashboard/hierarchy-playback?weeks=12").json()
+    current_figure = current["figures"]["activeProjectHierarchy"]
+    final_figure = playback["frames"][-1]["figure"]
+    assert current_figure["data"][0]["values"] == final_figure["data"][0]["values"]
+    assert current_figure["data"][0]["values"][0] == 2
+
+    custom = _home(api_client, "beg=2026-08-24&end=2026-11-16").json()
+    assert custom["range"]["mode"] == "custom"
+    custom_playback = api_client.get(
+        "/api/dashboard/hierarchy-playback?beg=2026-08-24&end=2026-11-16"
+    ).json()
+    assert custom["figures"]["activeProjectHierarchy"]["data"][0]["values"][0] == 3
+    assert custom["figures"]["activeProjectHierarchy"]["data"][0]["values"] == (
+        custom_playback["frames"][-1]["figure"]["data"][0]["values"]
+    )
+
+
 def _dashboard_cache(monkeypatch, tmp_path) -> web_api.Cache:
     monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
     monkeypatch.chdir(tmp_path)
