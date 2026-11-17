@@ -8,6 +8,8 @@ from pathlib import Path
 from scripts.check_architecture import check_tree
 
 ROOT = Path(__file__).resolve().parents[1]
+# SHA-256 of the literal GitHub 404 response, not a release archive.
+NOT_FOUND_SHA256 = "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
 
 
 def identity_errors(root: Path) -> list[str]:
@@ -23,6 +25,13 @@ def identity_errors(root: Path) -> list[str]:
     entry = project.get("scripts", {}).get("todometry", "")
     if not entry.startswith("todometry."):
         errors.append("todometry entry point must use todometry")
+    formula = root / "Formula" / "todometry.rb"
+    if formula.is_file():
+        # Examine only the formula's own archive, not the resource checksums.
+        definition = formula.read_text(encoding="utf-8").split("  resource ", 1)[0]
+        matches = re.findall(r'^\s*sha256\s+"([0-9a-f]{64})"', definition, re.MULTILINE)
+        if len(matches) != 1 or matches[0] == NOT_FOUND_SHA256:
+            errors.append("Homebrew release archive needs its verified SHA-256")
     errors.extend(check_tree(root, strict=True))
     for namespace in ("todoist", "todometry"):
         web = root / namespace / "web"

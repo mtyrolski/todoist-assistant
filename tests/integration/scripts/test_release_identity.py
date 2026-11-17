@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.check_release_identity import identity_errors
+from scripts.check_release_identity import NOT_FOUND_SHA256, identity_errors
 
 
 def test_release_guard_rejects_old_identity(tmp_path: Path) -> None:
@@ -64,3 +64,33 @@ def test_release_guard_rejects_web_injection_and_type_erasure(tmp_path: Path) ->
     assert any("catch-all" in error for error in errors)
     assert any("undefined-name" in error for error in errors)
     assert any("suppression" in error for error in errors)
+
+
+def test_release_guard_rejects_404_hash_and_does_not_use_resource_hash(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "todometry"\nversion = "0.4.1"\n'
+        '[project.scripts]\ntodometry = "todometry.cli:app"\n',
+        encoding="utf-8",
+    )
+    package = tmp_path / "todometry"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    formula = tmp_path / "Formula" / "todometry.rb"
+    formula.parent.mkdir()
+    formula.write_text(
+        f'  sha256 "{NOT_FOUND_SHA256}"\n'
+        '  resource "example" do\n    sha256 "' + "a" * 64 + '"\n  end\n',
+        encoding="utf-8",
+    )
+    assert any("Homebrew" in error for error in identity_errors(tmp_path))
+    formula.write_text(
+        '  resource "example" do\n    sha256 "' + "a" * 64 + '"\n  end\n',
+        encoding="utf-8",
+    )
+    assert any("Homebrew" in error for error in identity_errors(tmp_path))
+    # A plausible digest passes the static guard; its authenticity must still be
+    # verified against the actual public release archive before publication.
+    formula.write_text('  sha256 "' + "a" * 64 + '"\n', encoding="utf-8")
+    assert not any("Homebrew" in error for error in identity_errors(tmp_path))
