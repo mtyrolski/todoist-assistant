@@ -1,12 +1,14 @@
 """Local launcher for the todometry dashboard stack."""
 
 import argparse
+import errno
 import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import webbrowser
@@ -70,8 +72,54 @@ def _resolve_config_dir(
 
 def _seed_config_dir(config_dir: Path, install_dir: Path) -> None:
     templates_dir = install_dir / "configs"
-    if templates_dir.exists() and not any(config_dir.iterdir()):
-        shutil.copytree(templates_dir, config_dir, dirs_exist_ok=True)
+    if templates_dir.exists():
+        for template in templates_dir.rglob("*"):
+            if not template.is_file():
+                continue
+            destination = config_dir / template.relative_to(templates_dir)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                continue
+            fd, name = tempfile.mkstemp(prefix=".config-", dir=destination.parent)
+            try:
+                with os.fdopen(fd, "wb") as output, template.open("rb") as source:
+                    shutil.copyfileobj(source, output)
+                # Another startup or the user may have created it meanwhile.
+                try:
+                    os.link(name, destination)
+                except FileExistsError:
+                    pass
+                except OSError as error:
+                    if error.errno not in (
+                        errno.EACCES,
+                        errno.EPERM,
+                        errno.EXDEV,
+                        errno.EINVAL,
+                        errno.ENOSYS,
+                        errno.EOPNOTSUPP,
+                    ):
+                        raise
+                    # Some Windows volumes and network shares do not support
+                    # hard links. Exclusive creation still protects a file
+                    # another startup or the user has just created.
+                    created = None
+                    try:
+                        with destination.open("xb") as output:
+                            created = os.fstat(output.fileno())
+                            with open(name, "rb") as source:
+                                shutil.copyfileobj(source, output)
+                    except FileExistsError:
+                        pass
+                    except BaseException:
+                        if created is not None and created.st_ino:
+                            try:
+                                if os.path.samestat(created, destination.stat()):
+                                    destination.unlink()
+                            except FileNotFoundError:
+                                pass
+                        raise
+            finally:
+                Path(name).unlink(missing_ok=True)
 
     template_src: Path | None = None
     for name in (".env.template", ".env.example"):

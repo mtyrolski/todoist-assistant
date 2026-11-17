@@ -417,7 +417,9 @@ def _stage_assets(
         raise RuntimeError("README.md not found; required asset")
 
     config_stage.mkdir(parents=True, exist_ok=True)
-    _copy_tree_merge(configs_src, config_stage)
+    # Defaults are installed with the application, not into the mutable data
+    # directory: the launcher must migrate legacy settings before seeding them.
+    _copy_tree_merge(configs_src, app_root / "configs")
     _copy_file(env_template_src, config_stage / ".env.template")
 
     _copy_file(env_template_src, app_root / ".env.template")
