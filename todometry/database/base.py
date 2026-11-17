@@ -3,14 +3,11 @@ from dotenv import load_dotenv
 from todometry.database.db_activity import DatabaseActivity
 from todometry.database.db_labels import DatabaseLabels
 from todometry.database.db_projects import DatabaseProjects
-from todometry.database.db_tasks import DatabaseTasks
 from todometry.core.utils import Anonymizable
 from loguru import logger
 
 
-class Database(
-    Anonymizable, DatabaseActivity, DatabaseProjects, DatabaseTasks, DatabaseLabels
-):
+class Database(Anonymizable, DatabaseActivity, DatabaseProjects, DatabaseLabels):
     def __init__(self, dotenv_path: str):
         load_dotenv(dotenv_path, override=True)
         super().__init__()

@@ -24,9 +24,6 @@ class TodoistEndpoints:
 
     API_BASE = "https://api.todoist.com/api/v1"
 
-    # Tasks
-    CREATE_TASK = Endpoint("create_task", "POST", f"{API_BASE}/tasks")
-
     # Labels
     LIST_LABELS = Endpoint("list_labels", "GET", f"{API_BASE}/labels")
 

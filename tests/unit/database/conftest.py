@@ -3,12 +3,6 @@ import pytest
 from tests.factories import make_project_entry, make_task_entry
 from todometry.database.db_activity import DatabaseActivity
 from todometry.database.db_projects import DatabaseProjects
-from todometry.database.db_tasks import DatabaseTasks
-
-
-@pytest.fixture
-def db_tasks():
-    return DatabaseTasks()
 
 
 @pytest.fixture
