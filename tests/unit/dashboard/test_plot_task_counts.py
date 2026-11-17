@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -174,3 +176,23 @@ def test_task_count_trend_spans_cached_history_and_keeps_real_hover_counts() -> 
     assert figure.data[0].line.smoothing == pytest.approx(0.7)
     assert figure.layout.yaxis.title.text == "Active tasks (softened scale)"
     assert figure.layout.xaxis.rangeslider.visible is True
+
+
+def test_task_count_history_matches_android_shared_lifecycle_cases() -> None:
+    fixture = Path(__file__).parents[2] / "fixtures/task_count_conformance.json"
+    for scenario in json.loads(fixture.read_text()):
+        events = []
+        for raw in scenario["events"]:
+            events.append(
+                _event(
+                    raw["id"], raw["object_id"], raw["event_type"],
+                    datetime.fromisoformat(raw["event_date"]), **raw["extra_data"],
+                )
+            )
+        rows = {
+            row["date"]: row
+            for row in reconstruct_task_count_history([], events, today=date(2026, 10, 4))
+        }
+        for day, expected in scenario["expected"].items():
+            assert rows[day]["total"] == expected, (scenario["name"], day)
+            assert rows[day]["p1"] == expected, (scenario["name"], day)

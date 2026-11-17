@@ -276,6 +276,28 @@ final class PlotData {
     events.removeIf(item -> item.day.isAfter(today) || item.day.isBefore(boundary));
     if (events.isEmpty()) return new JSONArray().put(counts(today, active.size(), totals));
     events.sort(Comparator.comparing((Item item) -> item.time).reversed());
+    // A completed task can later be deleted; that deletion must not make it
+    // active again in the interval between completion and deletion.
+    Map<String, Boolean> lifecycle = new HashMap<>(), recurring = new HashMap<>();
+    Set<Item> inactiveDeletions = new HashSet<>();
+    for (int index = events.size() - 1; index >= 0; index--) {
+      Item item = events.get(index);
+      String id = item.data.optString("object_id"), kind = item.data.optString("event_type");
+      if (id.isEmpty()) continue;
+      JSONObject extra = item.data.optJSONObject("extra_data");
+      if (extra == null) extra = new JSONObject();
+      Object declared = extra.opt("is_recurring");
+      JSONObject due = extra.optJSONObject("due");
+      if (!(declared instanceof Boolean) && due != null) declared = due.opt("is_recurring");
+      if (!(declared instanceof Boolean) && Boolean.TRUE.equals(extra.opt("sub_tasks_reset")))
+        declared = true;
+      if (declared instanceof Boolean) recurring.put(id, (Boolean) declared);
+      if (kind.equals("deleted")) {
+        if (Boolean.FALSE.equals(lifecycle.get(id))) inactiveDeletions.add(item);
+        lifecycle.put(id, false);
+      } else if (kind.equals("completed")) lifecycle.put(id, recurring.getOrDefault(id, false));
+      else if (kind.equals("added") || kind.equals("uncompleted")) lifecycle.put(id, true);
+    }
     for (Item item : events) {
       String id = item.data.optString("object_id"), kind = item.data.optString("event_type");
       if (id.isEmpty() || item.day.isAfter(today) || item.day.isBefore(boundary)) continue;
@@ -314,7 +336,8 @@ final class PlotData {
         if (id.isEmpty()) continue;
         JSONObject extra = event.data.optJSONObject("extra_data");
         if (extra == null) extra = new JSONObject();
-        if ((kind.equals("completed") || kind.equals("deleted"))
+        if ((kind.equals("completed")
+                || (kind.equals("deleted") && !inactiveDeletions.contains(event)))
             && !active.containsKey(id)
             && added.containsKey(id))
           setPriority(

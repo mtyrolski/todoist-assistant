@@ -90,6 +90,35 @@ def reconstruct_task_count_history(
         return [{"date": today.isoformat(), **_counts(task_priorities)}]
 
     item_events.sort(key=_event_timestamp, reverse=True)
+    # Deletion does not imply the task was active: it can follow completion.
+    # Remember the last observed lifecycle state before each deletion while
+    # walking forward, then use that evidence during the reverse projection.
+    lifecycle: dict[str, bool] = {}
+    recurring: dict[str, bool] = {}
+    inactive_deletions: set[str] = set()
+    for event in reversed(item_events):
+        entry = event.event_entry
+        task_id = str(entry.object_id or "")
+        if not task_id:
+            continue
+        extra = entry.extra_data or {}
+        declared = extra.get("is_recurring")
+        due = extra.get("due")
+        if not isinstance(declared, bool) and isinstance(due, dict):
+            declared = due.get("is_recurring")
+        if not isinstance(declared, bool) and extra.get("sub_tasks_reset") is True:
+            declared = True
+        if isinstance(declared, bool):
+            recurring[task_id] = declared
+        if entry.event_type == "deleted":
+            if lifecycle.get(task_id) is False:
+                inactive_deletions.add(event.id)
+            lifecycle[task_id] = False
+        elif entry.event_type == "completed":
+            lifecycle[task_id] = recurring.get(task_id, False)
+        elif entry.event_type in {"added", "uncompleted"}:
+            lifecycle[task_id] = True
+
     priority_hints = dict(task_priorities)
     for event in item_events:
         task_id = str(event.event_entry.object_id or "")
@@ -137,7 +166,9 @@ def reconstruct_task_count_history(
             extra = entry.extra_data or {}
             event_type = entry.event_type
 
-            if event_type in {"completed", "deleted"}:
+            if event_type == "completed" or (
+                event_type == "deleted" and event.id not in inactive_deletions
+            ):
                 if task_id not in task_priorities and task_id in added_days_by_task:
                     task_priorities[task_id] = _priority(
                         extra.get("priority"),

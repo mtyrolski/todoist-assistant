@@ -262,6 +262,43 @@ public class PlotDataTest {
   }
 
   @Test
+  public void taskCountsMatchSharedDesktopLifecycleCases() throws Exception {
+    java.nio.file.Path fixture =
+        java.nio.file.Paths.get(System.getProperty("completionFixtures"))
+            .getParent()
+            .resolve("task_count_conformance.json");
+    JSONArray scenarios =
+        new JSONArray(
+            new String(
+                java.nio.file.Files.readAllBytes(fixture),
+                java.nio.charset.StandardCharsets.UTF_8));
+    Clock clock = Clock.fixed(Instant.parse("2026-10-04T12:00:00Z"), ZoneId.of("UTC"));
+    for (int i = 0; i < scenarios.length(); i++) {
+      JSONObject scenario = scenarios.getJSONObject(i);
+      JSONArray events = scenario.getJSONArray("events");
+      for (int j = 0; j < events.length(); j++)
+        events.getJSONObject(j).put("object_type", "item").put("parent_project_id", "project");
+      JSONObject snapshot =
+          new JSONObject()
+              .put("projects", new JSONArray())
+              .put("tasks", new JSONArray())
+              .put("activities", events)
+              .put("syncedAt", clock.instant().toString())
+              .put("historyStart", scenario.getString("historyStart"));
+      JSONArray counts = new DashboardModel(snapshot, clock).plotData.getJSONArray("taskCounts");
+      JSONObject expected = scenario.getJSONObject("expected");
+      for (java.util.Iterator<String> days = expected.keys(); days.hasNext(); ) {
+        String day = days.next();
+        JSONObject actual = row(counts, day);
+        assertEquals(
+            scenario.getString("name") + " " + day, expected.getInt(day), actual.getInt("total"));
+        assertEquals(
+            scenario.getString("name") + " " + day, expected.getInt(day), actual.getInt("p1"));
+      }
+    }
+  }
+
+  @Test
   public void taskCountsHandlePriorityChangesAndReopenedTasksAcrossDays() throws Exception {
     JSONArray tasks = new JSONArray().put(new JSONObject().put("id", "active").put("priority", 4));
     JSONArray events =
