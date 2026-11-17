@@ -6,6 +6,7 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
@@ -687,7 +688,6 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 
     error: str | None = None
     history_scan_succeeded = False
-    backfill_attempted = bool(globals().get("_activity_backfill_attempted", False))
     recent_events: set[Event] = set()
     activity_sync_succeeded = False
     try:
@@ -715,7 +715,19 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             detail=f"Loaded {len(cached_events)} cached activity event(s)",
         )
 
-        if _resolve_api_key():
+        # Avoid retaining the credential itself while invalidating the backfill
+        # marker when the account, cache location, or demo mode changes.
+        api_key = _resolve_api_key()
+        backfill_scope = (
+            demo_mode,
+            str(Path(Cache().path).resolve()),
+            hashlib.sha256(api_key.encode("utf-8")).digest(),
+        )
+        if _state.activity_backfill_scope != backfill_scope:
+            _state.activity_backfill_scope = backfill_scope
+            _state.activity_backfill_attempted = False
+
+        if api_key:
             try:
                 _set_progress_sync(
                     "Fetching recent activity",
@@ -732,7 +744,9 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                     len(cached_events),
                 )
 
-                if not backfill_attempted and needs_activity_history(cached_events):
+                if not _state.activity_backfill_attempted and needs_activity_history(
+                    cached_events
+                ):
                     nweeks, early_stop = _activity_fetch_window_config()
                     history_boundary = activity_history_boundary(cached_events)
                     logger.info(
@@ -776,8 +790,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
                 logger.warning(f"Failed to refresh activity cache: {exc}")
             finally:
                 if history_scan_succeeded or not needs_activity_history(cached_events):
-                    backfill_attempted = True
-                globals()["_activity_backfill_attempted"] = backfill_attempted
+                    _state.activity_backfill_attempted = True
 
         changed_project_ids = activity_project_ids(recent_events)
         if previous_projects is not None:
@@ -807,7 +820,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
             _reopened_project_ids(cached_events, previous_refresh_s),
         )
 
-        if _resolve_api_key():
+        if api_key:
             try:
                 try:
                     cached_events = load_activity_cache()
@@ -884,7 +897,7 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
         _state.last_refresh_s = time.time()
         _state.last_refresh_error = (
             "Activity sync failed. Task metadata was updated, but completion history is from saved data."
-            if _resolve_api_key() and not demo_mode and not activity_sync_succeeded
+            if api_key and not demo_mode and not activity_sync_succeeded
             else None
         )
         _state.home_payload_cache = {}
@@ -902,7 +915,8 @@ def _refresh_state_sync(*, demo_mode: bool) -> None:
 def _schedule_stale_state_refresh(*, demo_mode: bool) -> None:
     now = time.time()
     age = now - _state.last_refresh_s
-    if 0 <= age < _STATE_TTL_S or (
+    activity_changed = _state.activity_cache_signature != _activity_cache_signature()
+    if (not activity_changed and 0 <= age < _STATE_TTL_S) or (
         _state.refresh_task is not None and not _state.refresh_task.done()
     ):
         return
@@ -936,24 +950,28 @@ async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None
         await asyncio.shield(_state.refresh_task)
         if _state.demo_mode == desired_demo:
             return
+    # A completed snapshot remains usable even if another process, or a
+    # partially failed refresh, has since updated the activity cache. Its
+    # signature controls when to refresh, not whether reads can use it.
     if not refresh and _state.is_ready_for(
         demo_mode=desired_demo,
-        activity_cache_signature=_activity_cache_signature(),
+        activity_cache_signature=_state.activity_cache_signature,
     ):
         _schedule_stale_state_refresh(demo_mode=desired_demo)
         return
 
     async with _STATE_LOCK:
         desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
-        if not refresh and (
-            _state.is_ready_for(
+        if not refresh:
+            if _state.is_ready_for(
                 demo_mode=desired_demo,
-                activity_cache_signature=_activity_cache_signature(),
-            )
-            or _load_state_from_disk_cache(demo_mode=desired_demo)
-        ):
-            _schedule_stale_state_refresh(demo_mode=desired_demo)
-            return
+                activity_cache_signature=_state.activity_cache_signature,
+            ):
+                _schedule_stale_state_refresh(demo_mode=desired_demo)
+                return
+            if _load_state_from_disk_cache(demo_mode=desired_demo):
+                _schedule_stale_state_refresh(demo_mode=desired_demo)
+                return
         _state.last_refresh_attempt_s = time.time()
         try:
             _state.last_refresh_error = None

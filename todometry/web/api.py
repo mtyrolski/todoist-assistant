@@ -130,6 +130,8 @@ class _DashboardState:
         self.home_payload_cache: dict[tuple[str, ...], dict[str, Any]] = {}
         self.demo_mode: bool = False
         self.activity_cache_signature: dict[str, int] | None = None
+        self.activity_backfill_attempted: bool = False
+        self.activity_backfill_scope: tuple[bool, str, bytes] | None = None
 
     def is_ready_for(
         self,
@@ -175,7 +177,6 @@ class _ProgressState:
 
 _state = _DashboardState()
 _progress_state = _ProgressState()
-_activity_backfill_attempted = False
 _STATE_TTL_S = 60.0
 _STATE_LOCK = asyncio.Lock()
 _ADMIN_LOCK = asyncio.Lock()

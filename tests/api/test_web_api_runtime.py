@@ -12,6 +12,7 @@ import todometry.web.api as web_api
 import todometry.web.routes.runtime_admin as runtime_admin
 import todometry.web.api_components.dashboard_runtime as dashboard_runtime_component
 from tests.unit.database.helpers import make_event
+from tests.web_api_helpers import _single_event_df
 
 # pylint: disable=protected-access
 
@@ -556,3 +557,212 @@ def test_dashboard_status_excludes_triton_service(api_client) -> None:
     assert res.status_code == 200
     payload = res.json()
     assert all(svc.get("name") != "Triton" for svc in payload["services"])
+
+
+def _activity_cache_for_test(monkeypatch, tmp_path):
+    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
+    cache = web_api.Cache()
+    cache.activity.save(set())
+    return cache
+
+
+def test_partial_background_refresh_keeps_reads_responsive_and_throttles_retries(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import threading
+    import time
+    import todometry.web.api_components.dashboard_runtime as runtime
+
+    cache = _activity_cache_for_test(monkeypatch, tmp_path)
+    state = web_api._DashboardState()
+    state.df_activity = _single_event_df()
+    state.active_projects = []
+    state.project_colors = {}
+    state.last_refresh_s = time.time() - 3600
+    state.activity_cache_signature = web_api._activity_cache_signature()
+    monkeypatch.setattr(web_api, "_state", state)
+    started = threading.Event()
+    release = threading.Event()
+    attempts = []
+
+    def partial_failure(*, demo_mode):
+        attempts.append(demo_mode)
+        # The real sync persists activity before fetching projects. A later
+        # project failure must not invalidate the still usable snapshot.
+        cache.activity.save({"new-event"})
+        started.set()
+        if not release.wait(10):
+            raise TimeoutError("test did not release refresh")
+        raise ConnectionError("project fetch failed")
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", partial_failure)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        task = state.refresh_task
+        assert task is not None
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            assert state.activity_cache_signature != web_api._activity_cache_signature()
+            # Must return before the running refresh releases the state lock.
+            await asyncio.wait_for(
+                runtime._ensure_state(refresh=False, demo_mode=False), timeout=2
+            )
+            assert len(state.df_activity) == 1
+        finally:
+            release.set()
+            await task
+
+        assert "saved data" in state.last_refresh_error
+        for _ in range(2):
+            await runtime._ensure_state(refresh=False, demo_mode=False)
+        assert attempts == [False]
+        assert state.refresh_task is task
+
+        # A later normal read schedules one retry, despite the changed signature.
+        state.last_refresh_attempt_s -= web_api._STATE_TTL_S + 1
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        retry = state.refresh_task
+        assert retry is not None and retry is not task
+        await retry
+        assert attempts == [False, False]
+
+    asyncio.run(run())
+
+
+def test_changed_activity_cache_refreshes_fresh_snapshot_in_background(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import time
+    import todometry.web.api_components.dashboard_runtime as runtime
+
+    cache = _activity_cache_for_test(monkeypatch, tmp_path)
+    state = web_api._DashboardState()
+    state.df_activity = _single_event_df()
+    state.active_projects = []
+    state.project_colors = {}
+    state.last_refresh_s = time.time()
+    state.activity_cache_signature = web_api._activity_cache_signature()
+    cache.activity.save({"new-event"})
+    monkeypatch.setattr(web_api, "_state", state)
+    attempts = []
+
+    def refresh(*, demo_mode):
+        attempts.append(demo_mode)
+        state.activity_cache_signature = web_api._activity_cache_signature()
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", refresh)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        task = state.refresh_task
+        assert task is not None
+        await task
+        assert attempts == [False]
+
+    asyncio.run(run())
+
+
+def test_partial_failure_throttles_normal_reads_but_allows_manual_retry(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import time
+    import todometry.web.api_components.dashboard_runtime as runtime
+
+    cache = _activity_cache_for_test(monkeypatch, tmp_path)
+    state = web_api._DashboardState()
+    state.df_activity = _single_event_df()
+    state.active_projects = []
+    state.project_colors = {}
+    state.last_refresh_s = time.time() - 3600
+    state.activity_cache_signature = web_api._activity_cache_signature()
+    monkeypatch.setattr(web_api, "_state", state)
+    attempts = []
+
+    def partial_failure(*, demo_mode):
+        attempts.append(demo_mode)
+        cache.activity.save({"new-event"})
+        raise ConnectionError("project fetch failed")
+
+    monkeypatch.setattr(web_api, "_refresh_state_sync", partial_failure)
+
+    async def run():
+        monkeypatch.setattr(web_api, "_STATE_LOCK", asyncio.Lock())
+        runtime._sync_api_globals()
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        assert state.refresh_task is not None
+        await state.refresh_task
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        await runtime._ensure_state(refresh=False, demo_mode=False)
+        assert attempts == [False]
+        assert "saved data" in state.last_refresh_error
+        # An explicit user refresh is deliberately not rate-limited.
+        await runtime._ensure_state(refresh=True, demo_mode=False)
+        assert attempts == [False, False]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "history_succeeds, contexts, expected_backfills",
+    [
+        (True, [("token-a", "cache-a", False)] * 2, 1),
+        (False, [("token-a", "cache-a", False)] * 2, 2),
+        (True, [("token-a", "cache-a", False), ("token-b", "cache-a", False)], 2),
+        (True, [("token-a", "cache-a", False), ("token-a", "cache-b", False)], 2),
+        (True, [("token-a", "cache-a", False), ("token-a", "cache-a", True)], 2),
+    ],
+)
+def test_history_backfill_attempt_survives_repeated_runtime_wrapper_calls(
+    monkeypatch, tmp_path, history_succeeds, contexts, expected_backfills
+):
+    from types import SimpleNamespace
+
+    _activity_cache_for_test(monkeypatch, tmp_path)
+    state = web_api._DashboardState()
+    monkeypatch.setattr(web_api, "_state", state)
+    token = ["token-a"]
+    monkeypatch.setattr(web_api, "_resolve_api_key", lambda: token[0])
+    monkeypatch.setattr(
+        web_api, "_run_async_in_main_loop", lambda coroutine: coroutine.close()
+    )
+    monkeypatch.setattr(web_api, "get_tqdm_progress_callback", lambda: None)
+    monkeypatch.setattr(web_api, "set_tqdm_progress_callback", lambda callback: None)
+
+    class ProjectFetchFails:
+        def __init__(self, _path):
+            pass
+
+        def fetch_projects_incrementally(self, _previous, _changed):
+            raise ConnectionError("projects unavailable after history sync")
+
+    monkeypatch.setattr(web_api, "Database", ProjectFetchFails)
+    monkeypatch.setattr(dashboard_runtime_component, "load_activity_cache", lambda: set())
+    monkeypatch.setattr(dashboard_runtime_component, "needs_activity_history", lambda _: True)
+    monkeypatch.setattr(
+        dashboard_runtime_component,
+        "sync_recent_activity",
+        lambda _db: SimpleNamespace(new_events=set(), events=set()),
+    )
+    backfills = []
+
+    def backfill(_db, **_kwargs):
+        backfills.append(True)
+        if not history_succeeds:
+            raise ConnectionError("history unavailable")
+        return SimpleNamespace(events=set())
+
+    monkeypatch.setattr(dashboard_runtime_component, "backfill_activity_history", backfill)
+    for current_token, cache_name, demo_mode in contexts:
+        token[0] = current_token
+        monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path / cache_name))
+        with pytest.raises(ConnectionError, match="projects unavailable"):
+            web_api._call_dashboard_runtime("_refresh_state_sync", demo_mode=demo_mode)
+    assert len(backfills) == expected_backfills
