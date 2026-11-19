@@ -57,10 +57,14 @@ async def hierarchy_playback(
     weeks: int = 12,
     beg: str | None = None,
     end: str | None = None,
+    cached_only: bool = False,
 ) -> dict[str, Any]:
     """Build cumulative hierarchy snapshots on demand for the selected period."""
     _sync_api_globals(globals())
-    await _ensure_state(refresh=False)
+    if cached_only:
+        await _ensure_state(refresh=False, cached_only=True)
+    else:
+        await _ensure_state(refresh=False)
     activity = _state.df_activity
     active_projects = _state.active_projects
     project_colors = _state.project_colors
@@ -185,6 +189,7 @@ async def dashboard_home(
     beg: str | None = None,
     end: str | None = None,
     refresh: bool = False,
+    cached_only: bool = False,
 ) -> dict[str, Any]:
     _sync_api_globals(globals())
     """
@@ -195,8 +200,12 @@ async def dashboard_home(
     - `beg`/`end` (YYYY-MM-DD) override `weeks` when provided.
     - `granularity` controls periodic aggregation where applicable.
     - `refresh=true` forces a Todoist API pull + activity reload (otherwise cached state is reused).
+    - `cached_only=true` serves a saved dashboard without contacting Todoist.
     """
-    await _ensure_state(refresh=refresh)
+    if cached_only:
+        await _ensure_state(refresh=False, cached_only=True)
+    else:
+        await _ensure_state(refresh=refresh)
 
     df_activity = _state.df_activity
     active_projects = _state.active_projects
@@ -339,10 +348,15 @@ async def dashboard_home(
         )
         events_over_time_fig = _apply_date_axis_viewport(
             plot_events_over_time(
-                df_activity, history_beg_range, end_range, granularity
+                df_activity,
+                beg_range if beg is not None else history_beg_range,
+                end_range,
+                granularity,
+                daily=beg is not None,
             ),
             beg=beg_range,
             end=end_range,
+            rangeslider=beg is None,
         )
         task_count_trend_fig = _apply_date_axis_viewport(
             plot_task_count_trend(
@@ -397,6 +411,9 @@ async def dashboard_home(
 
     payload = {
         "noData": no_data,
+        "rangeHasActivity": bool(
+            ((df_activity.index >= beg_range) & (df_activity.index < end_range)).any()
+        ),
         "range": {
             "beg": beg_label,
             "end": end_label,

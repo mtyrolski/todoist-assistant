@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import pandas as pd
@@ -64,34 +64,41 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 
 
 def plot_events_over_time(
-    df: pd.DataFrame, beg_date: datetime, end_date: datetime, _granularity: str
+    df: pd.DataFrame,
+    beg_date: datetime,
+    end_date: datetime,
+    _granularity: str,
+    *,
+    daily: bool = False,
 ) -> go.Figure:
-    """
-    Plot event volume as a stacked rolling-average area chart by activity type.
-    """
+    """Plot daily counts or a rolling average of events by activity type."""
 
-    df_filtered = df.loc[beg_date:end_date].copy()
-    date_range = pd.date_range(start=beg_date.date(), end=end_date.date(), freq="D")
+    df_filtered = df.loc[(df.index >= beg_date) & (df.index < end_date)]
+    last_day = (end_date - timedelta(microseconds=1)).date()
+    date_range = pd.date_range(start=beg_date.date(), end=last_day, freq="D")
     daily_counts = (
         df_filtered.groupby([pd.Grouper(freq="D"), "type"])
         .size()
         .unstack(fill_value=0)
         .reindex(index=date_range, columns=_ACTIVITY_TYPES, fill_value=0)
     )
-    rolling_averages = cast(
-        pd.DataFrame, daily_counts.rolling(window=7, min_periods=1).mean()
+    values = (
+        daily_counts
+        if daily
+        else cast(pd.DataFrame, daily_counts.rolling(window=7, min_periods=1).mean())
     )
+    count_label = "Events: %{y}" if daily else "Average: %{y:.1f} events/day"
 
     fig = go.Figure()
     for index, activity_type in enumerate(_ACTIVITY_TYPES):
-        if activity_type not in rolling_averages.columns:
+        if activity_type not in values.columns:
             continue
         label = _ACTIVITY_LABELS.get(activity_type, activity_type.capitalize())
         fig.add_trace(
             go.Scatter(
-                x=rolling_averages.index,
-                y=rolling_averages[activity_type],
-                mode="lines",
+                x=values.index,
+                y=values[activity_type],
+                mode="lines+markers" if len(date_range) == 1 else "lines",
                 name=label,
                 fill="tonexty" if index > 0 else "tozeroy",
                 line=dict(
@@ -104,7 +111,8 @@ def plot_events_over_time(
                 hovertemplate=(
                     f"<b>{label}</b><br>"
                     + "Date: %{x}<br>"
-                    + "Average: %{y:.1f} events/day<br>"
+                    + count_label
+                    + "<br>"
                     + "<extra></extra>"
                 ),
             )
@@ -112,9 +120,13 @@ def plot_events_over_time(
 
     fig.update_layout(
         template="plotly_dark",
-        title=_title("Events Over Time (7-Day Rolling Average by Activity Type)"),
+        title=_title(
+            "Recorded Activity by Day"
+            if daily
+            else "Events Over Time (7-Day Rolling Average by Activity Type)"
+        ),
         xaxis=_axis("Date"),
-        yaxis=_axis("Average Number of Events per Day"),
+        yaxis=_axis("Events per Day" if daily else "Average Number of Events per Day"),
         plot_bgcolor=_BACKGROUND_COLOR,
         paper_bgcolor=_BACKGROUND_COLOR,
         legend={
@@ -137,7 +149,7 @@ def plot_heatmap_of_events_by_day_and_hour(
 ) -> go.Figure:
     """Plot weekly/hourly activity density within the selected date range."""
 
-    df_filtered = df.loc[beg_date:end_date].copy()
+    df_filtered = df.loc[(df.index >= beg_date) & (df.index < end_date)].copy()
     if df_filtered.empty:
         fig = go.Figure()
         fig.update_layout(

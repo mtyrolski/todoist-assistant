@@ -11,6 +11,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
+from fastapi import HTTPException
+
 from todometry.core.types import Event, Project
 from todometry.core.utils import IncompatibleCacheError
 from todometry.database.base import Database
@@ -941,11 +943,27 @@ async def _refresh_cached_state(*, demo_mode: bool) -> None:
             _state.home_payload_cache.clear()
 
 
-async def _ensure_state(refresh: bool, *, demo_mode: bool | None = None) -> None:
+async def _ensure_state(
+    refresh: bool, *, demo_mode: bool | None = None, cached_only: bool = False
+) -> None:
     global _main_loop
     _main_loop = asyncio.get_running_loop()
     _state.main_loop = _main_loop
     desired_demo = _env_demo_mode() if demo_mode is None else demo_mode
+    if cached_only:
+        if _state.is_ready_for(
+            demo_mode=desired_demo,
+            activity_cache_signature=_state.activity_cache_signature,
+        ):
+            return
+        if not _STATE_LOCK.locked() and _load_state_from_disk_cache(
+            demo_mode=desired_demo
+        ):
+            return
+        raise HTTPException(
+            status_code=409,
+            detail="Saved history is unavailable. Sync Todoist from Overview first.",
+        )
     if refresh and _state.refresh_task is not None and not _state.refresh_task.done():
         await asyncio.shield(_state.refresh_task)
         if _state.demo_mode == desired_demo:

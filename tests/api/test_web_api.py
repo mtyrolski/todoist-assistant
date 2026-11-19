@@ -5,6 +5,7 @@ from typing import cast
 
 import pandas as pd
 import plotly.graph_objects as go
+import pytest
 
 from tests.factories import make_project, make_project_entry, make_task
 from tests.unit.database.helpers import make_event
@@ -226,6 +227,46 @@ def _save_dashboard_snapshot(cache: web_api.Cache, **overrides) -> None:
     }
     payload.update(overrides)
     cache.dashboard_state.save(payload)
+
+
+@pytest.mark.parametrize("source", ["memory", "disk", "missing"])
+def test_history_reads_saved_dashboard_without_sync(
+    monkeypatch, tmp_path, api_client, source
+) -> None:
+    cache = _dashboard_cache(monkeypatch, tmp_path)
+    state = web_api._DashboardState()
+    monkeypatch.setattr(web_api, "_state", state)
+    monkeypatch.setattr(web_api, "_env_demo_mode", lambda: False)
+    monkeypatch.setenv(str(web_api.EnvVar.PERSONAL_DIR), str(tmp_path / "personal"))
+    _stub_all_figures(monkeypatch)
+
+    def unexpected_sync(*args, **kwargs):
+        pytest.fail("History must not schedule or run a Todoist sync")
+
+    monkeypatch.setattr(dashboard_runtime, "_schedule_stale_state_refresh", unexpected_sync)
+    monkeypatch.setattr(web_api, "_refresh_state_sync", unexpected_sync)
+    if source == "memory":
+        _set_state_with_df(_single_event_df())
+    elif source == "disk":
+        _save_dashboard_snapshot(cache)
+
+    home = _home(api_client, "cached_only=true&refresh=true&beg=2025-01-15&end=2025-01-15")
+    playback = api_client.get(
+        "/api/dashboard/hierarchy-playback?cached_only=true&beg=2025-01-15&end=2025-01-15"
+    )
+    if source == "missing":
+        assert home.status_code == playback.status_code == 409
+        assert "Saved history is unavailable" in home.json()["detail"]
+        return
+
+    assert home.status_code == playback.status_code == 200
+    assert home.json()["rangeHasActivity"] is True
+    assert playback.json()["frames"]
+    without_activity = _home(
+        api_client, "cached_only=true&beg=2025-01-14&end=2025-01-14"
+    )
+    assert without_activity.status_code == 200
+    assert without_activity.json()["rangeHasActivity"] is False
 
 
 def test_load_state_from_disk_cache_restores_payload(monkeypatch, tmp_path) -> None:
