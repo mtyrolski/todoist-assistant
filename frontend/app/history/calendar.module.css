@@ -1,0 +1,74 @@
+.picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 280px);
+  gap: 24px;
+  padding: 20px;
+  margin-bottom: 20px;
+  max-width: 920px;
+}
+
+.picker h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.controls label, .range {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.calendar {
+  width: 100%;
+  table-layout: fixed;
+  border-spacing: 3px;
+  margin-top: 12px;
+}
+
+.calendar th {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0;
+}
+
+.calendar td { padding: 0; }
+
+.day, .period {
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.period, .day[data-outside="true"] { color: var(--muted); }
+.day[aria-current="date"] { text-decoration: underline; }
+.day[aria-pressed="true"] { background: rgba(106, 227, 255, 0.22); }
+.day:hover:not(:disabled), .period:hover:not(:disabled) { border-color: var(--accent); }
+.day:focus-visible, .period:focus-visible { outline: 2px solid var(--accent); }
+.day:disabled, .period:disabled { opacity: 0.35; cursor: default; }
+
+.shortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
+.range p { min-height: 2.5em; margin: 0; }
+
+@media (max-width: 900px) {
+  .picker { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 450px) {
+  .picker { padding: 10px; }
+  .controls button, .controls select { padding-inline: 6px; }
+  .calendar { border-spacing: 2px; }
+  .calendar th { font-size: 10px; }
+}

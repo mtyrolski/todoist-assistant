@@ -18,10 +18,12 @@ while recurring occurrences remain separate.
 
 - **Overview** shows completion trends, task lifespans, project contributions,
   priority counts and configurable attention alerts.
+- **Activity History** loads saved activity for a day, week, month, year or
+  custom date range when you select **Load charts**.
 - **Project Timeline** shows active and archived subprojects over time. Project
   Adjustments lets you correct their local hierarchy.
-- **Background refresh** updates cached dashboard data without blocking an
-  existing view; recent activity and older history can also be synced manually.
+- **Background refresh** can update stale data when Overview opens. Use
+  **Refresh** in Overview to sync again while staying on the page.
 - **Habit data** for tasks labelled `track_habit` is included in the dashboard
   API payload. This branch does not have a dedicated habit-tracking screen.
 - **Control Panel and Live Logs** provide local settings, status and log access.

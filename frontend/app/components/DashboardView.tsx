@@ -116,139 +116,22 @@ function buildHierarchyFigureLayout(figure: PlotlyFigure): Record<string, unknow
   };
 }
 
-function toDateInputValue(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-export function DashboardView({
-  setupActive = false,
-  tokenReady = false
-}: {
-  setupActive?: boolean;
-  tokenReady?: boolean;
-}) {
-  const { health, loadingHealth, error } = useApiHealth();
-  const {
-    dashboard,
-    loadingDashboard,
-    dashboardError,
-    progressDisplay,
-    retrying,
-    granularity,
-    setGranularity,
-    weeks,
-    setWeeks,
-    rangeMode,
-    setRangeMode,
-    customBeg,
-    setCustomBeg,
-    customEnd,
-    setCustomEnd,
-    refresh
-  } = useDashboardHome({ enabled: !setupActive });
-  const { status, loadingStatus } = useDashboardStatus();
-  const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
-  const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
-  const [lifespanRange, setLifespanRange] = useState<"all" | "period">("all");
+function HierarchyCard({ dashboard, height }: { dashboard: DashboardHome | null; height?: number }) {
   const [hierarchyFrames, setHierarchyFrames] = useState<HierarchyFrame[]>([]);
   const [hierarchyFrameIndex, setHierarchyFrameIndex] = useState(-1);
   const [hierarchyPlaying, setHierarchyPlaying] = useState(false);
   const [hierarchyLoading, setHierarchyLoading] = useState(false);
   const [hierarchyError, setHierarchyError] = useState<string | null>(null);
   const hierarchyRequest = useRef<AbortController | null>(null);
-  const focusMetricsRef = useRef<HTMLDivElement | null>(null);
-  const activityReady = Boolean(status?.activityCache);
-  const setupSteps = useMemo(() => {
-    return [
-      {
-        label: "Token connected",
-        hint: tokenReady ? "Validated and saved" : "Add your API token",
-        done: tokenReady
-      },
-      {
-        label: "Activity cache loaded",
-        hint: activityReady ? "Activity history ready" : "Fetching activity history",
-        done: activityReady
-      },
-    ];
-  }, [tokenReady, activityReady]);
-  const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
-  const setupChecklistActive = setupSteps.some((step) => !step.done);
-
-  const periodLabel = useMemo(() => {
-    if (!dashboard) return null;
-    return `${dashboard.range.beg} -> ${dashboard.range.end}`;
-  }, [dashboard]);
-  const customRangeInvalid = Boolean(customBeg && customEnd && customBeg > customEnd);
-  const customRangeSummary = useMemo(() => {
-    if (!customBeg && !customEnd) return "Pick a start and end date.";
-    if (!customBeg || !customEnd) return "Select both dates to apply custom range.";
-    if (customRangeInvalid) return "Start date should be before end date.";
-    const start = new Date(`${customBeg}T00:00:00`);
-    const end = new Date(`${customEnd}T00:00:00`);
-    const msInDay = 24 * 60 * 60 * 1000;
-    const days = Math.round((end.getTime() - start.getTime()) / msInDay) + 1;
-    return `${days} day${days === 1 ? "" : "s"} selected.`;
-  }, [customBeg, customEnd, customRangeInvalid]);
-  const refreshDisabled = loadingDashboard || (rangeMode === "custom" && customRangeInvalid);
-
-  const applyCustomPreset = (days: number) => {
-    const end = new Date();
-    const beg = new Date(end);
-    beg.setDate(end.getDate() - (days - 1));
-    setRangeMode("custom");
-    setCustomBeg(toDateInputValue(beg));
-    setCustomEnd(toDateInputValue(end));
-  };
-
-  const clearCustomRange = () => {
-    setCustomBeg("");
-    setCustomEnd("");
-  };
-
-  const noData = Boolean(dashboard?.noData);
-  const dashboardWithUrgency = dashboard as DashboardHomeWithUrgency | null;
-  const figures = dashboard?.figures ?? {};
-  const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
-  const parentBoard = lastWeek?.parentProjects?.items ?? null;
-  const rootBoard = lastWeek?.rootProjects?.items ?? null;
-  const metricsCurrentPeriod = dashboard?.metrics.currentPeriod ?? "";
-  const metricsPreviousPeriod = dashboard?.metrics.previousPeriod ?? "";
-  const healthLabel = loadingHealth ? "Checking API..." : health?.status === "ok" ? "API online" : "API offline";
-  const healthTone = health?.status === "ok" ? "good" : "warn";
-  const jumpTargets = [
-    { id: "insights", label: "Insights" },
-    { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
-    { id: "stats", label: "Focus" },
-    { id: "badges", label: "Badges" },
-    { id: "completed-tasks", label: "Completions" },
-    { id: "project-contribution", label: "Projects" },
-    { id: "events", label: "Events" },
-    { id: "projects", label: "Projects" },
-    { id: "ops", label: "Activity & Ops" }
-  ];
-  const insightItems = dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null);
-  const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
-  const urgencyStatus = dashboardWithUrgency?.urgencyStatus ?? null;
-  const urgencyConfigItem = dashboard?.configurableItems?.find((item) => item.key === "urgency") ?? null;
-  const focusMetricItems = metricItems.filter(
-    (item) => item && (item.name === "Completed Tasks" || item.name === "Rescheduled Tasks")
-  );
-  const secondaryMetricItems = metricItems.filter(
-    (item) => item && !focusMetricItems.some((focus) => focus?.name === item.name) && item.name !== "Events" && item.name !== "Added Tasks"
-  );
-  const activeProjectHierarchyFigure = figures.activeProjectHierarchy ?? null;
+  const activeProjectHierarchyFigure = dashboard?.figures.activeProjectHierarchy ?? null;
   const hierarchyRangeKey = `${dashboard?.range.mode ?? ""}:${dashboard?.range.weeks ?? ""}:${dashboard?.range.beg ?? ""}:${dashboard?.range.end ?? ""}:${dashboard?.refreshedAt ?? ""}`;
   useEffect(() => {
-    hierarchyRequest.current?.abort();
     setHierarchyFrames([]);
     setHierarchyFrameIndex(-1);
     setHierarchyPlaying(false);
     setHierarchyLoading(false);
     setHierarchyError(null);
+    return () => hierarchyRequest.current?.abort();
   }, [hierarchyRangeKey]);
 
   useEffect(() => {
@@ -278,11 +161,13 @@ export function DashboardView({
       const params = dashboard.range.mode === "custom"
         ? new URLSearchParams({ beg: dashboard.range.beg, end: dashboard.range.end })
         : new URLSearchParams({ weeks: String(dashboard.range.weeks) });
+      params.set("cached_only", "true");
       const response = await fetch(`/api/dashboard/hierarchy-playback?${params}`, { signal: controller.signal });
       if (!response.ok) throw new Error(`Playback request failed (${response.status})`);
       const payload = await response.json() as { frames?: HierarchyFrame[]; error?: string };
       if (payload.error) throw new Error(payload.error);
       if (!payload.frames?.length) throw new Error("No hierarchy snapshots available");
+      if (controller.signal.aborted) return;
       setHierarchyFrames(payload.frames);
       setHierarchyFrameIndex(0);
       setHierarchyPlaying(true);
@@ -296,6 +181,176 @@ export function DashboardView({
   };
   const hierarchyFrame = hierarchyFrameIndex >= 0 ? hierarchyFrames[hierarchyFrameIndex] : null;
   const displayedHierarchyFigure = hierarchyFrame?.figure ?? activeProjectHierarchyFigure;
+  return (
+    <section className="card cardFillHeight hierarchyCard">
+      <header className="cardHeader hierarchyCardHeader">
+        <div className="hierarchyCardHeaderTop">
+          <div className="cardTitleRow">
+            <h2>Project Hierarchy</h2>
+            <InfoTip label="About project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
+          </div>
+          <div className="hierarchyPlaybackControls">
+            {hierarchyFrame ? <span className="muted tiny">Through {hierarchyFrame.date}</span> : null}
+            {hierarchyPlaying ? (
+              <button className="button buttonSmall" type="button" onClick={() => setHierarchyPlaying(false)}>Pause</button>
+            ) : (
+              <button className="button buttonSmall" type="button" onClick={startHierarchyPlayback} disabled={hierarchyLoading || !activeProjectHierarchyFigure}>
+                {hierarchyLoading ? "Preparing…" : hierarchyFrameIndex >= 0 && hierarchyFrameIndex < hierarchyFrames.length - 1 ? "Resume" : hierarchyFrameIndex >= 0 ? "Replay" : "Play history"}
+              </button>
+            )}
+            {hierarchyFrame ? (
+              <button className="button buttonSmall buttonGhost" type="button" onClick={() => { setHierarchyPlaying(false); setHierarchyFrameIndex(-1); }}>Current</button>
+            ) : null}
+          </div>
+        </div>
+        {hierarchyFrames.length > 1 ? (
+          <input
+            className="hierarchyPlaybackSlider"
+            type="range"
+            min={0}
+            max={hierarchyFrames.length - 1}
+            value={Math.max(0, hierarchyFrameIndex)}
+            aria-label="Hierarchy playback date"
+            onChange={(event) => { setHierarchyPlaying(false); setHierarchyFrameIndex(Number(event.target.value)); }}
+          />
+        ) : null}
+        {hierarchyError ? <p className="muted tiny" role="alert">{hierarchyError}</p> : null}
+        <p className="muted hierarchyCardLead">
+          Sunburst view of completed tasks across active and archived projects, assigned to their effective parent.
+        </p>
+      </header>
+      <div className="cardBody cardBodyFill hierarchyCardBody">
+        <div className="hierarchyPlotStage" style={{ minHeight: height }}>
+          {!displayedHierarchyFigure ? (
+            <div className="skeleton hierarchyPlotSkeleton" />
+          ) : (
+            <Plot
+              data={displayedHierarchyFigure.data as PlotParams["data"]}
+              layout={{ ...buildHierarchyFigureLayout(displayedHierarchyFigure), transition: { duration: hierarchyPlaying ? 550 : 0, easing: "cubic-in-out" } }}
+              config={{
+                displayModeBar: true,
+                responsive: true,
+                scrollZoom: true,
+                doubleClick: "reset+autosize"
+              }}
+              useResizeHandler
+              style={{ width: "100%", height: "100%" }}
+            />
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function HistoryDashboard({ range }: { range: { beg: string; end: string } }) {
+  const { dashboard, loadingDashboard, dashboardError } = useDashboardHome({ historyRange: range });
+  const figures = dashboard?.figures;
+  const charts = [
+    { title: "Recorded activity by day", figure: figures?.eventsOverTime, interactive: true },
+    { title: "Events by weekday and hour", figure: figures?.heatmapEventsByDayHour },
+    { title: "Time to completion", figure: figures?.taskLifespansPeriod }
+  ];
+
+  return (
+    <section className="stack" aria-label="History results" aria-busy={loadingDashboard}>
+      {loadingDashboard && <p role="status">Loading saved activity…</p>}
+      {dashboardError && <p role="alert">{dashboardError}</p>}
+      {dashboard && (
+        <>
+          <h2>{dashboard.range.beg} → {dashboard.range.end}</h2>
+          {dashboard.noData || dashboard.rangeHasActivity === false ? (
+            <p className="muted">No recorded activity in this period. Your local history may be incomplete.</p>
+          ) : (
+            <>
+              {figures?.activeProjectHierarchy && <HierarchyCard dashboard={dashboard} height={420} />}
+              {charts.map((chart) => chart.figure && <PlotCard key={chart.title} height={420} {...chart} />)}
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+export function DashboardView({
+  setupActive = false,
+  tokenReady = false
+}: {
+  setupActive?: boolean;
+  tokenReady?: boolean;
+}) {
+  const { health, loadingHealth, error } = useApiHealth();
+  const {
+    dashboard,
+    loadingDashboard,
+    dashboardError,
+    progressDisplay,
+    retrying,
+    granularity,
+    setGranularity,
+    weeks,
+    setWeeks,
+    refresh
+  } = useDashboardHome({ enabled: !setupActive });
+  const { status, loadingStatus } = useDashboardStatus();
+  const { label: syncLabel, title: syncTitle } = useSyncLabel(status);
+  const [focusMetricsHeight, setFocusMetricsHeight] = useState<number | null>(null);
+  const [lifespanRange, setLifespanRange] = useState<"all" | "period">("all");
+  const focusMetricsRef = useRef<HTMLDivElement | null>(null);
+  const activityReady = Boolean(status?.activityCache);
+  const setupSteps = useMemo(() => {
+    return [
+      {
+        label: "Token connected",
+        hint: tokenReady ? "Validated and saved" : "Add your API token",
+        done: tokenReady
+      },
+      {
+        label: "Activity cache loaded",
+        hint: activityReady ? "Activity history ready" : "Fetching activity history",
+        done: activityReady
+      },
+    ];
+  }, [tokenReady, activityReady]);
+  const firstIncompleteSetup = useMemo(() => setupSteps.findIndex((step) => !step.done), [setupSteps]);
+
+  const periodLabel = useMemo(() => {
+    if (!dashboard) return null;
+    return `${dashboard.range.beg} -> ${dashboard.range.end}`;
+  }, [dashboard]);
+  const noData = Boolean(dashboard?.noData);
+  const dashboardWithUrgency = dashboard as DashboardHomeWithUrgency | null;
+  const figures = dashboard?.figures ?? {};
+  const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
+  const parentBoard = lastWeek?.parentProjects?.items ?? null;
+  const rootBoard = lastWeek?.rootProjects?.items ?? null;
+  const metricsCurrentPeriod = dashboard?.metrics.currentPeriod ?? "";
+  const metricsPreviousPeriod = dashboard?.metrics.previousPeriod ?? "";
+  const apiOnline = health?.status === "ok" && !error;
+  const healthLabel = apiOnline ? "API online" : loadingHealth && !health ? "Checking API..." : "API offline";
+  const healthTone = apiOnline ? "good" : "warn";
+  const jumpTargets = [
+    { id: "insights", label: "Insights" },
+    { id: "weekly-trend-lifespans", label: "Trend + Lifespans" },
+    { id: "stats", label: "Focus" },
+    { id: "badges", label: "Badges" },
+    { id: "completed-tasks", label: "Completions" },
+    { id: "project-contribution", label: "Projects" },
+    { id: "events", label: "Events" },
+    { id: "projects", label: "Projects" },
+    { id: "ops", label: "Activity & Ops" }
+  ];
+  const insightItems = dashboard?.insights?.items ?? Array.from({ length: 4 }).map(() => null);
+  const metricItems = dashboard?.metrics.items ?? Array.from({ length: 4 }).map(() => null);
+  const urgencyStatus = dashboardWithUrgency?.urgencyStatus ?? null;
+  const urgencyConfigItem = dashboard?.configurableItems?.find((item) => item.key === "urgency") ?? null;
+  const focusMetricItems = metricItems.filter(
+    (item) => item && (item.name === "Completed Tasks" || item.name === "Rescheduled Tasks")
+  );
+  const secondaryMetricItems = metricItems.filter(
+    (item) => item && !focusMetricItems.some((focus) => focus?.name === item.name) && item.name !== "Events" && item.name !== "Added Tasks"
+  );
   useEffect(() => {
     const metricsNode = focusMetricsRef.current;
     if (!metricsNode) return;
@@ -425,13 +480,11 @@ export function DashboardView({
   ];
 
   const showSyncOverlay =
-    !setupActive &&
-    (retrying ||
-      (!dashboard && (setupChecklistActive || loadingDashboard || progressDisplay?.active)));
+    !setupActive && !dashboard && (retrying || loadingDashboard || progressDisplay?.active);
 
   return (
     <div>
-      <LoadingBar active={loadingDashboard || loadingStatus} />
+      <LoadingBar active={!dashboard && (loadingDashboard || loadingStatus)} />
       {showSyncOverlay ? (
         <div className="firstSyncOverlay" role="status" aria-live="polite">
           <div className="firstSyncPanel">
@@ -504,102 +557,28 @@ export function DashboardView({
           </div>
 
           <div className="control">
-            <div className="muted tiny">Time range</div>
-            <div className="segmented">
-              <button
-                type="button"
-                className={`seg ${rangeMode === "rolling" ? "segActive" : ""}`}
-                onClick={() => setRangeMode("rolling")}
-              >
-                Rolling
-              </button>
-              <button
-                type="button"
-                className={`seg ${rangeMode === "custom" ? "segActive" : ""}`}
-                onClick={() => setRangeMode("custom")}
-              >
-                Custom
-              </button>
-            </div>
+            <label className="muted tiny" htmlFor="range-select">
+              Range
+            </label>
+            <select
+              id="range-select"
+              value={weeks}
+              onChange={(e) => setWeeks(Number(e.target.value))}
+              className="select"
+            >
+              <option value={4}>Last 4 weeks</option>
+              <option value={12}>Last 12 weeks</option>
+              <option value={26}>Last 26 weeks</option>
+              <option value={52}>Last 52 weeks</option>
+            </select>
           </div>
-
-          {rangeMode === "rolling" ? (
-            <div className="control">
-              <label className="muted tiny" htmlFor="range-select">
-                Range
-              </label>
-              <select
-                id="range-select"
-                value={weeks}
-                onChange={(e) => setWeeks(Number(e.target.value))}
-                className="select"
-              >
-                <option value={4}>Last 4 weeks</option>
-                <option value={12}>Last 12 weeks</option>
-                <option value={26}>Last 26 weeks</option>
-                <option value={52}>Last 52 weeks</option>
-              </select>
-            </div>
-          ) : (
-            <div className="control controlCustomRange">
-              <label className="muted tiny" htmlFor="beg-input">
-                Custom range
-              </label>
-              <div className={`customRangePanel ${customRangeInvalid ? "customRangePanelInvalid" : ""}`}>
-                <div className="customRangeQuick">
-                  {[7, 14, 30, 90].map((days) => (
-                    <button
-                      key={days}
-                      type="button"
-                      className="customRangeChip"
-                      onClick={() => applyCustomPreset(days)}
-                    >
-                      Last {days}d
-                    </button>
-                  ))}
-                  <button type="button" className="customRangeChip customRangeChipGhost" onClick={clearCustomRange}>
-                    Clear
-                  </button>
-                </div>
-                <div className="customRangeFields">
-                  <label className="customRangeField" htmlFor="beg-input">
-                    <span className="customRangeFieldLabel">From</span>
-                    <input
-                      id="beg-input"
-                      className="dateInput"
-                      type="date"
-                      value={customBeg}
-                      onChange={(e) => setCustomBeg(e.target.value)}
-                    />
-                  </label>
-                  <span className="customRangeDivider" aria-hidden>
-                    →
-                  </span>
-                  <label className="customRangeField" htmlFor="end-input">
-                    <span className="customRangeFieldLabel">To</span>
-                    <input
-                      id="end-input"
-                      className="dateInput"
-                      type="date"
-                      value={customEnd}
-                      onChange={(e) => setCustomEnd(e.target.value)}
-                    />
-                  </label>
-                </div>
-                <p className={`customRangeMeta ${customRangeInvalid ? "customRangeMetaWarn" : ""}`}>
-                  {customRangeSummary}
-                </p>
-              </div>
-            </div>
-          )}
-          <button className="button" onClick={refresh} disabled={refreshDisabled}>
+          <Link className="button buttonGhost" href="/history">Browse activity history</Link>
+          <button className="button" onClick={refresh} disabled={loadingDashboard}>
             {loadingDashboard ? "Loading..." : "Refresh"}
           </button>
           {dashboard?.refreshedAt && <p className="muted tiny">Updated {dashboard.refreshedAt}</p>}
         </div>
       </header>
-
-      {showSyncOverlay ? null : <ProgressSteps progress={progressDisplay} />}
 
       {!noData ? (
         <nav className="jumpNav" aria-label="Jump to sections">
@@ -792,64 +771,7 @@ export function DashboardView({
             className="overviewPlotColumn jumpTarget"
             style={focusMetricsHeight ? { height: `${focusMetricsHeight}px` } : undefined}
           >
-            <section className="card cardFillHeight hierarchyCard">
-              <header className="cardHeader hierarchyCardHeader">
-                <div className="hierarchyCardHeaderTop">
-                  <div className="cardTitleRow">
-                    <h2>Project Hierarchy</h2>
-                    <InfoTip label="About project hierarchy" content={PLOT_HELP.activeProjectHierarchy} />
-                  </div>
-                  <div className="hierarchyPlaybackControls">
-                    {hierarchyFrame ? <span className="muted tiny">Through {hierarchyFrame.date}</span> : null}
-                    {hierarchyPlaying ? (
-                      <button className="button buttonSmall" type="button" onClick={() => setHierarchyPlaying(false)}>Pause</button>
-                    ) : (
-                      <button className="button buttonSmall" type="button" onClick={startHierarchyPlayback} disabled={hierarchyLoading || !activeProjectHierarchyFigure}>
-                        {hierarchyLoading ? "Preparing…" : hierarchyFrameIndex >= 0 && hierarchyFrameIndex < hierarchyFrames.length - 1 ? "Resume" : hierarchyFrameIndex >= 0 ? "Replay" : "Play history"}
-                      </button>
-                    )}
-                    {hierarchyFrame ? (
-                      <button className="button buttonSmall buttonGhost" type="button" onClick={() => { setHierarchyPlaying(false); setHierarchyFrameIndex(-1); }}>Current</button>
-                    ) : null}
-                  </div>
-                </div>
-                {hierarchyFrames.length > 1 ? (
-                  <input
-                    className="hierarchyPlaybackSlider"
-                    type="range"
-                    min={0}
-                    max={hierarchyFrames.length - 1}
-                    value={Math.max(0, hierarchyFrameIndex)}
-                    aria-label="Hierarchy playback date"
-                    onChange={(event) => { setHierarchyPlaying(false); setHierarchyFrameIndex(Number(event.target.value)); }}
-                  />
-                ) : null}
-                {hierarchyError ? <p className="muted tiny" role="alert">{hierarchyError}</p> : null}
-                <p className="muted hierarchyCardLead">
-                  Sunburst view of completed tasks across active and archived projects, assigned to their effective parent.
-                </p>
-              </header>
-              <div className="cardBody cardBodyFill hierarchyCardBody">
-                <div className="hierarchyPlotStage">
-                  {!displayedHierarchyFigure ? (
-                    <div className="skeleton hierarchyPlotSkeleton" />
-                  ) : (
-                    <Plot
-                      data={displayedHierarchyFigure.data as PlotParams["data"]}
-                      layout={{ ...buildHierarchyFigureLayout(displayedHierarchyFigure), transition: { duration: hierarchyPlaying ? 550 : 0, easing: "cubic-in-out" } }}
-                      config={{
-                        displayModeBar: true,
-                        responsive: true,
-                        scrollZoom: true,
-                        doubleClick: "reset+autosize"
-                      }}
-                      useResizeHandler
-                      style={{ width: "100%", height: "100%" }}
-                    />
-                  )}
-                </div>
-              </div>
-            </section>
+            <HierarchyCard dashboard={dashboard} />
           </div>
         </section>
       ) : null}

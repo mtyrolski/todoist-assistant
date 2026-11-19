@@ -45,19 +45,15 @@ export function useApiHealth(pollMs = 10_000) {
 }
 
 export function useDashboardHome({
-  defaultGranularity = "W",
-  defaultWeeks = 12,
+  historyRange,
   enabled = true
 }: {
-  defaultGranularity?: Granularity;
-  defaultWeeks?: number;
+  historyRange?: { beg: string; end: string };
   enabled?: boolean;
 } = {}) {
-  const [granularity, setGranularity] = useState<Granularity>(defaultGranularity);
-  const [weeks, setWeeks] = useState<number>(defaultWeeks);
-  const [rangeMode, setRangeMode] = useState<"rolling" | "custom">("rolling");
-  const [customBeg, setCustomBeg] = useState<string>("");
-  const [customEnd, setCustomEnd] = useState<string>("");
+  const [granularity, setGranularity] = useState<Granularity>("W");
+  const [weeks, setWeeks] = useState(12);
+  const { beg, end } = historyRange ?? {};
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
   const lastRefreshNonce = useRef<number>(0);
   const [retryNonce, setRetryNonce] = useState<number>(0);
@@ -89,14 +85,16 @@ export function useDashboardHome({
         const shouldRefresh = refreshNonce !== lastRefreshNonce.current;
         lastRefreshNonce.current = refreshNonce;
         const qs = new URLSearchParams({ granularity, refresh: shouldRefresh ? "true" : "false" });
-        if (rangeMode === "custom" && customBeg && customEnd) {
-          qs.set("beg", customBeg);
-          qs.set("end", customEnd);
+        if (beg || (!shouldRefresh && lastDashboard.current)) qs.set("cached_only", "true");
+        if (beg && end) {
+          qs.set("beg", beg);
+          qs.set("end", end);
         } else {
           qs.set("weeks", String(weeks));
         }
         const res = await fetch(`/api/dashboard/home?${qs.toString()}`, { signal: controller.signal });
         const payload = await readJson<DashboardHome>(res);
+        if (controller.signal.aborted) return;
         if (!res.ok || payload.error) {
           const detail = payload.error ?? (payload as unknown as { detail?: string })?.detail;
           throw new Error(detail ?? `Failed to load dashboard (${res.status})`);
@@ -110,11 +108,9 @@ export function useDashboardHome({
           retryTimer.current = null;
         }
       } catch (e) {
-        if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
-          return;
-        }
+        if (controller.signal.aborted) return;
         const message = e instanceof Error ? e.message : "Failed to load dashboard";
-        if (isRetryableFetchError(message) && retryAttempts.current < DASHBOARD_RETRY_LIMIT) {
+        if (!beg && !lastDashboard.current && isRetryableFetchError(message) && retryAttempts.current < DASHBOARD_RETRY_LIMIT) {
           retryAttempts.current += 1;
           setRetrying(true);
           setDashboardError("Dashboard API is starting. Retrying shortly...");
@@ -129,44 +125,29 @@ export function useDashboardHome({
         setRetrying(false);
         setDashboardError(lastDashboard.current ? `${message}. Showing the last loaded view.` : message);
       } finally {
-        setLoadingDashboard(false);
+        if (!controller.signal.aborted) setLoadingDashboard(false);
       }
     };
-    load();
-    return () => controller.abort();
-  }, [enabled, granularity, weeks, rangeMode, customBeg, customEnd, refreshNonce, retryNonce]);
-
-  useEffect(() => {
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void load();
+    });
     return () => {
+      controller.abort();
       if (retryTimer.current) {
         clearTimeout(retryTimer.current);
         retryTimer.current = null;
       }
     };
-  }, []);
+  }, [enabled, granularity, weeks, historyRange, beg, end, refreshNonce, retryNonce]);
 
   useEffect(() => {
-    if (!enabled) return;
-    const refreshVisible = () => {
-      if (!document.hidden) setRetryNonce((value) => value + 1);
-    };
-    const interval = setInterval(refreshVisible, 60_000);
-    window.addEventListener("focus", refreshVisible);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", refreshVisible);
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled || !dashboard?.refreshing || loadingDashboard) return;
+    if (!enabled || beg || !dashboard?.refreshing || loadingDashboard || dashboardError) return;
     const timer = setTimeout(() => setRetryNonce((value) => value + 1), 2000);
     return () => clearTimeout(timer);
-  }, [enabled, dashboard?.refreshing, loadingDashboard]);
+  }, [enabled, beg, dashboard?.refreshing, loadingDashboard, dashboardError]);
 
-  const shouldPollProgress = enabled && (
-    loadingDashboard || retrying || Boolean(dashboard?.refreshing) || (!dashboard && !dashboardError)
-  );
+  const shouldPollProgress = enabled && !beg && !dashboard &&
+    (loadingDashboard || retrying || !dashboardError);
 
   useEffect(() => {
     if (!shouldPollProgress) {
@@ -226,12 +207,6 @@ export function useDashboardHome({
     setGranularity,
     weeks,
     setWeeks,
-    rangeMode,
-    setRangeMode,
-    customBeg,
-    setCustomBeg,
-    customEnd,
-    setCustomEnd,
     refresh
   };
 }
