@@ -9,6 +9,7 @@ declare module "react-plotly.js" {
     useResizeHandler?: boolean;
     style?: React.CSSProperties;
     className?: string;
+    onRelayout?: (changes: Record<string, unknown>) => void;
   };
 
   const Plot: React.ComponentType<PlotParams>;

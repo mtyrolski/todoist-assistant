@@ -2,7 +2,7 @@
 
 import type { PlotParams } from "react-plotly.js";
 import { Plot } from "./Plot";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { InfoTip } from "./InfoTip";
 
 export type PlotlyFigure = {
@@ -19,7 +19,8 @@ export function PlotCard({
   legendContent,
   height = 420,
   interactive = false,
-  compact = false
+  compact = false,
+  persistViewport = false
 }: {
   title: string;
   figure: PlotlyFigure | null | undefined;
@@ -29,9 +30,30 @@ export function PlotCard({
   height?: number | string;
   interactive?: boolean;
   compact?: boolean;
+  persistViewport?: boolean;
 }) {
   const numericHeight = typeof height === "number" ? height : undefined;
   const fillHeight = typeof height === "string" && !numericHeight;
+  const viewport = useRef<Partial<Record<"xaxis" | "yaxis", {
+    autorange: boolean;
+    range?: unknown[];
+  }>>>({});
+
+  function rememberViewport(changes: Record<string, unknown>) {
+    for (const axis of ["xaxis", "yaxis"] as const) {
+      if (changes[`${axis}.autorange`] === true) {
+        viewport.current[axis] = { autorange: true, range: undefined };
+        continue;
+      }
+      const range = changes[`${axis}.range`];
+      const start = changes[`${axis}.range[0]`];
+      const end = changes[`${axis}.range[1]`];
+      if (Array.isArray(range)) viewport.current[axis] = { autorange: false, range };
+      else if (start !== undefined && end !== undefined) {
+        viewport.current[axis] = { autorange: false, range: [start, end] };
+      }
+    }
+  }
 
   return (
     <section
@@ -56,12 +78,19 @@ export function PlotCard({
         ) : (
           <Plot
             data={figure.data as PlotParams["data"]}
+            onRelayout={persistViewport ? rememberViewport : undefined}
             layout={(() => {
               const { title: _title, height: _height, ...baseLayout } = figure.layout ?? {};
               const layoutRecord = baseLayout as Record<string, unknown>;
               const margin = (layoutRecord.margin ?? {}) as Record<string, unknown>;
-              const xaxis = (layoutRecord.xaxis ?? {}) as Record<string, unknown>;
-              const yaxis = (layoutRecord.yaxis ?? {}) as Record<string, unknown>;
+              // A fresh figure can contain new default bounds. Keep any bounds
+              // or Autoscale mode the user has applied to this plot.
+              const xaxis: Record<string, unknown> = {
+                ...(layoutRecord.xaxis as Record<string, unknown>), ...viewport.current.xaxis
+              };
+              const yaxis: Record<string, unknown> = {
+                ...(layoutRecord.yaxis as Record<string, unknown>), ...viewport.current.yaxis
+              };
               const legend = (layoutRecord.legend ?? {}) as Record<string, unknown>;
 
               const toNumber = (value: unknown, fallback: number): number =>

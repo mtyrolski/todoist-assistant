@@ -53,6 +53,78 @@ test("a background sync updates the visible counts when it finishes", async ({ p
   expect(followupMode).toBe("true");
 });
 
+test("Autoscale survives a background sync and a new period resets the chart", async ({ page }) => {
+  const initialRange = ["2026-10-01", "2026-11-01"];
+  const syncedRange = ["2026-10-02", "2026-11-02"];
+  const selectedRange = ["2026-05-04", "2026-11-02"];
+  let finishSync!: () => void;
+  const sync = new Promise<void>((resolve) => { finishSync = resolve; });
+
+  await page.route("**/api/dashboard/home?**", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const selected = params.get("weeks") === "26";
+    const refreshed = params.get("cached_only") === "true";
+    if (refreshed) await sync;
+    const range = selected ? selectedRange : refreshed ? syncedRange : initialRange;
+    return route.fulfill({ json: {
+      ...home,
+      refreshing: !refreshed,
+      range: { ...home.range, weeks: selected ? 26 : 12, beg: range[0], end: range[1] },
+      figures: {
+        completedTasksPeriodically: {
+          data: [{
+            type: "scatter",
+            mode: "lines",
+            x: ["2024-06-01", "2026-06-01", "2026-10-26"],
+            y: [1, 2, refreshed ? 4 : 3]
+          }],
+          layout: { xaxis: { type: "date", range } }
+        }
+      }
+    } });
+  });
+  const chart = page.getByRole("region", { name: "Periodically Completed Tasks Per Project", exact: true });
+  const plot = chart.locator(".js-plotly-plot");
+  const chartState = () => plot.evaluateAll(([node]) => {
+    const graph = node as (HTMLElement & {
+      data?: { y: number[] }[];
+      _fullLayout?: { xaxis: { autorange: boolean; range: string[] } };
+    }) | undefined;
+    const axis = graph?._fullLayout?.xaxis;
+    if (!axis) return null;
+    return {
+      auto: axis.autorange,
+      range: axis.range.map((date) => date.slice(0, 10)),
+      lastCount: graph?.data?.[0]?.y.at(-1)
+    };
+  });
+
+  try {
+    const backgroundRead = page.waitForRequest((request) =>
+      request.url().includes("/api/dashboard/home?") &&
+      new URL(request.url()).searchParams.get("cached_only") === "true"
+    );
+    await page.goto("/");
+    await backgroundRead;
+    const autoscale = chart.locator('[data-title="Autoscale"]');
+    await expect(autoscale).toBeAttached();
+    await plot.hover();
+    await expect.poll(chartState).toMatchObject({ auto: false, range: initialRange, lastCount: 3 });
+    await autoscale.click();
+    await expect.poll(chartState).toMatchObject({ auto: true, lastCount: 3 });
+    const expandedRange = (await chartState())!.range;
+    expect(Date.parse(expandedRange[0])).toBeLessThanOrEqual(Date.UTC(2024, 5, 1));
+
+    finishSync();
+    await expect.poll(chartState).toMatchObject({ auto: true, range: expandedRange, lastCount: 4 });
+
+    await page.getByLabel("Range", { exact: true }).selectOption("26");
+    await expect.poll(chartState).toMatchObject({ auto: false, range: selectedRange, lastCount: 4 });
+  } finally {
+    finishSync();
+  }
+});
+
 test("idle Overview keeps its snapshot when time passes and the window regains focus", async ({ page }) => {
   await page.clock.install();
   let reads = 0;

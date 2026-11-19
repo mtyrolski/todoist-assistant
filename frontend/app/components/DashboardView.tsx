@@ -264,7 +264,9 @@ export function HistoryDashboard({ range }: { range: { beg: string; end: string 
           ) : (
             <>
               {figures?.activeProjectHierarchy && <HierarchyCard dashboard={dashboard} height={420} />}
-              {charts.map((chart) => chart.figure && <PlotCard key={chart.title} height={420} {...chart} />)}
+              {charts.map((chart) => chart.figure && (
+                <PlotCard key={`${chart.title}:${dashboard.range.beg}:${dashboard.range.end}`} height={420} persistViewport {...chart} />
+              ))}
             </>
           )}
         </>
@@ -322,6 +324,7 @@ export function DashboardView({
   const noData = Boolean(dashboard?.noData);
   const dashboardWithUrgency = dashboard as DashboardHomeWithUrgency | null;
   const figures = dashboard?.figures ?? {};
+  const plotScope = `${dashboard?.range.weeks ?? weeks}:${dashboard?.range.granularity ?? granularity}`;
   const lastWeek = dashboard?.leaderboards?.lastCompletedWeek ?? null;
   const parentBoard = lastWeek?.parentProjects?.items ?? null;
   const rootBoard = lastWeek?.rootProjects?.items ?? null;
@@ -636,7 +639,7 @@ export function DashboardView({
       {!noData ? (
         <section id="weekly-trend-lifespans" className="grid2 jumpTarget" aria-label="Weekly trend and task lifespans">
           {labelPlots.map((plot) => (
-            <PlotCard key={plot.title} {...plot} />
+            <PlotCard key={`${plot.title}:${plotScope}:${lifespanRange}`} persistViewport {...plot} />
           ))}
         </section>
       ) : null}
@@ -795,7 +798,7 @@ export function DashboardView({
       {!noData ? (
         <section id="completed-tasks" className="stack jumpTarget" aria-label="Completed tasks per project">
           {completionPlots.map((plot) => (
-            <PlotCard key={plot.title} {...plot} />
+            <PlotCard key={`${plot.title}:${plotScope}`} persistViewport {...plot} />
           ))}
         </section>
       ) : null}
@@ -817,12 +820,14 @@ export function DashboardView({
       {!noData ? (
         <section id="events" className="stack jumpTarget" aria-label="Event trends">
           {eventPlots.map((plot) => (
-            <PlotCard key={plot.title} {...plot} />
+            <PlotCard key={`${plot.title}:${plotScope}`} persistViewport {...plot} />
           ))}
           <PlotCard
+            key={plotScope}
             title="Active Tasks by Priority"
             figure={figures.taskCountTrend}
             height={420}
+            persistViewport
             help={PLOT_HELP.taskCountTrend}
           />
         </section>
