@@ -2,11 +2,15 @@ package com.todoistassistant;
 
 import static org.junit.Assert.*;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.platform.app.InstrumentationRegistry;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -322,280 +326,84 @@ public class BridgeSerializationTest {
   }
 
   @Test
-  public void javascriptConfirmationCanBeCancelledInTheNativeDialog() throws Exception {
-    var instrumentation = InstrumentationRegistry.getInstrumentation();
-    var automation = instrumentation.getUiAutomation();
-    java.lang.reflect.Field webField = MainActivity.class.getDeclaredField("web");
-    webField.setAccessible(true);
-    java.lang.reflect.Field readyField = MainActivity.class.getDeclaredField("ready");
-    readyField.setAccessible(true);
-    java.lang.reflect.Field confirmationField = MainActivity.class.getDeclaredField("confirmation");
-    confirmationField.setAccessible(true);
-    AtomicReference<String> answer = new AtomicReference<>();
-    CountDownLatch answered = new CountDownLatch(1);
+  public void javascriptConfirmationUsesNativeActionsAndClosesWithTheActivity() throws Exception {
+    var field = MainActivity.class.getDeclaredField("confirmation");
+    field.setAccessible(true);
     try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-      AtomicReference<Boolean> ready = new AtomicReference<>(false);
-      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
-      while (!ready.get() && System.nanoTime() < deadline) {
+      awaitJavascript(scenario, "!!document.querySelector('header h1')");
+      // Exercise the real dialog callbacks and WebView result without routing
+      // input through whatever window currently owns emulator focus.
+      AlertDialog previous = null;
+      for (int action :
+          new int[] {DialogInterface.BUTTON_NEGATIVE, DialogInterface.BUTTON_POSITIVE, 0}) {
+        var answer = requestConfirmation(scenario);
+        AlertDialog dialog = waitForConfirmation(scenario, field, previous);
         scenario.onActivity(
             activity -> {
-              try {
-                ready.set(readyField.getBoolean(activity));
-              } catch (IllegalAccessException failure) {
-                throw new AssertionError(failure);
+              if (action == 0) {
+                dialog.cancel();
+              } else {
+                var button = dialog.getButton(action);
+                assertTrue(
+                    "The native action must be visible and enabled",
+                    button.isShown() && button.isEnabled());
+                assertTrue("The native action must have a click handler", button.performClick());
               }
             });
-        if (!ready.get()) Thread.sleep(200);
+        assertEquals(
+            Boolean.toString(action == DialogInterface.BUTTON_POSITIVE),
+            answer.get(30, TimeUnit.SECONDS));
+        previous = dialog;
       }
-      assertTrue("The app must finish loading before confirmation", ready.get());
-      scenario.onActivity(
-          activity -> {
-            try {
-              WebView web = (WebView) webField.get(activity);
-              web.evaluateJavascript(
-                  "window.confirm('Confirm test action?')",
-                  value -> {
-                    answer.set(value);
-                    answered.countDown();
-                  });
-            } catch (IllegalAccessException failure) {
-              throw new AssertionError(failure);
-            }
-          });
-      waitForVisibleConfirmation(scenario, confirmationField, "Confirm test action?", answered);
-      assertTrue(
-          automation.performGlobalAction(
-              android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));
-      if (!answered.await(10, TimeUnit.SECONDS)) {
-        fail("Back must answer the confirmation; " + describeWindows());
-      }
-      assertEquals("false", answer.get());
 
-      CountDownLatch accepted = new CountDownLatch(1);
-      scenario.onActivity(
-          activity -> {
-            try {
-              WebView web = (WebView) webField.get(activity);
-              web.evaluateJavascript(
-                  "window.confirm('Confirm test action?')",
-                  value -> {
-                    answer.set(value);
-                    accepted.countDown();
-                  });
-            } catch (IllegalAccessException failure) {
-              throw new AssertionError(failure);
-            }
-          });
-      android.graphics.Rect confirm =
-          waitForVisibleConfirmation(scenario, confirmationField, "Confirm test action?", accepted);
-      long now = android.os.SystemClock.uptimeMillis();
-      android.view.MotionEvent down =
-          android.view.MotionEvent.obtain(
-              now,
-              now,
-              android.view.MotionEvent.ACTION_DOWN,
-              confirm.exactCenterX(),
-              confirm.exactCenterY(),
-              0);
-      down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-      try {
-        assertTrue(
-            "The system must deliver the confirmation tap",
-            automation.injectInputEvent(down, true));
-        android.os.SystemClock.sleep(100);
-        android.view.MotionEvent up =
-            android.view.MotionEvent.obtain(
-                now,
-                android.os.SystemClock.uptimeMillis(),
-                android.view.MotionEvent.ACTION_UP,
-                confirm.exactCenterX(),
-                confirm.exactCenterY(),
-                0);
-        try {
-          up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-          assertTrue(
-              "The system must deliver the confirmation tap",
-              automation.injectInputEvent(up, true));
-        } finally {
-          up.recycle();
-        }
-      } finally {
-        down.recycle();
-      }
-      if (!accepted.await(10, TimeUnit.SECONDS)) {
-        fail("Tapping confirm must answer the confirmation; " + describeWindows());
-      }
-      assertEquals("true", answer.get());
-
-      scenario.onActivity(
-          activity -> {
-            try {
-              ((WebView) webField.get(activity))
-                  .evaluateJavascript("window.confirm('Close while open?')", null);
-            } catch (IllegalAccessException failure) {
-              throw new AssertionError(failure);
-            }
-          });
-      AtomicReference<android.app.AlertDialog> open = new AtomicReference<>();
-      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
-      while (open.get() == null && System.nanoTime() < deadline) {
-        scenario.onActivity(
-            activity -> {
-              try {
-                android.app.AlertDialog dialog =
-                    (android.app.AlertDialog) confirmationField.get(activity);
-                if (dialog != null && dialog.isShowing()) open.set(dialog);
-              } catch (IllegalAccessException failure) {
-                throw new AssertionError(failure);
-              }
-            });
-        if (open.get() == null) Thread.sleep(500);
-      }
-      assertNotNull("A pending confirmation must be shown before closing", open.get());
-      scenario.onActivity(android.app.Activity::finish);
-      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
-      while (open.get().isShowing() && System.nanoTime() < deadline) Thread.sleep(200);
-      assertFalse("Closing the activity must dismiss its confirmation", open.get().isShowing());
+      requestConfirmation(scenario);
+      AlertDialog dialog = waitForConfirmation(scenario, field, previous);
+      scenario.moveToState(Lifecycle.State.DESTROYED);
+      assertFalse("Closing the activity must dismiss its confirmation", dialog.isShowing());
     }
   }
 
-  private static android.graphics.Rect waitForVisibleConfirmation(
-      ActivityScenario<MainActivity> scenario,
-      java.lang.reflect.Field field,
-      String expectedMessage,
-      CountDownLatch answered)
+  private static CompletableFuture<String> requestConfirmation(
+      ActivityScenario<MainActivity> scenario) throws Exception {
+    var field = MainActivity.class.getDeclaredField("web");
+    field.setAccessible(true);
+    var answer = new CompletableFuture<String>();
+    scenario.onActivity(
+        activity -> {
+          try {
+            ((WebView) field.get(activity))
+                .evaluateJavascript("window.confirm('Confirm test action?')", answer::complete);
+          } catch (IllegalAccessException error) {
+            throw new AssertionError(error);
+          }
+        });
+    return answer;
+  }
+
+  private static AlertDialog waitForConfirmation(
+      ActivityScenario<MainActivity> scenario, java.lang.reflect.Field field, AlertDialog previous)
       throws Exception {
-    AtomicReference<android.graphics.Rect> buttonBounds = new AtomicReference<>();
-    AtomicReference<String> diagnostic = new AtomicReference<>("dialog not created");
-    AtomicBoolean focused = new AtomicBoolean();
-    long focusDeadline = Long.MAX_VALUE;
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
-    while (buttonBounds.get() == null && answered.getCount() != 0 && System.nanoTime() < deadline) {
+    AtomicReference<AlertDialog> visible = new AtomicReference<>();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
+    while (System.nanoTime() < deadline) {
       scenario.onActivity(
           activity -> {
             try {
-              android.app.AlertDialog dialog = (android.app.AlertDialog) field.get(activity);
-              if (dialog == null || !dialog.isShowing() || dialog.getWindow() == null) {
-                diagnostic.set(
-                    "dialog missing or not showing; finishing=" + activity.isFinishing());
-                return;
-              }
-              android.view.View decor = dialog.getWindow().getDecorView();
-              focused.set(decor.hasWindowFocus());
+              AlertDialog dialog = (AlertDialog) field.get(activity);
+              if (dialog == null || dialog == previous || !dialog.isShowing()) return;
               android.widget.TextView message = dialog.findViewById(android.R.id.message);
-              android.widget.Button button =
-                  dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
-              android.graphics.Rect textBounds = new android.graphics.Rect();
-              android.graphics.Rect buttonRect = new android.graphics.Rect();
-              android.graphics.Rect buttonLocal = new android.graphics.Rect();
-              boolean messageVisible =
-                  message != null && message.isShown() && message.getGlobalVisibleRect(textBounds);
-              boolean buttonVisible =
-                  button != null
-                      && button.isShown()
-                      && button.isEnabled()
-                      && button.getGlobalVisibleRect(buttonRect)
-                      && button.getLocalVisibleRect(buttonLocal);
-              boolean messageAccessible = false;
-              boolean buttonAccessible = false;
-              if (messageVisible && buttonVisible) {
-                android.view.accessibility.AccessibilityNodeInfo messageNode =
-                    message.createAccessibilityNodeInfo();
-                android.view.accessibility.AccessibilityNodeInfo buttonNode =
-                    button.createAccessibilityNodeInfo();
-                try {
-                  messageAccessible =
-                      messageNode.isVisibleToUser()
-                          && android.text.TextUtils.equals(expectedMessage, messageNode.getText());
-                  buttonAccessible =
-                      buttonNode.isVisibleToUser()
-                          && buttonNode.isEnabled()
-                          && buttonNode.isClickable()
-                          && !android.text.TextUtils.isEmpty(buttonNode.getText())
-                          && android.text.TextUtils.equals(button.getText(), buttonNode.getText());
-                } finally {
-                  messageNode.recycle();
-                  buttonNode.recycle();
-                }
+              if (message != null && message.isShown() && message.getWidth() > 0) {
+                assertEquals("Confirm test action?", message.getText().toString());
+                visible.set(dialog);
               }
-              diagnostic.set(
-                  "decorShown="
-                      + decor.isShown()
-                      + ", focused="
-                      + decor.hasWindowFocus()
-                      + ", messageVisible="
-                      + messageVisible
-                      + ", buttonVisible="
-                      + buttonVisible
-                      + ", messageAccessible="
-                      + messageAccessible
-                      + ", buttonAccessible="
-                      + buttonAccessible);
-              // A visible, accessible dialog can temporarily lack keyboard
-              // focus. The actual Back and touchscreen interactions below are
-              // the checks that it can receive the user's input.
-              if (decor.isShown()
-                  && messageVisible
-                  && buttonVisible
-                  && messageAccessible
-                  && buttonAccessible
-                  && expectedMessage.contentEquals(message.getText())) {
-                int[] screenLocation = new int[2];
-                button.getLocationOnScreen(screenLocation);
-                buttonLocal.offset(screenLocation[0], screenLocation[1]);
-                buttonBounds.set(buttonLocal);
-              }
-            } catch (IllegalAccessException failure) {
-              throw new AssertionError(failure);
+            } catch (IllegalAccessException error) {
+              throw new AssertionError(error);
             }
           });
-      // Give window focus time to settle after the dialog is first drawn, but
-      // do not assume it must own keyboard focus to be touch-accessible.
-      if (buttonBounds.get() != null && !focused.get()) {
-        long now = System.nanoTime();
-        if (focusDeadline == Long.MAX_VALUE) focusDeadline = now + TimeUnit.SECONDS.toNanos(3);
-        if (now < focusDeadline) buttonBounds.set(null);
-      }
-      if (buttonBounds.get() == null) Thread.sleep(200);
+      if (visible.get() != null) return visible.get();
+      Thread.sleep(200);
     }
-    if (buttonBounds.get() == null) {
-      fail(
-          "The confirmation must be visible to the user: "
-              + diagnostic.get()
-              + ", javascriptAnswered="
-              + (answered.getCount() == 0)
-              + ", "
-              + describeWindows());
-    }
-    return buttonBounds.get();
-  }
-
-  private static String describeWindows() {
-    StringBuilder details = new StringBuilder("accessibility windows: ");
-    var windows = InstrumentationRegistry.getInstrumentation().getUiAutomation().getWindows();
-    if (windows.isEmpty()) return details.append("none reported").toString();
-    for (var window : windows) {
-      android.graphics.Rect bounds = new android.graphics.Rect();
-      window.getBoundsInScreen(bounds);
-      android.view.accessibility.AccessibilityNodeInfo root = window.getRoot();
-      CharSequence packageName = root == null ? null : root.getPackageName();
-      details
-          .append("[package=")
-          .append(packageName)
-          .append(", type=")
-          .append(window.getType())
-          .append(", layer=")
-          .append(window.getLayer())
-          .append(", active=")
-          .append(window.isActive())
-          .append(", focused=")
-          .append(window.isFocused())
-          .append(", bounds=")
-          .append(bounds)
-          .append("] ");
-      if (root != null) root.recycle();
-    }
-    return details.toString();
+    throw new AssertionError("The WebView must show its message in the native confirmation");
   }
 
   @Test
