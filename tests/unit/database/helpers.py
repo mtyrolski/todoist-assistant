@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Any
 
-from todoist.core.types import Event, EventEntry
+from todometry.core.types import Event, EventEntry
 
 
 def event_payload(

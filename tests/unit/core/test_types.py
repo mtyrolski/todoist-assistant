@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from tests.factories import make_project, make_project_entry, make_task, make_task_entry
-from todoist.core.types import (
+from todometry.core.types import (
     Event,
     EventEntry,
     ProjectEntry,
@@ -78,32 +78,6 @@ def test_project_entry_defaults() -> None:
     assert project_entry.public_access is False
     assert project_entry.access is None
     assert project_entry.new_api_kwargs is None
-
-
-@pytest.mark.parametrize(
-    ("duration", "expected_kwargs", "expected_duration_kwargs"),
-    [
-        (None, {"duration_unit": None, "duration": None}, None),
-        (
-            {"amount": 30, "unit": "minute", "duration": 30},
-            {"duration_unit": "minute", "duration": 30},
-            {"duration": 30, "unit": "minute"},
-        ),
-    ],
-)
-def test_task_entry_kwargs(duration, expected_kwargs, expected_duration_kwargs) -> None:
-    task_entry = make_task_entry(
-        content="Test Task",
-        description="A test task",
-        labels=["label1", "label2"] if duration is None else [],
-        duration=duration,
-    )
-
-    kwargs = task_entry.kwargs
-    assert kwargs["content"] == "Test Task"
-    for key, value in expected_kwargs.items():
-        assert kwargs[key] == value
-    assert task_entry.duration_kwargs == expected_duration_kwargs
 
 
 def test_task_entry_due_datetime_property() -> None:

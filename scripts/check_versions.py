@@ -58,7 +58,7 @@ def read_uv_lock_version(path: Path) -> str | None:
 
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     for package in data.get("package", []):
-        if isinstance(package, dict) and package.get("name") == "todoist-assistant":
+        if isinstance(package, dict) and package.get("name") == "todometry":
             version = package.get("version")
             if isinstance(version, str) and version.strip():
                 return version.strip()
@@ -88,15 +88,6 @@ def main() -> int:
 
     mismatches: list[str] = []
 
-    core_pyproject = repo_root / "core" / "pyproject.toml"
-    core_version = read_pyproject_version(core_pyproject)
-    if core_pyproject.exists() and core_version is None:
-        mismatches.append("core/pyproject.toml is missing project.version")
-    elif core_version and core_version != version:
-        mismatches.append(
-            f"core/pyproject.toml version {core_version} != pyproject {version}"
-        )
-
     frontend_package = repo_root / "frontend" / "package.json"
     frontend_version = read_package_json_version(frontend_package)
     if frontend_package.exists() and frontend_version is None:
@@ -121,22 +112,35 @@ def main() -> int:
             f"frontend/package-lock.json packages[''].version {lock_package_version} != pyproject {version}"
         )
 
+    if frontend_lock.exists():
+        from plotly.offline import get_plotlyjs_version
+
+        packages = json.loads(frontend_lock.read_text(encoding="utf-8")).get(
+            "packages", {}
+        )
+        renderer = packages.get("node_modules/plotly.js", {}).get("version", "")
+        backend_renderer = get_plotlyjs_version()
+        if renderer.split(".")[0] != backend_renderer.split(".")[0]:
+            mismatches.append(
+                f"frontend Plotly.js {renderer} is incompatible with the backend renderer {backend_renderer}; update the browser distribution"
+            )
+
     uv_lock = repo_root / "uv.lock"
     uv_lock_version = read_uv_lock_version(uv_lock)
     if uv_lock.exists() and uv_lock_version is None:
-        mismatches.append("uv.lock is missing todoist-assistant version")
+        mismatches.append("uv.lock is missing todometry version")
     elif uv_lock_version and uv_lock_version != version:
         mismatches.append(
-            f"uv.lock todoist-assistant version {uv_lock_version} != pyproject {version}"
+            f"uv.lock todometry version {uv_lock_version} != pyproject {version}"
         )
 
-    formula = repo_root / "Formula" / "todoist-assistant.rb"
+    formula = repo_root / "Formula" / "todometry.rb"
     formula_version = read_formula_version(formula)
     if formula.exists() and formula_version is None:
-        mismatches.append("Formula/todoist-assistant.rb is missing version")
+        mismatches.append("Formula/todometry.rb is missing version")
     elif formula_version and formula_version != version:
         mismatches.append(
-            f"Formula/todoist-assistant.rb version {formula_version} != pyproject {version}"
+            f"Formula/todometry.rb version {formula_version} != pyproject {version}"
         )
 
     if mismatches:

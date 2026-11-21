@@ -4,8 +4,8 @@ from pathlib import Path
 import os
 import plistlib
 
-from PyInstaller.utils.hooks import collect_all
-from todoist.core.env import EnvVar
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
+from todometry.core.env import EnvVar
 
 
 def _collect(module_name):
@@ -24,8 +24,8 @@ def _collect(module_name):
 plotly_datas, plotly_binaries, plotly_hiddenimports = _collect("plotly")
 
 binaries = plotly_binaries
-datas = plotly_datas
-hiddenimports = plotly_hiddenimports
+datas = plotly_datas + copy_metadata("todometry")
+hiddenimports = plotly_hiddenimports + collect_submodules("todometry.web") + ["todoist.core.types"]
 
 block_cipher = None
 
@@ -61,9 +61,9 @@ else:
 
 info_plist.update(
     {
-        "CFBundleName": info_plist.get("CFBundleName", "TodoistAssistant"),
+        "CFBundleName": info_plist.get("CFBundleName", "todometry"),
         "CFBundleDisplayName": info_plist.get(
-            "CFBundleDisplayName", "Todoist Assistant"
+            "CFBundleDisplayName", "todometry"
         ),
         "CFBundleIdentifier": "com.todoist.assistant",
         "CFBundleShortVersionString": version,
@@ -73,7 +73,7 @@ info_plist.update(
     }
 )
 
-script_path = repo_root / "todoist" / "launcher.py"
+script_path = repo_root / "todometry" / "launcher.py"
 
 a = Analysis(
     [str(script_path)],
@@ -96,7 +96,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="TodoistAssistant",
+    name="todometry",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -111,14 +111,12 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    name="TodoistAssistant",
+    name="todometry",
 )
 
-icon_path = repo_root / "packaging" / "macos" / "TodoistAssistant.icns"
 app = BUNDLE(
     coll,
-    name="TodoistAssistant.app",
-    icon=str(icon_path) if icon_path.exists() else None,
+    name="todometry.app",
     bundle_identifier="com.todoist.assistant",
     info_plist=info_plist,
 )

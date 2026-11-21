@@ -2,215 +2,45 @@ name: CI
 
 on:
   push:
-    branches: [ main, adaptive_automation ]
+    branches: [main, v0.4.1-dev]
   pull_request:
-    branches: [ main, adaptive_automation ]
+
+permissions:
+  contents: read
 
 jobs:
-  python-sanity:
-    name: Python sanity
+  python:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: uv sync --locked
+      - run: make ci-python
 
-      - name: Install dependencies
-        run: |
-          uv sync --locked || uv sync
-
-      - name: Check versions
-        run: |
-          uv run python3 -m scripts.check_versions
-
-      - name: Run typecheck
-        env:
-          PYTHONPATH: .
-        run: |
-          make typecheck
-
-      - name: Run lint
-        env:
-          PYTHONPATH: .
-        run: |
-          make lint
-
-      - name: Run tests
-        env:
-          PYTHONPATH: .
-          API_KEY: dummy_ci_key
-        run: |
-          make test
-
-  frontend-sanity:
-    name: Frontend sanity
+  frontend:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: '20'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
+      - run: npm ci
         working-directory: frontend
-        run: |
-          npm ci
-
-      - name: Run frontend lint
+      - run: npx playwright install --with-deps chromium
         working-directory: frontend
-        run: |
-          npm run lint
-
-      - name: Run frontend build
-        working-directory: frontend
-        run: |
-          npm run build
-
-  dashboard-runtime-smoke:
-    name: Dashboard runtime smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-
-    env:
-      PYTHONPATH: .
-      API_KEY: dummy_ci_key
-      TODOIST_DASHBOARD_DEMO: "1"
-      TODOIST_DASHBOARD_LLM_BACKEND_LOCK: disabled
-      DASHBOARD_API_PORT: "8000"
-      DASHBOARD_FRONTEND_PORT: "3000"
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - run: make ci-frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
         with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install backend dependencies
-        run: |
-          uv sync --locked || uv sync
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: |
-          npm ci
-
-      - name: Smoke runtime processes
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          export COMPOSE_PROFILES=dashboard
-
-          cache_root=".cache/todoist-assistant/dashboard"
-          api_log="${cache_root}/api.log"
-          frontend_log="${cache_root}/frontend.log"
-          observer_log="${cache_root}/observer.log"
-          mkdir -p "${cache_root}"
-          : > "${observer_log}"
-
-          cleanup() {
-            status=$?
-            if [[ -n "${FRONTEND_PID:-}" ]] && kill -0 "${FRONTEND_PID}" 2>/dev/null; then
-              kill "${FRONTEND_PID}" 2>/dev/null || true
-            fi
-            if [[ -n "${API_PID:-}" ]] && kill -0 "${API_PID}" 2>/dev/null; then
-              kill "${API_PID}" 2>/dev/null || true
-            fi
-            if [[ $status -ne 0 ]]; then
-              echo "== API log =="
-              tail -n 80 "${api_log}" 2>/dev/null || true
-              echo "== Frontend log =="
-              tail -n 80 "${frontend_log}" 2>/dev/null || true
-            fi
-            trap - EXIT
-            exit $status
-          }
-          trap cleanup EXIT
-
-          echo "Starting API process..."
-          nohup uv run uvicorn todoist.web.api:app --host 127.0.0.1 --port "${DASHBOARD_API_PORT}" > "${api_log}" 2>&1 &
-          API_PID=$!
-          for _ in $(seq 1 120); do
-            if curl -fsS "http://127.0.0.1:${DASHBOARD_API_PORT}/api/health" >/dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
-          curl -fsS "http://127.0.0.1:${DASHBOARD_API_PORT}/api/health" >/dev/null
-          tail -n 30 "${api_log}"
-
-          echo "Starting frontend process..."
-          nohup npm --prefix frontend run dev -- --port "${DASHBOARD_FRONTEND_PORT}" > "${frontend_log}" 2>&1 &
-          FRONTEND_PID=$!
-          for _ in $(seq 1 120); do
-            if curl -fsS "http://127.0.0.1:${DASHBOARD_FRONTEND_PORT}" >/dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
-          curl -fsS "http://127.0.0.1:${DASHBOARD_FRONTEND_PORT}" >/dev/null
-          tail -n 30 "${frontend_log}"
-
-          echo "Checking runtime log surface..."
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          api_port = os.environ["DASHBOARD_API_PORT"]
-          api_base = f"http://127.0.0.1:{api_port}"
-          with urllib.request.urlopen(f"{api_base}/api/runtime/logs") as res:
-              payload = json.load(res)
-          assert payload["inspectOnly"] is True
-          sources = {item["id"]: item for item in payload["sources"]}
-          expected = {"api", "frontend", "observer", "automation"}
-          missing = expected - sources.keys()
-          assert not missing, f"missing sources: {sorted(missing)}"
-          assert all(item["inspectOnly"] is True for item in payload["sources"])
-
-          for source in ("api", "frontend", "observer", "automation"):
-              url = f"{api_base}/api/runtime/logs/read?source={source}&tail_lines=20&page=1"
-              with urllib.request.urlopen(url) as res:
-                  read_payload = json.load(res)
-              assert read_payload["inspectOnly"] is True
-              assert read_payload["source"] == source
-          PY
-
-          echo "Runtime smoke completed; shutting everything down..."
+          name: frontend-browser-failures
+          path: frontend/test-results/

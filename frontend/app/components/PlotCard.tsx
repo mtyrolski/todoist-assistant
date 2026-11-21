@@ -1,11 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import type { PlotParams } from "react-plotly.js";
-import type { ComponentType } from "react";
+import { Plot } from "./Plot";
+import { useRef, type ReactNode } from "react";
 import { InfoTip } from "./InfoTip";
-
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as unknown as ComponentType<PlotParams>;
 
 export type PlotlyFigure = {
   data: unknown[];
@@ -17,21 +15,50 @@ export function PlotCard({
   title,
   figure,
   help,
+  actions,
+  legendContent,
   height = 420,
-  interactive = false
+  interactive = false,
+  compact = false,
+  persistViewport = false
 }: {
   title: string;
   figure: PlotlyFigure | null | undefined;
   help?: string;
+  actions?: ReactNode;
+  legendContent?: ReactNode;
   height?: number | string;
   interactive?: boolean;
+  compact?: boolean;
+  persistViewport?: boolean;
 }) {
   const numericHeight = typeof height === "number" ? height : undefined;
   const fillHeight = typeof height === "string" && !numericHeight;
+  const viewport = useRef<Partial<Record<"xaxis" | "yaxis", {
+    autorange: boolean;
+    range?: unknown[];
+  }>>>({});
+
+  function rememberViewport(changes: Record<string, unknown>) {
+    for (const axis of ["xaxis", "yaxis"] as const) {
+      if (changes[`${axis}.autorange`] === true) {
+        viewport.current[axis] = { autorange: true, range: undefined };
+        continue;
+      }
+      const range = changes[`${axis}.range`];
+      const start = changes[`${axis}.range[0]`];
+      const end = changes[`${axis}.range[1]`];
+      if (Array.isArray(range)) viewport.current[axis] = { autorange: false, range };
+      else if (start !== undefined && end !== undefined) {
+        viewport.current[axis] = { autorange: false, range: [start, end] };
+      }
+    }
+  }
 
   return (
     <section
-      className={`card${fillHeight ? " cardFillHeight" : ""}`}
+      className={`card${legendContent ? " cardWithLegend" : ""}${fillHeight ? " cardFillHeight" : ""}`}
+      aria-label={title}
       style={fillHeight ? { height: "100%", minHeight: 0 } : undefined}
     >
       <header className="cardHeader">
@@ -39,22 +66,31 @@ export function PlotCard({
           <h2>{title}</h2>
           {help ? <InfoTip label={`About ${title}`} content={help} /> : null}
         </div>
+        {actions}
       </header>
+      {legendContent}
       <div
         className={`cardBody${fillHeight ? " cardBodyFill" : ""}`}
         style={numericHeight ? { height: numericHeight } : fillHeight ? { minHeight: 0 } : undefined}
       >
         {!figure ? (
-          <div className="skeleton" />
+          <div className="skeleton" role="status" aria-label={`Loading ${title}`} />
         ) : (
           <Plot
             data={figure.data as PlotParams["data"]}
+            onRelayout={persistViewport ? rememberViewport : undefined}
             layout={(() => {
               const { title: _title, height: _height, ...baseLayout } = figure.layout ?? {};
               const layoutRecord = baseLayout as Record<string, unknown>;
               const margin = (layoutRecord.margin ?? {}) as Record<string, unknown>;
-              const xaxis = (layoutRecord.xaxis ?? {}) as Record<string, unknown>;
-              const yaxis = (layoutRecord.yaxis ?? {}) as Record<string, unknown>;
+              // A fresh figure can contain new default bounds. Keep any bounds
+              // or Autoscale mode the user has applied to this plot.
+              const xaxis: Record<string, unknown> = {
+                ...(layoutRecord.xaxis as Record<string, unknown>), ...viewport.current.xaxis
+              };
+              const yaxis: Record<string, unknown> = {
+                ...(layoutRecord.yaxis as Record<string, unknown>), ...viewport.current.yaxis
+              };
               const legend = (layoutRecord.legend ?? {}) as Record<string, unknown>;
 
               const toNumber = (value: unknown, fallback: number): number =>
@@ -81,19 +117,22 @@ export function PlotCard({
               return {
                 ...baseLayout,
                 autosize: true,
+                // On touch screens Plotly's default comparison hover can stack
+                // multiple labels over the axis and drag-to-zoom steals scrolling.
+                ...(compact ? { hovermode: "closest", dragmode: false } : {}),
                 ...(numericHeight ? { height: numericHeight } : {}),
                 paper_bgcolor: "rgba(0,0,0,0)",
                 plot_bgcolor: "rgba(0,0,0,0)",
-                font: { color: "#e8ecf2" },
+                font: { ...(layoutRecord.font as Record<string, unknown> ?? {}), color: "#e8ecf2" },
                 template: "plotly_dark",
                 margin: {
-                  l: Math.max(56, toNumber(margin.l, 56)),
-                  r: Math.max(24, toNumber(margin.r, 24)),
-                  t: Math.max(76, toNumber(margin.t, 76)),
-                  b: Math.max(58, toNumber(margin.b, 58))
+                  l: Math.max(compact ? 32 : 56, toNumber(margin.l, compact ? 32 : 56)),
+                  r: Math.max(compact ? 12 : 24, toNumber(margin.r, compact ? 12 : 24)),
+                  t: Math.max(compact ? (legendContent ? 12 : 48) : 76, toNumber(margin.t, compact ? (legendContent ? 12 : 48) : 76)),
+                  b: Math.max(compact ? 36 : 58, toNumber(margin.b, compact ? 36 : 58))
                 },
-                xaxis: withTitleStandoff(xaxis, 18),
-                yaxis: withTitleStandoff(yaxis, 16),
+                xaxis: withTitleStandoff(compact ? { showgrid: false, ...xaxis, ...(Array.isArray(xaxis.categoryarray) ? { tickangle: 0 } : {}) } : xaxis, 18),
+                yaxis: withTitleStandoff(compact ? { showgrid: false, ...yaxis } : yaxis, 16),
                 legend: {
                   ...legend,
                   tracegroupgap: Math.max(12, toNumber(legend.tracegroupgap, 12))

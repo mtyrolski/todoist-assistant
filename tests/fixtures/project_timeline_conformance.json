@@ -1,0 +1,201 @@
+{
+  "snapshot": {
+    "syncedAt": "2028-01-01T00:00:00Z",
+    "activitySyncedAt": "2028-01-01T00:00:00Z",
+    "historyStart": "2026-01-01T00:00:00Z",
+    "historyComplete": true,
+    "projects": [
+      {
+        "id": "root",
+        "name": "Parent",
+        "created_at": "2025-01-01T00:00:00Z"
+      },
+      {
+        "id": "renamed",
+        "name": "Renamed project",
+        "parent_id": "root",
+        "created_at": "2026-01-01T00:00:00Z"
+      },
+      {
+        "id": "new",
+        "name": "New project",
+        "parent_id": "root",
+        "created_at": "2026-03-01T00:00:00Z"
+      }
+    ],
+    "knownProjects": [
+      {
+        "id": "archive",
+        "name": "Archived project",
+        "parent_id": "root",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-08-01T00:00:00Z",
+        "is_archived": true
+      }
+    ],
+    "tasks": [
+      {
+        "id": "parent",
+        "project_id": "renamed",
+        "content": "Parent task"
+      },
+      {
+        "id": "new-task",
+        "project_id": "new",
+        "content": "New task"
+      },
+      {
+        "id": "deleted",
+        "project_id": "renamed",
+        "content": "Deleted",
+        "is_deleted": true
+      },
+      {
+        "id": "checked",
+        "project_id": "renamed",
+        "content": "Checked",
+        "checked": true
+      }
+    ],
+    "activities": [
+      {
+        "id": "undo-before",
+        "object_type": "item",
+        "object_id": "undo-task",
+        "event_type": "completed",
+        "event_date": "2026-02-28T23:59:59Z",
+        "parent_project_id": "renamed",
+        "extra_data": {
+          "content": "Old project name"
+        }
+      },
+      {
+        "id": "undo-after",
+        "object_type": "item",
+        "object_id": "undo-task",
+        "event_type": "uncompleted",
+        "event_date": "2026-03-01T00:00:00Z",
+        "parent_project_id": "renamed"
+      },
+      {
+        "id": "archive-done",
+        "object_type": "item",
+        "object_id": "archived-task",
+        "event_type": "completed",
+        "event_date": "2026-07-01T10:00:00Z",
+        "parent_project_id": "archive"
+      },
+      {
+        "id": "recurring-1",
+        "object_type": "item",
+        "object_id": "recurring",
+        "event_type": "completed",
+        "event_date": "2026-03-15T10:00:00Z",
+        "parent_project_id": "renamed",
+        "extra_data": {
+          "is_recurring": true
+        }
+      },
+      {
+        "id": "recurring-reset",
+        "object_type": "item",
+        "object_id": "recurring",
+        "event_type": "uncompleted",
+        "event_date": "2026-03-16T10:00:00Z",
+        "parent_project_id": "renamed"
+      },
+      {
+        "id": "recurring-2",
+        "object_type": "item",
+        "object_id": "recurring",
+        "event_type": "completed",
+        "event_date": "2026-03-17T10:00:00Z",
+        "parent_project_id": "renamed"
+      }
+    ]
+  },
+  "denseCount": 720,
+  "subtaskCount": 40,
+  "windows": [
+    {
+      "start": "2026-01-01",
+      "end": "2028-01-01"
+    },
+    {
+      "start": "2026-02-01",
+      "end": "2026-03-01"
+    },
+    {
+      "start": "2026-03-01",
+      "end": "2026-04-01"
+    },
+    {
+      "start": "2026-07-01",
+      "end": "2026-08-01"
+    }
+  ],
+  "expected": [
+    {
+      "renamed": {
+        "name": "Renamed project",
+        "archived": false,
+        "openTasks": 41,
+        "completions": 722
+      },
+      "archive": {
+        "name": "Archived project",
+        "archived": true,
+        "openTasks": 0,
+        "completions": 1
+      },
+      "new": {
+        "name": "New project",
+        "archived": false,
+        "openTasks": 1,
+        "completions": 0
+      }
+    },
+    {
+      "renamed": {
+        "name": "Renamed project",
+        "archived": false,
+        "openTasks": 41,
+        "completions": 28
+      }
+    },
+    {
+      "renamed": {
+        "name": "Renamed project",
+        "archived": false,
+        "openTasks": 41,
+        "completions": 33
+      },
+      "new": {
+        "name": "New project",
+        "archived": false,
+        "openTasks": 1,
+        "completions": 0
+      }
+    },
+    {
+      "renamed": {
+        "name": "Renamed project",
+        "archived": false,
+        "openTasks": 41,
+        "completions": 31
+      },
+      "archive": {
+        "name": "Archived project",
+        "archived": true,
+        "openTasks": 0,
+        "completions": 1
+      },
+      "new": {
+        "name": "New project",
+        "archived": false,
+        "openTasks": 1,
+        "completions": 0
+      }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { readJson } from "../lib/adminApi";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { InfoTip } from "./InfoTip";
@@ -33,12 +34,8 @@ type ApiErrorResponse = {
   detail?: string;
 };
 
-type Variant = "wide" | "embedded";
-
 type Props = {
-  variant?: Variant;
   showWhenEmpty?: boolean;
-  onAfterSave?: () => void;
 };
 
 const HELP_TEXT = `**Project hierarchy adjustments**
@@ -54,23 +51,11 @@ Todoist parent links map archived projects automatically. Saved mappings overrid
 const RETRY_LIMIT = 6;
 const RETRY_DELAY_MS = 2000;
 
-async function readJson<T>(res: Response): Promise<T> {
-  const text = await res.text();
-  if (!text) return {} as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    const snippet = text.trim();
-    const summary = snippet.length > 200 ? `${snippet.slice(0, 200)}...` : snippet;
-    throw new Error(summary ? `Invalid JSON response: ${summary}` : "Invalid JSON response");
-  }
-}
-
 function isRetryableFetchError(message: string): boolean {
   return /invalid json response|failed to fetch|networkerror|econnrefused|socket hang up|econnreset/i.test(message);
 }
 
-export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = false, onAfterSave }: Props) {
+export function ProjectAdjustmentsBoard({ showWhenEmpty = false }: Props) {
   const [adjustments, setAdjustments] = useState<ProjectAdjustmentsResponse | null>(null);
   const [adjustmentFile, setAdjustmentFile] = useState("");
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
@@ -83,6 +68,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
   const [loadingHint, setLoadingHint] = useState<string | null>(null);
   const [progress, setProgress] = useState<DashboardProgress | null>(null);
   const [dragOverZone, setDragOverZone] = useState<string | null>(null);
+  const [expandedBuckets, setExpandedBuckets] = useState<Record<string, boolean>>({});
   const retryAttempts = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draggedProjectRef = useRef<string | null>(null);
@@ -419,7 +405,6 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
       }
       await loadAdjustments(adjustmentFile, false, true);
       setNotice("Mappings saved. Refresh dashboard data separately when you want charts recalculated.");
-      onAfterSave?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save adjustments");
     } finally {
@@ -427,15 +412,12 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
     }
   };
 
-  const wrapperClass =
-    variant === "embedded" ? "card cardInner adjustmentsBoard" : "card adjustmentsBoard adjustmentsBoardWide";
-
   if (!showWhenEmpty && !loading && adjustments && unmappedProjects.length === 0) {
     return null;
   }
 
   return (
-    <section className={wrapperClass}>
+    <section className="card adjustmentsBoard adjustmentsBoardWide">
       <header className="adjustmentsHeader">
         <div>
           <p className="eyebrow">Project adjustments</p>
@@ -450,11 +432,11 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
         </div>
         <div className="adjustmentsHeaderActions">
           <div className="control" style={{ margin: 0 }}>
-            <label className="muted tiny" htmlFor={`adjustment-file-${variant}`}>
+            <label className="muted tiny" htmlFor="adjustment-file">
               Mapping file
             </label>
             <select
-              id={`adjustment-file-${variant}`}
+              id="adjustment-file"
               value={adjustmentFile}
               onChange={(e) => loadAdjustments(e.target.value, false, true)}
               className="select"
@@ -472,6 +454,18 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
             </button>
             <button className="button buttonSmall" type="button" onClick={saveAdjustments} disabled={saving || loading}>
               {saving ? "Saving…" : "Save mappings"}
+            </button>
+            <button className="button buttonSmall buttonGhost" type="button" disabled={loading || !adjustments} onClick={() => {
+              if (!adjustments) return;
+              const blob = new Blob([JSON.stringify({ format: "todoist-assistant-project-adjustments-v1", mappings: { ...adjustments.automaticMappings, ...adjustments.mappings }, archivedParents: adjustments.archivedParentProjects }, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "todoist-project-adjustments.json";
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}>
+              Export saved mappings for Android
             </button>
           </div>
         </div>
@@ -543,14 +537,16 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                           {remappableActiveRoots.includes(name) ? " (active root)" : ""}
                         </span>
                         <div className="adjustmentsTileActions">
-                          <button
-                            className="button buttonSmall buttonGhost"
-                            type="button"
-                            onClick={() => addParent(name)}
-                            disabled={isParent}
-                          >
-                            {isParent ? "Parent" : "Make parent"}
-                          </button>
+                          {archivedProjects.includes(name) ? (
+                            <button
+                              className="button buttonSmall buttonGhost"
+                              type="button"
+                              onClick={() => addParent(name)}
+                              disabled={isParent}
+                            >
+                              {isParent ? "Parent" : "Make parent"}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -577,31 +573,37 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                       ? "Archived parent"
                       : "Custom target";
                   return (
-                    <div
+                    <details
                       key={bucket.name}
                       className={`card cardInner adjustmentsBucket ${dragOverZone === zone ? "isDragOver" : ""}`}
+                      open={expandedBuckets[bucket.name] ?? items.length <= 8}
+                      onToggle={(event) => {
+                        const expanded = event.currentTarget.open;
+                        setExpandedBuckets((prev) => prev[bucket.name] === expanded ? prev : { ...prev, [bucket.name]: expanded });
+                      }}
                       onDragOver={handleDragOverZone(zone)}
                       onDragLeave={handleDragLeaveZone(zone)}
                       onDrop={handleDropOnBucket(bucket.name)}
                     >
-                      <div className="adjustmentsBucketHeader">
+                      <summary className="adjustmentsBucketHeader">
                         <div>
                           <p className="bucketTitle">{bucket.name}</p>
                           <p className="muted tiny" style={{ margin: 0 }}>
                             {meta}
                           </p>
                         </div>
+                        <span className="adjustmentsBucketCount">{items.length} {items.length === 1 ? "project" : "projects"}</span>
+                      </summary>
+                      <div className="adjustmentsBucketBody">
                         {bucket.removable ? (
                           <button
-                            className="button buttonSmall buttonGhost"
+                            className="button buttonSmall buttonGhost adjustmentsRemoveParent"
                             type="button"
                             onClick={() => removeParent(bucket.name)}
                           >
                             Remove parent
                           </button>
                         ) : null}
-                      </div>
-                      <div className="adjustmentsBucketBody">
                         {items.length ? (
                           items.map(({ project: name, provenance }) => (
                             <div
@@ -630,10 +632,10 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                                       })
                                     }
                                   >
-                                    Use automatic
+                                    Remove override
                                   </button>
                                 ) : null}
-                                {!parentSet.has(name) ? (
+                                {archivedProjects.includes(name) && !parentSet.has(name) ? (
                                   <button
                                     className="button buttonSmall buttonGhost"
                                     type="button"
@@ -651,7 +653,7 @@ export function ProjectAdjustmentsBoard({ variant = "wide", showWhenEmpty = fals
                           </div>
                         )}
                       </div>
-                    </div>
+                    </details>
                   );
                 })
               ) : (

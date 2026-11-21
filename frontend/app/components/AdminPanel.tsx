@@ -3,122 +3,24 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { InfoTip } from "./InfoTip";
-import { ProjectAdjustmentsBoard } from "./ProjectAdjustmentsBoard";
 import {
   clearAdminApiToken,
   clearAdminTimezone,
   getAdminApiTokenStatus,
-  getAdminAutomations,
-  getAdminJob,
   getAdminTimezoneStatus,
   saveAdminApiToken,
   saveAdminTimezone,
-  setAdminAutomationEnabled,
-  startAdminAutomation,
-  startAllAdminAutomations,
   type AdminApiTokenStatus,
-  type AdminAutomationInfo,
-  type AdminJob,
-  type AdminRunAllResult,
-  type AdminRunResult,
   type AdminTimezoneStatus
 } from "../lib/adminApi";
 
-type Tab = "automations" | "adjustments" | "settings";
-type AutomationInfo = AdminAutomationInfo;
 type ApiTokenStatus = AdminApiTokenStatus;
 type TimezoneStatus = AdminTimezoneStatus;
 
 const ADMIN_HELP = `**Dashboard Admin**
-Manage automations, project mappings, and local dashboard settings.
-
-- Automations follow the same cooldown rules as the observer.
-- Adjustments map archived projects to active roots.
-- Settings updates your local Todoist API token.`;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function formatLaunchMeta(a: AutomationInfo): string {
-  const last = a.lastLaunch ? `last: ${a.lastLaunch}` : "never run";
-  const freq = `freq: ${a.frequencyMinutes}m`;
-  const count = `runs: ${a.launchCount}`;
-  return `${last} • ${freq} • ${count}`;
-}
-
-function formatSignalMeta(a: AutomationInfo): string {
-  if (!a.lastStatus) return "signal: waiting for first tracked run";
-  const when = a.lastFinishedAt ?? a.lastStartedAt ?? a.lastSuccessAt;
-  const parts = [`signal: ${a.lastStatus}`];
-  if (when) parts.push(`at: ${when}`);
-  if (typeof a.lastDurationSeconds === "number") {
-    parts.push(`duration: ${a.lastDurationSeconds.toFixed(3)}s`);
-  }
-  if (typeof a.attemptCount === "number") {
-    parts.push(`attempts: ${a.attemptCount}`);
-  }
-  return parts.join(" • ");
-}
-
-function automationLogSource(a: AutomationInfo): string {
-  // Manual runs execute in the dashboard API process and are written to the
-  // automation log. The observer log only contains the separate background
-  // observer process, even when this automation is enabled there.
-  void a;
-  return "automation";
-}
-
-function automationStatusTone(a: AutomationInfo): "good" | "warn" | "neutral" {
-  if (a.lastStatus === "failed") return "warn";
-  if (a.lastStatus === "completed") return "good";
-  if (a.enabled) return "good";
-  return "neutral";
-}
-
-function automationStatusLabel(a: AutomationInfo): string {
-  if (a.lastStatus === "failed") return "Last run failed";
-  if (a.lastStatus === "completed") return "Last run completed";
-  if (a.lastStatus === "skipped") return "Skipped in batch";
-  if (a.enabled) return "Live in observer";
-  return "Ready to enable";
-}
-
-function automationAvailabilityLabel(a: AutomationInfo): string {
-  return a.enabled ? "Already active" : "One click to enable";
-}
-
-function automationTimelineItems(a: AutomationInfo, latestManualRun?: AdminRunResult) {
-  const items: { label: string; time: string | null; tone: "good" | "warn" | "neutral" }[] = [
-    {
-      label: "Launch",
-      time: a.lastLaunch,
-      tone: a.lastLaunch ? "neutral" : "neutral"
-    },
-    {
-      label: a.lastStatus ? `Signal ${a.lastStatus}` : "Signal",
-      time: a.lastFinishedAt ?? a.lastStartedAt ?? a.lastSuccessAt ?? null,
-      tone: a.lastStatus === "failed" ? "warn" : a.lastStatus === "completed" ? "good" : "neutral"
-    }
-  ];
-  if (latestManualRun) {
-    items.push({
-      label: latestManualRun.status === "failed" ? "Manual failed" : "Manual run",
-      time: latestManualRun.finishedAt ?? latestManualRun.startedAt,
-      tone: latestManualRun.status === "failed" ? "warn" : "good"
-    });
-  }
-  return items;
-}
+Update your local Todoist API token and timezone.`;
 
 export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void }) {
-  const [tab, setTab] = useState<Tab>("automations");
-
-  const [automations, setAutomations] = useState<AutomationInfo[] | null>(null);
-  const [running, setRunning] = useState<string | null>(null);
-  const [runOutput, setRunOutput] = useState<Record<string, AdminRunResult>>({});
-  const [adminError, setAdminError] = useState<string | null>(null);
-  const [adminNotice, setAdminNotice] = useState<string | null>(null);
-  const [automationMutationKey, setAutomationMutationKey] = useState<string | null>(null);
-
   const [tokenStatus, setTokenStatus] = useState<ApiTokenStatus | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>("");
   const [tokenSaving, setTokenSaving] = useState(false);
@@ -130,31 +32,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   const [timezoneSaving, setTimezoneSaving] = useState(false);
   const [timezoneError, setTimezoneError] = useState<string | null>(null);
   const [timezoneNotice, setTimezoneNotice] = useState<string | null>(null);
-
-  const automationStats = automations
-    ? {
-        total: automations.length,
-        enabled: automations.filter((automation) => automation.enabled).length
-      }
-    : null;
-
-  useEffect(() => {
-    const loadAutomations = async () => {
-      try {
-        const payload = await getAdminAutomations();
-        if (payload.error) {
-          setAutomations(payload.automations ?? []);
-          setAdminError(payload.error);
-          return;
-        }
-        setAutomations(payload.automations);
-      } catch {
-        setAutomations(null);
-        setAdminError("Failed to load automations (check API logs).");
-      }
-    };
-    loadAutomations();
-  }, []);
 
   const loadApiToken = async () => {
     try {
@@ -181,93 +58,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
   useEffect(() => {
     loadTimezone();
   }, []);
-
-  const waitForJob = async (jobId: string): Promise<AdminJob> => {
-    for (;;) {
-      const payload = await getAdminJob(jobId);
-      if (payload.status === "done" || payload.status === "failed") return payload;
-      await sleep(800);
-    }
-  };
-
-  const runAutomation = async (name: string) => {
-    try {
-      setAdminError(null);
-      setAdminNotice(null);
-      setRunning(name);
-      const startPayload = await startAdminAutomation(name);
-      setAdminNotice(`Automation job started: ${startPayload.jobId}`);
-      const job = await waitForJob(startPayload.jobId);
-      if (job.status === "failed") {
-        throw new Error(job.error ?? "Automation job failed");
-      }
-      const run = job.result as AdminRunResult;
-      setRunOutput((prev) => ({ ...prev, [name]: run }));
-      onAfterMutation();
-      setAdminNotice(`Automation finished: ${name}. Open live logs to inspect the run details.`);
-      const refreshed = await getAdminAutomations().catch(() => null);
-      if (refreshed) {
-        setAutomations(refreshed.automations);
-      }
-    } catch (e) {
-      setAdminError(e instanceof Error ? e.message : "Failed to run automation");
-    } finally {
-      setRunning(null);
-    }
-  };
-
-  const runAll = async () => {
-    try {
-      setAdminError(null);
-      setAdminNotice(null);
-      setRunning("__all__");
-      const startPayload = await startAllAdminAutomations();
-      setAdminNotice(`Automation job started: ${startPayload.jobId}`);
-      const job = await waitForJob(startPayload.jobId);
-      if (job.status === "failed") {
-        throw new Error(job.error ?? "Automation job failed");
-      }
-      const result = job.result as AdminRunAllResult;
-      const byName: Record<string, AdminRunResult> = {};
-      for (const r of result.results) byName[r.name] = r;
-      setRunOutput((prev) => ({ ...prev, ...byName }));
-      onAfterMutation();
-      const summary = result.summary;
-      setAdminNotice(
-        summary
-        ? `All automations finished: ${summary.completed} completed, ${summary.failed} failed, ${summary.skipped} skipped.`
-          : "All automations finished. Open live logs for the observer and automation runner traces."
-      );
-      const refreshed = await getAdminAutomations().catch(() => null);
-      if (refreshed) {
-        setAutomations(refreshed.automations);
-      }
-    } catch (e) {
-      setAdminError(e instanceof Error ? e.message : "Failed to run automations");
-    } finally {
-      setRunning(null);
-    }
-  };
-
-  const setAutomationEnabled = async (automation: AutomationInfo, enabled: boolean) => {
-    try {
-      setAdminError(null);
-      setAdminNotice(null);
-      setAutomationMutationKey(`${automation.key}:${enabled ? "enable" : "disable"}`);
-      const payload = await setAdminAutomationEnabled(automation.key, enabled);
-      setAutomations(payload.automations);
-      setAdminNotice(
-        enabled
-          ? `${automation.name} enabled. It will now run on schedule.`
-          : `${automation.name} disabled. It will stop scheduling until you turn it back on.`
-      );
-      onAfterMutation();
-    } catch (e) {
-      setAdminError(e instanceof Error ? e.message : "Failed to update automation");
-    } finally {
-      setAutomationMutationKey(null);
-    }
-  };
 
   const saveApiToken = async () => {
     if (!tokenDraft.trim()) {
@@ -351,134 +141,9 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
           <h2>Dashboard Admin</h2>
           <InfoTip label="About dashboard admin" content={ADMIN_HELP} />
         </div>
-        <div className="adminRowRight">
-          <div className="segmented">
-            <button className={`seg ${tab === "automations" ? "segActive" : ""}`} onClick={() => setTab("automations")} type="button">
-              Automations
-            </button>
-            <button className={`seg ${tab === "adjustments" ? "segActive" : ""}`} onClick={() => setTab("adjustments")} type="button">
-              Project Adjustments
-            </button>
-            <button className={`seg ${tab === "settings" ? "segActive" : ""}`} onClick={() => setTab("settings")} type="button">
-              Settings
-            </button>
-          </div>
-          <Link className="button buttonSmall buttonGhost" href="/live-logs">
-            Open Live Logs
-          </Link>
-        </div>
+        <Link className="button buttonSmall buttonGhost" href="/live-logs">Open Live Logs</Link>
       </header>
-
-      {adminError ? <p className="pill pill-warn" style={{ margin: "0 0 12px" }}>{adminError}</p> : null}
-      {adminNotice ? <p className="pill pill-good" style={{ margin: "0 0 12px" }}>{adminNotice}</p> : null}
-
-      {tab === "automations" ? (
-        <div className="stack">
-          <div className="automationSummary">
-            <div className="automationSummaryCard automationSummaryCardActive">
-              <span className="automationSummaryValue">{automationStats?.enabled ?? 0}</span>
-              <span className="automationSummaryLabel">Active</span>
-            </div>
-            <div className="automationSummaryCard automationSummaryCardWarm">
-              <span className="automationSummaryValue">{automationStats?.total ?? 0}</span>
-              <span className="automationSummaryLabel">Total</span>
-            </div>
-          </div>
-          <div className="adminRow">
-            <p className="muted tiny" style={{ margin: 0 }}>
-              Automations are enabled by default and stay persisted in `configs/automations.yaml`.
-            </p>
-            <button className="button buttonSmall" onClick={runAll} type="button" disabled={running !== null}>
-              {running === "__all__" ? "Running…" : "Run all"}
-            </button>
-          </div>
-          <div className="list">
-            {!automations ? (
-              <p className="muted tiny" style={{ margin: 0 }}>
-                Automations list unavailable.
-              </p>
-            ) : (
-              automations.map((a) => (
-                <div key={a.name} className="row rowTight">
-                  <div className={`dot ${automationStatusTone(a) === "good" ? "dot-ok" : automationStatusTone(a) === "warn" ? "dot-warn" : "dot-neutral"}`} />
-                  <div className="rowMain">
-                    <p className="rowTitle">{a.name}</p>
-                    <p className="muted tiny">{formatLaunchMeta(a)}</p>
-                    <p className="muted tiny">{formatSignalMeta(a)}</p>
-                    <div className="automationTimeline" aria-label={`${a.name} run timeline`}>
-                      {automationTimelineItems(a, runOutput[a.name]).map((item, index) => (
-                        <div className={`automationTimelineItem automationTimelineItem-${item.tone}`} key={`${a.name}-${item.label}-${index}`}>
-                          <span className="automationTimelineDot" />
-                          <span className="automationTimelineLabel">{item.label}</span>
-                          <span className="automationTimelineTime">{item.time ?? "waiting"}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="automationStatusLine">
-                      <span className={`pill ${automationStatusTone(a) === "good" ? "pill-good" : automationStatusTone(a) === "warn" ? "pill-warn" : "pill-neutral"}`}>
-                        {automationStatusLabel(a)}
-                      </span>
-                      <span className="pill pill-neutral">{automationAvailabilityLabel(a)}</span>
-                      {a.defaultEnabled ? <span className="pill pill-good">Default on</span> : <span className="pill pill-neutral">Opt-in</span>}
-                    </div>
-                    {a.lastError ? (
-                      <p className="muted tiny automationDetailNote">
-                        Last error: {a.lastError}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="rowActions">
-                    <button
-                      className={`button buttonSmall ${a.enabled ? "" : "buttonGhost"}`}
-                      onClick={() => setAutomationEnabled(a, !a.enabled)}
-                      type="button"
-                      disabled={running !== null || automationMutationKey !== null}
-                      title={a.enabled ? "Disable automation" : "Enable automation"}
-                    >
-                      {automationMutationKey === `${a.key}:${a.enabled ? "disable" : "enable"}`
-                        ? "Saving…"
-                        : a.enabled
-                          ? "Disable"
-                          : "Enable"}
-                    </button>
-                    <Link
-                      className="button buttonSmall buttonGhost automationLogLink"
-                      href={`/live-logs?source=${encodeURIComponent(automationLogSource(a))}`}
-                      title="Open live logs for this automation"
-                    >
-                      Live logs
-                    </Link>
-                    <button
-                      className={`button buttonSmall ${a.enabled ? "" : "buttonGhost"}`}
-                      onClick={() => runAutomation(a.name)}
-                      type="button"
-                      disabled={running !== null || !a.enabled}
-                      title="Run this automation now"
-                    >
-                      {running === a.name ? "Running…" : "Run now"}
-                    </button>
-                  </div>
-                  {runOutput[a.name] ? (
-                    <details className="rowDetails">
-                      <summary className="muted tiny">Latest manual run output</summary>
-                      <pre className="codeBlock">{runOutput[a.name].output || "(no output)"}</pre>
-                    </details>
-                  ) : null}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      ) : null}
-
-      {tab === "adjustments" ? (
-        <div className="stack">
-          <ProjectAdjustmentsBoard variant="embedded" showWhenEmpty onAfterSave={onAfterMutation} />
-        </div>
-      ) : null}
-
-      {tab === "settings" ? (
-        <div className="stack">
+      <div className="stack">
           <div className="card cardInner">
             <header className="cardHeader">
               <h3>Todoist API Token</h3>
@@ -591,7 +256,6 @@ export function AdminPanel({ onAfterMutation }: { onAfterMutation: () => void })
             </div>
           </div>
         </div>
-      ) : null}
     </section>
   );
 }

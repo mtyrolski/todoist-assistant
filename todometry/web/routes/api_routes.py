@@ -1,0 +1,12 @@
+"""FastAPI route aggregator for the web API."""
+
+from fastapi import APIRouter
+
+from todometry.web.routes.admin_settings import router as _admin_settings_router
+from todometry.web.routes.dashboard import router as _dashboard_router
+from todometry.web.routes.runtime_admin import router as _runtime_admin_router
+
+router = APIRouter()
+router.include_router(_dashboard_router)
+router.include_router(_runtime_admin_router)
+router.include_router(_admin_settings_router)

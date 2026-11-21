@@ -1,35 +1,10 @@
-from pathlib import Path
-
-import pytest
-import typer
 from typer.testing import CliRunner
 
-from todoist import cli
+from todometry.cli import app
+from todometry.core.version import get_version
 
 
-runner = CliRunner()
-
-
-def test_enable_telemetry_shows_missing_endpoint_note(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
-    calls: list[tuple[Path, bool]] = []
-
-    monkeypatch.setattr(cli.telemetry, "resolve_config_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        cli.telemetry,
-        "set_enabled",
-        lambda config_dir, enabled: calls.append((config_dir, enabled)),
-    )
-    monkeypatch.delenv(str(cli.EnvVar.TELEMETRY_ENDPOINT), raising=False)
-
-    with pytest.raises(typer.Exit) as exc_info:
-        cli.main(enable_telemetry=True, disable_telemetry=False, version=False)
-
-    captured = capsys.readouterr()
-
-    assert exc_info.value.exit_code == 0
-    assert "Telemetry enabled." in captured.out
-    assert "no telemetry will be sent" in captured.out
-    assert calls == [(tmp_path, True)]
-
+def test_version_option_works_without_a_command():
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == get_version()

@@ -1,15 +1,190 @@
 import os
+import errno
 import sys
 import subprocess
 from pathlib import Path
 import tempfile
 import zipfile
+import shutil
 
 import pytest
 
-from todoist.core.env import EnvVar
+from todometry.core.env import EnvVar
 
 _ALLOWED_MSIEXEC_CODES = {0, 3010, 1641}
+
+
+def test_windows_installer_data_directory_matches_launcher():
+    import xml.etree.ElementTree as etree
+
+    root = Path(__file__).resolve().parents[2]
+    directories = etree.parse(root / "windows/installer/components.wxs").findall(
+        ".//{*}Directory[@Id='APPDATADIR']"
+    )
+    assert len(directories) == 1
+    assert directories[0].get("Name") == "Todometry"
+
+
+@pytest.mark.parametrize("existing", [None, "urgency:\n  enabled: false\n"])
+def test_windows_staged_defaults_preserve_migrated_and_existing_settings(
+    tmp_path, monkeypatch, existing
+):
+    from scripts.build_windows import _stage_assets
+    from todometry.core.utils import migrate_legacy_files
+    from todometry.launcher import _ensure_env_and_files
+
+    repo_root = Path(__file__).resolve().parents[2]
+    app_root = tmp_path / "installed-app"
+    installer_config = tmp_path / "installer-config"
+    _stage_assets(
+        repo_root, app_root, installer_config, include_dashboard=False, node_version=""
+    )
+    bundled = app_root / "configs" / "dashboard.yaml"
+    assert (
+        bundled.read_bytes() == (repo_root / "configs" / "dashboard.yaml").read_bytes()
+    )
+    assert not (installer_config / "dashboard.yaml").exists()
+
+    legacy, target = tmp_path / "TodoistAssistant", tmp_path / "Todometry"
+    (legacy / "config").mkdir(parents=True)
+    legacy_dashboard = legacy / "config" / "dashboard.yaml"
+    legacy_dashboard.write_text("urgency:\n  enabled: true\n", encoding="utf-8")
+    shutil.copytree(installer_config, target / "config")
+    if existing is not None:
+        (target / "config" / "dashboard.yaml").write_text(existing, encoding="utf-8")
+
+    # The launcher migrates old state before adding any missing defaults.
+    migrate_legacy_files(legacy, target, ("config",))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    for name in (
+        EnvVar.CONFIG_DIR,
+        EnvVar.CACHE_DIR,
+        EnvVar.DATA_DIR,
+        EnvVar.LOGS_DIR,
+        EnvVar.PERSONAL_DIR,
+    ):
+        monkeypatch.delenv(str(name), raising=False)
+    _ensure_env_and_files(target, target / "config", app_root)
+    dashboard = target / "config" / "dashboard.yaml"
+    assert dashboard.read_text(encoding="utf-8") == (
+        existing or legacy_dashboard.read_text(encoding="utf-8")
+    )
+    assert legacy_dashboard.read_text(encoding="utf-8") == "urgency:\n  enabled: true\n"
+    assert (target / ".v040-migration-complete").exists()
+    _ensure_env_and_files(target, target / "config", app_root)
+    assert dashboard.read_text(encoding="utf-8") == (
+        existing or legacy_dashboard.read_text(encoding="utf-8")
+    )
+
+
+def test_windows_clean_install_seeds_missing_defaults_without_overwriting(
+    tmp_path, monkeypatch
+):
+    from scripts.build_windows import _stage_assets
+    from todometry.launcher import _ensure_env_and_files
+
+    repo_root = Path(__file__).resolve().parents[2]
+    app_root, target = tmp_path / "app", tmp_path / "Todometry"
+    _stage_assets(
+        repo_root, app_root, target / "config", include_dashboard=False, node_version=""
+    )
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    for name in (
+        EnvVar.CONFIG_DIR,
+        EnvVar.CACHE_DIR,
+        EnvVar.DATA_DIR,
+        EnvVar.LOGS_DIR,
+        EnvVar.PERSONAL_DIR,
+    ):
+        monkeypatch.delenv(str(name), raising=False)
+    _ensure_env_and_files(target, target / "config", app_root)
+    assert (target / "config" / "dashboard.yaml").read_bytes() == (
+        app_root / "configs" / "dashboard.yaml"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("race", [False, True])
+def test_seed_defaults_without_hardlinks_preserves_concurrent_file(
+    tmp_path, monkeypatch, race
+):
+    from todometry.launcher import _seed_config_dir
+
+    app_root, config = tmp_path / "app", tmp_path / "config"
+    (app_root / "configs").mkdir(parents=True)
+    (app_root / "configs" / "dashboard.yaml").write_text("default", encoding="utf-8")
+    config.mkdir()
+    destination = config / "dashboard.yaml"
+
+    def unsupported(_source, _target):
+        if race:
+            destination.write_text("user settings", encoding="utf-8")
+        raise OSError(errno.EOPNOTSUPP, "hard links unavailable")
+
+    monkeypatch.setattr(os, "link", unsupported)
+    _seed_config_dir(config, app_root)
+    assert destination.read_text(encoding="utf-8") == (
+        "user settings" if race else "default"
+    )
+    assert not list(config.glob(".config-*"))
+
+
+def test_seed_defaults_reports_fallback_write_failure_and_cleans_partial_file(
+    tmp_path, monkeypatch
+):
+    from todometry.launcher import _seed_config_dir
+
+    app_root, config = tmp_path / "app", tmp_path / "config"
+    (app_root / "configs").mkdir(parents=True)
+    (app_root / "configs" / "dashboard.yaml").write_text("default", encoding="utf-8")
+    config.mkdir()
+
+    def unsupported(_source, _target):
+        def fail_copy(_source, output):
+            output.write(b"partial")
+            raise OSError(errno.ENOSPC, "disk full")
+
+        monkeypatch.setattr(shutil, "copyfileobj", fail_copy)
+        raise OSError(errno.EOPNOTSUPP, "hard links unavailable")
+
+    monkeypatch.setattr(os, "link", unsupported)
+    with pytest.raises(OSError, match="disk full"):
+        _seed_config_dir(config, app_root)
+    assert not (config / "dashboard.yaml").exists()
+    assert not list(config.glob(".config-*"))
+
+
+def test_completed_migration_keeps_ambiguous_existing_dashboard(tmp_path, monkeypatch):
+    from scripts.build_windows import _stage_assets
+    from todometry.core.utils import migrate_legacy_files
+    from todometry.launcher import _ensure_env_and_files
+
+    repo_root = Path(__file__).resolve().parents[2]
+    app_root, target = tmp_path / "app", tmp_path / "Todometry"
+    legacy = tmp_path / "TodoistAssistant"
+    _stage_assets(
+        repo_root, app_root, target / "config", include_dashboard=False, node_version=""
+    )
+    (legacy / "config").mkdir(parents=True)
+    old_dashboard = legacy / "config" / "dashboard.yaml"
+    old_dashboard.write_text("urgency:\n  enabled: true\n", encoding="utf-8")
+    dashboard = target / "config" / "dashboard.yaml"
+    shutil.copyfile(app_root / "configs" / "dashboard.yaml", dashboard)
+    (target / ".v040-migration-complete").touch()
+    original = dashboard.read_bytes()
+
+    migrate_legacy_files(legacy, target, ("config",))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    for name in (
+        EnvVar.CONFIG_DIR,
+        EnvVar.CACHE_DIR,
+        EnvVar.DATA_DIR,
+        EnvVar.LOGS_DIR,
+        EnvVar.PERSONAL_DIR,
+    ):
+        monkeypatch.delenv(str(name), raising=False)
+    _ensure_env_and_files(target, target / "config", app_root)
+    assert dashboard.read_bytes() == original
+    assert old_dashboard.read_text(encoding="utf-8") == "urgency:\n  enabled: true\n"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only installer test")
@@ -34,11 +209,14 @@ def test_windows_msi_contents() -> None:
         )
 
         extracted_root = Path(temp_dir)
-        exe_path = _find_required(extracted_root, "todoist-assistant.exe")
+        exe_path = _find_required(extracted_root, "todometry.exe")
         app_root = exe_path.parent
 
         _find_required(extracted_root, ".env.template")
-        _find_required(extracted_root, "automations.yaml")
+        assert (app_root / "configs" / "dashboard.yaml").is_file()
+        assert list(extracted_root.rglob("dashboard.yaml")) == [
+            app_root / "configs" / "dashboard.yaml"
+        ]
 
         has_python = _has_python_runtime(app_root)
         assert has_python, (
@@ -92,9 +270,7 @@ def _resolve_msi_path(repo_root: Path) -> Path:
             return path
         raise AssertionError(f"MSI not found at {EnvVar.MSI_PATH}={env_path}")
 
-    candidates = sorted(
-        (repo_root / "dist" / "windows").glob("todoist-assistant-*.msi")
-    )
+    candidates = sorted((repo_root / "dist" / "windows").glob("todometry-*.msi"))
     if not candidates:
         pytest.skip(
             "MSI not found. Build with: uv run python3 -m scripts.build_windows"

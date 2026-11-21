@@ -1,18 +1,18 @@
 param(
   [string]$SetupExe,
-  [string]$InstallDir = "C:\\Program Files\\TodoistAssistant",
-  [string]$DataDir = "C:\\ProgramData\\TodoistAssistant",
   [int]$ApiPort = 8001,
   [int]$FrontendPort = 3001
 )
 
 $ErrorActionPreference = "Stop"
+$InstallDir = Join-Path $env:ProgramFiles "TodoistAssistant"
+$DataDir = Join-Path $env:ProgramData "Todometry"
 
 # Pass criteria:
 # - setup.exe exits 0/3010/1641 for install and uninstall
-# - todoist-assistant.exe launches headlessly and API health returns 200
+# - todometry.exe launches headlessly and API health returns 200
 # - frontend responds (any HTTP status)
-# - uninstall removes InstallDir and preserves ProgramData by default
+# - uninstall removes InstallDir and preserves existing ProgramData files by default
 
 function Get-HttpStatus {
   param([string]$Uri, [int]$TimeoutSec = 5)
@@ -52,7 +52,7 @@ function Wait-Http {
 }
 
 $allowed = @(0, 3010, 1641)
-$logDir = Join-Path $env:ProgramData "TodoistAssistant\\logs\\installer"
+$logDir = Join-Path $env:TEMP ("todometry-installer-logs-" + [guid]::NewGuid().ToString("N"))
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
@@ -60,17 +60,19 @@ $installLog = Join-Path $logDir "setup-install.log"
 $uninstallLog = Join-Path $logDir "setup-uninstall.log"
 
 if (-not $SetupExe) {
-  $candidate = Join-Path $PSScriptRoot "..\\..\\dist\\windows\\TodoistAssistantSetup.exe"
+  $candidate = Join-Path $PSScriptRoot "..\\..\\dist\\windows\\TodometrySetup.exe"
   if (Test-Path $candidate) {
     $SetupExe = (Resolve-Path $candidate).Path
   }
 }
 if (-not $SetupExe -or -not (Test-Path $SetupExe)) {
-  throw "Setup.exe not found. Provide -SetupExe or build dist/windows/TodoistAssistantSetup.exe"
+  throw "Setup.exe not found. Provide -SetupExe or build dist/windows/TodometrySetup.exe"
 }
 
-if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
-if (Test-Path $DataDir) { Remove-Item -Recurse -Force $DataDir }
+if ((Test-Path $InstallDir) -and (Get-ChildItem -LiteralPath $InstallDir -Force | Select-Object -First 1)) {
+  throw "Install directory is not empty: $InstallDir. Use a clean runner."
+}
+$runtimeData = Join-Path $env:TEMP ("todometry-runtime-smoke-" + [guid]::NewGuid().ToString("N"))
 
 Write-Host "Installing: $SetupExe"
 $installArgs = @(
@@ -78,24 +80,21 @@ $installArgs = @(
   "/quiet",
   "/norestart",
   "/log",
-  "`"$installLog`"",
-  "INSTALLFOLDER=`"$InstallDir`"",
-  "INSTALLDESKTOPSHORTCUT=0",
-  "SKIP_TELEMETRY_REGISTRY=1"
+  "`"$installLog`""
 )
 $install = Start-Process -FilePath $SetupExe -ArgumentList $installArgs -Wait -PassThru
 if ($allowed -notcontains $install.ExitCode) {
   throw "setup.exe install failed with code $($install.ExitCode)"
 }
 
-$exe = Join-Path $InstallDir "todoist-assistant.exe"
+$exe = Join-Path $InstallDir "todometry.exe"
 if (-not (Test-Path $exe)) {
   throw "Installed executable not found at $exe"
 }
 
-$stdoutLog = Join-Path $env:TEMP "todoist-assistant-stdout.log"
-$stderrLog = Join-Path $env:TEMP "todoist-assistant-stderr.log"
-$runArgs = "--api-host 127.0.0.1 --api-port $ApiPort --frontend-host 127.0.0.1 --frontend-port $FrontendPort --no-browser"
+$stdoutLog = Join-Path $env:TEMP "todometry-stdout.log"
+$stderrLog = Join-Path $env:TEMP "todometry-stderr.log"
+$runArgs = "--api-host 127.0.0.1 --api-port $ApiPort --frontend-host 127.0.0.1 --frontend-port $FrontendPort --no-browser --data-dir `"$runtimeData`""
 Write-Host "Launching app: $exe $runArgs"
 $appProc = Start-Process -FilePath $exe -ArgumentList $runArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
 
@@ -118,27 +117,44 @@ try {
     & taskkill /PID $appProc.Id /T /F | Out-Null
     Start-Sleep -Seconds 2
   }
-  Get-Process todoist-assistant,node -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 
-Write-Host "Uninstalling..."
-$uninstallArgs = @(
-  "/uninstall",
-  "/quiet",
-  "/norestart",
-  "/log",
-  "`"$uninstallLog`""
-)
-$uninstall = Start-Process -FilePath $SetupExe -ArgumentList $uninstallArgs -Wait -PassThru
-if ($allowed -notcontains $uninstall.ExitCode) {
-  throw "setup.exe uninstall failed with code $($uninstall.ExitCode)"
-}
+$sentinel = Join-Path $DataDir ("uninstall-smoke-" + [guid]::NewGuid().ToString("N") + ".txt")
+$sentinelValue = "todometry user data must survive uninstall"
+try {
+  if (-not (Test-Path -LiteralPath $DataDir -PathType Container)) {
+    throw "Installer did not create the expected data directory: $DataDir"
+  }
+  # Windows Installer may remove an empty CreateFolder on uninstall. A user file
+  # must survive, which is the behaviour the application actually relies on.
+  Set-Content -LiteralPath $sentinel -Value $sentinelValue -NoNewline -Encoding UTF8
 
-if (Test-Path $InstallDir) {
-  throw "Install dir still exists after uninstall: $InstallDir"
-}
-if (-not (Test-Path $DataDir)) {
-  throw "Expected ProgramData to be preserved by default, but $DataDir is missing"
+  Write-Host "Uninstalling..."
+  $uninstallArgs = @(
+    "/uninstall",
+    "/quiet",
+    "/norestart",
+    "/log",
+    "`"$uninstallLog`""
+  )
+  $uninstall = Start-Process -FilePath $SetupExe -ArgumentList $uninstallArgs -Wait -PassThru
+  if ($allowed -notcontains $uninstall.ExitCode) {
+    throw "setup.exe uninstall failed with code $($uninstall.ExitCode)"
+  }
+
+  if (Test-Path $InstallDir) {
+    throw "Install dir still exists after uninstall: $InstallDir"
+  }
+  if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) {
+    throw "Existing user data was removed on uninstall: $sentinel"
+  }
+  if ((Get-Content -LiteralPath $sentinel -Raw) -ne $sentinelValue) {
+    throw "Existing user data changed on uninstall: $sentinel"
+  }
+} finally {
+  if (Test-Path -LiteralPath $sentinel -PathType Leaf) {
+    Remove-Item -LiteralPath $sentinel -Force
+  }
 }
 
 Write-Host "Smoke test completed successfully."

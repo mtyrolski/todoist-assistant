@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${REPO_ROOT}/dist/macos"
-APP_PATH="${DIST_DIR}/TodoistAssistant.app"
+APP_PATH="${DIST_DIR}/todometry.app"
 OUTPUT_SUFFIX=""
 
 usage() {
@@ -67,12 +67,12 @@ suffix=""
 if [ -n "${OUTPUT_SUFFIX}" ]; then
   suffix="-${OUTPUT_SUFFIX}"
 fi
-output_dmg="${DIST_DIR}/todoist-assistant-${version}${suffix}.dmg"
+output_dmg="${DIST_DIR}/todometry-${version}${suffix}.dmg"
 
 if [ -f "${output_dmg}" ] && [ "${FORCE}" -ne 1 ]; then
   echo "DMG already exists at ${output_dmg}. Use --force to overwrite." >&2
   exit 1
 fi
 
-hdiutil create -volname "TodoistAssistant" -srcfolder "${APP_PATH}" -ov -format UDZO "${output_dmg}"
+hdiutil create -volname "todometry" -srcfolder "${APP_PATH}" -ov -format UDZO "${output_dmg}"
 echo "Built macOS DMG: ${output_dmg}"

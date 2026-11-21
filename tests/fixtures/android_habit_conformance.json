@@ -1,0 +1,22 @@
+{
+  "anchor": "2026-11-02T12:00:00Z",
+  "events": [
+    {"id":"a", "object_id":"h1", "object_type":"item", "event_type":"completed", "event_date":"2026-10-25T23:59:59Z", "extra_data":{"is_recurring":true}},
+    {"id":"b", "object_id":"h1", "object_type":"item", "event_type":"completed", "event_date":"2026-10-26T00:00:00Z", "extra_data":{"is_recurring":true}},
+    {"id":"c", "object_id":"h1", "object_type":"item", "event_type":"completed", "event_date":"2026-11-01T23:59:59Z", "extra_data":{"is_recurring":true}},
+    {"id":"d", "object_id":"h1", "object_type":"item", "event_type":"completed", "event_date":"2026-11-02T00:00:00Z", "extra_data":{"is_recurring":true}},
+    {"id":"e", "object_id":"h1", "object_type":"item", "event_type":"updated", "event_date":"2026-10-27T08:00:00Z", "extra_data":{"due_date":"2026-10-28", "last_due_date":"2026-10-27"}},
+    {"id":"f", "object_id":"h1", "object_type":"item", "event_type":"updated", "event_date":"2026-10-28T08:00:00Z", "extra_data":{"due_date":"2026-10-29"}},
+    {"id":"g", "object_id":"h2", "object_type":"item", "event_type":"completed", "event_date":"2026-10-29T08:00:00Z", "extra_data":{}},
+    {"id":"h", "object_id":"h2", "object_type":"item", "event_type":"uncompleted", "event_date":"2026-11-02T09:00:00Z", "extra_data":{}},
+    {"id":"i", "object_id":"other", "object_type":"item", "event_type":"completed", "event_date":"2026-10-29T08:00:00Z", "extra_data":{}}
+  ],
+  "expected": {
+    "weekBeg":"2026-10-26", "weekEnd":"2026-11-01", "trackedCount":2,
+    "totals":{"weeklyCompleted":2,"weeklyRescheduled":1,"allTimeCompleted":4,"allTimeRescheduled":1},
+    "items": [
+      {"taskId":"h1","weeklyCompleted":2,"weeklyRescheduled":1,"allTimeCompleted":4,"allTimeRescheduled":1,"reliability":80.0},
+      {"taskId":"h2","weeklyCompleted":0,"weeklyRescheduled":0,"allTimeCompleted":0,"allTimeRescheduled":0,"reliability":null}
+    ]
+  }
+}

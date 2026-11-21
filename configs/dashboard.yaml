@@ -20,7 +20,4 @@ urgency:
     good: OK
     warn: Watch
     danger: Urgent
-observer:
-  enabled: true
-  refresh_interval_minutes: 2.0
 plot_events: []

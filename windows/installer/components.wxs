@@ -6,11 +6,11 @@
         <Directory Id="INSTALLFOLDER" Name="TodoistAssistant" />
       </Directory>
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="AppStartMenuDir" Name="Todoist Assistant" />
+        <Directory Id="AppStartMenuDir" Name="todometry" />
       </Directory>
       <Directory Id="DesktopFolder" />
       <Directory Id="CommonAppDataFolder">
-        <Directory Id="APPDATADIR" Name="TodoistAssistant">
+        <Directory Id="APPDATADIR" Name="Todometry">
           <Directory Id="CONFIGDIR" Name="config" />
           <Directory Id="LOGSDIR" Name="logs" />
         </Directory>
@@ -33,9 +33,9 @@
       <Component Id="AppShortcuts" Guid="*" Win64="yes">
         <Shortcut
           Id="StartMenuShortcut"
-          Name="Todoist Assistant"
-          Description="Launch Todoist Assistant"
-          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          Name="todometry"
+          Description="Launch todometry"
+          Target="[INSTALLFOLDER]todometry.exe"
           WorkingDirectory="APPDATADIR" />
         <RemoveFolder Id="RemoveStartMenuDir" Directory="AppStartMenuDir" On="uninstall" />
         <RegistryValue
@@ -55,9 +55,9 @@
         <Condition>INSTALLDESKTOPSHORTCUT=1</Condition>
         <Shortcut
           Id="DesktopShortcut"
-          Name="Todoist Assistant"
-          Description="Launch Todoist Assistant"
-          Target="[INSTALLFOLDER]todoist-assistant.exe"
+          Name="todometry"
+          Description="Launch todometry"
+          Target="[INSTALLFOLDER]todometry.exe"
           WorkingDirectory="APPDATADIR" />
         <RegistryValue
           Root="HKCU"
@@ -98,6 +98,7 @@
   </Fragment>
 
   <Fragment>
+    <util:CloseApplication Id="CloseTelemetryExe" Target="todometry.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" />
     <util:CloseApplication
       Id="CloseTodoistAssistantExe"
       Target="todoist-assistant.exe"
@@ -132,18 +133,4 @@
     </DirectoryRef>
   </Fragment>
 
-  <Fragment>
-    <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="TelemetryOptIn" Guid="*" Win64="yes">
-        <Condition>WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND SKIP_TELEMETRY_REGISTRY &lt;&gt; 1</Condition>
-        <RegistryValue
-          Root="HKCU"
-          Key="Software\TodoistAssistant"
-          Name="telemetry_opt_in"
-          Type="integer"
-          Value="[WIXUI_EXITDIALOGOPTIONALCHECKBOX]"
-          KeyPath="yes" />
-      </Component>
-    </DirectoryRef>
-  </Fragment>
 </Wix>

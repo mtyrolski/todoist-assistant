@@ -1,1 +1,1 @@
-"""Core shared helpers for Todoist Assistant."""
+"""Compatibility package for v0.4.0 cached types."""

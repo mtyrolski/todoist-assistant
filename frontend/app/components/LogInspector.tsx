@@ -250,7 +250,7 @@ export function LogInspector() {
               {selectedMeta?.description ?? "Choose a runtime source to inspect its live output."}
             </p>
             {selectedMeta ? (
-              <div className="automationStatusLine" style={{ marginTop: 10 }}>
+              <div className="logStatusLine" style={{ marginTop: 10 }}>
                 <span className={`pill ${selectedMeta.available ? "pill-good" : "pill-warn"}`}>
                   {selectedMeta.available ? "Available now" : "Unavailable"}
                 </span>
@@ -305,7 +305,7 @@ export function LogInspector() {
             </p>
             {selectedMeta?.available ? (
               <p className="muted tiny" style={{ margin: 0 }}>
-                Opened source mirrors the current automation feed. Keep auto-refresh on to watch live starts and finishes.
+                Keep auto-refresh on to watch live log output.
               </p>
             ) : null}
           </div>

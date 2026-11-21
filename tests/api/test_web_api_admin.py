@@ -1,13 +1,11 @@
 """Tests for FastAPI admin endpoints."""
 
-from datetime import datetime
-from typing import cast
-
 import pytest
 
-import todoist.database.dataframe as dataframe_module
-from todoist.core.utils import MaxRetriesExceeded
-import todoist.web.api as web_api
+import todometry.database.dataframe as dataframe_module
+from todometry.core.utils import MaxRetriesExceeded
+import todometry.web.api as web_api
+from todometry.web.services.project_adjustments import _resolve_automatic_project_mappings
 
 # pylint: disable=protected-access
 
@@ -83,7 +81,7 @@ def test_automatic_project_mappings_use_parent_ids_and_manual_overrides() -> Non
         },
     ]
 
-    automatic, details = web_api._resolve_automatic_project_mappings(
+    automatic, details = _resolve_automatic_project_mappings(
         records,
         manual_mappings={"Old Research": "Academy"},
         archived_parent_projects=set(),
@@ -395,379 +393,111 @@ def test_admin_dashboard_labels_returns_sorted_local_labels(
     ]
 
 
-def test_admin_automations_returns_inventory(monkeypatch, api_client) -> None:
-    monkeypatch.setattr(
-        web_api,
-        "_load_automation_inventory",
-        lambda: [
-            {
-                "key": "activity",
-                "name": "Activity Fetching Automation",
-                "frequencyMinutes": 15,
-                "isLong": False,
-                "launchCount": 0,
-                "lastLaunch": None,
-                "enabled": True,
-                "defaultEnabled": True,
-                "target": "todoist.automations.activity.Activity",
-            }
-        ],
-    )
-
-    res = api_client.get("/api/admin/automations")
-
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["automations"][0]["key"] == "activity"
-    assert payload["automations"][0]["enabled"] is True
-    assert payload["automations"][0]["defaultEnabled"] is True
-
-
-class _ApiStubAutomation(web_api.Automation):
-    def __init__(self, name: str):
-        super().__init__(name, frequency=15)
-
-    def _tick(self, db):
-        _ = db
-        return []
-
-
-class _ApiFailingAutomation(_ApiStubAutomation):
-    def _tick(self, db):
-        _ = db
-        raise RuntimeError("boom")
-
-
-def test_automation_launch_metadata_includes_run_signal(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-    cache = web_api.Cache()
-    cache.automation_launches.save({"Signal Auto": [datetime(2026, 4, 18, 15, 0, 0)]})
-    cache.automation_run_signals.save(
-        {
-            "Signal Auto": {
-                "attemptCount": 3,
-                "successCount": 2,
-                "failureCount": 1,
-                "skipCount": 0,
-                "lastStatus": "failed",
-                "lastStartedAt": "2026-04-18T15:01:00",
-                "lastFinishedAt": "2026-04-18T15:01:02",
-                "lastDurationSeconds": 2.0,
-                "lastError": "RuntimeError: boom",
-                "lastSuccessAt": "2026-04-18T14:59:59",
-            }
-        }
-    )
-
-    payload = web_api._automation_launch_metadata(_ApiStubAutomation("Signal Auto"))
-
-    assert payload["launchCount"] == 1
-    assert payload["lastLaunch"] == "2026-04-18T15:00:00"
-    assert payload["lastStatus"] == "failed"
-    assert payload["attemptCount"] == 3
-    assert payload["successCount"] == 2
-    assert payload["failureCount"] == 1
-    assert payload["lastError"] == "RuntimeError: boom"
-
-
-def test_run_all_automations_sync_continues_after_failure(
-    monkeypatch, tmp_path
-) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-
-    class _DbStub:
-        def __init__(self) -> None:
-            self.reset_calls = 0
-
-        def reset(self) -> None:
-            self.reset_calls += 1
-
-    db = _DbStub()
-    monkeypatch.setattr(
-        web_api,
-        "_load_automations",
-        lambda: [_ApiFailingAutomation("broken"), _ApiStubAutomation("healthy")],
-    )
-
-    result = web_api._run_all_automations_sync(dbio=cast(web_api.Database, db))
-
-    assert result["summary"] == {"completed": 1, "failed": 1, "skipped": 0}
-    assert [item["name"] for item in result["results"]] == ["broken", "healthy"]
-    assert result["results"][0]["status"] == "failed"
-    assert result["results"][0]["error"] == "RuntimeError: boom"
-    assert result["results"][1]["status"] == "completed"
-    assert result["results"][1]["error"] is None
-    assert db.reset_calls == 2
-
-
-def test_enabled_automation_keys_defaults_to_all_sections() -> None:
-    config = {
-        "activity": {"_target_": "todoist.automations.activity.Activity"},
-        "habit_tracker": {"_target_": "todoist.automations.habit_tracker.HabitTracker"},
-    }
-
-    assert web_api._enabled_automation_keys(config) == ["activity", "habit_tracker"]
-
-
-def test_configured_enabled_automation_keys_supports_resolved_omegaconf_entries(
-    tmp_path,
-) -> None:
-    config_path = tmp_path / "automations.yaml"
-    _write_yaml(
-        config_path,
-        "defaults:",
-        "  - _self_",
-        "activity:",
-        "  _target_: todoist.automations.activity.Activity",
-        "habit_tracker:",
-        "  _target_: todoist.automations.habit_tracker.HabitTracker",
-        "automations:",
-        "  - ${activity}",
-        "  - ${habit_tracker}",
-    )
-
-    config = web_api._read_yaml_config(config_path)
-
-    assert web_api._configured_enabled_automation_keys(config) == [
-        "activity",
-        "habit_tracker",
-    ]
-
-
-def test_admin_set_automation_enabled_updates_config(
-    monkeypatch, tmp_path, api_client
-) -> None:
-    config_path = tmp_path / "automations.yaml"
-    _write_yaml(
-        config_path,
-        "defaults:",
-        "  - _self_",
-        "activity:",
-        "  _target_: todoist.automations.activity.Activity",
-        "  name: Activity Fetching Automation",
-        "  early_stop_after_n_windows: 2",
-        "  nweeks_window_size: 4",
-        "habit_tracker:",
-        "  _target_: todoist.automations.habit_tracker.HabitTracker",
-        "  name: Habit Tracker",
-        "  frequency_in_minutes: 10080",
-        "automations:",
-        "  - ${activity}",
-    )
-    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
-    monkeypatch.setattr(web_api, "_CONFIG_DIR", tmp_path)
-
-    res = api_client.post(
-        "/api/admin/automations/habit_tracker/enabled", json={"enabled": True}
-    )
-
-    assert res.status_code == 200
-    saved = config_path.read_text(encoding="utf-8")
-    assert "- ${habit_tracker}" in saved
-
-
-def test_admin_stale_task_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
-    config_path = tmp_path / "automations.yaml"
-    _write_yaml(
-        config_path,
-        "defaults:",
-        "  - _self_",
-        "stale_tasks:",
-        "  _target_: todoist.automations.stale_tasks.StaleTasksAutomation",
-        "  name: Stale Tasks",
-        "  frequency_in_minutes: 1440",
-        "  config:",
-        "    old_after_days: 30",
-        "    very_old_after_days: 90",
-        "    old_label: old",
-        "    very_old_label: very-old",
-        "  dry_run: true",
-        "  max_updates_per_tick: 25",
-        "automations:",
-        "  - ${stale_tasks}",
-    )
-    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
-
-    res = api_client.put(
-        "/api/admin/stale_tasks",
-        json={
-            "oldAfterDays": 14,
-            "veryOldAfterDays": 45,
-            "warningLabel": "stale-warning",
-            "veryOldLabel": "stale-critical",
-            "deleteAfterWarningDays": 5,
-            "dryRun": False,
-            "maxUpdatesPerTick": 10,
-        },
-    )
-
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["settings"]["deleteAfterWarningDays"] == 5
-    assert payload["settings"]["dryRun"] is False
-    saved = config_path.read_text(encoding="utf-8")
-    assert "old_label: stale-warning" in saved
-    assert "delete_after_warning_days: 5" in saved
-    assert "dry_run: false" in saved
-
-
-def test_admin_multiplication_settings_roundtrip_cleanup(
-    monkeypatch, tmp_path, api_client
-) -> None:
-    config_path = tmp_path / "automations.yaml"
-    _write_yaml(
-        config_path,
-        "defaults:",
-        "  - _self_",
-        "multiply:",
-        "  _target_: todoist.automations.multiplicate.Multiply",
-        "  frequency_in_minutes: 0.1",
-        "automations:",
-        "  - ${multiply}",
-    )
-    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
-
-    res = api_client.put(
-        "/api/admin/multiplication",
-        json={
-            "flatLeafTemplate": "{base} #{i}",
-            "deepLeafTemplate": "{base} - {i}/{n}",
-            "deepChildLabel": "effort-point",
-            "cleanupUnusedLabels": True,
-            "cleanupUnusedLabelsAfterDays": 3,
-        },
-    )
-
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["settings"]["cleanupUnusedLabels"] is True
-    assert payload["settings"]["cleanupUnusedLabelsAfterDays"] == 3
-    assert payload["settings"]["deepChildLabel"] == "effort-point"
-    saved = config_path.read_text(encoding="utf-8")
-    assert "deep_child_label: effort-point" in saved
-    assert "cleanup_unused_labels_after_days: 3" in saved
-
-
-def test_set_automation_enabled_disables_config_entry(monkeypatch, tmp_path) -> None:
-    config_path = tmp_path / "automations.yaml"
-    _write_yaml(
-        config_path,
-        "defaults:",
-        "  - _self_",
-        "activity:",
-        "  _target_: todoist.automations.activity.Activity",
-        "habit_tracker:",
-        "  _target_: todoist.automations.habit_tracker.HabitTracker",
-        "automations:",
-        "  - ${activity}",
-        "  - ${habit_tracker}",
-    )
-    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
-
-    changed = web_api._set_automation_enabled("habit_tracker", enabled=False)
-
-    assert changed is True
-    saved = config_path.read_text(encoding="utf-8")
-    assert "- ${habit_tracker}" not in saved
-
-
-def test_set_automation_enabled_returns_false_for_unknown_key(
-    monkeypatch, tmp_path
-) -> None:
-    config_path = tmp_path / "automations.yaml"
-    _write_yaml(
-        config_path,
-        "defaults:",
-        "  - _self_",
-        "activity:",
-        "  _target_: todoist.automations.activity.Activity",
-        "automations:",
-        "  - ${activity}",
-    )
-    monkeypatch.setattr(web_api, "_AUTOMATIONS_PATH", config_path)
-
-    changed = web_api._set_automation_enabled("missing", enabled=True)
-
-    assert changed is False
-
-
-def test_admin_observer_settings_roundtrip(monkeypatch, tmp_path, api_client) -> None:
-    config_dir = tmp_path / "configs"
-    config_dir.mkdir()
-    (config_dir / "dashboard.yaml").write_text(
-        "observer:\n  enabled: true\n  refresh_interval_minutes: 0.5\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml"
-    )
-
-    client = api_client
-    res = client.get("/api/admin/observer")
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["settings"]["enabled"] is True
-    assert payload["settings"]["refreshIntervalMinutes"] == 0.5
-    assert payload["editTargets"][0]["icon"] == "wrench"
-
-    update = client.post(
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/admin/automations",
         "/api/admin/observer",
-        json={"enabled": False, "refreshIntervalMinutes": 2},
-    )
-    assert update.status_code == 200
-    updated = update.json()
-    assert updated["state"]["enabled"] is False
-    assert updated["settings"]["refreshIntervalMinutes"] == 2.0
-
-    saved_text = (config_dir / "dashboard.yaml").read_text(encoding="utf-8")
-    assert (
-        "refresh_interval_minutes: 2.0" in saved_text
-        or "refresh_interval_minutes: 2" in saved_text
-    )
-    assert "enabled: false" in saved_text
+        "/api/admin/multiplication",
+        "/api/admin/stale_tasks",
+        "/api/dashboard/executive_review",
+    ],
+)
+def test_removed_runtime_features_have_no_routes(api_client, path: str) -> None:
+    assert api_client.get(path).status_code == 404
 
 
-def test_admin_run_observer_reports_idle_polling_automations(
+def test_dashboard_settings_create_directory_and_invalidate_home(
     monkeypatch, tmp_path, api_client
-) -> None:
-    monkeypatch.setenv(str(web_api.EnvVar.CACHE_DIR), str(tmp_path))
-    monkeypatch.chdir(tmp_path)
-
-    config_dir = tmp_path / "configs"
-    config_dir.mkdir()
-    (config_dir / "dashboard.yaml").write_text(
-        "observer:\n  enabled: true\n  refresh_interval_minutes: 0.5\n",
-        encoding="utf-8",
-    )
+):
+    path = tmp_path / "new-configs" / "dashboard.yaml"
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", path)
     monkeypatch.setattr(
-        web_api, "_DASHBOARD_CONFIG_PATH", config_dir / "dashboard.yaml"
+        web_api._state, "home_payload_cache", {("home",): {"stale": True}}
     )
+    response = api_client.put(
+        "/api/admin/dashboard/settings",
+        json={
+            "fireLabels": [],
+            "warnPriorityThresholds": [],
+            "dangerOnFireLabel": False,
+            "warnOnPriority": False,
+            "warnOnDue": False,
+            "warnOnDeadline": False,
+        },
+    )
+    assert response.status_code == 200
+    assert web_api._state.home_payload_cache == {}
+    reread = api_client.get("/api/admin/dashboard/settings").json()["settings"]
+    assert reread["fireLabels"] == []
+    assert reread["warnPriorityThresholds"] == []
+    assert reread["dangerOnFireLabel"] is False
+    assert reread["warnOnPriority"] is False
+    assert path.exists()
 
-    class _FakeDatabase:
-        def __init__(self, dotenv_path: str) -> None:
-            self.dotenv_path = dotenv_path
 
-        def pull(self) -> None:
-            return None
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"enabled": "false"},
+        {"warnOnPriority": 0},
+        {"fireLabels": "fire"},
+        {"warnPriorityThresholds": "43"},
+        {"warnPriorityThresholds": [0, 5]},
+        {"warnPriorityMinCount": 1.5},
+        {"warnDueWithinDays": -1},
+        {"warnDueMinCount": 0},
+        {"warnDeadlineWithinDays": True},
+        {"fireLabels": [None]},
+        {"plotEvents": [{"date": "2026-02-30", "label": "Invalid"}]},
+        {"plotEvents": [{"date": "2026-11-01", "label": "Launch", "color": "garbage"}]},
+    ],
+)
+def test_invalid_settings_do_not_modify_saved_rules(
+    monkeypatch, tmp_path, api_client, patch
+):
+    path = tmp_path / "dashboard.yaml"
+    path.write_text("urgency:\n  enabled: true\n  warn_priority_thresholds: [4]\n")
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", path)
+    before = path.read_bytes()
+    response = api_client.put("/api/admin/dashboard/settings", json=patch)
+    assert response.status_code == 400
+    assert path.read_bytes() == before
+    assert response.json()["detail"]
 
-        def reset(self) -> None:
-            return None
 
-    class _FakeRunResult:
-        def __init__(self) -> None:
-            self.new_events = 0
-            self.automations_ran = 1
+def test_concurrent_partial_settings_updates_preserve_each_other(monkeypatch, tmp_path):
+    import asyncio
+    import httpx
 
-    class _FakeObserver:
-        def run_once(self) -> _FakeRunResult:
-            return _FakeRunResult()
+    path = tmp_path / "dashboard.yaml"
+    path.write_text("urgency:\n  enabled: true\n  warn_priority_thresholds: [4]\n")
+    monkeypatch.setattr(web_api, "_DASHBOARD_CONFIG_PATH", path)
 
-    monkeypatch.setattr(web_api, "Database", _FakeDatabase)
-    monkeypatch.setattr(web_api, "_build_observer", lambda db: _FakeObserver())
+    async def run():
+        lock = asyncio.Lock()
+        monkeypatch.setattr(web_api, "_ADMIN_LOCK", lock)
+        await lock.acquire()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=web_api.app), base_url="http://test"
+        ) as client:
+            first = asyncio.create_task(
+                client.put("/api/admin/dashboard/settings", json={"enabled": False})
+            )
+            second = asyncio.create_task(
+                client.put(
+                    "/api/admin/dashboard/settings",
+                    json={"warnPriorityThresholds": [2]},
+                )
+            )
+            await asyncio.sleep(0)
+            lock.release()
+            responses = await asyncio.gather(first, second)
+            assert all(response.status_code == 200 for response in responses)
+            settings = (await client.get("/api/admin/dashboard/settings")).json()[
+                "settings"
+            ]
+            assert settings["enabled"] is False
+            assert settings["warnPriorityThresholds"] == [2]
 
-    res = api_client.post("/api/admin/observer/run")
-    assert res.status_code == 200
-    payload = res.json()
-    assert payload["state"]["lastStatus"] == "ran"
-    assert payload["state"]["lastEvents"] == 0
-    assert payload["state"]["lastAutomationsRan"] == 1
+    asyncio.run(run())

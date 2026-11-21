@@ -9,7 +9,9 @@ export type Granularity = "W" | "ME" | "3ME";
 
 export type DashboardFigures = {
   weeklyCompletionTrend?: PlotlyFigure;
+  taskCountTrend?: PlotlyFigure;
   taskLifespans?: PlotlyFigure;
+  taskLifespansPeriod?: PlotlyFigure;
   completedTasksPeriodically?: PlotlyFigure;
   cumsumCompletedTasksPeriodically?: PlotlyFigure;
   heatmapEventsByDayHour?: PlotlyFigure;
@@ -40,8 +42,11 @@ export type HabitTrackerItem = {
 };
 
 export type DashboardHome = {
+  refreshing?: boolean;
+  refreshWarning?: string | null;
   noData?: boolean;
-  range: { beg: string; end: string; granularity: Granularity; weeks: number };
+  rangeHasActivity?: boolean;
+  range: { beg: string; end: string; mode: "rolling" | "custom"; granularity: Granularity; weeks: number };
   metrics: {
     items: {
       name: string;

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from todoist.core.types import Project, ProjectEntry, Task, TaskEntry
+from todometry.core.types import Project, ProjectEntry, Task, TaskEntry
 
 _DEFAULT_TIMESTAMP = "2024-01-01T00:00:00Z"
 

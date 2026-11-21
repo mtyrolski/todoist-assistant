@@ -1,0 +1,51 @@
+[
+  {
+    "name": "completed task deleted later",
+    "historyStart": "2026-10-01T00:00:00Z",
+    "events": [
+      {"id":"add", "object_id":"task", "event_type":"added", "event_date":"2026-10-01T09:00:00Z", "extra_data":{"priority":4}},
+      {"id":"done", "object_id":"task", "event_type":"completed", "event_date":"2026-10-02T09:00:00Z", "extra_data":{"priority":4}},
+      {"id":"delete", "object_id":"task", "event_type":"deleted", "event_date":"2026-10-04T09:00:00Z", "extra_data":{"priority":4}}
+    ],
+    "expected": {"2026-10-01":1, "2026-10-02":0, "2026-10-03":0, "2026-10-04":0}
+  },
+  {
+    "name": "active task deleted",
+    "historyStart": "2026-10-01T00:00:00Z",
+    "events": [
+      {"id":"add", "object_id":"task", "event_type":"added", "event_date":"2026-10-01T09:00:00Z", "extra_data":{"priority":4}},
+      {"id":"delete", "object_id":"task", "event_type":"deleted", "event_date":"2026-10-04T09:00:00Z", "extra_data":{"priority":4}}
+    ],
+    "expected": {"2026-10-01":1, "2026-10-02":1, "2026-10-03":1, "2026-10-04":0}
+  },
+  {
+    "name": "reopened task deleted",
+    "historyStart": "2026-10-01T00:00:00Z",
+    "events": [
+      {"id":"add", "object_id":"task", "event_type":"added", "event_date":"2026-10-01T09:00:00Z", "extra_data":{"priority":4}},
+      {"id":"done", "object_id":"task", "event_type":"completed", "event_date":"2026-10-02T09:00:00Z", "extra_data":{"priority":4}},
+      {"id":"undo", "object_id":"task", "event_type":"uncompleted", "event_date":"2026-10-03T09:00:00Z", "extra_data":{}},
+      {"id":"delete", "object_id":"task", "event_type":"deleted", "event_date":"2026-10-04T09:00:00Z", "extra_data":{"priority":4}}
+    ],
+    "expected": {"2026-10-01":1, "2026-10-02":0, "2026-10-03":1, "2026-10-04":0}
+  },
+  {
+    "name": "recurring completion leaves task active until deletion",
+    "historyStart": "2026-10-01T00:00:00Z",
+    "events": [
+      {"id":"add", "object_id":"task", "event_type":"added", "event_date":"2026-10-01T09:00:00Z", "extra_data":{"priority":4}},
+      {"id":"done", "object_id":"task", "event_type":"completed", "event_date":"2026-10-02T09:00:00Z", "extra_data":{"priority":4, "is_recurring":true}},
+      {"id":"delete", "object_id":"task", "event_type":"deleted", "event_date":"2026-10-04T09:00:00Z", "extra_data":{"priority":4}}
+    ],
+    "expected": {"2026-10-01":1, "2026-10-02":1, "2026-10-03":1, "2026-10-04":0}
+  },
+  {
+    "name": "partial history has no prior state evidence",
+    "historyStart": "2026-10-03T00:00:00Z",
+    "events": [
+      {"id":"edit", "object_id":"task", "event_type":"updated", "event_date":"2026-10-03T09:00:00Z", "extra_data":{}},
+      {"id":"delete", "object_id":"task", "event_type":"deleted", "event_date":"2026-10-04T09:00:00Z", "extra_data":{"priority":4, "date_added":"2026-10-01T09:00:00Z"}}
+    ],
+    "expected": {"2026-10-03":1, "2026-10-04":0}
+  }
+]

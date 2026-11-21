@@ -17,7 +17,8 @@ export function StatCard({
   previousPeriod,
   currentLabel = "Current",
   previousLabel = "Previous",
-  help
+  help,
+  comparison = true
 }: {
   name: string;
   value: number;
@@ -28,6 +29,7 @@ export function StatCard({
   currentLabel?: string;
   previousLabel?: string;
   help?: string;
+  comparison?: boolean;
 }) {
   const isUp = (deltaPercent ?? 0) > 0;
   const isDown = (deltaPercent ?? 0) < 0;
@@ -50,10 +52,10 @@ export function StatCard({
           <p className="muted">{name}</p>
           {help ? <InfoTip label={`About ${name}`} content={help} /> : null}
         </div>
-        <span className={`pill pill-${deltaTone} statDeltaPill`}>{formatDelta(deltaPercent)}</span>
+        {comparison && <span className={`pill pill-${deltaTone} statDeltaPill`}>{formatDelta(deltaPercent)}</span>}
       </div>
       <p className="statValue">{value.toLocaleString()}</p>
-      <div className="statPeriods">
+      {comparison && <div className="statPeriods">
         <div className="statPeriodBlock">
           <p className="muted tiny">{currentLabel}</p>
           <p className="tiny">{currentPeriod}</p>
@@ -62,7 +64,7 @@ export function StatCard({
           <p className="muted tiny">{previousLabel}</p>
           <p className="tiny">{previousPeriod}</p>
         </div>
-      </div>
+      </div>}
     </section>
   );
 }

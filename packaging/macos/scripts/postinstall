@@ -9,7 +9,7 @@ fi
 if [ -n "${console_user}" ] && [ "${console_user}" != "root" ]; then
   user_home="$(dscl . -read "/Users/${console_user}" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
   if [ -n "${user_home}" ]; then
-    data_dir="${user_home}/Library/Application Support/TodoistAssistant"
+    data_dir="${user_home}/Library/Application Support/Todometry"
     mkdir -p "${data_dir}"
     chown "${console_user}":staff "${data_dir}" || true
   fi

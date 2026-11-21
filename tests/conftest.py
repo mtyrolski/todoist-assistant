@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from tests.factories import make_project, make_project_entry, make_task, make_task_entry
-from todoist.core.types import Project, ProjectEntry, Task, TaskEntry
+from todometry.core.types import Project, ProjectEntry, Task, TaskEntry
 
 
 @pytest.fixture

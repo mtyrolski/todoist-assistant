@@ -4,12 +4,11 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from tests.factories import make_project, make_task
-from todoist.web.dashboard_payload import (
+from todometry.web.dashboard_payload import (
     add_plot_event_markers,
     apply_date_axis_viewport,
     compute_plot_history_beg,
     FIRE_TASK_LABEL,
-    count_labeled_tasks,
     evaluate_urgency_status,
     extract_metrics_dict,
     normalize_plot_events,
@@ -20,21 +19,6 @@ def _assert_counts_include(status: dict[str, object], **expected: int) -> None:
     counts = status["counts"]
     assert isinstance(counts, dict)
     assert {key: counts[key] for key in expected} == expected
-
-
-def test_count_labeled_tasks_matches_fire_label_case_insensitively() -> None:
-    projects = [
-        make_project(
-            tasks=[
-                make_task("a", labels=[FIRE_TASK_LABEL]),
-                make_task("b", labels=["Fire \U0001f9ef\U0001f692"]),
-                make_task("c", labels=["other"]),
-            ]
-        ),
-        make_project(tasks=[make_task("d", labels=[FIRE_TASK_LABEL, "extra"])]),
-    ]
-
-    assert count_labeled_tasks(projects, label_name=FIRE_TASK_LABEL) == 3
 
 
 def test_extract_metrics_dict_keeps_period_metrics_only() -> None:
@@ -227,9 +211,7 @@ def test_evaluate_urgency_status_respects_custom_settings() -> None:
     assert status["state"] == "warn"
     assert status["badgeLabel"] == "Heads up"
     assert status["total"] == 2
-    _assert_counts_include(
-        status, fireTasks=0, p1Tasks=1, priorityTasks=1, dueTasks=1
-    )
+    _assert_counts_include(status, fireTasks=0, p1Tasks=1, priorityTasks=1, dueTasks=1)
     assert status["visibleChips"] == ["p1Tasks", "dueTasks"]
     assert (
         status["summary"]
@@ -277,3 +259,99 @@ def test_evaluate_urgency_status_supports_multi_labels_and_minimum_thresholds() 
         dueTasks=1,
         deadlineTasks=1,
     )
+
+
+def test_urgency_honors_loaded_yaml_rules_and_empty_selections():
+    from omegaconf import OmegaConf
+
+    projects = [
+        make_project(tasks=[make_task("a", priority=4, labels=[FIRE_TASK_LABEL])])
+    ]
+    settings = OmegaConf.create(
+        {
+            "fire_labels": [],
+            "warn_priority_thresholds": [],
+            "warn_on_due": False,
+            "warn_on_deadline": False,
+        }
+    )
+    assert evaluate_urgency_status(projects, settings=settings)["state"] == "good"
+    settings.fire_labels = [FIRE_TASK_LABEL]
+    settings.danger_summary_label = "Custom red alert"
+    status = evaluate_urgency_status(projects, settings=settings)
+    assert status["state"] == "danger"
+    assert status["title"] == "Custom red alert"
+    settings.danger_on_fire_label = False
+    settings.warn_priority_thresholds = [4]
+    settings.warn_priority_min_count = 2
+    assert evaluate_urgency_status(projects, settings=settings)["state"] == "good"
+
+
+def test_automatic_plot_range_includes_newest_cached_completion():
+    from todometry.web.dashboard_payload import compute_plot_range
+
+    df = pd.DataFrame(
+        {"type": ["completed"]}, index=pd.to_datetime(["2026-10-31T20:00:00"])
+    )
+    _, end = compute_plot_range(df, weeks=12, beg=None, end=None)
+    assert df.index[0] < end
+
+
+def test_upcoming_due_window_never_hides_overdue_tasks():
+    projects = [
+        make_project(tasks=[make_task("late", priority=1, due={"date": "2026-10-01"})])
+    ]
+    status = evaluate_urgency_status(
+        projects,
+        today=date(2026, 11, 1),
+        settings={
+            "warn_on_priority": False,
+            "warn_due_within_days": 3,
+        },
+    )
+    assert status["counts"]["dueTasks"] == 1
+    assert status["state"] == "warn"
+
+
+def test_adjacent_metric_windows_do_not_count_the_shared_boundary_twice():
+    df = pd.DataFrame(
+        {"type": ["completed", "completed"]},
+        index=pd.to_datetime(["2026-10-25", "2026-10-26"]),
+    )
+    metrics = extract_metrics_dict(
+        df,
+        {
+            "beg": datetime(2026, 10, 26),
+            "end": datetime(2026, 11, 2),
+            "prevBeg": datetime(2026, 10, 19),
+            "prevEnd": datetime(2026, 10, 26),
+        },
+    )
+    completed = next(
+        metric for metric in metrics if metric["name"] == "Completed Tasks"
+    )
+    assert completed["value"] == 1
+    assert completed["deltaPercent"] == 0
+
+
+def test_undone_completions_remain_actions_without_inflating_effective_counts():
+    df = pd.DataFrame(
+        {
+            "type": ["completed", "uncompleted", "completed"],
+            "completion_effective": [False, False, True],
+        },
+        index=pd.to_datetime(["2026-10-26", "2026-10-27", "2026-10-28"]),
+    )
+    metrics = extract_metrics_dict(
+        df,
+        {
+            "beg": datetime(2026, 10, 26),
+            "end": datetime(2026, 11, 2),
+            "prevBeg": datetime(2026, 10, 19),
+            "prevEnd": datetime(2026, 10, 26),
+        },
+    )
+    values = {metric["name"]: metric["value"] for metric in metrics}
+    assert values["Events"] == 3
+    assert values["Completed Tasks"] == 1
+    assert "Undone Completions" not in values

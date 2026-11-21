@@ -1,10 +1,10 @@
 export const METRIC_HELP: Record<string, string> = {
   Events: `Events
-Total task activity (added, completed, rescheduled) in the selected period.
+All recorded task actions in the selected period, including completion and undo actions.
 
 - Delta compares against the previous period of equal length.`,
   "Completed Tasks": `Completed tasks
-Total completed tasks in the selected period.
+Effective completions in the selected period. Ordinary completions later undone are removed; recurring occurrences remain counted.
 
 - Delta compares against the previous period of equal length.`,
   "Added Tasks": `Added tasks
@@ -48,6 +48,8 @@ export const DEFAULT_INSIGHT_HELP = `Insight
 Quick highlight computed from recent activity.`;
 
 export const PLOT_HELP = {
+  taskCountTrend: `Active task counts by date
+Reconstructed daily from cached Todoist activity and today's active tasks, shown for the selected dashboard range on a softened scale. Older events without priority metadata are counted as normal priority, so historical totals are more exact than the priority split.`,
   weeklyCompletionTrend: `Weekly completion trend
 Normalized cumulative completion pace by weekday.
 
@@ -55,11 +57,11 @@ Normalized cumulative completion pace by weekday.
 - Optional 6w / 12w / 24w baselines can be toggled in the legend.
 - Current week hover shows raw cumulative task counts (no forecast).`,
   taskLifespans: `Task Lifespans
-Account-lifetime distribution of time between task creation and completion. Recent completions carry more weight.`,
+Time between task creation and completion. Each completed task counts equally. Use Selected period to include tasks completed in the dashboard date range; All time includes the full recorded history.`,
   completedTasksPeriodically: `Periodically Completed Tasks
-Completed tasks per project for each period in the selected range.`,
+Completed tasks per project for each calendar period. All periods use the same cached completion history: undoing a non-recurring completion removes it from its original period; recurring completions remain separate occurrences.\n\nOpen circles show actual counts; filled circles and dashed lines show estimates. Forecasts blend the last eight periods (including empty periods) with current pace and never fall below actuals. All projects forecast is the sum of project forecasts.`,
   cumsumCompletedTasksPeriodically: `Cumulative Completed Tasks
-Running total of completions per project across the range.`,
+Running total of completions per project across the available chart history. All periods use the same reconciled cached completion history. This is not the account lifetime total.`,
   activeProjectHierarchy: `Project Hierarchy
 Sunburst view of the busiest active and archived projects and their subprojects.
 
@@ -70,7 +72,7 @@ Sunburst view of the busiest active and archived projects and their subprojects.
   heatmapEventsByDayHour: `Event Heatmap
 Activity intensity by day of week and hour. Darker means more events.`,
   eventsOverTime: `Events Over Time
-Timeline of activity events across the selected range.`,
+Timeline of raw activity actions across the selected range. Completion actions remain visible even if later undone; effective completed-task charts remove ordinary undone completions.`,
 };
 
 export const BADGES_HELP = `Priority badges
@@ -84,11 +86,4 @@ Top projects by completed tasks in the most recent finished week.
 - Subprojects includes nested projects.
 - Root projects are top-level only.`;
 
-export const HABIT_TRACKER_LAB_HELP = `Habit Tracker Lab
-A focused view for the weekly habit payload.
-
-- About sits first so the page reads like an overview instead of a chart dump.
-- The plots section shows the overall completion rate and recent N-week slices.
-- The notes section stays focused on how the tracker works instead of repeating the roster.`;
-
-export const SURFACE_STATUS_SUMMARY = `Stable: dashboard, control panel, automation tooling, and the Codex personal assistant. Experimental: Habit Tracker Lab.`;
+export const SURFACE_STATUS_SUMMARY = `Dashboard, project adjustments, and local data sync.`;

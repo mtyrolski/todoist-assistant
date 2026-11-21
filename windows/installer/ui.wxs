@@ -3,12 +3,6 @@
   <Fragment>
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="0" />
-    <Property
-      Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT"
-      Value="Enable anonymous telemetry (optional)"
-    />
-
     <UIRef Id="WixUI_InstallDir" />
     <UIRef Id="WixUI_ErrorProgressText" />
   </Fragment>
